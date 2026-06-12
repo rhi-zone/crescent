@@ -64,16 +64,55 @@ end
 -- relation stays pure w.r.t. its arguments (no state leaks between calls).
 
 -- subtype of A against B, given the assumption set `seen` (a cycle-guard stack
--- keyed on tid-pairs). Recursive `local function` — self-reference is in scope.
---: (Ty, Ty, { [string]: boolean | nil }) -> boolean
-local function sub(a, b, seen)
+-- keyed on tid-pairs) and a per-query result `memo` (audit round 1, finding 4).
+--
+-- MEMOIZATION (finding 4): without it, rec/union/fn descent re-explores shared
+-- interned subterms — O(2^n) on shared-subterm DAGs (`{a: child, b: child}`
+-- chains), >120s at depth 30. The `seen` stack only covers μ-unfold pairs, so it
+-- did not stop the blow-up. The `memo` caches the FINAL verdict of every fully
+-- decided `(tidA, tidB)` pair; an interned tid-pair is a trivial, sound key
+-- (structural identity ⇒ tid identity). Coinductive correctness is preserved: a
+-- pair currently ON the `seen` stack is revisited via the coinductive-hypothesis
+-- short-circuit (returns true) BEFORE reaching the decision/cache code, so a
+-- provisional coinductive `true` is NEVER written to the memo. Only the outermost
+-- computation of a pair — after its μ assumption is discharged consistently —
+-- writes its definite verdict. Non-μ descents never touch `seen`, so caching
+-- their shared-subterm results is unconditionally sound. The contravariant-
+-- recursion / memo-poisoning tests guard this argument.
+local sub --[[: (Ty, Ty, { [string]: boolean | nil }, { [string]: boolean | nil }) -> boolean ]]
+local decide --[[: (Ty, Ty, { [string]: boolean | nil }, { [string]: boolean | nil }) -> boolean ]]
+
+-- Memoizing wrapper: reflexivity, the coinductive-hypothesis short-circuit, then
+-- the per-query memo, then `decide`. The verdict is cached after `decide` returns
+-- (a definite, non-provisional result — see the header on finding 4).
+--: (Ty, Ty, { [string]: boolean | nil }, { [string]: boolean | nil }) -> boolean
+sub = function(a, b, seen, memo)
 	-- (1) reflexivity by interning.
 	if a.tid == b.tid then return true end
 
-	-- (2) coinductive hypothesis: pair already on the assumption stack.
+	-- (2) coinductive hypothesis: pair already on the assumption stack. (Must come
+	-- before the memo lookup: an in-progress μ pair is provisionally true and must
+	-- not be served — or cached — as a definite verdict.)
 	local pair = a.tid .. ":" .. b.tid
 	if seen[pair] then return true end
 
+	-- (3) memoized definite verdict for this pair (this query). Sound because only
+	-- fully-decided, non-provisional results are stored.
+	local cached = memo[pair]
+	if cached ~= nil then return cached end
+
+	local r = decide(a, b, seen, memo) --: boolean
+	memo[pair] = r
+	return r
+end
+
+-- The structural decision per constructor pair (§3.2). Recurses via `sub` (which
+-- memoizes). The μ branch pushes/pops the `(a,b)` pair on `seen` for the
+-- coinductive hypothesis; that pair's verdict is cached by the wrapper after the
+-- pop, never during a provisional revisit.
+--: (Ty, Ty, { [string]: boolean | nil }, { [string]: boolean | nil }) -> boolean
+decide = function(a, b, seen, memo)
+	local pair = a.tid .. ":" .. b.tid
 	local bk = b.kind
 	local ak = a.kind
 
@@ -89,7 +128,7 @@ local function sub(a, b, seen)
 		seen[pair] = true
 		local ua = ak == "mu" and G.unfold(a) or a
 		local ub = bk == "mu" and G.unfold(b) or b
-		local r = sub(ua, ub, seen)
+		local r = sub(ua, ub, seen, memo)
 		seen[pair] = nil
 		return r
 	end
@@ -105,7 +144,7 @@ local function sub(a, b, seen)
 	if ak == "union" then
 		local ms = members_of(a)
 		for i = 1, #ms do
-			if not sub(ms[i], b, seen) then return false end
+			if not sub(ms[i], b, seen, memo) then return false end
 		end
 		return true
 	end
@@ -113,7 +152,7 @@ local function sub(a, b, seen)
 	if bk == "inter" then
 		local ms = members_of(b)
 		for i = 1, #ms do
-			if not sub(a, ms[i], seen) then return false end
+			if not sub(a, ms[i], seen, memo) then return false end
 		end
 		return true
 	end
@@ -127,7 +166,7 @@ local function sub(a, b, seen)
 	if bk == "union" then
 		local ms = members_of(b)
 		for i = 1, #ms do
-			if sub(a, ms[i], seen) then return true end
+			if sub(a, ms[i], seen, memo) then return true end
 		end
 		-- fall through: if A is also an inter, the A=inter rule may still hold.
 	end
@@ -135,7 +174,7 @@ local function sub(a, b, seen)
 	if ak == "inter" then
 		local ms = members_of(a)
 		for i = 1, #ms do
-			if sub(ms[i], b, seen) then return true end
+			if sub(ms[i], b, seen, memo) then return true end
 		end
 		return false
 	end
@@ -179,24 +218,24 @@ local function sub(a, b, seen)
 			local a_param --[[: Ty | nil ]]
 			if i <= #pa.fixed then a_param = pa.fixed[i] else a_param = pa.vararg end
 			if a_param == nil then return false end  -- A demands a param B won't supply
-			if not sub(pb.fixed[i], a_param, seen) then return false end
+			if not sub(pb.fixed[i], a_param, seen, memo) then return false end
 		end
 		-- A's extra fixed params (beyond B) make A unsatisfiable by a B-caller.
 		if #pa.fixed > nb then return false end
 		-- varargs: contravariant on the tail element when both present.
 		local pbv, pav = pb.vararg, pa.vararg
 		if pbv ~= nil and pav ~= nil then
-			if not sub(pbv, pav, seen) then return false end
+			if not sub(pbv, pav, seen, memo) then return false end
 		end
 		-- return: covariant, pointwise on the return tuple. A may return MORE than
 		-- B needs (extra returns are droppable), so A's tuple is <: a shorter prefix.
 		for i = 1, #rb.fixed do
 			if i > #ra.fixed then return false end  -- A returns fewer than B promises
-			if not sub(ra.fixed[i], rb.fixed[i], seen) then return false end
+			if not sub(ra.fixed[i], rb.fixed[i], seen, memo) then return false end
 		end
 		local rbv, rav = rb.vararg, ra.vararg
 		if rbv ~= nil and rav ~= nil then
-			if not sub(rav, rbv, seen) then return false end
+			if not sub(rav, rbv, seen, memo) then return false end
 		end
 		return true
 	end
@@ -205,13 +244,13 @@ local function sub(a, b, seen)
 
 	-- (Records: width + depth + optional + open-row. §3.2.)
 	if (ak == "rec" or ak == "rec_with_indexer") and (bk == "rec" or bk == "rec_with_indexer") then
-		if not M._rec_sub(a, b, seen) then return false end
+		if not M._rec_sub(a, b, seen, memo) then return false end
 		-- rec_with_indexer decomposes to its rec part AND its indexer part.
 		if bk == "rec_with_indexer" then
 			-- B has an index signature: A must satisfy it. Only A's *listed* fields
 			-- are checked against B's indexer (A is not an indexer itself unless it
 			-- is rec_with_indexer — the `...`-vs-indexer distinction, §3.2).
-			if not M._indexer_obligation(a, b, seen) then return false end
+			if not M._indexer_obligation(a, b, seen, memo) then return false end
 		end
 		return true
 	end
@@ -221,8 +260,8 @@ local function sub(a, b, seen)
 		local ka, va = a.key, a.val
 		local kb, vb = b.key, b.val
 		if ka == nil or va == nil or kb == nil or vb == nil then return false end
-		if not sub(kb, ka, seen) then return false end
-		return sub(va, vb, seen)
+		if not sub(kb, ka, seen, memo) then return false end
+		return sub(va, vb, seen, memo)
 	end
 
 	-- (A = rec/rwi with integer-literal fields (a tuple) <: indexer(integer, V).
@@ -237,13 +276,13 @@ local function sub(a, b, seen)
 			-- the field's key, as a singleton, must be <: the indexer key, and the
 			-- field's value <: the indexer value.
 			local key_ty = G.lit_str(fs[i].key)
-			if not sub(key_ty --[[: Ty ]], kb, seen) then return false end
-			if not sub(fs[i].ty, vb, seen) then return false end
+			if not sub(key_ty --[[: Ty ]], kb, seen, memo) then return false end
+			if not sub(fs[i].ty, vb, seen, memo) then return false end
 		end
 		if ak == "rec_with_indexer" then
 			local ka2, va2 = a.key, a.val
 			if ka2 == nil or va2 == nil then return false end
-			if not (sub(kb, ka2, seen) and sub(va2, vb, seen)) then return false end
+			if not (sub(kb, ka2, seen, memo) and sub(va2, vb, seen, memo)) then return false end
 		end
 		return true
 	end
@@ -253,8 +292,8 @@ local function sub(a, b, seen)
 end
 
 -- Record width/depth/optional/open-row rule (§3.2). A <: B for records.
---: (Ty, Ty, { [string]: boolean | nil }) -> boolean
-function M._rec_sub(a, b, seen)
+--: (Ty, Ty, { [string]: boolean | nil }, { [string]: boolean | nil }) -> boolean
+function M._rec_sub(a, b, seen, memo)
 	local fa, fb = fields_of(a), fields_of(b)
 	-- open-row A is NOT <: a closed B (the open tail could violate closedness),
 	-- and an open A is conservatively not <: ANY B beyond what its listed fields
@@ -281,11 +320,11 @@ function M._rec_sub(a, b, seen)
 			if bf.optional then
 				-- A's field may be `<: (B.ty | nil)`; build that union once.
 				local bopt = G.union({ bf.ty --[[: Ty ]], G.nil_() })
-				if not sub(af.ty, bopt --[[: Ty ]], seen) then return false end
+				if not sub(af.ty, bopt --[[: Ty ]], seen, memo) then return false end
 			else
 				-- required B field: A's must be present, non-optional, and <:.
 				if af.optional then return false end
-				if not sub(af.ty, bf.ty, seen) then return false end
+				if not sub(af.ty, bf.ty, seen, memo) then return false end
 			end
 		end
 	end
@@ -294,8 +333,8 @@ end
 
 -- B is rec_with_indexer: A's listed fields must satisfy B's index signature
 -- (key contravariance, value covariance). §3.2 decomposition.
---: (Ty, Ty, { [string]: boolean | nil }) -> boolean
-function M._indexer_obligation(a, b, seen)
+--: (Ty, Ty, { [string]: boolean | nil }, { [string]: boolean | nil }) -> boolean
+function M._indexer_obligation(a, b, seen, memo)
 	local kb, vb = b.key, b.val
 	if kb == nil or vb == nil then return false end
 	local b_named = fields_of(b)
@@ -307,8 +346,8 @@ function M._indexer_obligation(a, b, seen)
 		if find_field(b_named, fa[i].key) == nil then
 			local key_ty = G.lit_str(fa[i].key)
 			-- if this field's key is admitted by the indexer key, its value must be <: vb.
-			if sub(key_ty, kb, seen) then
-				if not sub(fa[i].ty, vb, seen) then return false end
+			if sub(key_ty, kb, seen, memo) then
+				if not sub(fa[i].ty, vb, seen, memo) then return false end
 			end
 		end
 	end
@@ -316,7 +355,7 @@ function M._indexer_obligation(a, b, seen)
 	if a.kind == "rec_with_indexer" then
 		local ka2, va2 = a.key, a.val
 		if ka2 == nil or va2 == nil then return false end
-		if not (sub(kb, ka2, seen) and sub(va2, vb, seen)) then return false end
+		if not (sub(kb, ka2, seen, memo) and sub(va2, vb, seen, memo)) then return false end
 	end
 	return true
 end
@@ -326,7 +365,7 @@ end
 -- Pure, total boolean verdict.
 --: (Ty, Ty) -> boolean
 function M.is_subtype(a, b)
-	return sub(a, b, {})
+	return sub(a, b, {}, {})
 end
 
 -- Witness variant: returns (verdict, counterexample-or-nil). On rejection the
@@ -335,7 +374,7 @@ end
 -- top-level pair; deeper localization is a later-pass refinement.
 --: (Ty, Ty) -> (boolean, Counterexample | nil)
 function M.subtype(a, b)
-	local ok = sub(a, b, {})
+	local ok = sub(a, b, {}, {})
 	if ok then return true, nil end
 	return false, { kind = "not_subtype", a = a, b = b }
 end

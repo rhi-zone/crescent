@@ -183,6 +183,10 @@ Rung status (ladder, design doc):
   (boolean `and`, closure return-slot, table-widening, redundant-cast, hamt
   tag-narrow) all closed, the six FIXED guards held. The substrate (`init.lua`) was
   **not touched** across any pass — the ladder's falsifiable bet settled at target.
+  **Adversarial audit round 1 (2026-06-12): 5 findings fixed** (well-formedness now
+  a hard precondition; `lit_int` integer validation; `unknown` narrowing; subtype
+  DAG memoization; `instantiate_witness` callee binding), each a permanent
+  regression test (§9.7).
 
 Limits:
 

@@ -211,6 +211,19 @@ local function ty_eq(a, b) return a.tid == b.tid end
 
 M.ty_eq = ty_eq
 
+-- ── Well-formedness gate (audit round 1, finding 1) ──────────────────────────
+-- Well-formedness is a HARD PRECONDITION of every type-consuming evidence method.
+-- A non-contractive μ (e.g. `μX.(number | X)`) reads as TOP in the cycle-guarded
+-- subtype relation, so it MUST NOT be allowed to enter `subtype_witness`,
+-- `has_type`/`checks_against`, `instantiate_witness`, or `narrow_guard`. The gate
+-- is at the claim/method ENTRY (per the §9.3 performance note), never inside the
+-- relation's recursion. `TA.well_formed` also rejects degenerate μ whose binder
+-- never occurs (`μX.never`). Reject the evidence with a diagnostic; never proceed.
+--: (Ty) -> boolean
+local function wf(ty) return TA.well_formed(ty) end
+
+M.wf = wf
+
 -- ── Trust note (hosted-checker trust obligation) ─────────────────────────────
 --: () -> unknown
 local function trust_note() return A.unverified_checker_trust(M.ID, M.VERSION) end
@@ -230,7 +243,8 @@ local function synth_literal(node)
 	end
 	if lit == "int" then
 		if type(v) ~= "number" then return nil end
-		return G.lit_int(v)
+		local li = G.lit_int(v) -- (nil on a non-integer-valued literal, audit r1 finding 2)
+		return li
 	end
 	if lit == "num" then
 		if type(v) ~= "number" then return nil end
@@ -550,6 +564,11 @@ function M.checker(cc, claim, ev)
 		end
 		local pair = read_subtype(cc, claim.id)
 		if not pair then return cc.REJECTED, "subtype claim args are malformed", nil, nil end
+		-- well-formedness is a hard precondition (audit round 1, finding 1): a
+		-- non-contractive μ reads as top in the relation, so reject before deciding.
+		if not wf(pair.a) or not wf(pair.b) then
+			return cc.REJECTED, "subtype operand is not well-formed (non-contractive or degenerate μ)", nil, nil
+		end
 		local ok, counter = SUB.subtype(pair.a, pair.b)
 		if not ok then
 			-- surface the counterexample in the diagnostic (the rejection-with-
@@ -576,6 +595,10 @@ function M.checker(cc, claim, ev)
 		if not gref then return cc.REJECTED, "narrows missing guard ref", nil, nil end
 		if type(x) ~= "string" then return cc.REJECTED, "narrows missing refined variable name", nil, nil end
 		if not want_true or not want_false then return cc.REJECTED, "narrows missing/malformed refinement type", nil, nil end
+		-- well-formedness is a hard precondition (audit round 1, finding 1).
+		if not want_true or not want_false or not wf(want_true) or not wf(want_false) then
+			return cc.REJECTED, "narrows refinement type is not well-formed", nil, nil
+		end
 		-- premise: has_type(Γ, x_node, T) — the synthesized PRE-GUARD type of x.
 		-- (The producer supplies the one has_type premise establishing T; it must be
 		--  a has_type whose asserted type is the pre-guard type of the refined var.)
@@ -615,12 +638,42 @@ function M.checker(cc, claim, ev)
 		return cc.REJECTED, "unknown claim predicate: " .. tostring(claim.predicate), nil, nil
 	end
 
+	-- trusted_signature is handled BEFORE the type-decode preamble: a trusted
+	-- boundary admits the claim through visible trust precisely because the slice
+	-- does NOT decode/check the asserted type. This is what lets a generic stdlib
+	-- signature (whose type carries FREE tyvars, which do not intern) ride a
+	-- has_type claim — its raw PTy `type` arg is then bound to a call site by
+	-- `instantiate_witness` (audit round 1, finding 5). All NON-trusted methods
+	-- below require a decodable, well-formed type (the WF gate, finding 1).
+	if method == "trusted_signature" then
+		local nref0 = arg_id(args.node)
+		if not nref0 then return cc.REJECTED, predicate .. " missing node ref", nil, nil end
+		local payload = ev.result
+		local tb_id = type(payload) == "table" and arg_id(payload.trust) or nil
+		if not tb_id then return cc.REJECTED, "trusted_signature missing trust boundary", nil, nil end
+		local tb = cc.state.trust_boundaries[A.idk(tb_id)]
+		if not tb then return cc.REJECTED, "trusted_signature references unknown trust boundary", nil, nil end
+		return cc.ACCEPTED, nil, { dep_trust(claim.id, tb.id), dep_artifact(claim.id, nref0) }, { tb, trust_note() }
+	end
+
 	local ctx = parse_ctx(args.ctx)
 	local nref = arg_id(args.node)
 	local want_ty = TA.decode(args.type)
 	if not ctx then return cc.REJECTED, predicate .. " context is malformed", nil, nil end
 	if not nref then return cc.REJECTED, predicate .. " missing node ref", nil, nil end
 	if not want_ty then return cc.REJECTED, predicate .. " missing/malformed type", nil, nil end
+	-- well-formedness is a hard precondition (audit round 1, finding 1): a
+	-- non-contractive/degenerate μ must not enter a typing judgment.
+	if not wf(want_ty) then
+		return cc.REJECTED, predicate .. " asserted type is not well-formed (non-contractive or degenerate μ)", nil, nil
+	end
+	-- every binding in Γ must also be well-formed (a refined/bound type rides Γ
+	-- into downstream judgments; an ill-formed binding would leak through).
+	for i = 1, #ctx do
+		if not wf(ctx[i].type) then
+			return cc.REJECTED, predicate .. " context binding '" .. ctx[i].name .. "' is not well-formed", nil, nil
+		end
+	end
 	local node = node_of(cc, nref)
 	if type(node) ~= "table" then
 		return cc.REJECTED, predicate .. " node artifact is malformed slice syntax", nil, nil
@@ -925,6 +978,40 @@ function M.checker(cc, claim, ev)
 		if type(generic) ~= "table" or type(praw) ~= "table" then
 			return cc.REJECTED, "instantiate_witness missing generic-type or σ payload", nil, nil
 		end
+		-- BIND G TO THE CALLEE (audit round 1, finding 5). §2.4's input is
+		-- `has_type(Γ, f_node, G)`: the FIRST premise must establish the function
+		-- node's type, and the payload's portable generic G must structurally EQUAL
+		-- that premise's asserted type — otherwise a fabricated generic gives any
+		-- call any return type. A generic callee carries FREE tyvar nodes, which do
+		-- not intern, so its has_type premise is established via `trusted_signature`
+		-- (the stdlib generic signature) and carries the generic as its raw PTy
+		-- `type` arg. We read that raw PTy and compare it structurally to
+		-- payload.generic; we do NOT decode it (free tyvars are not interner-valid).
+		if #ev.inputs < 1 then return cc.REJECTED, "instantiate_witness requires the has_type(f_node, G) premise first", nil, nil end
+		local fn_prem = ev.inputs[1]
+		if not cc.is_accepted(fn_prem) then return cc.UNKNOWN, nil, nil, nil end
+		local fn_claim = cc.get_claim(fn_prem)
+		if not fn_claim or fn_claim.predicate ~= "has_type" then
+			return cc.REJECTED, "instantiate_witness first premise is not a has_type claim for the callee", nil, nil
+		end
+		local fn_cargs = fn_claim.args
+		if type(fn_cargs) ~= "table" then return cc.REJECTED, "instantiate_witness callee premise has malformed args", nil, nil end
+		-- the premise must be for THIS call's function node.
+		local fnode_ref = arg_id(node.fn)
+		local prem_node = arg_id(fn_cargs.node)
+		if not fnode_ref or not prem_node or prem_node.space ~= fnode_ref.space or prem_node.key ~= fnode_ref.key then
+			return cc.REJECTED, "instantiate_witness callee premise is not for this call's function node", nil, nil
+		end
+		-- the premise context must equal this claim's context.
+		local fn_pctx = parse_ctx(fn_cargs.ctx)
+		if not fn_pctx then return cc.REJECTED, "instantiate_witness callee premise context is malformed", nil, nil end
+		if A._serialize(ctx_to_arg(fn_pctx)) ~= A._serialize(ctx_to_arg(ctx)) then
+			return cc.REJECTED, "instantiate_witness callee premise context must match the conclusion's", nil, nil
+		end
+		-- payload.generic must structurally EQUAL the premise's asserted (generic) type.
+		if A._serialize(generic) ~= A._serialize(fn_cargs.type) then
+			return cc.REJECTED, "instantiate_witness: payload generic does not match the callee's declared type (fabricated generic)", nil, nil
+		end
 		local subst = {} --[[: { [string]: Ty } ]]
 		for name, pty in pairs(praw) do
 			local d = TA.decode(pty)
@@ -933,15 +1020,17 @@ function M.checker(cc, claim, ev)
 		end
 		local applied = TA.apply_subst_pty(generic, subst)
 		if not applied then return cc.REJECTED, "instantiate_witness: σ application/decode failed", nil, nil end
+		if not wf(applied) then return cc.REJECTED, "instantiate_witness: σ-applied callee is not well-formed", nil, nil end
 		if applied.kind ~= "fn" then return cc.REJECTED, "instantiate_witness: σ-applied callee is not a function", nil, nil end
 		local ret = applied.ret or ({ fixed = {} } --[[: Ret ]])
 		local params = applied.params or ({ fixed = {} } --[[: Params ]])
-		-- verify each argument premise was checked against σ-applied params.
+		-- verify each argument premise was checked against σ-applied params. The
+		-- argument premises follow the callee premise (inputs[2..]).
 		local call_args = node.args
 		local nargs = type(call_args) == "table" and #call_args or 0
-		local deps = {} --[[: Dependency[] ]]
+		local deps = { dep_claim(claim.id, fn_prem) } --[[: Dependency[] ]]
 		for i = 1, nargs do
-			local prem = ev.inputs[i]
+			local prem = ev.inputs[i + 1]
 			if not prem then return cc.REJECTED, "instantiate_witness missing an argument premise", nil, nil end
 			if not cc.is_accepted(prem) then return cc.UNKNOWN, nil, nil, nil end
 			local apr = read_typing(cc, prem, "checks_against")
@@ -1007,18 +1096,10 @@ function M.checker(cc, claim, ev)
 			return cc.REJECTED, "synth_numeric_for_var: the numeric-for control variable is integer | number", nil, nil
 		end
 		return accept({}, { trust_note() })
-
-	-- ── trusted_signature (stdlib / FFI / cross-module / force-cast boundary) ──
-	elseif method == "trusted_signature" then
-		-- Admit a has_type / checks_against through a VISIBLE trust boundary
-		-- recorded as a trusted_boundary dependency (verbatim trusted_type_axiom).
-		local payload = ev.result
-		local tb_id = type(payload) == "table" and arg_id(payload.trust) or nil
-		if not tb_id then return cc.REJECTED, "trusted_signature missing trust boundary", nil, nil end
-		local tb = cc.state.trust_boundaries[A.idk(tb_id)]
-		if not tb then return cc.REJECTED, "trusted_signature references unknown trust boundary", nil, nil end
-		return cc.ACCEPTED, nil, { dep_trust(claim.id, tb.id), dep_artifact(claim.id, nref) }, { tb, trust_note() }
 	end
+
+	-- (trusted_signature is handled before the decode preamble above — see the
+	-- comment there; it never reaches this point.)
 
 	return cc.UNKNOWN, "unknown " .. predicate .. " method: " .. tostring(method), nil, nil
 end

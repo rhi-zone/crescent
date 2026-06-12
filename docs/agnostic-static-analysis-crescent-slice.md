@@ -1018,9 +1018,17 @@ de-Bruijn-indexed equirecursive μ so alpha-equivalent μ types share a tid),
 family + the §6.2 worked μ example + the §3.5 fuzz invariants; seeded `FUZZ_SEED`
 default `0xC0FFEE`, 4454 assertions), `lib/type/analysis/slice_subtype_bench.lua`
 (§5.1 benchmark). Gates met: all fuzz invariants hold; benchmark clears timeout-30
-with ~20000× headroom on the worst query (`docs/perf/log.md`, 2026-06-12 entry); the
+with large headroom on the worst query (`docs/perf/log.md`, 2026-06-12 entries); the
 153 prior analysis assertions are intact (full suite 4607). `bin/cr check` is clean
 on every new file. Findings recorded in §9.3.
+
+> **NOTE (audit round 1, finding 4, §9.7).** Pass 1's bench did NOT include a
+> shared-subterm DAG, and the relation was exponential on that shape (`{ a: child,
+> b: child }` chains — >120s at depth 30). The original "~20000× headroom on the
+> worst query" claim was therefore **measured on too narrow a shape set**. The fix
+> adds per-query memoization and the DAG shape to the bench; the corrected
+> headroom numbers are in the audit-round-1 perf-log entry (the depth-30 DAG query
+> drops from unmeasurable to ~0.007 ms/query). See §9.7 finding 4.
 
 **Pass 2 — Synthesis evidence methods + the `crescent.slice.v1` registry entry. ✅ DONE (2026-06-12).**
 Register the semantics (§2.1). Build the parser-frontend adapter (Lua syntax →
@@ -1247,6 +1255,18 @@ implementation.
   the precise statement. (This is a *new* well-formedness obligation the value-
   universe derivation did not surface, only the fuzz did — the rung's data.)
 
+  > **CORRECTED by audit round 1, finding 1 (§9.7).** Pass 2 only *half*-enforced
+  > this: contractiveness gated `well_typed_type` but **nothing called it** on the
+  > types entering `subtype_witness`, `has_type`/`checks_against`,
+  > `instantiate_witness`, or `declare_alias`. A non-contractive μ reachable from
+  > plain annotation syntax (`--:: T = number | T`) therefore still read as top in
+  > the relation and type-checked unsoundly. The fix makes well-formedness a HARD
+  > PRECONDITION at every type-consuming evidence-method entry (reject with a
+  > diagnostic) and in `declare_alias` (return `(nil, errmsg)`). The audit also
+  > settled the degenerate non-occurring-binder case (`μX.never`, `μX.number`):
+  > rejected as ill-formed — a binder that never occurs denotes its body verbatim
+  > and should be written as the body. See §9.7 finding 1.
+
 - **`inter <: union` requires trying BOTH "exists" decompositions (transitivity
   completeness).** §3.2 says the relation is "decided by the structure of `B`
   first," and lists `B = union → A <: some member` and `A = inter → some member <:
@@ -1398,18 +1418,26 @@ load-bearing. The deferral fence (no complement) held throughout — and is now
   frontend, where it belongs. Recorded because the naive "left operand is the
   variable" reading would silently miss half the corpus's guards.
 
-- **`type(x) == "<name>"` member-matching must enumerate the literal SUBKINDS, and
-  must NOT match `unknown`.** §4.1's `type(x) == "string"` truthy = "the `string`
-  member of the union `T`." Mechanization found "the string member" is really "every
-  union member whose runtime `type()` is `"string"`" — which includes `lit_str`
-  singletons, and for `"number"` includes `integer`/`lit_int`/`lit_num`, for
-  `"table"` includes `rec`/`rec_with_indexer`/`indexer`, etc. (the §1 subkind
-  lattice surfacing in narrowing). Critically, an `unknown` member is NOT matched
-  (it could be any runtime kind — keeping it on the truthy branch would be an
-  *unsound* narrow) and NOT dropped either (it stays via the falsy sound-wider T);
-  the positive decomposition only keeps members it can *prove* match. Recorded
-  because "the string member" undercounts the matching set and over-trusts
-  `unknown`.
+- **`type(x) == "<name>"` member-matching must enumerate the literal SUBKINDS.**
+  §4.1's `type(x) == "string"` truthy = "the `string` member of the union `T`."
+  Mechanization found "the string member" is really "every union member whose
+  runtime `type()` is `"string"`" — which includes `lit_str` singletons, and for
+  `"number"` includes `integer`/`lit_int`/`lit_num`, for `"table"` includes
+  `rec`/`rec_with_indexer`/`indexer`, etc. (the §1 subkind lattice surfacing in
+  narrowing).
+
+  > **CORRECTED by audit round 1, finding 3 (§9.7).** This finding originally also
+  > claimed an `unknown` member is "NOT matched and NOT dropped — it stays via the
+  > falsy sound-wider T." That was **wrong** and produced a soundness-adjacent
+  > wrong-rejection: narrowing a bare `unknown` by `type(x)=="string"` collapsed the
+  > truthy branch to `never` (no member matched), breaking the canonical TS-`unknown`
+  > idiom `if type(x)=="string" then x:upper() end`. The correct rule is the general
+  > one: truthy narrowing is `T ∩ positive`, decomposed per member as `member ∩
+  > positive`. A member that *proves* the runtime type contributes itself; a member
+  > the guard *cannot exclude* — `unknown`, the top — contributes the positive set
+  > itself (`unknown ∩ string = string`). It is NOT an `unknown` special case; it is
+  > the intersection rule, of which `keep_members` is the all-or-nothing instance.
+  > See §9.7 finding 3.
 
 - **`x == lit` against an impossible target narrows truthy to `never`, not to the
   bare singleton.** §4.1 gives `x == "GET"` truthy = `lit_str("GET")`. Mechanization
@@ -1532,6 +1560,115 @@ a pure consumer of the unchanged claim database. `init.lua` is byte-for-byte
 unchanged across all four passes. The ladder's final rung lands with the agnostic
 substrate validated from propositional logic through a real Crescent slice without a
 single Crescent-specific substrate primitive.
+
+### 9.7 Adversarial audit — round 1 (post-mechanization)
+
+After all four mechanization passes landed, the slice was subjected to an
+adversarial audit: an attacker constructed execution repros probing for soundness
+holes, wrong rejections, and termination failures. **Five confirmed findings** were
+reproduced by execution and fixed; each is now a permanent regression test
+(`crescent_slice_test.lua`, the "audit round 1" describe blocks). Recorded honestly
+per the prompt — including the prior sections' claims this audit FALSIFIED, and the
+*survivals* (attacks that found nothing), because a survival is evidence too.
+
+**The five findings (what was wrong, and the fix):**
+
+1. **Well-formedness was not a precondition anywhere load-bearing (blocking,
+   unsound).** §9.3 recorded contractiveness as a precondition of `well_typed_type`,
+   but Pass 2 only *half*-enforced it: NOTHING gated the types entering
+   `subtype_witness`, `has_type`/`checks_against`, `instantiate_witness`, or
+   `declare_alias` through `TA.well_formed`. A non-contractive μ reachable from
+   plain annotation syntax (`--:: T = number | T`, also `T = T?`, `T = T`) read as
+   **top** in the cycle-guarded relation, so `subtype(string, μX.(number|X))` was
+   accepted and `checks_against` let a string value type-check against a number
+   type. **Fix:** well-formedness is now a HARD PRECONDITION at every type-consuming
+   evidence-method entry (reject with a diagnostic; gated at claim/method entry, not
+   inside the relation's recursion — the §9.3 performance note), AND `declare_alias`
+   validates and returns `(nil, errmsg)` per convention. The latent degenerate case
+   — a μ whose binder never occurs (`μX.never`, `μX.number`) — is **decided:
+   rejected as ill-formed** (it denotes its body verbatim; write the body directly;
+   the interner cannot normalize it away because `mu_raw` interns before
+   well-formedness runs, so the gate is the right place to reject). This corrects
+   §9.3's "Pass 2's `type_shape_check` must enforce" — it specifies the obligation
+   but did not wire it to the load-bearing entry points.
+
+2. **`lit_int` accepted non-integers and collided interner keys (blocking, unsound,
+   codec-only reach).** `decode({k="lit_int", n=3.5})` succeeded, and `G.lit_int(3.5)`
+   interned to the SAME tid as `lit_int(3)` via the old `string.format("%d", …)` key
+   (which truncated `3.5 → "3"`), making `lit_int(3.5) <: lit_int(3)` and
+   `lit_int(3.5) <: integer` both wrongly true. **Fix:** integer-valuedness is
+   validated in BOTH the `lit_int` constructor (returns `(nil, errmsg)` on a
+   non-integer) and the decoder (rejects → decode failure, parse-not-cast); the key
+   is now `%.17g` (exact double value, never a truncation). The **2^53 boundary** is
+   documented in the tests as the decided behavior: integers beyond 2^53 are not
+   separately representable as doubles, so `lit_int(2^53)` and `lit_int(2^53+1)`
+   share a tid — a fundamental IEEE-754 limitation, not a bug; both are integer-
+   valued and well-formed.
+
+3. **Narrowing `unknown` via `type_eq`/`tag_eq` truthy yielded `never`
+   (wrong-rejection).** `keep_members` dropped the `unknown` member, collapsing the
+   canonical idiom `if type(x)=="string" then x:upper() end` (over `x : unknown`) to
+   an uninhabitable branch. (`lit_eq` did NOT have this bug — it reasons via
+   `lit <: T`.) **Fix:** the guard forms are unified under the general rule —
+   truthy refinement is `T ∩ positive`, decomposed per member as `member ∩ positive`:
+   a member that *proves* the guard contributes itself; a member the guard *cannot
+   exclude* (`unknown`, the top) contributes the positive set itself
+   (`type_eq "string"` → `string`; `tag_eq "leaf"` → the open rec `{ tag: "leaf",
+   ... }`, expressible in the v1 grammar). `keep_members` is the all-or-nothing
+   instance of this; the `unknown` case is NOT special-cased. This corrects §9.5's
+   wrong "unknown is NOT matched and stays via the falsy T" claim (annotated inline
+   in §9.5).
+
+4. **`subtype` exponential on shared-subterm DAGs (hang).** The `seen` set covered
+   only μ-unfold pairs; rec/union/fn descent re-explored shared interned subterms —
+   O(2^n), >120s at depth 30 on `{ a: child, b: child }` chains. **Fix:** per-query
+   memoization covering ALL constructor descents (interned tid-pairs are a trivial,
+   sound key). The coinductive correctness argument is preserved — an in-progress μ
+   pair short-circuits via the coinductive hypothesis BEFORE the memo write, so a
+   provisional `true` is never cached; only fully-decided pairs are memoized. The
+   contravariant-recursion / memo-poisoning tests (which the audit confirmed survive)
+   guard this. The DAG shape was added to `slice_subtype_bench.lua`, the full bench
+   re-run, `docs/perf/log.md` updated (depth-30 DAG: unmeasurable → ~0.007 ms/query),
+   and §5.1/§7.2/§8's "~20000× headroom on the worst query" claim corrected (it was
+   measured on too narrow a shape set — annotated inline in §8).
+
+5. **`instantiate_witness` never bound G to the callee (spec-gap, soundness-
+   relevant).** `payload.generic` came straight from the untrusted producer; a
+   fabricated generic gave any call any return type — the real callee's type was
+   never consulted. **Fix:** per §2.4's stated input, the `has_type(Γ, f_node, G)`
+   premise is now REQUIRED as the first input, and the payload's portable G must
+   structurally equal that premise's asserted type (compared via `A._serialize` on
+   the raw PTy — the generic carries free tyvars, which do not intern, so the
+   premise rides a `trusted_signature` whose raw `type` arg is the generic; the
+   `trusted_signature` method is now handled before the type-decode preamble so an
+   un-decodable generic can ride a trusted has_type claim). A fabricated or
+   mismatched generic is rejected. This corrects §9.4's account (which framed G as
+   payload-only with no binding obligation to the callee).
+
+**Survivals (attacks that found nothing — evidence too):**
+
+- **Record-field covariance unsoundness is unreachable within v1 syntax.** The
+  §9.2 mutable-field-invariance gap (fields treated covariantly) was probed; it
+  remains *unreachable* in v1's checked syntax (no fixture writes through a widened
+  field alias), so the audit did not disprove the §9.2 fencing — it stands.
+- **Memo-poisoning withstood.** After adding memoization (finding 4), the attacker
+  probed for a coinductive result poisoned by a cached provisional `true`; the
+  contravariant-recursion and equirecursive-μ tests stayed green, confirming only
+  non-provisional verdicts are cached.
+- **Codec contractiveness held except the gated entry points.** The portable codec
+  faithfully round-trips contractiveness; the hole was purely the *missing gate
+  calls* (finding 1), not a codec defect.
+- **Parser guard recognition — no false positives.** `recognize_guard` was probed
+  with non-guard comparisons (`x < 0`) and malformed shapes; it correctly returned
+  `nil` (no spurious narrowing), so no wrong narrow entered from the frontend.
+
+**What buckled in the substrate during the audit fixes: nothing** — every fix is in
+the slice modules (`slice_ty`, `slice_ty_arg`, `slice_subtype`, `slice_narrow`,
+`crescent_slice`, `crescent_slice_parse`); `init.lua` is still byte-for-byte
+unchanged. The full suite is green at 4789 + the audit regression assertions; the two
+prior `instantiate_witness` tests were updated to supply the now-required callee
+premise (they asserted accept/reject behavior that the finding-5 fix re-grounds on
+the callee's true type — called out in the commit message).
 
 ---
 

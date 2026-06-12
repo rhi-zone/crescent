@@ -429,23 +429,33 @@ T.describe("crescent.slice.v1: instantiate_witness (local generic instantiation,
 		local registry = reg()
 		-- generic callee G as a portable PTy with a FREE tyvar `T`.
 		local generic = { k = "fn", params = { fixed = { { k = "tyvar", var = "T" } } }, ret = { fixed = { { k = "tyvar", var = "T" } } } }
+		local nf = add_node(state, "nf", { t = "var", name = "id" })
 		local narg = add_node(state, "narg", { t = "var", name = "s" })
 		local ncall = add_node(state, "ncall", { t = "call", fn = { space = "artifact", key = "nf" }, args = { { space = "artifact", key = "narg" } } })
 		local g = S.extend(S.empty_ctx(), "s", G.string())
+		-- the callee premise has_type(Γ, f_node, G) — G is a free-tyvar generic, so
+		-- it cannot intern; it rides a trusted_signature claim whose raw `type` arg is
+		-- the generic PTy (audit round 1, finding 5). instantiate_witness compares
+		-- payload.generic structurally to this premise's type.
+		local tb = A.trust_boundary({ id = A.id("trust", "stdlib"), kind = "stdlib", issuer = "test" })
+		A.add_trust_boundary(state, tb)
+		local cfn = A.claim({ id = A.id("claim", "cfn"), semantics = S.ID, predicate = "has_type",
+			args = { ctx = g, node = { space = "artifact", key = "nf" }, type = generic } })
 		-- arg checked against σ-applied param (string).
 		local carg_s = S.has_type_claim(A.id("claim", "cargs"), g, narg, G.string())
 		local csub = S.subtype_claim(A.id("claim", "csub"), G.string(), G.string())
 		local carg = S.checks_against_claim(A.id("claim", "carg"), g, narg, G.string())
 		local ccall = S.has_type_claim(A.id("claim", "ccall"), g, ncall, G.string())
-		A.add_claim(state, carg_s); A.add_claim(state, csub); A.add_claim(state, carg); A.add_claim(state, ccall)
+		A.add_claim(state, cfn); A.add_claim(state, carg_s); A.add_claim(state, csub); A.add_claim(state, carg); A.add_claim(state, ccall)
+		A.add_evidence(state, A.evidence({ id = A.id("ev", "efn"), claim = cfn.id, method = "trusted_signature", result = { trust = tb.id } }))
 		A.add_evidence(state, A.evidence({ id = A.id("ev", "eargs"), claim = carg_s.id, method = "synth_var" }))
 		A.add_evidence(state, A.evidence({ id = A.id("ev", "esub"), claim = csub.id, method = "subtype_witness" }))
 		A.add_evidence(state, A.evidence({ id = A.id("ev", "earg"), claim = carg.id, method = "check_against", inputs = { carg_s.id, csub.id } }))
 		A.add_evidence(state, A.evidence({ id = A.id("ev", "ecall"), claim = ccall.id, method = "instantiate_witness",
-			inputs = { carg.id }, result = { generic = generic, subst = { T = TA.encode(G.string()) } } }))
+			inputs = { cfn.id, carg.id }, result = { generic = generic, subst = { T = TA.encode(G.string()) } } }))
 		local res = A.check({ state = state, requested_claims = { ccall.id }, semantics_registry = registry })
 		if not res then T.fail(true, "no result"); return end
-		T.ok(has(res.accepted_claims, ccall), "identity<string>(s) ⇒ string under validated σ")
+		T.ok(has(res.accepted_claims, ccall), "identity<string>(s) ⇒ string under validated σ (callee G bound via premise)")
 	end)
 
 	T.it("instantiate_witness rejects a σ that does not match the argument check", function()
@@ -453,20 +463,26 @@ T.describe("crescent.slice.v1: instantiate_witness (local generic instantiation,
 		local state = A.new_state()
 		local registry = reg()
 		local generic = { k = "fn", params = { fixed = { { k = "tyvar", var = "T" } } }, ret = { fixed = { { k = "tyvar", var = "T" } } } }
+		local nf = add_node(state, "nf", { t = "var", name = "id" })
 		local narg = add_node(state, "narg", { t = "var", name = "s" })
 		local ncall = add_node(state, "ncall", { t = "call", fn = { space = "artifact", key = "nf" }, args = { { space = "artifact", key = "narg" } } })
 		local g = S.extend(S.empty_ctx(), "s", G.string())
+		local tb = A.trust_boundary({ id = A.id("trust", "stdlib"), kind = "stdlib", issuer = "test" })
+		A.add_trust_boundary(state, tb)
+		local cfn = A.claim({ id = A.id("claim", "cfn"), semantics = S.ID, predicate = "has_type",
+			args = { ctx = g, node = { space = "artifact", key = "nf" }, type = generic } })
 		local carg_s = S.has_type_claim(A.id("claim", "cargs"), g, narg, G.string())
 		local csub = S.subtype_claim(A.id("claim", "csub"), G.string(), G.string())
 		local carg = S.checks_against_claim(A.id("claim", "carg"), g, narg, G.string())
 		-- σ claims T = number, but the arg was checked against string ⇒ mismatch.
 		local ccall = S.has_type_claim(A.id("claim", "ccall"), g, ncall, G.number())
-		A.add_claim(state, carg_s); A.add_claim(state, csub); A.add_claim(state, carg); A.add_claim(state, ccall)
+		A.add_claim(state, cfn); A.add_claim(state, carg_s); A.add_claim(state, csub); A.add_claim(state, carg); A.add_claim(state, ccall)
+		A.add_evidence(state, A.evidence({ id = A.id("ev", "efn"), claim = cfn.id, method = "trusted_signature", result = { trust = tb.id } }))
 		A.add_evidence(state, A.evidence({ id = A.id("ev", "eargs"), claim = carg_s.id, method = "synth_var" }))
 		A.add_evidence(state, A.evidence({ id = A.id("ev", "esub"), claim = csub.id, method = "subtype_witness" }))
 		A.add_evidence(state, A.evidence({ id = A.id("ev", "earg"), claim = carg.id, method = "check_against", inputs = { carg_s.id, csub.id } }))
 		A.add_evidence(state, A.evidence({ id = A.id("ev", "ecall"), claim = ccall.id, method = "instantiate_witness",
-			inputs = { carg.id }, result = { generic = generic, subst = { T = TA.encode(G.number()) } } }))
+			inputs = { cfn.id, carg.id }, result = { generic = generic, subst = { T = TA.encode(G.number()) } } }))
 		local res = A.check({ state = state, requested_claims = { ccall.id }, semantics_registry = registry })
 		if not res then T.fail(true, "no result"); return end
 		T.ok(has(res.rejected_claims, ccall), "σ={T:number} contradicts the string arg check ⇒ rejected")
@@ -911,5 +927,254 @@ T.describe("crescent.slice.v1: adapter guard recognition (the five v1 forms)", f
 		T.eq(g, nil, "a non-guard call is not a recognized guard")
 		-- `x < 0` (a relational comparison, not eq/ne) is not a v1 narrowing guard.
 		T.eq(P.recognize_guard({ t = "cmp", op = "lt", left = { t = "var", name = "x" }, right = { t = "lit", lit = "int", v = 0 } }), nil, "x < 0 is not a narrowing guard")
+	end)
+end)
+
+-- ── Audit round 1 regression suite (§9.7) ────────────────────────────────────
+-- Each test below is the permanent regression form of an adversarial repro that
+-- found a confirmed defect. The repros (/tmp/*.lua) were converted here so the
+-- defect cannot silently return.
+
+T.describe("audit round 1 — finding 1: well-formedness is a load-bearing precondition", function()
+	-- repro_unsound.lua: subtype(string, μX.(number|X)) ACCEPTED (μ read as top).
+	T.it("subtype(string, μX.(number|X)) is REJECTED (non-contractive μ never enters the relation)", function()
+		G.reset()
+		local state = A.new_state()
+		local registry = reg()
+		local mubad = G.mu("X", function(x) return G.union({ G.number(), x }) end)
+		local c = S.subtype_claim(A.id("claim", "st"), G.string(), mubad)
+		A.add_claim(state, c)
+		A.add_evidence(state, A.evidence({ id = A.id("ev", "e"), claim = c.id, method = "subtype_witness" }))
+		local res = A.check({ state = state, requested_claims = { c.id }, semantics_registry = registry })
+		if not res then T.fail(true, "no result"); return end
+		T.fail(has(res.accepted_claims, c), "string <: μX.(number|X) must NOT be accepted")
+		T.ok(has(res.rejected_claims, c), "the subtype claim over a non-contractive μ is rejected")
+	end)
+
+	-- repro2b.lua: checks_against(string-node, μX.(number|X)) ACCEPTED (unsound:
+	-- a string value type-checking against a number type).
+	T.it("checks_against an ill-formed μ target is REJECTED (no string-checks-against-number leak)", function()
+		G.reset()
+		local state = A.new_state()
+		local registry = reg()
+		local mubad = G.mu("X", function(x) return G.union({ G.number(), x }) end)
+		local nlit = add_node(state, "nlit", { t = "lit", lit = "str", v = "hello" })
+		local g = S.empty_ctx()
+		local c_synth = S.has_type_claim(A.id("claim", "syn"), g, nlit, G.lit_str("hello"))
+		local c_sub = S.subtype_claim(A.id("claim", "sub"), G.lit_str("hello"), mubad)
+		local c_chk = S.checks_against_claim(A.id("claim", "chk"), g, nlit, mubad)
+		A.add_claim(state, c_synth); A.add_claim(state, c_sub); A.add_claim(state, c_chk)
+		A.add_evidence(state, A.evidence({ id = A.id("ev", "es"), claim = c_synth.id, method = "synth_lit" }))
+		A.add_evidence(state, A.evidence({ id = A.id("ev", "esub"), claim = c_sub.id, method = "subtype_witness" }))
+		A.add_evidence(state, A.evidence({ id = A.id("ev", "ec"), claim = c_chk.id, method = "check_against", inputs = { c_synth.id, c_sub.id } }))
+		local res = A.check({ state = state, requested_claims = { c_synth.id, c_sub.id, c_chk.id }, semantics_registry = registry })
+		if not res then T.fail(true, "no result"); return end
+		T.ok(has(res.accepted_claims, c_synth), "the literal synthesizes fine")
+		T.fail(has(res.accepted_claims, c_sub), "lit_str <: ill-formed μ must NOT be accepted")
+		T.fail(has(res.accepted_claims, c_chk), "checks_against an ill-formed μ must NOT be accepted")
+		T.ok(has(res.rejected_claims, c_chk), "the checks_against claim is rejected")
+	end)
+
+	-- attack_parse_mu.lua: `--:: T = number | T`, `T = T?`, `T = T` all bound OK.
+	T.it("declare_alias rejects non-contractive recursive aliases with (nil, errmsg)", function()
+		for _, body in ipairs({ "number | T", "T?", "T" }) do
+			local env = {} --[[: { [string]: Ty } ]]
+			local r, err = P.declare_alias(env, "T", body)
+			T.eq(r, nil, "alias 'T = " .. body .. "' is rejected")
+			T.ok(type(err) == "string" and #err > 0, "rejection carries an error message")
+			T.eq(env["T"], nil, "the ill-formed alias is not bound")
+		end
+	end)
+
+	T.it("declare_alias still admits a guarded recursive alias", function()
+		local env = {} --[[: { [string]: Ty } ]]
+		local r = P.declare_alias(env, "List", "nil | { next: List }")
+		T.ok(r ~= nil, "List = nil | { next: List } is well-formed and bound")
+		T.ok(env["List"] ~= nil and TA.well_formed(env["List"]), "the bound alias is contractive")
+	end)
+
+	-- The degenerate non-occurring-binder case (decided + documented in §9.7):
+	-- a μ whose variable never occurs (μX.never, μX.number) is rejected as
+	-- ill-formed — it should be written as its body directly.
+	T.it("a degenerate μ whose binder never occurs (μX.never, μX.number) is ill-formed", function()
+		T.fail(TA.well_formed(G.mu("X", function(_) return G.never() end)), "μX.never is degenerate (binder never occurs)")
+		T.fail(TA.well_formed(G.mu("X", function(_) return G.number() end)), "μX.number is degenerate (binder never occurs)")
+		-- contrast: a guarded μ with an occurrence is well-formed.
+		T.ok(TA.well_formed(G.mu("X", function(x) return G.union({ G.nil_(), G.rec({ { key = "n", ty = x, optional = false, readonly = false } }, "closed") }) end)), "a guarded, occurring μ is well-formed")
+	end)
+end)
+
+T.describe("audit round 1 — finding 2: lit_int rejects non-integers (constructor + decoder)", function()
+	-- attack_lit.lua: G.lit_int(3.5) interned to the same tid as lit_int(3) via %d.
+	T.it("G.lit_int rejects a non-integer-valued number with (nil, errmsg)", function()
+		G.reset()
+		local a, err = G.lit_int(3.5)
+		T.eq(a, nil, "lit_int(3.5) is rejected")
+		T.ok(type(err) == "string", "the rejection carries a message")
+		local b = G.lit_int(3)
+		T.ok(b ~= nil, "lit_int(3) is accepted")
+	end)
+
+	T.it("integer-valued floats are accepted and intern by exact value (no %d collision)", function()
+		G.reset()
+		local three = G.lit_int(3)
+		local three0 = G.lit_int(3.0)
+		T.ok(three ~= nil and three0 ~= nil, "lit_int(3) and lit_int(3.0) are accepted")
+		T.eq(three and three.tid, three0 and three0.tid, "3 and 3.0 are the same integer value (same tid)")
+	end)
+
+	T.it("the decoder rejects {k=lit_int, n=3.5} (parse-not-cast)", function()
+		G.reset()
+		T.eq(TA.decode({ k = "lit_int", n = 3.5 }), nil, "decode of a non-integer lit_int fails")
+		T.ok(TA.decode({ k = "lit_int", n = 3 }) ~= nil, "decode of an integer lit_int succeeds")
+	end)
+
+	-- The 2^53 precision boundary: distinct integers beyond 2^53 are not separately
+	-- representable as doubles, so they share a tid. Documented behavior, not a bug.
+	T.it("integers beyond 2^53 collide by IEEE-754 precision (documented boundary)", function()
+		G.reset()
+		local big = G.lit_int(2 ^ 53)
+		local big1 = G.lit_int(2 ^ 53 + 1) -- not representable; equals 2^53 as a double
+		T.ok(big ~= nil and big1 ~= nil, "both are integer-valued doubles, accepted")
+		T.eq(big and big.tid, big1 and big1.tid, "2^53 and 2^53+1 are the same double — same tid (precision boundary)")
+	end)
+end)
+
+T.describe("audit round 1 — finding 3: narrowing unknown via type_eq/tag_eq is T ∩ positive", function()
+	local NAR = require("lib.type.analysis.slice_narrow")
+	-- confirm_unknown.lua: type(x)=="string" over unknown gave `never` (wrong).
+	T.it("type(x)=='string' over unknown narrows truthy to string (not never)", function()
+		G.reset()
+		local tt = NAR.refine({ g = "type_eq", var = "x", tyname = "string" }, "x", G.unknown())
+		T.eq(tt and tt.kind, "string", "unknown ∩ string-positive-set = string")
+	end)
+
+	T.it("type(x)=='table' over unknown narrows truthy to an open record {...}", function()
+		G.reset()
+		local tt = NAR.refine({ g = "type_eq", var = "x", tyname = "table" }, "x", G.unknown())
+		T.eq(tt and tt.kind, "rec", "unknown ∩ table-positive-set = the open record")
+		T.eq(tt and tt.rows, "open", "the positive set for `table` is the open row {...}")
+	end)
+
+	T.it("x.tag=='leaf' over unknown narrows truthy to { tag: 'leaf', ... }", function()
+		G.reset()
+		local tt = NAR.refine({ g = "tag_eq", var = "x", field = "tag", lit = G.lit_str("leaf") }, "x", G.unknown())
+		T.eq(tt and tt.kind, "rec", "unknown ∩ tag-positive-set = the open tagged record")
+		T.eq(tt and tt.rows, "open", "the tag positive set is open (more fields allowed)")
+		-- the tag field is the literal singleton.
+		local fields = tt and tt.fields or {} --[[: Field[] ]]
+		local f1 = fields[1] --[[: Field | nil ]]
+		T.eq(f1 and f1.key, "tag", "the tag field is present")
+	end)
+
+	-- The general rule must NOT regress union narrowing (still exact).
+	T.it("union narrowing stays exact (the general rule generalizes, not special-cases unknown)", function()
+		G.reset()
+		local u = G.union({ G.string(), G.number() })
+		local tt = NAR.refine({ g = "type_eq", var = "x", tyname = "string" }, "x", u)
+		T.eq(tt and tt.kind, "string", "type(x)=='string' over string|number ⇒ string")
+		-- lit_eq over unknown was already correct (via lit <: T) — keep it so.
+		local tt2 = NAR.refine({ g = "lit_eq", var = "x", lit = G.lit_int(42) }, "x", G.unknown())
+		T.eq(tt2 and tt2.kind, "lit_int", "x == 42 over unknown ⇒ lit_int(42)")
+	end)
+end)
+
+T.describe("audit round 1 — finding 4: subtype memoization defeats the shared-subterm DAG blow-up", function()
+	local SUB = require("lib.type.analysis.slice_subtype")
+	-- attack_perf3.lua / perf_wall.lua: `{a: child, b: child}` chains were O(2^n),
+	-- >120s at depth 30. With per-query memoization the depth-30 query is instant.
+	--: (integer, Ty) -> Ty
+	local function dag(n, leaf)
+		local t = leaf
+		for _ = 1, n do
+			t = G.rec({ { key = "a", ty = t, optional = false, readonly = false }, { key = "b", ty = t, optional = false, readonly = false } }, "closed")
+		end
+		return t
+	end
+
+	T.it("dag(30) lit_int(1) <: dag(30) integer decides quickly and correctly", function()
+		G.reset()
+		local a = dag(30, G.lit_int(1))
+		local b = dag(30, G.integer())
+		local t0 = os.clock()
+		local r = SUB.is_subtype(a, b)
+		local dt = os.clock() - t0
+		T.ok(r, "the DAG subtype holds (lit_int(1) <: integer at every leaf)")
+		T.ok(dt < 1.0, "decides in well under a second (was >120s pre-memoization); took " .. string.format("%.4fs", dt))
+	end)
+
+	-- Memoization must not poison the coinductive contravariant-recursion result.
+	T.it("memoization preserves coinductive correctness on mutually-recursive μ", function()
+		G.reset()
+		local m1 = G.mu("X", function(x) return G.union({ G.nil_(), G.rec({ { key = "next", ty = x, optional = false, readonly = false } }, "closed") }) end)
+		local m2 = G.mu("Y", function(y) return G.union({ G.nil_(), G.rec({ { key = "next", ty = y, optional = false, readonly = false } }, "closed") }) end)
+		T.ok(SUB.is_subtype(m1, m2), "alpha-equivalent recursive μ are mutual subtypes")
+		T.ok(SUB.is_subtype(m1, G.unfold(m1)), "μ <: its one-step unfolding (equirecursive)")
+		T.ok(SUB.is_subtype(G.unfold(m1), m1), "unfolding <: μ (equirecursive)")
+	end)
+end)
+
+T.describe("audit round 1 — finding 5: instantiate_witness binds G to the callee", function()
+	-- attack_inst.lua: a fabricated generic with no callee premise gave any call any
+	-- return type. The callee's has_type(Γ, f_node, G) premise is now required and
+	-- payload.generic must structurally equal it.
+	T.it("a fabricated generic with NO callee premise is REJECTED", function()
+		G.reset()
+		local state = A.new_state()
+		local registry = reg()
+		local na = add_node(state, "na", { t = "lit", lit = "int", v = 5 })
+		local nf = add_node(state, "nf", { t = "var", name = "f" })
+		local ncall = add_node(state, "ncall", { t = "call", fn = { space = "artifact", key = "nf" }, args = { { space = "artifact", key = "na" } } })
+		local g = S.empty_ctx()
+		local generic = { k = "fn", params = { fixed = { { k = "tyvar", var = "X" } } }, ret = { fixed = { { k = "tyvar", var = "X" } } } }
+		local c_synth_a = S.has_type_claim(A.id("claim", "syna"), g, na, G.lit_int(5))
+		local c_sub_a = S.subtype_claim(A.id("claim", "suba"), G.lit_int(5), G.number())
+		local c_arg = S.checks_against_claim(A.id("claim", "carg"), g, na, G.number())
+		local c_call = S.has_type_claim(A.id("claim", "ccall"), g, ncall, G.number())
+		A.add_claim(state, c_synth_a); A.add_claim(state, c_sub_a); A.add_claim(state, c_arg); A.add_claim(state, c_call)
+		A.add_evidence(state, A.evidence({ id = A.id("ev", "esyna"), claim = c_synth_a.id, method = "synth_lit" }))
+		A.add_evidence(state, A.evidence({ id = A.id("ev", "esuba"), claim = c_sub_a.id, method = "subtype_witness" }))
+		A.add_evidence(state, A.evidence({ id = A.id("ev", "earg"), claim = c_arg.id, method = "check_against", inputs = { c_synth_a.id, c_sub_a.id } }))
+		-- NOTE: inputs has only the arg premise; NO has_type(f_node, generic) premise.
+		A.add_evidence(state, A.evidence({ id = A.id("ev", "ecall"), claim = c_call.id, method = "instantiate_witness",
+			inputs = { c_arg.id }, result = { generic = generic, subst = { X = TA.encode(G.number()) } } }))
+		local res = A.check({ state = state, requested_claims = { c_call.id }, semantics_registry = registry })
+		if not res then T.fail(true, "no result"); return end
+		T.fail(has(res.accepted_claims, c_call), "a fabricated generic must NOT type the call")
+		T.ok(has(res.rejected_claims, c_call), "the call is rejected (G not bound to the callee)")
+	end)
+
+	-- And a generic that does NOT match the callee premise's declared type is rejected.
+	T.it("a generic that mismatches the callee premise's declared type is REJECTED", function()
+		G.reset()
+		local state = A.new_state()
+		local registry = reg()
+		local na = add_node(state, "na", { t = "lit", lit = "int", v = 5 })
+		local nf = add_node(state, "nf", { t = "var", name = "f" })
+		local ncall = add_node(state, "ncall", { t = "call", fn = { space = "artifact", key = "nf" }, args = { { space = "artifact", key = "na" } } })
+		local g = S.empty_ctx()
+		-- the callee's TRUE declared (generic) type, carried via a trusted signature.
+		local true_generic = { k = "fn", params = { fixed = { { k = "tyvar", var = "X" } } }, ret = { fixed = { { k = "string" } } } }
+		-- the producer FABRICATES a different generic (identity) to forge the return.
+		local fake_generic = { k = "fn", params = { fixed = { { k = "tyvar", var = "X" } } }, ret = { fixed = { { k = "tyvar", var = "X" } } } }
+		local tb = A.trust_boundary({ id = A.id("trust", "stdlib"), kind = "stdlib", issuer = "test" })
+		A.add_trust_boundary(state, tb)
+		local cfn = A.claim({ id = A.id("claim", "cfn"), semantics = S.ID, predicate = "has_type",
+			args = { ctx = g, node = { space = "artifact", key = "nf" }, type = true_generic } })
+		local c_synth_a = S.has_type_claim(A.id("claim", "syna"), g, na, G.lit_int(5))
+		local c_sub_a = S.subtype_claim(A.id("claim", "suba"), G.lit_int(5), G.number())
+		local c_arg = S.checks_against_claim(A.id("claim", "carg"), g, na, G.number())
+		local c_call = S.has_type_claim(A.id("claim", "ccall"), g, ncall, G.number())
+		A.add_claim(state, cfn); A.add_claim(state, c_synth_a); A.add_claim(state, c_sub_a); A.add_claim(state, c_arg); A.add_claim(state, c_call)
+		A.add_evidence(state, A.evidence({ id = A.id("ev", "efn"), claim = cfn.id, method = "trusted_signature", result = { trust = tb.id } }))
+		A.add_evidence(state, A.evidence({ id = A.id("ev", "esyna"), claim = c_synth_a.id, method = "synth_lit" }))
+		A.add_evidence(state, A.evidence({ id = A.id("ev", "esuba"), claim = c_sub_a.id, method = "subtype_witness" }))
+		A.add_evidence(state, A.evidence({ id = A.id("ev", "earg"), claim = c_arg.id, method = "check_against", inputs = { c_synth_a.id, c_sub_a.id } }))
+		A.add_evidence(state, A.evidence({ id = A.id("ev", "ecall"), claim = c_call.id, method = "instantiate_witness",
+			inputs = { cfn.id, c_arg.id }, result = { generic = fake_generic, subst = { X = TA.encode(G.number()) } } }))
+		local res = A.check({ state = state, requested_claims = { c_call.id }, semantics_registry = registry })
+		if not res then T.fail(true, "no result"); return end
+		T.fail(has(res.accepted_claims, c_call), "the fabricated generic does not match the callee's true type")
+		T.ok(has(res.rejected_claims, c_call), "the call is rejected (payload.generic ≠ callee premise type)")
 	end)
 end)

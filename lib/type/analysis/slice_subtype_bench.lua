@@ -60,6 +60,20 @@ local function wide_union(n)
 	return G.union(ms)
 end
 
+-- SHARED-SUBTERM DAG: a `{ a: child, b: child }` chain of depth `n` where both
+-- fields point at the SAME interned child (audit round 1, finding 4). Without
+-- per-query memoization, the rec/union/fn descent re-explores the shared child
+-- twice per level — O(2^n), >120s at depth 30. With memoization it is linear.
+-- This is the adversarial DAG shape the audit's perf wall exercised.
+--: (integer, Ty) -> Ty
+local function dag(n, leaf)
+	local t = leaf
+	for _ = 1, n do
+		t = G.rec({ fld("a", t), fld("b", t) }, "closed")
+	end
+	return t
+end
+
 -- WIDE intersection: an intersection of `n` distinct open records (each adds a
 -- field), the worst case for the record-conjunction decomposition.
 --: (integer) -> Ty
@@ -127,6 +141,15 @@ bench("lit_int(150) <: wide_union(200)",           function() return S.is_subtyp
 local F1rec = G.rec({ fld("f1", G.integer()) }, "open")
 bench("wide_inter_records(60) <: f1-record",       function() return S.is_subtype(WI, F1rec) end,       20000)
 bench("wide_inter_records(60) <: wide_inter(60)",  function() return S.is_subtype(WI, WI2) end,         20000)
+
+-- Shared-subterm DAG (finding 4): the perf-wall shape. Pre-memoization this was
+-- O(2^n) — >120s at depth 30; post-memoization it is linear in the DAG size.
+local DAG30a = dag(30, G.lit_int(1))
+local DAG30b = dag(30, G.integer())
+bench("dag(30) lit_int(1) <: dag(30) integer",     function() return S.is_subtype(DAG30a, DAG30b) end,  20000)
+local DAG40a = dag(40, G.lit_int(1))
+local DAG40b = dag(40, G.integer())
+bench("dag(40) lit_int(1) <: dag(40) integer",     function() return S.is_subtype(DAG40a, DAG40b) end,  20000)
 
 print("")
 -- Worst single-query latency probe: time ONE query of the heaviest shape and

@@ -80,7 +80,7 @@ T.describe("corpus: fixture_boolean_narrowing — `and` of booleans ⇒ boolean"
 		local res = A.check({ state = state, requested_claims = { cand.id }, semantics_registry = registry })
 		if not res then T.fail(true, "no result"); return end
 		T.ok(has(res.accepted_claims, cand), "0 errors; return-expr type is boolean")
-		T.eq(#res.rejected_claims and 0 or 0, 0, "no rejections")
+		T.ok(next(res.rejected_claims) == nil, "no rejections")
 		-- mechanism assertion: the synthesized `and`-of-booleans is exactly boolean.
 		T.ok(SUB.is_subtype(G.boolean(), G.boolean()), "boolean ⇐ boolean (the declared return)")
 	end)

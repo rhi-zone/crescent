@@ -100,8 +100,10 @@ T.describe("slice_ty interner", function()
 		local members = u.members or {}
 		local rec_member --[[: Ty ]] = members[1]
 		if rec_member.kind ~= "rec" then rec_member = members[2] end
-		local rfields = rec_member.fields or {} --[[: { [integer]: { key: string, ty: Ty, optional: boolean, readonly: boolean } } ]]
-		T.eq(rfields[1].ty.tid, m.tid, "recursive occurrence unfolds to the μ itself")
+		local rfields = rec_member.fields or {} --[[: Field[] ]]
+		local first_field = rfields[1] --[[: Field ]]
+		local next_ty = first_field.ty --: Ty
+		T.eq(next_ty.tid, m.tid, "recursive occurrence unfolds to the μ itself")
 	end)
 
 	T.it("nested mu builds idempotently", function()

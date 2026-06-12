@@ -206,8 +206,11 @@ local function new_type_parser(toks, aliases)
 		if not t then return fail("unexpected end of type") end
 		if t.kind == "number" then
 			bump()
-			if t.text:find("%.") then return G.lit_num(tonumber(t.text) or 0) end
-			return G.lit_int(tonumber(t.text) or 0)
+			local num = tonumber(t.text) or 0 --: number
+			if t.text:find("%.") then return G.lit_num(num) end
+			local li = G.lit_int(num)
+			if not li then return fail("integer literal in type is not integer-valued: '" .. t.text .. "'") end
+			return li
 		end
 		if t.kind == "string" then
 			bump()
@@ -361,11 +364,21 @@ function M.declare_alias(aliases, name, body)
 			return ty
 		end)
 		if perr then return nil, perr end
+		-- well-formedness is a hard precondition of admitting an alias (audit round 1,
+		-- finding 1): a non-contractive recursive alias (`T = number | T`, `T = T?`,
+		-- `T = T`) reads as top in the subtype relation and must be rejected at the
+		-- declaration site, per the (nil, errmsg) convention — never silently bound.
+		if not TA.well_formed(mu) then
+			return nil, "recursive alias '" .. name .. "' is not well-formed: its variable occurs unguarded (non-contractive μ)"
+		end
 		aliases[name] = mu
 		return aliases
 	end
 	local ty, e = M.parse_type_ann(body, aliases)
 	if not ty then return nil, e end
+	if not TA.well_formed(ty) then
+		return nil, "alias '" .. name .. "' is not well-formed (non-contractive or degenerate μ)"
+	end
 	aliases[name] = ty
 	return aliases
 end
@@ -434,7 +447,7 @@ local function lit_node_to_ty(node)
 	local lit, v = node.lit, node.v
 	if lit == "nil" then return G.nil_() end
 	if lit == "bool" and type(v) == "boolean" then return G.lit_bool(v) end
-	if lit == "int" and type(v) == "number" then return G.lit_int(v) end
+	if lit == "int" and type(v) == "number" then return (G.lit_int(v)) end
 	if lit == "num" and type(v) == "number" then return G.lit_num(v) end
 	if lit == "str" and type(v) == "string" then return G.lit_str(v) end
 	return nil

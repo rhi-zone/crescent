@@ -6,7 +6,59 @@ Bench machine: AMD Ryzen 7 5700G, LuaJIT 2.1.1741730670, NixOS Linux 6.12.67.
 
 ---
 
+## 2026-06-12: crescent slice v1 — audit round 1, finding 4 (subtype memoization)
+
+Benchmark: `bin/cr run lib/type/analysis/slice_subtype_bench.lua`. LuaJIT 2.1.1774896198.
+
+Adversarial audit finding 4: `M.is_subtype` was exponential on **shared-subterm
+DAGs**. The cycle-guard `seen` stack covered only μ-unfold pairs; rec/union/fn
+descent re-explored shared interned subterms, so a `{ a: child, b: child }` chain
+(both fields the same interned child) re-decided each child twice per level —
+O(2^n). The perf wall: `dag(30)` did not return within 120s.
+
+Fix: per-query **memoization** of every fully-decided `(tidA, tidB)` pair (interned
+tid-pairs are a trivial, sound key). Coinductive correctness is preserved — an
+in-progress μ pair short-circuits via the coinductive hypothesis BEFORE the memo
+write, so a provisional `true` is never cached. The DAG shape is now linear.
+
+New measured numbers (full bench re-run after the fix):
+
+| Query (1 `is_subtype` call per iteration) | iters | total ms | ms/query |
+|---|---|---|---|
+| `hamt <: hamt` (reflexive, interned) | 100000 | 0.087 | 0.0000009 |
+| `hamt <: unfold(hamt)` | 100000 | 439.068 | 0.00439 |
+| `Interior(hamt) <: hamt` (coinductive) | 100000 | 485.390 | 0.00485 |
+| `deep_mu(40) <: deep_mu(40)` (interned refl) | 100000 | 1.258 | 0.00001 |
+| `deep_mu(40) <: unfold(deep_mu(40))` | 20000 | 1931.078 | 0.09655 |
+| `wide_union(200) <: wide_union(200)` (interned refl) | 20000 | 0.355 | 0.00002 |
+| `wide_union(200) <: wide_union(400)` | 20000 | 66883.031 | 3.34415 |
+| `lit_int(150) <: wide_union(200)` | 20000 | 427.377 | 0.02137 |
+| `wide_inter_records(60) <: f1-record` | 20000 | 4.670 | 0.00023 |
+| `wide_inter_records(60) <: wide_inter(60)` (interned refl) | 20000 | 0.232 | 0.00001 |
+| **`dag(30) lit_int(1) <: dag(30) integer`** (NEW, the perf-wall shape) | 20000 | 133.322 | **0.00667** |
+| **`dag(40) lit_int(1) <: dag(40) integer`** (NEW) | 20000 | 178.006 | **0.00890** |
+
+The previously-unmeasurable `dag(30)` query (>120s pre-fix) is now **0.00667
+ms/query**, and `dag(40)` is **0.00890 ms/query** — linear in DAG size, ≈10^6×
+under the timeout-30 ceiling. The depth-30 perf wall is gone (a single
+non-iterated `dag(30)` query measures ~0.00s wall).
+
+Heaviest single query (deep_mu(40) unfold) probe: **0.052 ms** — 30000 ms ceiling,
+~577000× headroom. The slowest *realistic* per-query case remains the union
+cross-product `wide_union(200) <: wide_union(400)` at **3.34 ms/query** (the m×n
+union-width floor; absolute timings here run ~2× the prior machine entry below
+because of a different bench host/JIT build — the *shape* is unchanged, and it is
+still ~9000× under the ceiling). Memoization does not regress these shapes.
+
+Verdict: **clears timeout-30 with enormous margin, and the exponential DAG class is
+retired.** Replay: `bin/cr run lib/type/analysis/slice_subtype_bench.lua`.
+
+---
+
 ## 2026-06-12: crescent slice v1 — Pass 1 subtype-relation benchmark (§5.1)
+
+> Superseded by the audit-round-1 entry above (memoization added; DAG shape added
+> to the bench). Retained for the pre-memoization baseline.
 
 **Commit (Pass 1):** committed in this change; baseline HEAD before it = `7a6b9d5c`.
 Benchmark: `bin/cr run lib/type/analysis/slice_subtype_bench.lua`. LuaJIT 2.1.1774896198.

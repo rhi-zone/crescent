@@ -67,6 +67,30 @@ local function keep_members(ty, pred)
 	return G.union(kept)
 end
 
+-- The GENERAL truthy refinement (audit round 1, finding 3): truthy narrowing is
+-- `T ∩ positive`, where `positive` is the guard's positive set. Decomposed over
+-- the union members of `T`, each member contributes `member ∩ positive`:
+--   - a member that the guard PROVES matches contributes the member itself
+--     (`member ∩ positive = member`, since `member <: positive`);
+--   - a member the guard PROVES excludes contributes `never` (dropped);
+--   - a member the guard CANNOT exclude — paradigmatically `unknown`, the top —
+--     contributes `member ∩ positive = positive` (for `unknown`, `unknown ∩ P = P`).
+-- This is the derived rule, NOT an `unknown` special case: `keep_members` is the
+-- instance where every member either fully matches or is fully excluded (so the
+-- intersection is the member or never). The cases where a member only PARTIALLY
+-- intersects the positive set (`unknown`) need the positive set itself. `contrib`
+-- returns the member's contribution to the truthy refinement, or nil to drop it.
+--: (Ty, (Ty) -> (Ty | nil)) -> Ty
+local function refine_positive(ty, contrib)
+	local kept = {} --[[: Ty[] ]]
+	local ms = members_of(ty)
+	for i = 1, #ms do
+		local c = contrib(ms[i])
+		if c ~= nil then kept[#kept + 1] = c end
+	end
+	return G.union(kept)
+end
+
 -- Is `m` a falsy-only member (nil, false, or lit_bool(false))? These are the
 -- members truthiness drops on the truthy branch.
 --: (Ty) -> boolean
@@ -108,6 +132,27 @@ local function member_matches_typename(m, tyname)
 end
 
 M.member_matches_typename = member_matches_typename
+
+-- The POSITIVE SET for `type(x) == tyname` — the type every value passing the
+-- guard inhabits. This is what `unknown` (the top) narrows to under the guard
+-- (audit round 1, finding 3): `unknown ∩ positive_of("string") = string`. For
+-- the `table` tag the positive set is the open record `{ ... }` (any table), the
+-- best v1-expressible upper bound of "is a table". Returns nil for an unknown
+-- type name (no positive set ⇒ no narrow).
+--: (string) -> Ty | nil
+local function positive_of_typename(tyname)
+	if tyname == "nil" then return G.nil_() end
+	if tyname == "boolean" then return G.boolean() end
+	if tyname == "number" then return G.number() end
+	if tyname == "string" then return G.string() end
+	if tyname == "function" then return G.func() end
+	-- "table": any table — the open empty record `{ ... }` (reading any unlisted
+	-- field yields unknown). This is the v1-grammar expression of "is a table".
+	if tyname == "table" then return G.rec({}, "open") end
+	return nil
+end
+
+M.positive_of_typename = positive_of_typename
 
 -- ── tag-field discriminant (union-of-recs idiom) ─────────────────────────────
 --
@@ -172,12 +217,24 @@ local function refine_nil_eq(t, eq)
 	return drop_nil, only_nil                -- x ~= nil
 end
 
--- `type(x) == tyname`: truthy keeps members matching the runtime type; falsy is T.
+-- `type(x) == tyname`: truthy = `T ∩ positive_of(tyname)` (audit round 1,
+-- finding 3). Per the general rule (refine_positive): a member that PROVES the
+-- runtime type contributes itself; `unknown` (the top, which the guard cannot
+-- exclude) contributes the positive set itself — so `type(x)=="string"` over
+-- `unknown` yields `string`, NOT `never` (the canonical TS-unknown idiom). A
+-- member that proves a DIFFERENT runtime type is dropped. Falsy is T (sound
+-- wider). For an unknown type name there is no positive set, so truthy stays T.
 --: (Ty, string) -> (Ty, Ty)
 local function refine_type_eq(t, tyname)
-	--: (Ty) -> boolean
-	local function matches(m) return member_matches_typename(m, tyname) end
-	local t_true = keep_members(t, matches)
+	local positive = positive_of_typename(tyname)
+	if not positive then return t, t end
+	--: (Ty) -> (Ty | nil)
+	local function contrib(m)
+		if m.kind == "unknown" then return positive end  -- unknown ∩ positive = positive
+		if member_matches_typename(m, tyname) then return m end -- m <: positive ⇒ m ∩ positive = m
+		return nil -- a member of a different runtime kind is excluded
+	end
+	local t_true = refine_positive(t, contrib)
 	return t_true, t
 end
 
@@ -190,13 +247,22 @@ local function refine_lit_eq(t, lit)
 	return G.never(), t
 end
 
--- `x.tag == lit`: truthy keeps the union members admitting the tag literal; falsy
--- is T. The union-of-recs discriminant (§4.1, requirement 3).
+-- `x.tag == lit`: truthy = `T ∩ { [field]: lit, ... }` (audit round 1,
+-- finding 3). Per the general rule: a union member whose `tag` field admits the
+-- literal contributes itself; `unknown` (the top) contributes the positive set —
+-- the open record `{ field: lit, ... }` (a table with that tag, more fields
+-- allowed), expressible in the v1 grammar — so `x.tag == "leaf"` over `unknown`
+-- yields `{ tag: "leaf", ... }`, NOT `never`. Falsy is T (sound wider).
 --: (Ty, string, Ty) -> (Ty, Ty)
 local function refine_tag_eq(t, field, lit)
-	--: (Ty) -> boolean
-	local function admits(m) return member_admits_tag(m, field, lit) end
-	local t_true = keep_members(t, admits)
+	local positive = G.rec({ { key = field, ty = lit, optional = false, readonly = false } }, "open")
+	--: (Ty) -> (Ty | nil)
+	local function contrib(m)
+		if m.kind == "unknown" then return positive end -- unknown ∩ positive = positive
+		if member_admits_tag(m, field, lit) then return m end
+		return nil
+	end
+	local t_true = refine_positive(t, contrib)
 	return t_true, t
 end
 

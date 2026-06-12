@@ -104,9 +104,26 @@ function M.lit_bool(b)
 	return intern("LB:" .. tostring(b), { kind = "lit_bool", b = b, tid = 0 })
 end
 
---: (number) -> Ty
+-- A lit_int must carry an INTEGER-VALUED number (audit round 1, finding 2). A
+-- non-integer (`3.5`) is rejected with (nil, errmsg) — it would otherwise collide
+-- with `lit_int(3)` via the old `%d` key (which truncated 3.5 → "3") AND be
+-- unsound (`lit_int(3.5) <: integer` is wrong; 3.5 is not an integer). The key
+-- uses `%.17g` so the interned identity is over the exact double value, never a
+-- truncation. Note (2^53 precision boundary, documented in tests): integers beyond
+-- 2^53 are not exactly representable as doubles, so `lit_int(2^53)` and
+-- `lit_int(2^53 + 1)` denote the SAME double and SHARE a tid — a fundamental
+-- IEEE-754 limitation of representing integers as Lua/LuaJIT numbers, not a bug;
+-- both are integer-valued and well-formed.
+--: (number) -> (Ty | nil, string | nil)
 function M.lit_int(n)
-	return intern("LI:" .. string.format("%d", n), { kind = "lit_int", n = n, tid = 0 })
+	if type(n) ~= "number" then return nil, "lit_int requires a number" end
+	if n ~= n or n == math.huge or n == -math.huge then
+		return nil, "lit_int requires a finite integer-valued number"
+	end
+	if n % 1 ~= 0 then
+		return nil, "lit_int requires an integer-valued number, got " .. tostring(n)
+	end
+	return intern("LI:" .. string.format("%.17g", n), { kind = "lit_int", n = n, tid = 0 })
 end
 
 --: (number) -> Ty
