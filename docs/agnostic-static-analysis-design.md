@@ -439,13 +439,27 @@ The plan:
    identity coexist over the one structural substrate identity. 108 prior
    assertions preserved (153 total).
 
-4. **After STLC: tiny Crescent slice, not more synthetic rungs.** Now unblocked —
-   STLC forced no special pleading and no substrate change. No further synthetic
-   rungs are scheduled. The next rung is a small but real subset of Crescent/Lua
-   semantics checked over actual files in `lib/`. It inherits STLC's position:
-   structural substrate claim identity carries hosted types and contexts with no
-   arg-schema or identity-override mechanism. See "First Validation Ladder" for
-   the rationale and the acceptance/falsification corpus.
+4. **After STLC: tiny Crescent slice, not more synthetic rungs. — DESIGNED;
+   mechanization next.** Now unblocked — STLC forced no special pleading and no
+   substrate change. No further synthetic rungs are scheduled. The rung is a
+   small but real subset of Crescent/Lua semantics checked over actual files in
+   `lib/`, designed whole from the value universe in
+   `docs/agnostic-static-analysis-crescent-slice.md` (`crescent.slice.v1`). It is
+   the first consumer of the ratified kernel
+   (`docs/decisions/kernel-recommendation.md`): a bidirectional synth/check spine,
+   ONE cycle-guarded equirecursive (hash-consed μ) subtype relation, local generic
+   instantiation as witnessed evidence, solvers untrusted, and a separate
+   flow-narrowing layer. It inherits STLC's position: structural substrate claim
+   identity carries hosted types and contexts with no arg-schema or
+   identity-override mechanism. The slice doc derives the v1 type grammar
+   (primitives + `integer<:number`, literals, functions with multi-return/vararg
+   tuples, structural tables with the hard `...`-vs-indexer distinction,
+   union/intersection, equirecursive μ), maps every corpus fixture to its v1
+   verdict, decides `for-in` (included for `pairs`/`ipairs` + numeric form;
+   general iterator protocol deferred with a trigger), and records the design
+   pressure (falsy-branch precision without complement, mutable-field invariance,
+   flow-insensitive stores). Mechanization runs in four passes (subtype relation +
+   fuzz first). See "First Validation Ladder" and the slice doc.
 
 No Crescent feature work should start before this sequence does not force
 special pleading.

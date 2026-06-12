@@ -147,8 +147,11 @@ validation docs. The STLC rung (`docs/agnostic-static-analysis-stlc.md`)
 introduced the first hosted `type` vocabulary, typing contexts, and deep
 derivation trees with **no substrate change** — types and contexts ride
 `ArgValue` claim args, and structural substrate claim identity is exactly right
-for context-dependent judgments. Next: tiny Crescent slice (ladder compressed —
-no further synthetic rungs). See "Next Pass" in
+for context-dependent judgments. The tiny Crescent slice (ladder rung 5, the
+final rung) is now **designed** in
+`docs/agnostic-static-analysis-crescent-slice.md` (`crescent.slice.v1`, the first
+consumer of the ratified kernel); mechanization is next, in four passes (subtype
+relation + fuzz first). See "Next Pass" in
 `docs/agnostic-static-analysis-design.md`.
 
 Rung status (ladder, design doc):
@@ -160,8 +163,17 @@ Rung status (ladder, design doc):
 - 4 STLC — mechanized (`stlc.min`); substrate unchanged. Hosted `type`
   vocabulary, typing contexts, and deep evidence trees all hosted; arg-schema
   open item closed (no schema mechanism, no identity override needed).
-- 5 tiny Crescent slice — next. (Capability-reachability and imperative-store
-  pressure absorbed here from the real target; ladder compressed after STLC.)
+- 5 tiny Crescent slice — **design landed, mechanization next**
+  (`docs/agnostic-static-analysis-crescent-slice.md`, `crescent.slice.v1`). First
+  consumer of the ratified kernel (`docs/decisions/kernel-recommendation.md`):
+  bidirectional synth/check spine, ONE cycle-guarded equirecursive (hash-consed μ)
+  subtype relation, local generic instantiation as witnessed evidence, separate
+  flow-narrowing layer. v1 type grammar derived whole from the Lua value universe;
+  all 11 corpus fixtures mapped to v1 verdicts; `for-in` decided (`pairs`/`ipairs`
+  + numeric included, general iterator protocol deferred). Capability-reachability
+  and imperative-store pressure absorbed here from the real target (stores handled
+  flow-insensitively by check-against-declared-element-type; ladder compressed
+  after STLC). Mechanization: four passes, subtype relation + fuzz first.
 
 Limits:
 
