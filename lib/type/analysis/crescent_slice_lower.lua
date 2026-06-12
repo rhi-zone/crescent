@@ -1474,8 +1474,36 @@ synth_expr = function(lc, ctx, e)
 		return synth_func_expr(lc, ctx, e)
 	end
 	if k == "indexdyn" then
-		mark(lc, { line = 0, construct = "dynamic-index", text = "t[expr]" })
-		return nil, nil
+		-- dynamic-index READ `t[e]` (§6.9.2). Synthesize the object and the key, then
+		-- resolve via `index_result(obj_ty, nil, key_ty)`: an indexer / rec-with-indexer
+		-- yields its value type; an open-row rec yields `unknown`; a CLOSED rec yields
+		-- `union(field-value-types) | nil`. A non-table object (or un-indexable shape)
+		-- stays out-of-subset — the honest deferral, never a forged result.
+		local oty, ocid = synth_expr(lc, ctx, v.obj)
+		if not oty or not ocid then
+			mark(lc, { line = 0, construct = "dynamic-index", text = "t[expr]" })
+			return nil, nil
+		end
+		local key_ty, key_cid = synth_expr(lc, ctx, v.key)
+		if not key_ty or not key_cid then
+			mark(lc, { line = 0, construct = "dynamic-index", text = "t[expr]" })
+			return nil, nil
+		end
+		local res = S.index_result(oty, nil, key_ty)
+		if not res then
+			mark(lc, { line = 0, construct = "dynamic-index", text = "t[expr]" })
+			return nil, nil
+		end
+		local opc = lc.state.claims[A.idk(ocid)]
+		local kpc = lc.state.claims[A.idk(key_cid)]
+		local obj_ref = opc and opc.args and opc.args.node --[[: unknown ]]
+		local key_ref = kpc and kpc.args and kpc.args.node --[[: unknown ]]
+		local nid = lc.b.node({ t = "index", obj = obj_ref, key = key_ref })
+		local cid = lc.b.fresh_claim("index")
+		A.add_claim(lc.state, S.has_type_claim(cid, ctx, nid, res))
+		A.add_evidence(lc.state, A.evidence({ id = lc.b.fresh_ev("index"), claim = cid,
+			method = "synth_index", inputs = { ocid, key_cid } }))
+		return res, cid
 	end
 	if k == "vararg" then
 		mark(lc, { line = 0, construct = "vararg-expr", text = "..." })
@@ -1626,25 +1654,50 @@ local function flatten_values(lc, ctx, values)
 		local val = values[i]
 		local vv = view(val)
 		local is_last = (i == n)
-		-- the last value, when a call to a multi-return fn, expands to its Ret tuple.
-		if is_last and vv and vv.k == "call" then
-			local fnv = view(vv.fn)
-			local fname = fnv and fnv.name
-			local fty = type(fname) == "string" and ctx_get(ctx, fname) or nil
-			if fty and fty.kind == "fn" then
-				local vty, vcid = synth_call_expr(lc, ctx, val)
-				if not vty or not vcid then return nil end
-				local ret = fty.ret or ({ fixed = {} } --[[: Ret ]])
-				if #ret.fixed <= 1 then
-					slots[#slots + 1] = { ty = vty, cid = vcid }
-				else
-					slots[#slots + 1] = { ty = ret.fixed[1], cid = vcid }
-					for j = 2, #ret.fixed do
-						slots[#slots + 1] = { ty = ret.fixed[j], cid = nil }
-					end
+		-- the LAST value, when it is a call PRODUCING a multi-return tuple, expands to
+		-- its Ret (§6.9.4). The producing function's `fn` type is recovered regardless
+		-- of the call's syntactic form:
+		--   - `f(...)`        — `f` a name bound to an `fn`-typed local
+		--   - `o:m(...)`      — the method's `fn` type via the desugared `o.m` index
+		--   - `t.f(...)`      — the field's `fn` type via `synth_index` on `t.f`
+		-- Only when the recovered `Ret` has ≥2 fixed elements do we spread; otherwise
+		-- the call contributes one slot (a single-value producer).
+		if is_last and vv and (vv.k == "call" or vv.k == "methodcall") then
+			-- recover the producing function's type, then its return tuple.
+			local prod_fty --[[: Ty | nil ]]
+			if vv.k == "call" then
+				local fnv = view(vv.fn)
+				local fname = fnv and fnv.name
+				if type(fname) == "string" then
+					prod_fty = ctx_get(ctx, fname)
+				elseif fnv and fnv.k == "index" then
+					-- `t.f(...)`: resolve the field's fn type via synth_index.
+					prod_fty = synth_index_expr(lc, ctx, vv.fn)
 				end
-				goto continue
+			else
+				-- `o:m(...)`: the method's fn type is `synth_index(o, "m")`.
+				local method = vv.method
+				if type(method) == "string" then
+					prod_fty = synth_index_expr(lc, ctx, { k = "index", obj = vv.recv, field = method })
+				end
 			end
+			local rfixed --[[: Ty[] ]] = {}
+			if prod_fty and prod_fty.kind == "fn" then
+				local pf = prod_fty --[[: Ty ]]
+				local ret = pf.ret or ({ fixed = {} } --[[: Ret ]])
+				rfixed = ret.fixed
+			end
+			local vty, vcid = synth_expr(lc, ctx, val)
+			if not vty or not vcid then return nil end
+			if #rfixed >= 2 then
+				slots[#slots + 1] = { ty = rfixed[1], cid = vcid }
+				for j = 2, #rfixed do
+					slots[#slots + 1] = { ty = rfixed[j], cid = nil }
+				end
+			else
+				slots[#slots + 1] = { ty = vty, cid = vcid }
+			end
+			goto continue
 		end
 		do
 			local vty, vcid = synth_expr(lc, ctx, val)
@@ -1971,9 +2024,19 @@ local function lower_stmt(lc, ctx, s, ret_ty)
 			-- `local function f` is in scope inside its OWN body (Lua's recursive
 			-- binding: `local f; f = function...`); bind it in body_ctx too.
 			if fname and k == "localfunc" then body_ctx[#body_ctx + 1] = { name = fname, type = TA.encode(f) } end
+			-- the body's `ret_ty`: a SINGLE-value declared return passes `fixed[1]` (the
+			-- single-return check checks `v <: fixed[1]`); a MULTI-value declared return
+			-- (≥2 fixed or a vararg) passes the joint §6.5.5 `tuple`, so a multi-return
+			-- statement checks `jtuple <: tuple(declared)` (§6.9.3). A single return
+			-- against a multi-value declared tuple is then correctly `v <: tuple([A,B])`
+			-- = false (a single value cannot satisfy a 2-value return).
 			local rty --[[: Ty ]]
-			local r0 = fret.fixed[1]
-			if r0 then rty = r0 else rty = G.nil_() end
+			if #fret.fixed >= 2 or fret.vararg ~= nil then
+				rty = G.tuple(fret.fixed, fret.vararg)
+			else
+				local r0 = fret.fixed[1]
+				if r0 then rty = r0 else rty = G.nil_() end
+			end
 			lc.func_depth = (lc.func_depth or 0) + 1
 			lower_block(lc, body_ctx, sv.body, rty)
 			lc.func_depth = (lc.func_depth or 1) - 1
@@ -2001,10 +2064,68 @@ local function lower_stmt(lc, ctx, s, ret_ty)
 	elseif k == "return" then
 		local values = sv.values or {}
 		if #values == 0 then return end
+		-- a closure-body return sink (§6.8) captures the return-premise claim id.
+		local sink = lc.return_premise_sink and lc.return_premise_sink[#lc.return_premise_sink]
+		if #values > 1 then
+			-- MULTI-RETURN statement (§6.9.3): build the joint §6.5.5 `tuple` from the
+			-- value list (the last value spreads its multi-return tuple, §6.7.4 width
+			-- rule), then — in check mode — check the tuple ⇐ ret_ty (via the §6.5.5
+			-- tuple-subtype rule), or, at module top level, capture it as the module's
+			-- exported value type. Surplus/short tuples are handled by tuple_sub.
+			local slots = flatten_values(lc, ctx, values)
+			if not slots then
+				mark(lc, { line = 0, construct = "multi-return", text = "return a, b" })
+				return
+			end
+			local fixed = {} --[[: Ty[] ]]
+			local inputs = {} --[[: Id[] ]]
+			local all_cids = true --: boolean
+			for i = 1, #slots do
+				local s = slots[i]
+				if s then
+					fixed[#fixed + 1] = s.ty
+					if s.cid then inputs[#inputs + 1] = s.cid else all_cids = false end
+				end
+			end
+			local jtuple = G.tuple(fixed, nil)
+			-- the synth_tuple has_type claim needs one premise per slot. When the last
+			-- value SPREAD into ≥2 slots (the `return f()` multi-spread), slots 2..n
+			-- carry no per-slot claim — the synth_tuple premise contract cannot be met;
+			-- that shape is the §9.15 deferral (a tuple-spread-premise mechanism). The
+			-- per-value `return a, b` form (the dominant idiom) has a cid per slot.
+			if not all_cids or #inputs ~= #fixed then
+				-- still request the available value claims so their checks run, then mark.
+				for i = 1, #inputs do lc.requested[#lc.requested + 1] = inputs[i] end
+				mark(lc, { line = 0, construct = "multi-return", text = "return f() (spread)" })
+				return
+			end
+			-- emit has_type(Γ, tuple_node, jtuple) via synth_tuple over the slot claims.
+			local tnid = lc.b.node({ t = "tuple", n = #fixed })
+			local tcid = lc.b.fresh_claim("tuple")
+			A.add_claim(lc.state, S.has_type_claim(tcid, ctx, tnid, jtuple))
+			A.add_evidence(lc.state, A.evidence({ id = lc.b.fresh_ev("tuple"), claim = tcid,
+				method = "synth_tuple", inputs = inputs }))
+			local rt = ret_ty
+			if rt then
+				-- check the synthesized tuple ⇐ ret_ty (the §6.5.5 tuple-subtype rule).
+				local caid = emit_check_against(lc, ctx, tcid, tnid, jtuple, rt)
+				if caid then
+					lc.requested[#lc.requested + 1] = caid
+					if sink then sink[#sink + 1] = caid end
+				end
+			else
+				-- request the tuple claim; capture it as the module value type at top
+				-- level (§6.7.2 — the FIRST top-level return wins).
+				lc.requested[#lc.requested + 1] = tcid
+				if (lc.func_depth or 0) == 0 and lc.module_ret_ty == nil then
+					lc.module_ret_ty = jtuple
+				end
+			end
+			return
+		end
 		-- single-return: check value ⇐ ret_ty.
 		local vty, vcid = synth_expr(lc, ctx, values[1])
 		if not vty or not vcid then
-			if #values > 1 then mark(lc, { line = 0, construct = "multi-return", text = "return a, b" }) end
 			return
 		end
 		local rt = ret_ty
@@ -2017,7 +2138,6 @@ local function lower_stmt(lc, ctx, s, ret_ty)
 				-- when this return is inside a closure body being built (§6.8), the
 				-- return-premise sink captures the checks_against claim id so it becomes
 				-- a `synth_function` evidence input (the return-premise contract).
-				local sink = lc.return_premise_sink and lc.return_premise_sink[#lc.return_premise_sink]
 				if sink then sink[#sink + 1] = caid end
 			end
 		else
@@ -2029,9 +2149,6 @@ local function lower_stmt(lc, ctx, s, ret_ty)
 			if (lc.func_depth or 0) == 0 and lc.module_ret_ty == nil then
 				lc.module_ret_ty = vty
 			end
-		end
-		if #values > 1 then
-			mark(lc, { line = 0, construct = "multi-return", text = "return a, b" })
 		end
 		return
 
@@ -2217,17 +2334,16 @@ local function lower_stmt(lc, ctx, s, ret_ty)
 				end
 				return
 			elseif tgt and tgt.k == "indexdyn" then
-				-- dynamic-key write `t[e] = v` (§6.7.4). Over an indexer-typed table
-				-- (`{ [K]: V }`), check `e ⇐ K` and `v ⇐ V` (the index-signature write
-				-- rule). Over a closed rec (no element type), it stays out-of-subset.
+				-- dynamic-key write `t[e] = v` (§6.7.4 + §6.9.5). Over an indexer-typed
+				-- table (`{ [K]: V }`), check `e ⇐ K` and `v ⇐ V`. Over a closed rec, the
+				-- write target is `index_write_target` (the WRITE dual of `index_result`):
+				-- a homogeneous closed rec ⇒ its single field type; a heterogeneous or
+				-- empty closed rec stays out-of-subset (the §9.15 deferral).
 				local oty = synth_expr(lc, ctx, tgt.obj)
 				if oty then
-					local kty = S.index_result(oty, nil, G.unknown())
-					-- kty non-nil ⇒ the object admits a dynamic key (indexer/open). We
-					-- need the element type V: probe with the key's own type.
 					local key_ty, key_cid = synth_expr(lc, ctx, tgt.key)
 					if key_ty and key_cid then
-						local vty2 = S.index_result(oty, nil, key_ty)
+						local vty2 = S.index_write_target(oty, key_ty)
 						if vty2 then
 							local vpc = lc.state.claims[A.idk(vcid)]
 							local vref = vpc and vpc.args and vpc.args.node --[[: unknown ]]
@@ -2236,7 +2352,6 @@ local function lower_stmt(lc, ctx, s, ret_ty)
 							return
 						end
 					end
-					local _ = kty
 				end
 				mark(lc, { line = 0, construct = "dynamic-index-assign", text = "t[e] = v" })
 				return

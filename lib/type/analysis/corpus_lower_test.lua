@@ -224,33 +224,36 @@ T.describe("corpus e2e: fixture_cross_module_type_alias — field-path-narrow bo
 	end)
 end)
 
-T.describe("corpus e2e: fixture_closure_param_typing — closures lower, multi-return boundary", function()
-	T.it("v2.4: the inner `function(s) ... end` closures lower; multi-return is the boundary", function()
+T.describe("corpus e2e: fixture_closure_param_typing — multi-return lowers to CLEAN", function()
+	T.it("v2.5: `return node, function() end` lowers (the §6.5.5 tuple) — the fixture is now CLEAN", function()
 		local o = lower_fixture("closure_param_typing")
-		-- v2.4 (§6.8): the unannotated `function() return nil end` and the typed
-		-- closure `function(s) return { kind = "a" } end` (flowing into the annotated
-		-- `(Signal) -> Node` slot via CHECK-mode) now lower. The fixture remains
-		-- OUT-OF-SUBSET on the NEXT boundary: `return node, function() end` is a
-		-- multi-return statement form (the return-tuple §6.7.4 statement, recorded as
-		-- the next e2e front), distinct from the closures which are now in-subset.
-		T.eq(o.expected, "OUT-OF-SUBSET", "multi-return statement form is outside §5")
-		T.ok(has_construct(o, "multi-return"), "marked the multi-return boundary")
-		T.ok(not has_construct(o, "unannotated-closure"), "the closures now lower (v2.4)")
+		-- v2.5 (§6.9): the `return node, function() end` multi-return statement now
+		-- lowers (the §6.5.5 tuple built at the return site, §6.9.3) — `multi-return`
+		-- was the LAST out-of-subset boundary, so with it gone the fixture goes
+		-- whole-file CLEAN. `with_scope` is unannotated (capture path, no return check),
+		-- and v1's flow-insensitive synthesis types the closure args loosely (`unknown`
+		-- params), so no claim rejects. The documented "typing w causes c1 nil" gap is
+		-- a PRECISION limitation of the loose synthesis (c1 binds the call result, a
+		-- single slot), not a soundness error — every requested claim accepts.
+		T.eq(o.expected, "CLEAN", "the multi-return was the last boundary; the fixture is now whole-file CLEAN")
+		T.ok(not has_construct(o, "multi-return"), "the multi-return now lowers (v2.5)")
+		T.ok(not has_construct(o, "unannotated-closure"), "the closures lower (v2.4)")
 		assert_sound(o)
 	end)
 end)
 
 -- ── The headline assertion: the honest split ─────────────────────────────────
 
-T.describe("corpus e2e: the honest 11-fixture split under real lowering (v2.3)", function()
-	T.it("3 CLEAN, 1 FINDINGS, 7 OUT-OF-SUBSET, 0 rejections anywhere", function()
-		-- v2.3 (operator typing + assignments + method calls + unannotated functions,
-		-- §6.7): boolean_narrowing moved OUT-OF-SUBSET → CLEAN (operators), and
-		-- coinductive moved OUT-OF-SUBSET → FINDINGS (operators unblocked the body,
-		-- surfacing the honest field-path-narrow type-mismatch). These fixtures lower
-		-- WITHOUT the injected stdlib cap (no `{ stdlib = true }`), so tonumber/
-		-- cast_not_inference_source stay OUT-OF-SUBSET on unbound stdlib names — the
-		-- caps-first posture (the cap is the survey's, not a default global).
+T.describe("corpus e2e: the honest 11-fixture split under real lowering (v2.5)", function()
+	T.it("4 CLEAN, 1 FINDINGS, 6 OUT-OF-SUBSET, 0 rejections anywhere", function()
+		-- v2.5 (§6.9, the multi-return / dynamic-index family): closure_param_typing
+		-- moved OUT-OF-SUBSET → CLEAN — `return node, function() end` now lowers
+		-- (the §6.5.5 tuple built at the return site), which was its last boundary.
+		-- v2.3 had moved boolean_narrowing → CLEAN (operators) and coinductive →
+		-- FINDINGS (the field-path-narrow type-mismatch, the sole remaining finding).
+		-- These fixtures lower WITHOUT the injected stdlib cap (no `{ stdlib = true }`),
+		-- so tonumber/cast_not_inference_source stay OUT-OF-SUBSET on unbound stdlib
+		-- names — the caps-first posture (the cap is the survey's, not a default global).
 		local names = {
 			"boolean_narrowing", "local_return_narrowing", "union_alias_over_named_types",
 			"tonumber_return_type", "pairs_return_leak", "coinductive_recursive_types",
@@ -265,9 +268,9 @@ T.describe("corpus e2e: the honest 11-fixture split under real lowering (v2.3)",
 			elseif o.expected == "FINDINGS" then findings = findings + 1 end
 			total_rej = total_rej + o.rej
 		end
-		T.eq(clean, 3, "3 fixtures fully within §5 (local_return_narrowing, union_alias, boolean_narrowing)")
+		T.eq(clean, 4, "4 fixtures fully within §5 (local_return_narrowing, union_alias, boolean_narrowing, closure_param_typing)")
 		T.eq(findings, 1, "1 fixture (coinductive) hits the field-path-narrow type-mismatch finding")
-		T.eq(oos, 7, "7 fixtures hit a real §5 boundary (stdlib/closures/forward-alias/dynamic-key)")
+		T.eq(oos, 6, "6 fixtures hit a real §5 boundary (stdlib/forward-alias/dynamic-key-write/field-path)")
 		T.eq(total_rej, 0, "ZERO rejections across all 11 — every in-subset claim the lowering emits is sound")
 	end)
 end)
@@ -765,6 +768,129 @@ return { run = run }
 ]]
 		local o = lower_with_modules(entry, { ["lib/aliasmod2.lua"] = exp }, false)
 		T.eq(o.expected, "CLEAN", "A.f = fn assignment via direct alias propagates to M (F3 trivial case)")
+		assert_sound(o)
+	end)
+end)
+
+-- ── §6.9 increment v2.5: the multi-return / dynamic-index family ──────────────
+
+T.describe("slice v2.5: dynamic-index READ over an indexer", function()
+	T.it("`t[k]` over `{ [string]: integer }` yields the element type — CLEAN", function()
+		local o = lower_src([[
+--: ({ [string]: integer }, string) -> integer
+local function get(t, k)
+  return t[k]
+end
+return { get = get }
+]], false)
+		T.eq(o.expected, "CLEAN", "indexer read `t[k]` resolves to the value type V (no dynamic-index marker)")
+		T.ok(not has_construct(o, "dynamic-index"), "the dynamic-index read is now in subset")
+		assert_sound(o)
+	end)
+end)
+
+T.describe("slice v2.5: dynamic-index READ over a closed rec (union | nil)", function()
+	T.it("`r[k]` over a closed rec yields union(field types) | nil — CLEAN against unknown", function()
+		local o = lower_src([[
+--: ({ a: integer, b: integer }, string) -> integer | nil
+local function pick(r, k)
+  return r[k]
+end
+return { pick = pick }
+]], false)
+		-- r[k] : (integer | integer) | nil = integer | nil <: integer | nil.
+		T.eq(o.expected, "CLEAN", "closed-rec dynamic read is union(fields)|nil (the closed-row promise)")
+		T.ok(not has_construct(o, "dynamic-index"), "closed-rec dynamic read is in subset")
+		assert_sound(o)
+	end)
+end)
+
+T.describe("slice v2.5: multi-return STATEMENT — check against the declared return", function()
+	T.it("`return v, nil` against `(integer, string | nil)` lowers (the §6.5.5 tuple) — CLEAN", function()
+		local o = lower_src([[
+--: (integer) -> (integer, string | nil)
+local function ok_pair(v)
+  return v, nil
+end
+return { ok_pair = ok_pair }
+]], false)
+		T.eq(o.expected, "CLEAN", "the joint tuple (integer, nil) <: (integer, string | nil)")
+		T.ok(not has_construct(o, "multi-return"), "the multi-return statement is now in subset")
+		assert_sound(o)
+	end)
+	T.it("`return nil, msg` against a union-of-tuples return member lowers — CLEAN", function()
+		local o = lower_src([[
+--: (integer) -> (integer, boolean) | (nil, string)
+local function maybe(v)
+  return nil, "boom"
+end
+return { maybe = maybe }
+]], false)
+		T.eq(o.expected, "CLEAN", "(nil, lit\"boom\") <: the (nil, string) union member (§6.5.5 exists-forall)")
+		assert_sound(o)
+	end)
+end)
+
+T.describe("slice v2.5: multi-assign with a CALL last value spreading its tuple", function()
+	T.it("`local a, b = f()` over a 2-return f binds both slots — CLEAN", function()
+		local o = lower_src([[
+--: () -> (integer, string)
+local function f()
+  return 1, "x"
+end
+--: () -> integer
+local function use()
+  local a, b = f()
+  return a
+end
+return { f = f, use = use }
+]], false)
+		T.eq(o.expected, "CLEAN", "f()'s (integer, string) return spreads into a, b")
+		T.ok(not has_construct(o, "multi-assign"), "the multi-assign-from-call is in subset")
+		assert_sound(o)
+	end)
+end)
+
+T.describe("slice v2.5: multi-assign with a METHOD-CALL last value (the dominant idiom)", function()
+	T.it("`n, err = r:read()` spreads the method's return tuple — CLEAN", function()
+		local o = lower_src([[
+--:: Reader = { read: (self: Reader) -> (integer, string | nil) }
+--: (Reader) -> integer
+local function consume(r)
+  local n, err = r:read()
+  return n
+end
+return { consume = consume }
+]], false)
+		T.eq(o.expected, "CLEAN", "the methodcall's (integer, string | nil) return spreads into n, err")
+		T.ok(not has_construct(o, "multi-assign"), "the methodcall-last multi-assign is in subset")
+		assert_sound(o)
+	end)
+end)
+
+T.describe("slice v2.5: dynamic-index WRITE over a homogeneous closed rec", function()
+	T.it("`t[k] = v` over a closed rec whose fields share one type checks v ⇐ V — CLEAN", function()
+		local o = lower_src([[
+--: ({ a: integer, b: integer }, string, integer) -> ()
+local function set(t, k, v)
+  t[k] = v
+end
+return { set = set }
+]], false)
+		T.eq(o.expected, "CLEAN", "homogeneous closed-rec dynamic write checks v ⇐ the common field type")
+		T.ok(not has_construct(o, "dynamic-index-assign"), "the homogeneous closed-rec write is in subset")
+		assert_sound(o)
+	end)
+	T.it("`t[k] = v` over a HETEROGENEOUS closed rec stays out-of-subset (the §9.15 deferral)", function()
+		local o = lower_src([[
+--: ({ a: integer, b: string }, string, integer) -> ()
+local function set(t, k, v)
+  t[k] = v
+end
+return { set = set }
+]], false)
+		T.eq(o.expected, "OUT-OF-SUBSET", "a heterogeneous closed-rec dynamic write is the recorded deferral")
+		T.ok(has_construct(o, "dynamic-index-assign"), "marked the heterogeneous-rec write boundary")
 		assert_sound(o)
 	end)
 end)

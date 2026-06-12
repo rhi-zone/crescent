@@ -236,7 +236,19 @@ Rung status (ladder, design doc):
   (un-memoized recursive precompute, `check.lua` 74.76s → 0.79s after a shared cache)
   was found and fixed. Earlier findings: a parser non-termination (FIXED) and a
   substrate-scaling TIMEOUT (FIXED, content-addressed keys). See
-  `docs/slice-survey-v1.md` "after v2 increment 4".
+  `docs/slice-survey-v1.md` "after v2 increment 4". **Slice v2 increment 5** (§6.9)
+  landed the multi-return / dynamic-index statement family (the e2e histogram's top
+  after incr 4: `dynamic-index` read, `multi-return` statement, `dynamic-index-assign`,
+  `multi-assign` with method-call last value): dynamic-key reads reach `index_result`
+  (a new closed-rec-under-dynamic-key result rule, `union(fields)|nil`, the closed-row
+  dual of the open-row `unknown`); the `return a, b` statement builds the §6.5.5 tuple
+  (one new evidence method, `synth_tuple`, the dual of `synth_table`); `flatten_values`
+  spreads any multi-return last value (method-call / field-call), and homogeneous
+  closed-rec dynamic writes check `v ⇐ V`. Substrate untouched. **e2e CHECKED-CLEAN
+  22 → 25 (2.9%)**; the per-construct demand fell sharply (`multi-return` 482 → 317,
+  `dynamic-index` 589 → 512). The heterogeneous closed-rec dynamic write and the
+  body-synthesized multi-return join are recorded §9.15 deferrals. See
+  `docs/slice-survey-v1.md` "after v2 increment 5".
 
 Limits:
 

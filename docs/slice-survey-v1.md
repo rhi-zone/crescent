@@ -933,3 +933,85 @@ lowers, leaving the field-path / assignment-in-branch narrowing boundary
 (`no-such-field`). 0 rejections anywhere. Full analysis suite green at 6328
 assertions (6282 + 46 new); 0 TIMEOUT in the e2e survey; the touched lib file
 typechecks clean. Findings in §9.13.
+
+<!-- ════════════════════════════════════════════════════════════════════════
+     AFTER v2 INCREMENT 5 — appended by hand. Records the end-to-end delta from
+     the multi-return / dynamic-index statement family (§6.9). END-TO-END (--e2e)
+     delta; the GENERATED annotation survey at the top is unchanged by increment 5
+     (it is statement-lowering, not annotation-grammar, work).
+     Re-run: bin/cr run lib/type/analysis/slice_survey.lua --e2e
+════════════════════════════════════════════════════════════════════════════ -->
+
+## After v2 increment 5 (the multi-return / dynamic-index statement family)
+
+Slice v2 increment 5 (`docs/agnostic-static-analysis-crescent-slice.md` §6.9)
+landed the measured top of the e2e histogram after increment 4 (`dynamic-index`
+589 files, `multi-return` 482, `dynamic-index-assign` 477, `multi-assign` 466).
+**Diagnosis first** (sampled 15 real sites/tag across `lib/`): the tag names hid
+the residual sub-shapes — `dynamic-index` was overwhelmingly `t[expr]` READS the
+lowering rejected wholesale (never reaching `index_result`); `multi-return` was
+the `return a, b` STATEMENT (the §6.5.5 `tuple`'s first statement producer);
+`multi-assign`'s residue was the **method-call / call last RHS value**
+(`n, err = r:read()`) `flatten_values` never spread; `dynamic-index-assign`'s
+residue was the **closed-rec dynamic write**. The increment closes each from the
+value universe: one new `index_result` RESULT rule (closed rec under a dynamic key
+⇒ `union(fields) | nil`, the closed-row dual of the open-row `unknown`), one new
+evidence method (`synth_tuple`, the dual of `synth_table` for the return-position
+value sequence — the §6.9 design was corrected from "zero new methods" to this one
+when the substrate showed a tuple needs a synthesis rule, recorded honestly), and
+lowering reach for the rest. **No substrate change** (`init.lua` byte-for-byte).
+
+**End-to-end survey re-run** (`--e2e`, 868 files, per-file budget 5s, the survey
+injects the stdlib + read_file caps):
+
+| Class | after v2 increment 4 | after v2 increment 5 |
+|---|--:|--:|
+| CHECKED-CLEAN | 22 (2.5%) | **25 (2.9%)** |
+| CHECKED-FINDINGS | 6 (0.7%) | 9 (1.0%) |
+| OUT-OF-SUBSET | 833 (96.1%) | **828 (95.4%)** |
+| NO-ANNOTATION | 6 (0.7%) | 6 (0.7%) |
+| TIMEOUT | 0 | **0** |
+
+**The whole-file CHECKED-CLEAN headline rose 22 → 25 (2.5% → 2.9%).** The honest,
+load-bearing finding: this is a smaller whole-file jump than increment 4's 5 → 22,
+because the e2e gate is the LAST out-of-subset construct in each file, and the
+multi-return / dynamic-index family files are SATURATED with several remaining
+blockers each — closing this family moves the *construct histogram* far more than
+the whole-file gate. The per-construct demand (files in which the tag blocks ≥1
+construct) is where the real movement shows:
+
+| Construct | after incr 4 | after incr 5 | delta |
+|---|--:|--:|--:|
+| `dynamic-index` (read) | 589 | **512** | −77 |
+| `multi-return` (statement) | 482 | **317** | −165 |
+| `dynamic-index-assign` | 477 | 482 | +5 (deeper reach) |
+| `multi-assign` | 466 | **450** | −16 |
+
+`multi-return` fell hardest (−165): the `return a, b` statement is now in-subset
+wherever its values are. `dynamic-index` reads fell −77 (the indexer / closed-rec
+reads that resolve; the residue is reads over `unknown`/`call-non-function`
+objects). `dynamic-index-assign` rose slightly (+5) — the increased reach lowers
+MORE statements before hitting a dynamic write, surfacing the marker in files that
+previously blocked earlier; the homogeneous closed-rec write IS now in-subset
+(corpus tests), and the heterogeneous case is the recorded §9.15 deferral. The new
+e2e front (most-blocking after this family) is `call-non-function` (259, calling an
+`unknown`-typed value), `iterate-non-table` / `general-iterator` (211 / 118, the
+`for in pairs(t)` generic-for over non-table or with a stdlib iterator), and the
+string-method `no-such-field:sub`/`gsub`/`match` (182 / 125 / 108, `s:sub(...)` on
+`unknown` — a stdlib-string-method-on-a-value follow-up).
+
+**Corpus fixture movements** (the load-bearing `corpus_lower_test`, WITHOUT the
+stdlib cap — caps-first): `closure_param_typing` moved OUT-OF-SUBSET → **CLEAN** —
+`return node, function() end` now lowers (the §6.5.5 tuple built at the return
+site), which was its LAST boundary; `with_scope` is unannotated (capture path), and
+v1's loose synthesis types the closure args without rejection. The honest 11-fixture
+split moved **3 CLEAN / 1 FINDINGS / 7 OUT-OF-SUBSET → 4 CLEAN / 1 FINDINGS / 6
+OUT-OF-SUBSET**, 0 rejections anywhere. New direct sub-form tests (inline sources):
+dynamic-index read over an indexer (CLEAN), over a closed rec ⇒ `union(fields)|nil`
+(CLEAN), multi-return statement checked against a declared tuple return and against
+a §6.5.5 union-of-tuples member (CLEAN), multi-assign spreading a call return
+(CLEAN) and a METHOD-CALL return (the dominant `n, err = r:read()` idiom, CLEAN),
+and dynamic-index write over a homogeneous closed rec (CLEAN) vs a heterogeneous one
+(OUT-OF-SUBSET, the §9.15 deferral). Full analysis suite green at 6421 assertions
+(6374 + 47 new); 0 TIMEOUT in the e2e survey; both touched lib files typecheck clean.
+Findings in §9.15.

@@ -450,6 +450,18 @@ index_result = function(obj_ty, field, key_ty)
 			if SUB.is_subtype(key_ty, obj_ty.key) then return obj_ty.val end
 		end
 		if obj_ty.rows == "open" then return G.unknown() end
+		-- closed `rec` under a DYNAMIC key (§6.9.2): the read may hit ANY listed
+		-- field or miss (Lua returns nil for an absent key). The sound result is the
+		-- union of all field value types `| nil` — strictly more precise than
+		-- `unknown` (a closed row promises no unlisted field exists). For an empty
+		-- closed rec the union is empty ⇒ just `nil`. This is the dual of the
+		-- open-row rule above (open ⇒ unknown; closed ⇒ the field union).
+		if key_ty ~= nil and k == "rec" then
+			local vals = {} --[[: Ty[] ]]
+			for i = 1, #fields do vals[#vals + 1] = fields[i].ty end
+			vals[#vals + 1] = G.nil_()
+			return G.union(vals)
+		end
 		return nil
 	end
 
@@ -468,6 +480,48 @@ index_result = function(obj_ty, field, key_ty)
 end
 
 M.index_result = index_result
+
+-- Dynamic-key WRITE target (§6.9.5) — the type a value must satisfy for `t[e] = v`
+-- with a dynamic key `e : key_ty`. This is the WRITE dual of `index_result`'s READ
+-- rule; the two differ for a closed `rec`:
+--   - indexer / rec_with_indexer admitting `key_ty` ⇒ the element value type `V`
+--     (write into the index signature) — same as the read.
+--   - open-row `rec` ⇒ `unknown` (any write is admitted; the open row hides it).
+--   - CLOSED `rec` ⇒ the write may land on any listed field; v1 is flow-insensitive
+--     and cannot widen the rec, so the in-fence SOUND choice is: when all listed
+--     fields share ONE value type `V` (homogeneous — an array/map built field-by-
+--     field), the target is `V`; a HETEROGENEOUS closed rec returns nil (the write
+--     stays out-of-subset, the §9.15 deferral) rather than forge an unsound check.
+--     An EMPTY closed rec also returns nil (no element type to check against).
+--: (Ty, Ty) -> Ty | nil
+local function index_write_target(obj_ty, key_ty)
+	local k = obj_ty.kind
+	if k == "mu" then return index_write_target(G.unfold(obj_ty), key_ty) end
+	if k == "indexer" then
+		if obj_ty.key and SUB.is_subtype(key_ty, obj_ty.key) then return obj_ty.val end
+		return nil
+	end
+	if k == "rec_with_indexer" then
+		if obj_ty.key and SUB.is_subtype(key_ty, obj_ty.key) then return obj_ty.val end
+		return nil
+	end
+	if k == "rec" then
+		if obj_ty.rows == "open" then return G.unknown() end
+		local fields = obj_ty.fields or {}
+		if #fields == 0 then return nil end
+		-- homogeneous? all field value types structurally equal ⇒ that one type.
+		local first = fields[1].ty
+		for i = 2, #fields do
+			if not SUB.is_subtype(fields[i].ty, first) or not SUB.is_subtype(first, fields[i].ty) then
+				return nil -- heterogeneous: the §9.15 deferral
+			end
+		end
+		return first
+	end
+	return nil
+end
+
+M.index_write_target = index_write_target
 
 -- ── synth_table: table constructor (§2.3) ────────────────────────────────────
 -- Synthesizes the PRECISE type from per-entry types. Named entries produce a
@@ -917,8 +971,16 @@ function M.checker(cc, claim, ev)
 	-- ── synth_index ──
 	elseif method == "synth_index" then
 		if node.t ~= "index" then return cc.REJECTED, "synth_index applied to a non-index node", nil, nil end
-		-- premise: has_type(Γ, obj_node, OBJ_T).
-		if #ev.inputs ~= 1 then return cc.REJECTED, "synth_index requires one has_type premise (the object)", nil, nil end
+		-- premise[1]: has_type(Γ, obj_node, OBJ_T). A DYNAMIC key (§6.9.2) carries a
+		-- SECOND premise has_type(Γ, key_node, KEY_T) and a `key` node ref; a static
+		-- field carries one premise and a `field` string. The rule dispatches on
+		-- whether `node.key` is present.
+		local nfield = node.field
+		local field --[[: string | nil ]]
+		if type(nfield) == "string" then field = nfield end
+		local is_dyn = node.key ~= nil
+		local need = is_dyn and 2 or 1
+		if #ev.inputs ~= need then return cc.REJECTED, "synth_index premise count mismatch", nil, nil end
 		local prem = ev.inputs[1]
 		if not cc.is_accepted(prem) then return cc.UNKNOWN, nil, nil, nil end
 		local pr = read_typing(cc, prem, "has_type")
@@ -932,12 +994,26 @@ function M.checker(cc, claim, ev)
 		if not obj_ref or obj_ref.space ~= pr.node.space or obj_ref.key ~= pr.node.key then
 			return cc.REJECTED, "synth_index premise node is not the access object", nil, nil
 		end
-		local nfield = node.field
-		local field --[[: string | nil ]]
-		if type(nfield) == "string" then field = nfield end
-		-- (dynamic-key t[e] resolution: v1 handles the static-field case; a dynamic
-		--  key needs its own has_type premise — out of this rule's 1-premise form.)
-		local res = index_result(pr.type, field, nil)
+		local key_ty --[[: Ty | nil ]]
+		local deps = { dep_claim(claim.id, prem) } --[[: Dependency[] ]]
+		if is_dyn then
+			-- the key premise: has_type(Γ, key_node, KEY_T) supplies the dynamic key's
+			-- type for the index-signature / closed-rec-union resolution (§6.9.2).
+			local kprem = ev.inputs[2]
+			if not cc.is_accepted(kprem) then return cc.UNKNOWN, nil, nil, nil end
+			local kpr = read_typing(cc, kprem, "has_type")
+			if not kpr then return cc.REJECTED, "synth_index key premise is not a has_type claim", nil, nil end
+			if ctx_canon_key(cc, ctx) ~= ctx_canon_key(cc, kpr.ctx) then
+				return cc.REJECTED, "synth_index key premise context must match the conclusion's", nil, nil
+			end
+			local key_ref = arg_id(node.key)
+			if not key_ref or key_ref.space ~= kpr.node.space or key_ref.key ~= kpr.node.key then
+				return cc.REJECTED, "synth_index key premise node is not the access key", nil, nil
+			end
+			key_ty = kpr.type
+			deps[#deps + 1] = dep_claim(claim.id, kprem)
+		end
+		local res = index_result(pr.type, field, key_ty)
 		if not res then
 			-- no-such-field counterevidence (§6.4) surfaced in the diagnostic.
 			return cc.REJECTED, "synth_index: no such field '" .. tostring(field) .. "' (no_such_field)", nil, nil
@@ -945,7 +1021,7 @@ function M.checker(cc, claim, ev)
 		if not ty_eq(res, want_ty) then
 			return cc.REJECTED, "synth_index: asserted type does not match the field type", nil, nil
 		end
-		return accept({ dep_claim(claim.id, prem) }, { trust_note() })
+		return accept(deps, { trust_note() })
 
 	-- ── synth_table ──
 	elseif method == "synth_table" then
@@ -988,6 +1064,39 @@ function M.checker(cc, claim, ev)
 		local synth = synth_table_type(named, arr)
 		if not ty_eq(synth, want_ty) then
 			return cc.REJECTED, "synth_table: asserted type does not match the synthesized record", nil, nil
+		end
+		return accept(deps, { trust_note() })
+
+	-- ── synth_tuple (§6.9.3 — the multi-return value sequence) ──
+	-- A `return e1, …, en` produces the §6.5.5 `tuple([t1,…,tn])`. The node is
+	-- `{ t="tuple", n=<count> }`; the evidence carries one has_type premise per
+	-- fixed slot, in order. The synthesized tuple is `G.tuple(slot-types)` — exactly
+	-- the dual of `synth_table`'s array path, but the §6.5.5 RETURN-position
+	-- value-shape rather than a table. This is the relation's first STATEMENT
+	-- producer (the `tuple<:` subtype rule already shipped in §6.5.5).
+	elseif method == "synth_tuple" then
+		if node.t ~= "tuple" then return cc.REJECTED, "synth_tuple applied to a non-tuple node", nil, nil end
+		-- the tuple arity is the premise count (one has_type per fixed slot); a tuple
+		-- normalizes to its single element below 2 slots, so a synth_tuple node must
+		-- carry >= 2 premises.
+		local n = #ev.inputs
+		if n < 2 then return cc.REJECTED, "synth_tuple requires >= 2 has_type premises", nil, nil end
+		local fixed = {} --[[: Ty[] ]]
+		local deps = {} --[[: Dependency[] ]]
+		for i = 1, n do
+			local prem = ev.inputs[i]
+			if not cc.is_accepted(prem) then return cc.UNKNOWN, nil, nil, nil end
+			local pr = read_typing(cc, prem, "has_type")
+			if not pr then return cc.REJECTED, "synth_tuple premise is not a has_type claim", nil, nil end
+			if ctx_canon_key(cc, ctx) ~= ctx_canon_key(cc, pr.ctx) then
+				return cc.REJECTED, "synth_tuple premise context must match the conclusion's", nil, nil
+			end
+			fixed[#fixed + 1] = pr.type
+			deps[#deps + 1] = dep_claim(claim.id, prem)
+		end
+		local synth = G.tuple(fixed, nil)
+		if not ty_eq(synth, want_ty) then
+			return cc.REJECTED, "synth_tuple: asserted type does not match the synthesized tuple", nil, nil
 		end
 		return accept(deps, { trust_note() })
 
@@ -1379,7 +1488,7 @@ function M.register(registry)
 		observation_predicates = { "syntax", "annotation" },
 		evidence_methods = {
 			"synth_lit", "synth_var", "synth_call", "synth_table", "synth_index",
-			"synth_function", "synth_and_or_not",
+			"synth_function", "synth_and_or_not", "synth_tuple",
 			"synth_binop", "synth_unop",
 			"check_against", "check_cast",
 			"subtype_witness", "instantiate_witness", "narrow_guard",

@@ -1865,6 +1865,225 @@ consumer, like §6.6). The substrate (`init.lua`) is **untouched**, byte-for-byt
 
 ---
 
+## 6.9 Increment v2.5 — the multi-return / dynamic-index statement family
+
+Status: design pass for slice **v2 increment 5**, the measured top of the e2e
+histogram after increment 4 (`docs/slice-survey-v1.md` after-increment-4:
+`dynamic-index` 589 files, `multi-return` 482, `dynamic-index-assign` 477,
+`multi-assign` 466). Derived whole from the value universe; the §6.5.5 `tuple`
+machinery is the substrate for the multi-value items; `index_result` (§3) is the
+substrate for the dynamic-index items. The headline finding first, as every
+prior increment: **no substrate change.** The design pass projected zero new
+evidence methods; mechanization corrected that to **exactly one** —
+`synth_tuple`, the value-position dual of `synth_table`, which the multi-return
+statement genuinely needs (§6.9.3, §9.15 finding 1). Every other item is lowering
+reach over the EXISTING methods, plus one value-universe-justified sharpening of
+the `index_result` *result* (a closed `rec` under a dynamic key).
+
+### 6.9.1 The measured demand (diagnosed before designing)
+
+Increment 3 (§6.7.4) already landed *basic* assignment forms — multi-assign
+flatten-and-zip, indexer-typed dynamic-key writes. Yet these four tags top the
+histogram. The survey records each file's lowering markers; sampling 15 real
+sites per tag across the corpus (`lib/mediator`, `lib/memoize`, `lib/wire`,
+`lib/dns`, `lib/websocket`, `lib/ecs`, `lib/email`, …) pins the residual
+sub-shapes precisely — the tag names hide them:
+
+- **`dynamic-index` (591 measured)** is overwhelmingly `t[expr]` *reads* — the
+  EXPRESSION-position dynamic key the lowering rejects WHOLESALE (`synth_expr`'s
+  `indexdyn` arm emits the marker unconditionally, never calling `index_result`).
+  Real sites: `handlers[fname]`, `event_lists[fname]`, `list[i]`, `cmd_mw[i]`,
+  `lru.map[key]`, `weak_cache[k]`. The objects are table-locals bound to an
+  **indexer** (`{ [K]: V }`), a **rec-with-indexer**, or a **closed rec**. The
+  read result is fully determined by `index_result` — which already handles
+  indexer / rec-with-indexer / open-row — for every shape EXCEPT the closed rec
+  under a dynamic key (§6.9.2). So the dominant gap is **the lowering never
+  reaching the existing `index_result`**, plus one missing result rule.
+- **`multi-return` (482)** is the `return a, b` STATEMENT — the return-position
+  multi-value form. Single-return is handled; the moment a return has ≥2 values
+  the lowering marks it out-of-subset (`return nil, "msg"` the error idiom,
+  `return v, true`, `return node.value, true`, `return mw(...)` where the last is
+  a multi-value call). The §6.5.5 `tuple` constructor and its subtype rule ALREADY
+  EXIST — this item is the lowering building the joint `tuple` from the value list
+  and checking/capturing it (§6.9.3).
+- **`multi-assign` (466)** — the residue after increment 3 is the
+  **method-call / call as the LAST RHS value** feeding a multi-target list:
+  `n, err = r:uint32_be()`, `send, close = tcp_client(...)`, `code, resp =
+  smtp_read_response(self._transport)`, `ok, err = self._db:execute(SCHEMA)`. The
+  `flatten_values` helper spreads only a `call`-to-a-known-`fn`-local as the last
+  value; it does NOT spread a **`methodcall`** (the dominant idiom) nor a call to
+  a function reached by field access — those collapse to ONE slot and the second
+  target binds `nil`, after which the marker fires. The fix is to spread any
+  last-value whose synthesized type is a known multi-return tuple, regardless of
+  the syntactic call form (§6.9.4).
+- **`dynamic-index-assign` (479)** — the residue after increment 3 (indexer-typed
+  writes landed) is the **closed-rec dynamic write** `t[e] = v` where `t` is a
+  closed `rec` with no index signature (`parts[i] = …` where `parts` is an array
+  built field-by-field, `map[victim.key] = nil`). The sound write rule is the dual
+  of §6.9.2's read rule (§6.9.5).
+
+This diagnosis IS the demand: design against the closed-rec dynamic key, the
+return-statement tuple, and the methodcall-last-value spread — not against the
+tag names.
+
+### 6.9.2 Dynamic-index reads — `index_result`, lifted to expression position
+
+**Value-universe derivation.** `t[e]` with a non-literal `e` reads one of `t`'s
+values. The result is fully determined by `t`'s type:
+
+- `t : indexer(K, V)` and `e : K' <: K` ⇒ **`V`** (the index-signature read,
+  already in `index_result`).
+- `t : rec_with_indexer` ⇒ `V` when `e <: K` (already in `index_result`).
+- `t : rec` **open-row** ⇒ **`unknown`** (the `...`-open-row meaning: an unlisted
+  read yields `unknown` — already in `index_result`, line 452).
+- `t : rec` **closed**, no index signature, dynamic key ⇒ **the union of all
+  listed field value types `| nil`**. This is the universe's sound result and the
+  ONLY new rule: a dynamic key may hit ANY listed field (so the value is `f1 |
+  f2 | … | fn`) OR miss every field (Lua returns `nil` for an absent key, so
+  `| nil`). It is NOT `unknown`: a closed rec promises NO field outside its list
+  exists, so the read cannot produce a value of any other type — `union(fields) |
+  nil` is strictly more precise than `unknown` and is what the closed-row promise
+  earns. (For an EMPTY closed rec `{}` the union is empty, so the result is
+  `nil` — every dynamic read misses.) This is the dual of the open-row rule: open
+  rows admit unlisted fields ⇒ `unknown`; closed rows do not ⇒ the field union.
+
+**Mechanization.** `index_result`'s closed-rec dynamic-key path (the `key_ty ~=
+nil` branch that currently falls through to `return nil` at the closed-rec tail)
+returns `G.union(field-value-types ++ { nil })`. The lowering's `synth_expr`
+`indexdyn` arm STOPS emitting the marker unconditionally: it synthesizes the
+object, synthesizes the key, calls `index_result(obj_ty, nil, key_ty)`, and on a
+non-nil result emits a `synth_index` claim (the dynamic-key node carries the key
+ref, exactly like the static-field `index` node carries the field name). A `nil`
+result (object is not a table, or a truly un-indexable shape) keeps the marker —
+the honest out-of-subset deferral, never a forged result.
+
+### 6.9.3 Multi-return statement — the §6.5.5 tuple, built at the `return` site
+
+**Value-universe derivation.** `return e1, …, en` produces the multi-value
+sequence the §6.5.5 `tuple` constructor denotes. The value list flattens by the
+same width rule as assignment (§6.7.4): values `1..n-1` contribute one value each
+(multi-return-collapsed); value `n` spreads its full tuple when it is a
+multi-return call. The joint shape is `tuple([t1, …, tn])` (with a vararg tail if
+the last value spreads a vararg). Its role:
+
+- **Top-level return** (`func_depth == 0`): the joint `tuple` becomes the module's
+  exported VALUE type (§6.7.2 capture), so a consumer's `require` binding sees the
+  multi-value export. The FIRST top-level return still wins.
+- **Return inside an annotated function body**: the joint `tuple` is checked
+  `⇐ ret_ty` via the EXISTING tuple-subtype rule (§6.5.5 — `tuple <: tuple`,
+  `tuple <: union`). A declared return `(A, B) | (nil, string)` is a
+  union-of-tuples; the actual `return nil, "msg"` builds `tuple([nil, lit"msg"])`
+  and the union exists-forall accepts it against the `(nil, string)` member. This
+  is the §6.5.5 relation's CONSUMER — the increment that motivates it (§6.5.5
+  predicted "the flow-narrowing consumer follows when a fixture demands it"; the
+  multi-return STATEMENT is the producer consumer it predicted).
+- **Return inside an unannotated function body** (`ret_ty == nil`, synthesis
+  mode): each value's claim is requested (as single-return already does); the
+  synthesized function return is `unknown` (§6.7.3 fence-honest choice — no
+  body-join), so the multi-value shape is not yet reflected in the synthesized
+  `fn` type. Recorded as a §9.15 deferral (the body-synthesized multi-return join),
+  identical in spirit to the single-return `unknown` synthesis already shipped.
+
+**Mechanization (corrected at mechanization time — §9.15 finding 1).** The `return`
+arm's `#values > 1` branch STOPS marking out-of-subset: it runs the §6.7.4
+`flatten_values` helper to build the slot list and synthesizes a `tuple` Ty from the
+slots. The design's first claim — "no new evidence method, reuse `check_against`" —
+was WRONG and was corrected against the substrate: `check_against` requires a
+`has_type` premise whose claim type IS the value being checked, and there was no
+claim asserting `has_type(tuple_node, jtuple)`. The tuple is a CONSTRUCTED value
+(the multi-value sequence) and, exactly like a table constructor, needs its own
+SYNTHESIS rule. So the increment admits **one new evidence method, `synth_tuple`** —
+the value-position dual of `synth_table`: N `has_type` premises (one per fixed
+slot), the conclusion `has_type(tuple_node, G.tuple(slot-types))`. The `tuple`
+constructor and its subtype rule remain §6.5.5's (untouched); `synth_tuple` only
+BUILDS the tuple has_type claim the §6.5.5 relation then consumes. In check mode the
+`return` arm emits a `check_against` of that tuple claim against `ret_ty` (the
+declared multi-value return is threaded as the joint `tuple` Ty, not just its first
+slot, so the §6.5.5 `tuple <: tuple` / `tuple <: union-of-tuples` rule fires); in
+capture mode it fixes the module return type to the tuple. The
+`return f()`-multi-spread (the last value spreading into ≥2 slots with no per-slot
+claim) cannot meet `synth_tuple`'s per-slot-premise contract and is the §9.15
+deferral (a tuple-spread-premise mechanism).
+
+### 6.9.4 Multi-assign — spread any multi-return last value (methodcall + field-call)
+
+**Value-universe derivation.** `a, b = <last>` binds `(a, b)` to the multi-value
+sequence `<last>` produces — the §6.7.4 width rule. The producer's SYNTACTIC form
+(`f()`, `o:m()`, `t.f()`) is irrelevant; only its synthesized RETURN TUPLE matters.
+Increment 3's `flatten_values` keyed the spread on "the last value is a `call`
+node whose `fn` is a name bound to an `fn`-typed local" — too narrow: it misses
+`methodcall` (the dominant `n, err = r:uint32_be()` idiom) and a call through a
+field (`a, b = mod.f()`).
+
+**Mechanization.** `flatten_values` is generalized: for the LAST value, it
+synthesizes the value's type AND recovers the producing function's `Ret` from the
+synthesized expression — for a `call` via the existing fn-local lookup, and now for
+a `methodcall` via the desugared method's `fn` type (the `synth_methodcall_expr`
+already resolves `o.m`'s `fn`; the helper reads its `ret`), and for a `call` whose
+`fn` is a field access via `synth_index`. When the recovered `Ret` has ≥2 fixed
+elements, the slots spread exactly as today (slot 1 carries the call's claim id,
+slots 2..n carry only the type — the §6.5.5 tuple draw). When the producer's return
+is a single value (or its tuple is unrecoverable), it contributes one slot, and
+surplus targets bind `nil` — the honest width rule, NOT a marker. The marker now
+fires ONLY when a value is genuinely out-of-subset (synthesis returns nil), never
+merely because a target outran the values.
+
+### 6.9.5 Dynamic-index-assign over a closed rec — the write dual of §6.9.2
+
+**Value-universe derivation.** `t[e] = v` with a closed `rec` `t` (no index
+signature) and a dynamic key `e` writes `v` into one of `t`'s fields. The sound
+check: `v` must be assignable to WHATEVER field the write lands on — but the key
+is dynamic, so the write may target ANY field; the conservative sound obligation
+is `v ⇐ union(all listed field value types)` (the write must satisfy every field
+it could reach is too strong — the universe writes to exactly one, so `v` need
+only be `<:` the union of what those fields admit IS NOT sound either). **Resolved
+honestly:** a dynamic write into a closed rec whose fields have DIFFERENT types
+cannot be soundly checked field-by-field without knowing which field — the sound
+treatment is to require `v ⇐ union(field types)` AND record that the write WIDENS
+the rec (any field could now hold `v`). v1 is flow-insensitive and does not mutate
+a rec's field types post-hoc, so the precise widening is out of reach. The
+in-fence sound choice: when all listed fields share ONE value type `V` (the common
+case — an array-like or homogeneous map built field-by-field, `parts[i] = str`),
+check `v ⇐ V`; when fields are heterogeneous, the write stays out-of-subset
+(`dynamic-index-assign` deferral, §9.15) rather than forge an unsound
+field-by-field check. The homogeneous closed-rec write is the measured common
+case; the heterogeneous one is a recorded deferral with its un-defer trigger
+(a rec-field-widening pass).
+
+**Mechanization.** The `assign` arm's `indexdyn` target branch, after the existing
+indexer probe fails, computes the closed-rec field-value union; if the rec is
+homogeneous (one distinct field value type) it checks `v ⇐ V` (reusing
+`emit_check_against`), else it marks. No new evidence method.
+
+### 6.9.6 Mechanization surface summary
+
+| Item | Where | New evidence method? | Subtype change? | Substrate? |
+|---|---|---|---|---|
+| dynamic-index read | `synth_expr` `indexdyn` arm → `index_result` (2-premise `synth_index`); closed-rec dynamic-key result in `index_result` | none (reuses `synth_index`, dynamic-key form) | none (one new RESULT rule, not a relation rule) | none |
+| multi-return statement | `return` arm builds the tuple via `synth_tuple`, checks `⇐ ret_ty` / captures module type | **`synth_tuple`** (the value-position dual of `synth_table`) | none (uses §6.5.5's `tuple<:`) | none |
+| multi-assign (methodcall/field-call last) | `flatten_values` generalized to recover any producer's `Ret` | none (reuses value claims) | none | none |
+| dynamic-index-assign (closed rec) | `assign` `indexdyn` arm; `index_write_target` homogeneous-rec write | none (reuses `check_against`) | none | none |
+
+**The fence holds — with ONE new evidence method, honestly admitted.** The design
+first claimed zero new methods; mechanization corrected that (§9.15 finding 1): the
+multi-return statement needs **`synth_tuple`**, the value-position dual of the
+existing `synth_table` — N `has_type` premises build a `has_type(tuple_node,
+G.tuple(...))` claim, derived from the universe (a multi-value return IS a
+constructed value needing a synthesis rule, exactly as a table constructor is). It
+adds no subtype relation, no constructor (the `tuple` ctor and `tuple <:` rule are
+§6.5.5's, untouched), no solver. The other lattice-adjacent change is ONE new RESULT
+rule in `index_result` (closed-rec dynamic key ⇒ `union(fields) | nil`) — a
+sharpening of an existing function's return, the closed-row dual of the open-row
+`unknown`, NOT a relation rule. The `synth_index` rule gains a 2-premise dynamic-key
+form (the node grammar already declared `key?: Node`); it is the same index rule,
+not a special case. Heterogeneous closed-rec dynamic writes, body-synthesized
+multi-return joins, and the `return f()` multi-spread are recorded §9.15 deferrals
+with un-defer triggers, never forged. No complement, no match types, no global
+solving, no HKT, no name-keying. The substrate (`init.lua`) is **untouched**,
+byte-for-byte.
+
+---
+
 ## 7. Acceptance Criteria
 
 ### 7.1 Per-fixture acceptance mapping
@@ -3550,3 +3769,124 @@ through the fix pass:
   a closure — all held.
 - Round-1 / round-2 regression spot-checks: collision detection, two-module same-field,
   recursive-alias typed field, well-formedness gate, subtype DAG memoization — all held.
+
+---
+
+### 9.15 Mechanization findings — slice v2 increment 5 (§6.9, the multi-return / dynamic-index family)
+
+Recorded honestly per the prompt. The increment landed the four §6.9 items; the
+substrate forced one design correction (the new evidence method), and three honest
+deferrals surfaced. No checker soundness bug.
+
+1. **The design's "zero new evidence methods" was WRONG — `synth_tuple` is needed
+   (the sharpest finding).** §6.9.3 first claimed the multi-return statement reuses
+   `check_against`. Mechanization rejected it: `check_against` requires a `has_type`
+   premise whose claim type IS the checked value, and nothing asserted
+   `has_type(tuple_node, jtuple)`. A multi-value return is a CONSTRUCTED value (the
+   value sequence) and, exactly like a table constructor, needs a SYNTHESIS rule.
+   The fix is `synth_tuple` — the value-position dual of `synth_table`: N `has_type`
+   premises (one per fixed slot, context-matched), conclusion `has_type(tuple_node,
+   G.tuple(slot-types))`. It adds no subtype relation, no constructor (the `tuple`
+   ctor and `tuple <:` rule are §6.5.5's, untouched), no solver. The design doc was
+   corrected in the SAME commit (§6.9 intro, §6.9.3, §6.9.6). This is the
+   substrate-honesty discipline: a projected "no new method" that the substrate
+   contradicts is corrected to the real method, not forced through with a
+   special-cased premise.
+
+2. **The body's declared return must be threaded as the JOINT tuple, not just its
+   first slot.** The pre-existing single-return path passed `fret.fixed[1]` as the
+   body `ret_ty` (a single Ty). A multi-return check needs the whole declared tuple,
+   so the funcdecl/localfunc arm now passes `G.tuple(fret.fixed, fret.vararg)` when
+   the declared return has ≥2 fixed (or a vararg), else `fixed[1]`. A SINGLE return
+   against a multi-value declared tuple is then correctly `v <: tuple([A,B])` =
+   false (a single value cannot satisfy a 2-value return) — sound, no special case.
+   A union-of-tuples declared return `(A,B) | (nil, string)` parses as a
+   single-element `Ret` whose `fixed[1]` is the union, so the single-slot path
+   already carries it and the §6.5.5 exists-forall fires (verified by the
+   `return nil, "boom"` test).
+
+3. **The closed-rec dynamic-key RESULT rule must NOT be reused as the WRITE target
+   (a real bug, caught by the corpus).** The first draft used `index_result` for
+   both the read and the write-target probe. With the new closed-rec read rule
+   (`union(fields) | nil`), an EMPTY closed rec `{}` (the `merged = {}` /
+   `insns = {}` fixtures) made the dynamic write target `union({nil}) = nil`, so a
+   write `merged[k] = v` checked `v <: nil` and REJECTED — turning two
+   OUT-OF-SUBSET fixtures into spurious FINDINGS. Root-caused and fixed by splitting
+   out `index_write_target` (§6.9.5): the WRITE dual returns the indexer/rec-with-
+   indexer element type, `unknown` for an open row, the single field type for a
+   HOMOGENEOUS closed rec, and `nil` (out-of-subset) for a heterogeneous or empty
+   closed rec. The corpus is the spec — the regression was the signal.
+
+4. **Deferral — heterogeneous closed-rec dynamic write.** `t[e] = v` over a closed
+   rec whose fields have DIFFERENT types cannot be soundly checked field-by-field
+   without knowing which field the dynamic key hits; v1 is flow-insensitive and
+   cannot widen the rec. The homogeneous case (`{ a: integer, b: integer }`, an
+   array/map built field-by-field) checks `v ⇐ V`; the heterogeneous case stays
+   out-of-subset (`dynamic-index-assign`). **Un-defer trigger:** a rec-field-widening
+   pass (mutating the rec's field types post-write).
+
+5. **Deferral — `return f()` multi-spread.** When the last return value SPREADS into
+   ≥2 slots (a multi-return call whose tuple fills slots 2..n), those slots carry no
+   per-slot `has_type` claim, so `synth_tuple`'s per-slot-premise contract cannot be
+   met. The dominant `return a, b` (each value its own claim) form is in-subset; the
+   `return f()` spread is out-of-subset. **Un-defer trigger:** a tuple-spread-premise
+   mechanism (a `synth_tuple` variant taking the producing call's claim + an arity).
+
+6. **Deferral — body-synthesized multi-return join.** An UNANNOTATED function with a
+   multi-return body still synthesizes return `unknown` (the §6.7.3 fence-honest
+   choice — no body-join), so the multi-value shape is not reflected in the
+   synthesized `fn` type. Identical in spirit to the single-return `unknown`
+   synthesis already shipped. **Un-defer trigger:** a local-return-type-collection
+   pass (the same sink the §6.8 closure-return join is deferred behind).
+
+**Survivals.** The dynamic-index READ rule is sound over every shape: indexer /
+rec-with-indexer (element type, key-checked), open-row rec (`unknown`), closed rec
+(`union(fields) | nil`, strictly more precise than `unknown`), union/inter/μ (the
+existing recursion). The `synth_index` 2-premise dynamic-key form re-verifies both
+the object AND the key node refs against their premises (no forged key type). The
+multi-assign method-call / field-call spread recovers the producer's `Ret` from the
+synthesized fn type, never from the syntactic form. Full analysis suite green at
+6421 assertions (6374 + 47); both touched lib files (`crescent_slice.lua`,
+`crescent_slice_lower.lua`) typecheck clean (0 new errors vs HEAD); 0 TIMEOUT in the
+e2e survey.
+
+### 10.6 Slice v2 increment 5 — DONE (the multi-return / dynamic-index family) (2026-06-12)
+
+Increment 5 (§6.9) landed the measured top of the e2e histogram — the
+multi-return / dynamic-index statement family — diagnosed first (15 real sites per
+tag pinned the residual sub-shapes the tag names hid), designed whole against the
+measured demand (§6.9), then mechanized in the SAME commit:
+
+- dynamic-index READS reach `index_result` through `synth_expr`'s `indexdyn` arm
+  (a 2-premise `synth_index` dynamic-key form) + the new closed-rec-under-dynamic-key
+  result rule (`union(fields) | nil`, the closed-row dual of the open-row `unknown`);
+- the `return a, b` STATEMENT builds the §6.5.5 tuple via the one new evidence method
+  `synth_tuple` (the value-position dual of `synth_table`), checked `⇐ ret_ty` (the
+  declared multi-value return threaded as the joint tuple) or captured as the module
+  value type;
+- `flatten_values` spreads any multi-return LAST value (method-call / field-call), so
+  `n, err = r:read()` (the dominant idiom) binds both slots;
+- homogeneous closed-rec dynamic WRITES check `v ⇐ V` via the new `index_write_target`
+  (the write dual of `index_result`); heterogeneous/empty stay out-of-subset.
+
+ONE new evidence method (`synth_tuple`), honestly admitted after the design's
+zero-method projection was contradicted by the substrate (§9.15 finding 1); ONE new
+`index_result` result rule + its `index_write_target` write dual; everything else
+lowering reach. Substrate (`init.lua`) **not touched**.
+
+**Survey re-run headlines** (`docs/slice-survey-v1.md`, "after v2 increment 5",
+`--e2e`, 868 files): whole-file **CHECKED-CLEAN 22 → 25 (2.5% → 2.9%)**,
+CHECKED-FINDINGS 6 → 9, OUT-OF-SUBSET 833 → 828, **TIMEOUT 0**. The smaller
+whole-file jump than increment 4's is the honest, load-bearing finding: the e2e gate
+is the LAST out-of-subset construct per file, and these family files carry several
+remaining blockers each, so closing the family moves the CONSTRUCT histogram far more
+than the gate — `multi-return` 482 → 317 (−165), `dynamic-index` 589 → 512 (−77),
+`multi-assign` 466 → 450 (−16). The new front (most-blocking after this family):
+`call-non-function` (calling an `unknown`-typed value), `iterate-non-table` /
+`general-iterator` (generic-for over non-table / stdlib iterators), and the
+string-method `no-such-field:sub`/`gsub`/`match` (a stdlib-string-method-on-a-value
+follow-up). The corpus 11-fixture split moved 3 CLEAN / 1 FINDINGS / 7 OUT-OF-SUBSET
+→ 4 CLEAN / 1 FINDINGS / 6 OUT-OF-SUBSET (closure_param_typing → CLEAN, the
+multi-return was its last boundary), 0 rejections anywhere. The fence held; the
+substrate was again **not** touched. Full report:
+`docs/artifacts/typechecker-run-2026-06-12/increment-5.md`.
