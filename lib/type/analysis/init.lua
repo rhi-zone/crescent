@@ -58,10 +58,30 @@ end
 -- the canonical case). `alpha_eq(t1,t2)` and `alpha_eq(t2,t1)` are DISTINCT
 -- claims at the substrate level; symmetry is the hosted semantics' business.
 
+-- Content-addressed serialization with optional per-table-identity interning.
+--
+-- The serialized string IS the content address: structurally-equal arg trees map
+-- to byte-identical strings (the substrate's claim identity, unchanged). The
+-- `intern` table — when supplied — memoizes the serialization of each visited
+-- TABLE by its identity, so a subtree reached more than once (the same encoded
+-- type reused across many bindings/claims, the dominant shape on lowered files)
+-- serializes ONCE instead of once per containing claim. This is purely an
+-- implementation of the existing structural equality: with or without `intern`
+-- the returned string is byte-identical, so two claims are the same claim iff
+-- their structural serialization is equal, exactly as before. Interning the
+-- serialized FORM rather than minting a new key object keeps `claim_key`'s
+-- contract (a string usable directly as a table key) untouched.
+--
+-- Soundness of identity-keying rests on the documented invariant that claim args
+-- are IMMUTABLE once constructed (the per-check `key_cache` below and the hosted
+-- decode cache in `crescent_slice.lua` already rely on it). A mutated subtree
+-- would invalidate its cached serialization — but the substrate, like those
+-- consumers, treats arg trees as frozen for the duration of a check.
+
 local serialize_value
 
---: (unknown) -> string
-serialize_value = function(value)
+--: (unknown, { [unknown]: string } | nil) -> string
+serialize_value = function(value, intern)
 	if type(value) == "nil" then return "n" end
 	if type(value) == "boolean" then return value and "bT" or "bF" end
 	if type(value) == "number" then return "#" .. tostring(value) end
@@ -74,6 +94,10 @@ serialize_value = function(value)
 		return "?" .. type(value)
 	end
 	local t = value
+	if intern then
+		local hit = intern[t --[[: unknown ]]] --[[: string | nil ]]
+		if hit then return hit end
+	end
 	-- Collect keys deterministically: integer keys in order, then sorted
 	-- string keys. Mixed/other keys are stringified for stability.
 	local parts = {} --[[: { [integer]: string } ]]
@@ -89,22 +113,26 @@ serialize_value = function(value)
 	local arr_len = #t
 	parts[#parts + 1] = "{" .. tostring(n)
 	for i = 1, arr_len do
-		parts[#parts + 1] = "[" .. tostring(i) .. "]" .. serialize_value(t[i])
+		parts[#parts + 1] = "[" .. tostring(i) .. "]" .. serialize_value(t[i], intern)
 	end
 	for _, k in ipairs(skeys) do
-		parts[#parts + 1] = "<" .. k .. ">" .. serialize_value(t[k])
+		parts[#parts + 1] = "<" .. k .. ">" .. serialize_value(t[k], intern)
 	end
 	parts[#parts + 1] = "}"
-	return table.concat(parts)
+	local s = table.concat(parts)
+	if intern then intern[t] = s end
+	return s
 end
 
 M._serialize = serialize_value
 
 -- Canonical key for a claim: semantics + predicate + serialized args. Accepts
 -- any structure with these three fields (a full Claim, or a bare descriptor).
---: ({ semantics: string, predicate: string, args: ArgValue, ... }) -> string
-local function claim_key(claim)
-	return claim.semantics .. "|" .. claim.predicate .. "|" .. serialize_value(claim.args)
+-- The optional `intern` table memoizes subtree serialization by table identity
+-- (see serialize_value); the returned key is byte-identical with or without it.
+--: ({ semantics: string, predicate: string, args: ArgValue, ... }, { [unknown]: string } | nil) -> string
+local function claim_key(claim, intern)
+	return claim.semantics .. "|" .. claim.predicate .. "|" .. serialize_value(claim.args, intern)
 end
 
 M.claim_key = claim_key
@@ -392,22 +420,42 @@ function M.check(req)
 
 	local state = req.state
 
-	-- Per-check memoization of structural claim keys. A Claim record is immutable
-	-- data within one check, so its canonical key (semantics|predicate|serialized
-	-- args) is constant; serializing it once per claim instead of once per lookup
-	-- turns the dominant cost on large graphs (every `is_accepted`/`accepted_result`
-	-- input probe re-serialized deep args) from O(probes × |args|) into
-	-- O(claims × |args|). Pure substrate vocabulary (claims, structural keys);
-	-- the cached string is byte-identical to recomputing it, so classification is
-	-- unchanged. Keyed by the claim's identity key `idk(id)` (unique per claim in
-	-- state, and cheap to compute: two string concats vs. a deep-args serialize).
+	-- Per-check memoization of structural claim keys, on two levels:
+	--
+	-- (1) `key_cache` caches the final key per claim by its identity `idk(id)`, so
+	--     each claim's key is built at most once per check (an `is_accepted`/
+	--     `accepted_result` probe is a hash lookup, not a re-serialize).
+	-- (2) `arg_intern` content-addresses claim-arg SUBTREES by table identity (see
+	--     serialize_value). On the prior design, building 2724 distinct claim keys
+	--     still walked every key's full (deep) arg tree — but those trees share
+	--     subtrees massively (the same encoded type recurs across ~49-binding
+	--     contexts and across claims): ~8.05M structural table visits collapse to
+	--     ~188k distinct tables (~43× fewer serializations). With `arg_intern` each
+	--     distinct arg subtree serializes once for the whole check, not once per
+	--     containing claim — eliminating the structural-serialization floor that was
+	--     the substrate's dominant cost on large lowered files.
+	--
+	-- Both levels are pure substrate vocabulary (claims, structural keys). The key
+	-- a claim receives is byte-identical to `claim_key(claim)` with no cache, so
+	-- claim identity — two claims are the same claim iff their structural
+	-- serialization is equal — is exactly as before; interning is an implementation
+	-- of that equality, not a new equality.
+	--
+	-- Memory discipline: both tables are PER-CHECK (created here, dropped when
+	-- `check` returns), so nothing leaks across unrelated checks. `arg_intern` is
+	-- additionally weak-keyed so any arg subtree that becomes unreachable mid-check
+	-- can be collected. Soundness rests on the documented invariant that claim args
+	-- are immutable once constructed (the same invariant `key_cache` and the hosted
+	-- decode cache already rely on); a frozen tree's serialization is constant, so
+	-- identity-keyed memoization is exact.
 	local key_cache = {} --[[: { [string]: string } ]]
+	local arg_intern = setmetatable({}, { __mode = "k" }) --[[: { [unknown]: string } ]]
 	--: (Claim) -> string
 	local function ckey(claim)
 		local ik = idk(claim.id)
 		local cached = key_cache[ik]
 		if cached then return cached end
-		local k = claim_key(claim)
+		local k = claim_key(claim, arg_intern)
 		key_cache[ik] = k
 		return k
 	end

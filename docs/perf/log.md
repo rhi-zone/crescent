@@ -6,6 +6,62 @@ Bench machine: AMD Ryzen 7 5700G, LuaJIT 2.1.1741730670, NixOS Linux 6.12.67.
 
 ---
 
+## 2026-06-12: analysis substrate — content-addressed (interned) claim keys
+
+Benchmark: `bin/cr run lib/type/analysis/check_bench.lua`. Baseline `28c9312e`
+(post the hosted per-run decode/context-key pass), optimization this commit. One
+substrate change to `A.check` / `claim_key` / `serialize_value`
+(`lib/type/analysis/init.lua`), pure substrate vocabulary (claims, structural
+keys), behavior-identical: all 6157 assertions across `bin/cr test
+lib/type/analysis/` pass unchanged; the lowered `v7_mr0` file still classifies
+accepted=713 / rejected=0 / unknown=0.
+
+**The measured problem (prior two entries).** With the worklist and the hosted
+layer both optimized, the dominant residual cost on the lowered
+`lib/type/v7_mr0/init.lua` check (2724 claims/evidence, ~49-binding contexts in
+args) was the substrate's own `claim_key` serializing each claim's deep arg tree.
+Even with the per-claim key memo (each claim serialized once, not once per probe),
+building 2724 keys still walked every key's full deep arg tree — the
+structural-serialization floor (~5.5s).
+
+**The change — content-addressed interning of subtree serializations.** The
+serializer (`serialize_value`) takes an optional per-check intern table that
+memoizes each visited TABLE's serialized form by its identity. Lowered claim args
+share subtrees massively (the same encoded type recurs across the bindings of one
+context and across claims), so a subtree reached more than once now serializes
+ONCE for the whole check rather than once per containing claim. The serialized
+string IS the content address; interning the FORM (not minting a key object) keeps
+`claim_key`'s string-key contract untouched. Measured sharing on the lowered
+`v7_mr0` arg trees: a full structural walk is **8 053 237** table visits; the
+distinct-by-identity count is **187 937** — a **~43×** reduction in serializations.
+
+**Design choices.** (1) Identity-keyed memo, not a fresh content-address key
+object: claim identity is already the serialized string used as a table key, so
+the win is eliminating *re-serialization*, not changing comparison — the returned
+key is byte-identical with or without interning, so identity is unchanged
+(interning is an implementation of the existing structural equality, guarded by the
+STLC/substrate claim-identity probes and the shuffled-order tests). (2) Memory:
+the intern table is PER-CHECK (created in `A.check`, dropped on return) so it
+cannot leak across unrelated checks; it is additionally `__mode="k"` weak-keyed so
+any arg subtree that becomes unreachable mid-check can be collected. Soundness
+rests on the documented immutable-args invariant the per-claim key memo and the
+hosted decode cache already depend on.
+
+| Case | Baseline (`28c9312e`) | Optimized (this commit) | Speedup |
+|---|--:|--:|--:|
+| `v7_mr0` lowered check, cold single run | 5.48 s | 0.70 s | ~7.9× |
+| synthetic chain, 100 / 1k / 5k claims | 0.0006 / 0.0026 / 0.0106 s | 0.0006 / 0.0026 / 0.0110 s | ~1× (shallow args, no shared subtrees — no regression) |
+
+**TIMEOUT cleared.** Re-running `slice_survey.lua --e2e` (866 files, 5s per-file
+budget): the single TIMEOUT — `lib/type/v7_mr0/init.lua`, the lone file the survey
+ever timed out on — **clears, 1 → 0** (it reclassifies TIMEOUT → OUT-OF-SUBSET, as
+the file is saturated with out-of-subset statement forms). The e2e headline is now
+entirely statement-lowering-bound with zero performance residue in the substrate or
+hosted layers. `docs/slice-survey-v1.md` finding 2 + the e2e table updated;
+`timeout 30 bin/cr check lib/type/analysis/init.lua` clean (0 errors, 0 warnings).
+
+---
+
 ## 2026-06-12: hosted slice checker — per-run decode + context-key memoization
 
 Benchmark: cold single `A.check` over the lowered real file

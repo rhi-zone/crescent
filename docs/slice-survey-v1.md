@@ -611,11 +611,26 @@ annotation survey ranked the type-grammar work.
    built. Per-run memoization (decode keyed on arg-table identity; a Γ canonical key
    built from interned `(name, tid)` pairs instead of decode→re-encode→serialize)
    cut the lowered `v7_mr0` check **14.5s → ~5.5s (~2.5×)**, eliminating the hosted
-   layer's instrumented cost (`_serialize` 1.7k → 0 calls). The single TIMEOUT
-   **persists**, however: the residual ~5.5s is now the SUBSTRATE structural-
-   serialization floor (the substrate's own `claim_key` over 2724 deep claim args),
-   which alone exceeds the 5s budget. Clearing it needs the separate substrate pass
-   — interned/content-addressed claim keys — not a hosted-layer change.
+   layer's instrumented cost (`_serialize` 1.7k → 0 calls). The residual ~5.5s was
+   then the SUBSTRATE structural-serialization floor (the substrate's own `claim_key`
+   over 2724 deep claim args).
+
+   **Update (2026-06-12, substrate pass; `perf(analysis)`, `docs/perf/log.md`) —
+   TIMEOUT CLEARED.** The substrate floor is now removed. `claim_key`'s serializer
+   takes an optional per-check content-address intern table that memoizes each arg
+   SUBTREE's serialization by table identity, so a subtree reached more than once
+   (the same encoded type recurring across ~49-binding contexts and across claims)
+   serializes once for the whole check rather than once per containing claim. On the
+   lowered `v7_mr0` arg trees this collapses ~8.05M structural table visits to ~188k
+   distinct tables (~43× fewer serializations); the cold single `A.check` drops
+   **5.5s → 0.70s (~7.9×)**. Claim identity is unchanged — the interned serialization
+   is byte-identical to the un-interned one, so two claims are the same claim iff
+   their structural serialization is equal, exactly as before (the STLC/substrate
+   claim-identity probes and all shuffled-order tests are the guard, all green). With
+   the file now well under the 5s budget, the survey's **single TIMEOUT clears: 1 →
+   0** (full e2e re-run, 866 files, 0 TIMEOUT). The large-graph scaling finding is
+   fully resolved end-to-end: worklist (loop), hosted memoization (semantics layer),
+   and content-addressed keys (substrate floor) together.
 
 3. **Multi-line `--::` table aliases (the 3 CHECKED-FINDINGS).** All three
    CHECKED-FINDINGS (`lib/formats/ccv2/ccv2_types.lua` and its app mirror,
@@ -628,11 +643,11 @@ annotation survey ranked the type-grammar work.
 
 Re-running the end-to-end (`--e2e`) survey after increment 1:
 
-| Class | v1 baseline | after v2 increment 1 |
-|---|--:|--:|
-| CHECKED-CLEAN | 3 (0.3%) | **5 (0.6%)** |
-| OUT-OF-SUBSET | 853 (98.6%) | 854 (98.6%) |
-| TIMEOUT | 1 | 1 |
+| Class | v1 baseline | after v2 increment 1 | after substrate pass |
+|---|--:|--:|--:|
+| CHECKED-CLEAN | 3 (0.3%) | **5 (0.6%)** | 5 (0.6%) |
+| OUT-OF-SUBSET | 853 (98.6%) | 854 (98.6%) | **855 (98.7%)** |
+| TIMEOUT | 1 | 1 | **0** |
 
 CHECKED-CLEAN rose 3 → 5: named/`self` parameters now lower in statement bodies
 (a body that references its parameters by name is in §5's reach). The end-to-end
@@ -643,3 +658,11 @@ did not touch (it is annotation-grammar + frontend reach, not operator/global/
 statement typing). `named-param` has dropped OUT of the end-to-end top ranking (it
 was #9 at 232 files; now lowered). The statement-lowering gaps remain the e2e
 build order for later increments.
+
+**After the substrate content-addressed-key pass (finding 2 update):** the single
+TIMEOUT clears (`lib/type/v7_mr0/init.lua` now checks in ~0.70s vs the 5s budget).
+It does not become CHECKED-CLEAN — the file is saturated with out-of-subset
+statement forms — so it reclassifies TIMEOUT → OUT-OF-SUBSET (853→855 across both
+passes). The survey now has **zero TIMEOUT**: no remaining file exceeds the per-file
+budget, and the e2e headline is entirely statement-lowering-bound, with no
+performance residue in the substrate or hosted layers.

@@ -328,9 +328,22 @@ that it is the *same* semantics:
 A companion micro-refinement memoizes each claim's structural key per check (the
 key is constant within a check, so serializing the — potentially deep — args once
 per claim rather than once per accepted-ness probe is byte-identical and removes
-the substrate's dominant per-probe cost on large graphs). Neither refinement
-introduces any knowledge of a hosted semantics: both speak only claims, evidence,
-inputs, dependencies, and structural keys.
+the substrate's dominant per-probe cost on large graphs). A further refinement
+content-addresses the key serialization itself: the serializer takes an optional
+per-check intern table that memoizes each arg SUBTREE's serialization by table
+identity, so a subtree reached more than once — the same encoded value recurring
+across many claims and across the bindings of one deep context, the dominant shape
+on lowered real files — serializes once for the whole check instead of once per
+containing claim. This is an implementation of the existing structural identity,
+not a new identity: with or without interning the key string is byte-identical, so
+two claims are the same claim iff their structural serialization is equal, exactly
+as before; interning only avoids recomputing equal serializations. It is sound on
+the documented invariant that claim args are immutable once constructed (the same
+invariant the per-claim key memo and the hosted decode cache already rely on), and
+it leaks nothing — the intern table is per-check (dropped when the check returns)
+and weak-keyed. None of these refinements introduces any knowledge of a hosted
+semantics: all speak only claims, evidence, inputs, dependencies, and structural
+keys.
 
 ## Semantics Registry
 
