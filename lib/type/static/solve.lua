@@ -2994,10 +2994,36 @@ local function solve_bind_generics(ctx, c)
     if callee_t.tag ~= TAG_FUNCTION then return true end
 
     -- Instantiate if callee was a free var at gen time (method calls).
+    --
+    -- Per-constraint instantiation cache (livelock fix). This handler may be
+    -- re-seeded every solve_range round (the constraint stays on ctx.constraints
+    -- and re-enters the worklist). The VAR/ROWVAR `raw_t` tag persists across
+    -- rounds even after the callee var resolves to a concrete function (union-find
+    -- records the bind in the parent pointer, not the node tag), so without a cache
+    -- this path re-instantiates a FRESH copy of the callee every round: +N arena
+    -- slots and a fresh set of generic-param TVs each time. The bind loop below
+    -- then unifies those fresh TVs, advancing ctx._bind_generation every round,
+    -- which defeats the solve_range quiescence test (`not solved and gen unchanged`)
+    -- and livelocks until the arena exhausts (observed >430k rounds on lib/bloom).
+    --
+    -- The instantiation only depends on the resolved callee type, so caching it on
+    -- the constraint and reusing it across re-seeds is sound: the second round's
+    -- bind loop operates on the SAME (already-bound) TVs, so unify is a no-op, gen
+    -- stays put, and quiescence can fire. Keyed by the resolved source tid so that
+    -- if the callee ever resolves to a different function mid-solve the stale copy
+    -- is discarded and re-instantiated. The instantiated tid is local to this
+    -- handler (solve_check_args instantiates its own independent copy), so the
+    -- cache cannot affect any other constraint.
     local raw_t = ctx.types:get(callee_raw)
     if raw_t.tag == TAG_VAR or raw_t.tag == TAG_ROWVAR then
-        callee_tid = env_mod.instantiate(ctx, callee_tid, 0)
-        callee_t   = ctx.types:get(callee_tid)
+        if c._bg_inst_src == callee_tid and c._bg_inst_tid then
+            callee_tid = c._bg_inst_tid --[[: integer]]
+        else
+            c._bg_inst_src = callee_tid
+            callee_tid = env_mod.instantiate(ctx, callee_tid, 0)
+            c._bg_inst_tid = callee_tid
+        end
+        callee_t = ctx.types:get(callee_tid)
     end
 
     local pl = types_mod.fn_params_len(callee_t)
