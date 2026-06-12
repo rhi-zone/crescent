@@ -9,7 +9,7 @@ Bench machine: AMD Ryzen 7 5700G, LuaJIT 2.1.1741730670, NixOS Linux 6.12.67.
 ## 2026-06-12: analysis substrate — dependency-driven worklist + structural-key memoization
 
 Benchmark: `bin/cr run lib/type/analysis/check_bench.lua`. Baseline `13f0eb4c`
-(pre-change `A.check`), optimization on the same tree.
+(pre-change `A.check`), optimization `00176f52`.
 
 Two substrate changes to `A.check` (`lib/type/analysis/init.lua`), both pure
 substrate vocabulary (claims, evidence, inputs, structural keys), behavior-identical
