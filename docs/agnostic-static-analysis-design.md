@@ -283,6 +283,14 @@ These are design tests, not product checkers:
    imperative-store pressure — previously scheduled as separate synthetic rungs
    — are absorbed here, because the real target generates them naturally.
 
+**All five rungs are mechanized** (rung 5's four passes DONE, 2026-06-12;
+`docs/agnostic-static-analysis-crescent-slice.md` §8/§10). The ladder is complete:
+the agnostic substrate is validated from propositional logic through a real
+Crescent slice without a single Crescent-specific substrate primitive, and
+`init.lua` was never touched by any hosted semantics. The §7 corpus grading run
+(`lib/type/analysis/corpus_test.lua`) Accepts all 11 fixtures (0 errors), matching
+every Expected Verdict — the falsifiable bet below settled at the target.
+
 The compression from the original eight-rung ladder to five rungs is a
 deliberate bet. Synthetic rungs have unbounded appetite: there is always one
 more clean calculus to validate first. The test for whether the substrate is
@@ -439,9 +447,23 @@ The plan:
    identity coexist over the one structural substrate identity. 108 prior
    assertions preserved (153 total).
 
-4. **After STLC: tiny Crescent slice, not more synthetic rungs. — DESIGNED;
-   mechanization next.** Now unblocked — STLC forced no special pleading and no
-   substrate change. No further synthetic rungs are scheduled. The rung is a
+4. **After STLC: tiny Crescent slice, not more synthetic rungs. — DONE (all four
+   mechanization passes, 2026-06-12).** STLC forced no special pleading and no
+   substrate change, and neither did the slice. Built in
+   `lib/type/analysis/{slice_ty,slice_subtype,slice_ty_arg,crescent_slice,
+   crescent_slice_parse,slice_narrow}.lua` (+ tests + `slice_subtype_bench.lua`),
+   per the four passes of the slice doc §8: (1) the `Ty` grammar + hash-consed
+   equirecursive-μ interner + the ONE cycle-guarded subtype relation + its fuzz +
+   the §5.1 benchmark; (2) the synth/check evidence methods + the
+   `crescent.slice.v1` registry entry + the parser-frontend adapter +
+   `trusted_signature` + `instantiate_witness` + `type_shape_check` (μ
+   contractiveness enforced); (3) the separate flow-narrowing layer (`narrow_guard`
+   / `narrows`, positive-decomposition truthy / sound-wider falsy, the falsy fence
+   enforced as a test); (4) the `for-in pairs`/`ipairs` + numeric-`for` loop-var
+   typing + the §7 corpus grading run. **Result: all 11 corpus fixtures Accept
+   (0 errors), matching every Expected Verdict**, with no fixture-keyed carve-out
+   and `init.lua` byte-for-byte unchanged across every pass. Findings recorded in
+   the slice doc §9.3–§9.6. The rung is a
    small but real subset of Crescent/Lua semantics checked over actual files in
    `lib/`, designed whole from the value universe in
    `docs/agnostic-static-analysis-crescent-slice.md` (`crescent.slice.v1`). It is
@@ -458,8 +480,8 @@ The plan:
    verdict, decides `for-in` (included for `pairs`/`ipairs` + numeric form;
    general iterator protocol deferred with a trigger), and records the design
    pressure (falsy-branch precision without complement, mutable-field invariance,
-   flow-insensitive stores). Mechanization runs in four passes (subtype relation +
-   fuzz first). See "First Validation Ladder" and the slice doc.
+   flow-insensitive stores). Mechanization ran in four passes (subtype relation +
+   fuzz first), all DONE. See "First Validation Ladder" and the slice doc.
 
 No Crescent feature work should start before this sequence does not force
 special pleading.

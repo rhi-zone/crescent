@@ -148,11 +148,15 @@ introduced the first hosted `type` vocabulary, typing contexts, and deep
 derivation trees with **no substrate change** — types and contexts ride
 `ArgValue` claim args, and structural substrate claim identity is exactly right
 for context-dependent judgments. The tiny Crescent slice (ladder rung 5, the
-final rung) is now **designed** in
+final rung) is now **fully mechanized** (all four passes DONE, 2026-06-12) in
+`lib/type/analysis/{slice_ty,slice_subtype,slice_ty_arg,crescent_slice,
+crescent_slice_parse,slice_narrow}.lua` (+ tests), per
 `docs/agnostic-static-analysis-crescent-slice.md` (`crescent.slice.v1`, the first
-consumer of the ratified kernel); mechanization is next, in four passes (subtype
-relation + fuzz first). See "Next Pass" in
-`docs/agnostic-static-analysis-design.md`.
+consumer of the ratified kernel). The §7 corpus grading run
+(`lib/type/analysis/corpus_test.lua`) Accepts all 11 fixtures (0 errors), matching
+every Expected Verdict, with no fixture-keyed carve-out and no substrate change.
+**Mechanization through the whole ladder is complete**; `lib/type/analysis/`
+now also holds the slice's six modules and a subtype benchmark.
 
 Rung status (ladder, design doc):
 
@@ -163,17 +167,22 @@ Rung status (ladder, design doc):
 - 4 STLC — mechanized (`stlc.min`); substrate unchanged. Hosted `type`
   vocabulary, typing contexts, and deep evidence trees all hosted; arg-schema
   open item closed (no schema mechanism, no identity override needed).
-- 5 tiny Crescent slice — **design landed, mechanization next**
-  (`docs/agnostic-static-analysis-crescent-slice.md`, `crescent.slice.v1`). First
+- 5 tiny Crescent slice — **mechanized** (all four passes DONE, 2026-06-12;
+  `docs/agnostic-static-analysis-crescent-slice.md`, `crescent.slice.v1`). First
   consumer of the ratified kernel (`docs/decisions/kernel-recommendation.md`):
   bidirectional synth/check spine, ONE cycle-guarded equirecursive (hash-consed μ)
   subtype relation, local generic instantiation as witnessed evidence, separate
   flow-narrowing layer. v1 type grammar derived whole from the Lua value universe;
-  all 11 corpus fixtures mapped to v1 verdicts; `for-in` decided (`pairs`/`ipairs`
-  + numeric included, general iterator protocol deferred). Capability-reachability
-  and imperative-store pressure absorbed here from the real target (stores handled
-  flow-insensitively by check-against-declared-element-type; ladder compressed
-  after STLC). Mechanization: four passes, subtype relation + fuzz first.
+  `for-in` decided (`pairs`/`ipairs` + numeric included, general iterator protocol
+  deferred). Capability-reachability and imperative-store pressure absorbed here
+  (stores handled flow-insensitively by check-against-declared-element-type).
+  Code in `lib/type/analysis/{slice_ty,slice_subtype,slice_ty_arg,crescent_slice,
+  crescent_slice_parse,slice_narrow}.lua` (+ tests + `slice_subtype_bench.lua`).
+  **Corpus result: all 11 fixtures Accept (0 errors), matching every Expected
+  Verdict** (`corpus_test.lua`, the §7 grading run); the five legacy REMAINS gaps
+  (boolean `and`, closure return-slot, table-widening, redundant-cast, hamt
+  tag-narrow) all closed, the six FIXED guards held. The substrate (`init.lua`) was
+  **not touched** across any pass — the ladder's falsifiable bet settled at target.
 
 Limits:
 

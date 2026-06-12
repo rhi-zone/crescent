@@ -42,9 +42,14 @@ local M = {}
 
 -- ── Union helpers (positive decomposition primitives) ────────────────────────
 
--- The members of `T` as a list. A non-union is a singleton list (itself).
+-- The members of `T` as a list. A non-union is a singleton list (itself). A μ is
+-- unfolded once (equirecursive: a μ and its unfolding are the same type), so a
+-- discriminated union written as a recursive alias (`HamtNode = Leaf | Interior`,
+-- §6.2) splits into its arms for the positive decomposition — the same
+-- equirecursive `unfold` member_admits_tag already applies, lifted to the target.
 --: (Ty) -> Ty[]
 local function members_of(ty)
+	if ty.kind == "mu" then ty = G.unfold(ty) end
 	if ty.kind == "union" then return ty.members or {} end
 	return { ty }
 end

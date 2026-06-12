@@ -10,11 +10,14 @@
 -- every accepted claim with `unverified_checker_trust` (the hosted-checker trust
 -- obligation).
 --
--- This file is Pass 2 of the mechanization (§8): the synthesis/checking evidence
--- methods, the registry entry, `trusted_signature`, `instantiate_witness`, and the
--- `type_shape_check` well-formedness (incl. μ contractiveness, §9.3 finding 1).
--- The flow-narrowing layer (`narrow_guard`, narrows) is Pass 3; the corpus +
--- for-in/numeric-for handling is Pass 4. Nothing here precludes them.
+-- This file hosts Passes 2–4 of the mechanization (§8): the synthesis/checking
+-- evidence methods, the registry entry, `trusted_signature`, `instantiate_witness`,
+-- and the `type_shape_check` well-formedness (incl. μ contractiveness, §9.3
+-- finding 1) [Pass 2]; the flow-narrowing layer (`narrow_guard`, narrows) [Pass 3];
+-- and the `for-in pairs`/`ipairs` + numeric-`for` loop-variable typing
+-- (`synth_loop_var`, `synth_numeric_for_var`, §5.2) [Pass 4]. Loop variables bind
+-- directly from the iterated table's key/value types — no `$PairsReturn`-style
+-- intrinsic (the slice has none; §9.1).
 --
 -- Errors are (rejected result class) / nil returns; the checker never throws for
 -- data errors.
@@ -350,6 +353,86 @@ local function synth_table_type(named, array)
 end
 
 M.synth_table_type = synth_table_type
+
+-- ── Loop-variable typing (for-in pairs/ipairs; numeric for, §5.2) ────────────
+--
+-- `for-in` over `pairs(t)` / `ipairs(t)` is the ONLY for-in form in v1, and it is
+-- typed by binding the loop variables DIRECTLY from the table's key/value types —
+-- the trusted generic stdlib signature realized without a `$PairsReturn`-style
+-- match-type intrinsic (the slice has none; §1.4, §9.1). `pairs<T>` over a table
+-- yields (KeyType, ValueType); `ipairs<T>` over a table yields (integer, ValueType).
+-- The body is checked under Γ extended with k:key-type, v:value-type.
+--
+-- pairs_kv(T): the (key, value) types pairs() binds over a table type T.
+--   - indexer(K, V)              ⇒ (K, V)
+--   - rec_with_indexer(.., K, V) ⇒ (string | K, fieldUnion | V)   (named keys are strings)
+--   - rec (closed/open)          ⇒ (string, fieldValueUnion)       (or (string, unknown) if open/empty)
+--   - union/mu                   ⇒ distribute / unfold
+-- Returns nil if T is not a table type (pairs over a non-table is a type error).
+local pairs_kv --[[: (Ty) -> ({ key: Ty, val: Ty }) | nil ]]
+
+--: (Ty) -> ({ key: Ty, val: Ty }) | nil
+pairs_kv = function(t)
+	local k = t.kind
+	if k == "mu" then return pairs_kv(G.unfold(t)) end
+	if k == "indexer" then
+		if not t.key or not t.val then return nil end
+		return { key = t.key, val = t.val }
+	end
+	if k == "union" then
+		-- distribute: pairs over a union of tables yields the union of key/value types.
+		local ms = t.members or {}
+		local keys = {} --[[: Ty[] ]]
+		local vals = {} --[[: Ty[] ]]
+		for i = 1, #ms do
+			local kv = pairs_kv(ms[i])
+			if not kv then return nil end
+			keys[#keys + 1] = kv.key
+			vals[#vals + 1] = kv.val
+		end
+		if #keys == 0 then return nil end
+		return { key = G.union(keys), val = G.union(vals) }
+	end
+	if k == "rec" or k == "rec_with_indexer" then
+		local fields = t.fields or {}
+		local keys = {} --[[: Ty[] ]]
+		local vals = {} --[[: Ty[] ]]
+		if #fields > 0 then
+			keys[#keys + 1] = G.string() -- named keys are strings
+			for i = 1, #fields do vals[#vals + 1] = fields[i].ty end
+		end
+		if k == "rec_with_indexer" and t.key and t.val then
+			keys[#keys + 1] = t.key
+			vals[#vals + 1] = t.val
+		end
+		if t.rows == "open" then
+			-- an open row carries unlisted fields of unknown value (the open-row rule).
+			keys[#keys + 1] = G.string()
+			vals[#vals + 1] = G.unknown()
+		end
+		if #keys == 0 then
+			-- a closed, empty record: no keys to iterate. v1 types this as (string, never)
+			-- — pairs over it produces nothing, so the value type is uninhabited.
+			return { key = G.string(), val = G.never() }
+		end
+		return { key = G.union(keys), val = G.union(vals) }
+	end
+	return nil
+end
+
+M.pairs_kv = pairs_kv
+
+-- ipairs(T): always (integer, valueType). The value type is the array-element type:
+-- the indexer value when keys include integers, else the field-value union. v1
+-- derives it from the indexer part (the array tail) when present, else from pairs_kv.
+--: (Ty) -> ({ key: Ty, val: Ty }) | nil
+local function ipairs_kv(t)
+	local kv = pairs_kv(t)
+	if not kv then return nil end
+	return { key = G.integer(), val = kv.val }
+end
+
+M.ipairs_kv = ipairs_kv
 
 -- ── Dependency helpers ───────────────────────────────────────────────────────
 
@@ -878,6 +961,53 @@ function M.checker(cc, claim, ev)
 		end
 		return accept(deps, { trust_note() })
 
+	-- ── synth_loop_var (for-in pairs/ipairs loop variable, §5.2) ──
+	-- A loop-variable node synthesizes its type from the iterated table's type.
+	-- node: { t="loop_var", iter="pairs"|"ipairs", table=NodeRef, slot=1|2 }.
+	-- premise: has_type(Γ, table_node, T) — the iterated table's type. The loop
+	-- vars bind DIRECTLY from T's key/value types (no $PairsReturn intrinsic).
+	elseif method == "synth_loop_var" then
+		if node.t ~= "loop_var" then return cc.REJECTED, "synth_loop_var applied to a non-loop-var node", nil, nil end
+		local iter = node.iter
+		local slot = node.slot
+		if type(iter) ~= "string" then return cc.REJECTED, "synth_loop_var: missing iterator kind", nil, nil end
+		if iter ~= "pairs" and iter ~= "ipairs" then return cc.REJECTED, "synth_loop_var: iterator must be pairs or ipairs (general iterators are outside v1)", nil, nil end
+		if slot ~= 1 and slot ~= 2 then return cc.REJECTED, "synth_loop_var: slot must be 1 (key) or 2 (value)", nil, nil end
+		if #ev.inputs ~= 1 then return cc.REJECTED, "synth_loop_var requires one has_type premise (the iterated table)", nil, nil end
+		local prem = ev.inputs[1]
+		if not cc.is_accepted(prem) then return cc.UNKNOWN, nil, nil, nil end
+		local pr = read_typing(cc, prem, "has_type")
+		if not pr then return cc.REJECTED, "synth_loop_var premise is not a has_type claim", nil, nil end
+		if A._serialize(ctx_to_arg(ctx)) ~= A._serialize(ctx_to_arg(pr.ctx)) then
+			return cc.REJECTED, "synth_loop_var premise context must match the conclusion's", nil, nil
+		end
+		local tref = arg_id(node.table)
+		if not tref or tref.space ~= pr.node.space or tref.key ~= pr.node.key then
+			return cc.REJECTED, "synth_loop_var premise node is not the iterated table", nil, nil
+		end
+		local kv --[[: ({ key: Ty, val: Ty }) | nil ]]
+		if iter == "pairs" then kv = pairs_kv(pr.type) else kv = ipairs_kv(pr.type) end
+		if not kv then return cc.REJECTED, "synth_loop_var: " .. iter .. " applied to a non-table type", nil, nil end
+		local bound --[[: Ty ]]
+		if slot == 1 then bound = kv.key else bound = kv.val end
+		if not ty_eq(bound, want_ty) then
+			return cc.REJECTED, "synth_loop_var: asserted type does not match the loop variable's key/value type", nil, nil
+		end
+		return accept({ dep_claim(claim.id, prem) }, { trust_note() })
+
+	-- ── synth_numeric_for_var (numeric for i = a, b, c, §5.2) ──
+	-- The control variable of a numeric `for i = a, b, c do` binds `i : integer | number`
+	-- per the doc's rule (the loop runs over numeric values; the precise subkind
+	-- depends on the bounds, which v1 does not flow-track). node: { t="numeric_for_var" };
+	-- no premises (the bound type is fixed by the loop form).
+	elseif method == "synth_numeric_for_var" then
+		if node.t ~= "numeric_for_var" then return cc.REJECTED, "synth_numeric_for_var applied to a non-loop-control node", nil, nil end
+		local bound = G.union({ G.integer(), G.number() })
+		if not ty_eq(bound, want_ty) then
+			return cc.REJECTED, "synth_numeric_for_var: the numeric-for control variable is integer | number", nil, nil
+		end
+		return accept({}, { trust_note() })
+
 	-- ── trusted_signature (stdlib / FFI / cross-module / force-cast boundary) ──
 	elseif method == "trusted_signature" then
 		-- Admit a has_type / checks_against through a VISIBLE trust boundary
@@ -906,6 +1036,7 @@ function M.register(registry)
 			"synth_function", "synth_and_or_not",
 			"check_against", "check_cast",
 			"subtype_witness", "instantiate_witness", "narrow_guard",
+			"synth_loop_var", "synth_numeric_for_var",
 			"type_shape_check", "trusted_signature",
 		},
 		trusted_methods = { "trusted_signature" },
