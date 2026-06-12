@@ -820,7 +820,22 @@ recognize_guard = function(expr)
 		if op == "and" or op == "or" then
 			local l = recognize_guard(expr.left)
 			local r = recognize_guard(expr.right)
-			if not l or not r then return nil end
+			if op == "and" then
+				-- For `and`, a conjunct that is not a recognized guard shape contributes
+				-- no refinement for any variable. Dropping it is SOUND: in the truthy
+				-- branch of `a and b`, everything `a` (or `b`) implies still holds —
+				-- we merely lose the refinement we cannot decode. This lets a BARE
+				-- VARIABLE left-hand side (`if x and <complex>`) narrow `x` even when
+				-- the right operand is not a guard-recognized form (audit round 4 fix).
+				if not l and not r then return nil end
+				if not r then return l end
+				if not l then return r end
+			else
+				-- For `or`, dropping a conjunct would be unsound (a guard that holds on
+				-- one branch and not the other cannot be trusted independently). Require
+				-- BOTH sides to be recognized.
+				if not l or not r then return nil end
+			end
 			return { g = op, left = l, right = r }
 		end
 		return nil

@@ -1383,6 +1383,101 @@ T.describe("audit round 1 — finding 5: instantiate_witness binds G to the call
 	end)
 end)
 
+-- ── Audit round 4 regression suite (§9.17) ───────────────────────────────────
+-- A-F1: rec_with_indexer dynamic-key READ must union listed field types + val.
+-- And-guard: a bare-variable left operand of `and` must be kept as a truthy
+-- guard even when the right operand is unrecognized.
+
+T.describe("audit round 4 — A-F1: rec_with_indexer dynamic-key read includes listed field types", function()
+	T.it("dynamic read over { a: string, [string]: integer } is string | integer, not integer alone", function()
+		G.reset()
+		-- { a: string, [string]: integer }
+		local rwi = G.rec_with_indexer(
+			{ { key = "a", ty = G.string(), optional = false, readonly = false } },
+			"closed",
+			{ key = G.string(), val = G.integer() }
+		)
+		local result = S.index_result(rwi, nil, G.string())
+		T.ok(result ~= nil, "dynamic read over rec_with_indexer with admitted key_ty returns non-nil")
+		-- The result must include `string` (the listed field `a`'s type) AND `integer`
+		-- (the indexer value). It must NOT be just `integer` (the pre-fix unsound result).
+		local expected = G.union({ G.integer(), G.string() })
+		T.eq(result and result.tid, expected.tid,
+			"dynamic read result is string | integer (field union ∪ indexer val), not integer alone")
+	end)
+
+	T.it("dynamic read over an AGREEING rec_with_indexer stays the indexer val (still sound)", function()
+		G.reset()
+		-- { a: integer, [string]: integer } — field and indexer AGREE.
+		local rwi = G.rec_with_indexer(
+			{ { key = "a", ty = G.integer(), optional = false, readonly = false } },
+			"closed",
+			{ key = G.string(), val = G.integer() }
+		)
+		local result = S.index_result(rwi, nil, G.string())
+		T.ok(result ~= nil, "agreeing rec_with_indexer dynamic read returns non-nil")
+		-- union({ integer, integer }) normalizes to integer (no new type introduced).
+		T.eq(result and result.tid, G.integer().tid,
+			"agreeing fields: union normalizes to integer (no change in the agreeing case)")
+	end)
+
+	T.it("static read .a on rec_with_indexer DISAGREE still returns the field type (unchanged)", function()
+		G.reset()
+		local rwi = G.rec_with_indexer(
+			{ { key = "a", ty = G.string(), optional = false, readonly = false } },
+			"closed",
+			{ key = G.string(), val = G.integer() }
+		)
+		local result = S.index_result(rwi, "a", nil)
+		T.eq(result and result.tid, G.string().tid, "static .a returns string (field type, not indexer val)")
+	end)
+end)
+
+T.describe("audit round 4 — and-guard: bare-variable left operand narrows even with unrecognized right", function()
+	T.it("`x and <call>` (right unrecognized) still produces a truthy guard for x", function()
+		-- `x and foo()` — `foo()` is a call, not a guard-shaped expression.
+		local call_expr = { t = "call", fn = { t = "var", name = "foo" }, args = {} }
+		local ga = P.recognize_guard({ t = "andor", op = "and",
+			left = { t = "var", name = "x" },
+			right = call_expr })
+		T.ok(ga ~= nil, "and with unrecognized right still produces a guard")
+		-- The result must be the left guard (truthy x), not nil.
+		T.eq(ga and ga.g, "truthy", "the kept guard is the truthy-var form for x")
+		T.eq(ga and ga.var, "x", "variable is x")
+	end)
+
+	T.it("`x and y ~= \"\"` recognizes as `and(truthy x, lit_eq y)`", function()
+		-- x and y ~= "" — both sides recognizable; both kept.
+		local cmp = { t = "cmp", op = "ne",
+			left = { t = "var", name = "y" },
+			right = { t = "lit", lit = "str", v = "" } }
+		local ga = P.recognize_guard({ t = "andor", op = "and",
+			left = { t = "var", name = "x" },
+			right = cmp })
+		T.ok(ga ~= nil, "both-recognizable and still produces a guard")
+		T.eq(ga and ga.g, "and", "result is an and guard when both sides are recognized")
+		T.ok(ga and ga.left ~= nil and ga.right ~= nil, "both conjuncts present")
+	end)
+
+	T.it("`<call> and x` (left unrecognized) keeps the right guard for x", function()
+		local call_expr = { t = "call", fn = { t = "var", name = "foo" }, args = {} }
+		local ga = P.recognize_guard({ t = "andor", op = "and",
+			left = call_expr,
+			right = { t = "var", name = "x" } })
+		T.ok(ga ~= nil, "unrecognized left, recognized right still produces a guard")
+		T.eq(ga and ga.g, "truthy", "the kept guard is the truthy-var form for x")
+		T.eq(ga and ga.var, "x", "variable is x")
+	end)
+
+	T.it("`or` with an unrecognized operand still returns nil (no unsound partial)", function()
+		local call_expr = { t = "call", fn = { t = "var", name = "foo" }, args = {} }
+		local go = P.recognize_guard({ t = "andor", op = "or",
+			left = { t = "var", name = "x" },
+			right = call_expr })
+		T.eq(go, nil, "or with unrecognized right ⇒ nil (cannot narrow from partial or-guard)")
+	end)
+end)
+
 -- ── §6.7.1 operator typing (synth_binop / synth_unop) ────────────────────────
 
 T.describe("crescent.slice.v1: binop_result — operator typing from the value universe", function()

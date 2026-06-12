@@ -925,3 +925,63 @@ return { set = set }
 		assert_sound(o)
 	end)
 end)
+
+-- ── Audit round 4 fixes (§9.17) ──────────────────────────────────────────────
+
+T.describe("audit round 4 — A-F1: rec_with_indexer dynamic-key READ (e2e soundness)", function()
+	T.it("fixture_rec_with_indexer_dynamic_read: sound annotation (string|integer) lowers CLEAN", function()
+		local o = lower_fixture("rec_with_indexer_dynamic_read")
+		-- After the fix: t[k] over { a: string, [string]: integer } with k: string
+		-- synthesizes string|integer (field union ∪ indexer val). The fixture's
+		-- only function declares `-> (string | integer)`, which must ACCEPT.
+		T.eq(o.expected, "CLEAN", "sound return annotation string|integer is accepted")
+		T.eq(#o.constructs, 0, "no out-of-subset markers")
+		assert_sound(o)
+		T.ok(o.requested > 0, "load-bearing claims were emitted and accepted")
+	end)
+
+	T.it("asserting integer alone for a rec_with_indexer DISAGREE dynamic read is FINDINGS", function()
+		local o = lower_src([[
+--:: RWI = { a: string, [string]: integer }
+--: (RWI, string) -> integer
+local function f(t, k) return t[k] end
+return { f = f }
+]], false)
+		-- The return type `integer` is too narrow: the dynamic read may yield `string`
+		-- (the listed field `a`). This must produce a type-mismatch finding.
+		T.eq(o.expected, "FINDINGS", "integer-only return rejected: field `a: string` is also possible")
+		T.ok(has_construct(o, "type-mismatch"), "marked the type-mismatch")
+		assert_sound(o)
+	end)
+end)
+
+T.describe("audit round 4 — and-guard narrowing: `if x and <expr>` narrows x (e2e)", function()
+	T.it("fixture_and_guard_narrows_left: `x and x ~= \"\"` narrows x to string — CLEAN", function()
+		local o = lower_fixture("and_guard_narrows_left")
+		-- After the fix: `if title and fallback ~= ""` and `if s and s ~= ""`
+		-- both narrow their first operand (a truthy bare-variable left operand of
+		-- `and`). The fixtures use the narrowed string inside the branch; they must
+		-- be CLEAN (0 rejections).
+		T.eq(o.expected, "CLEAN", "and-guard left-operand narrowing accepted")
+		T.eq(#o.constructs, 0, "no out-of-subset markers")
+		assert_sound(o)
+		T.ok(o.requested > 0, "load-bearing claims were emitted and accepted")
+	end)
+
+	T.it("`if x and <call>` narrows x: inline CLEAN", function()
+		local o = lower_src([[
+--: (string | nil, boolean) -> string
+local function f(x, flag)
+  if x and flag then
+    return x
+  end
+  return ""
+end
+return { f = f }
+]], false)
+		-- `x and flag` — `flag` is a boolean variable, a recognized truthy guard.
+		-- Both sides are recognized; the and-guard narrows x to string.
+		T.eq(o.expected, "CLEAN", "x and flag (both recognized) narrows x to string")
+		assert_sound(o)
+	end)
+end)

@@ -447,7 +447,20 @@ index_result = function(obj_ty, field, key_ty)
 		end
 		-- dynamic key t[e]
 		if key_ty ~= nil and k == "rec_with_indexer" and obj_ty.key then
-			if SUB.is_subtype(key_ty, obj_ty.key) then return obj_ty.val end
+			if SUB.is_subtype(key_ty, obj_ty.key) then
+				-- The key is admitted by the index signature, but a dynamic key may hit
+				-- any LISTED field (which may disagree with the indexer value type —
+				-- §6.9.2 A-F1 fix, audit round 4). The sound result is the union of all
+				-- listed field value types joined with the indexer value type. No `nil`
+				-- is appended: `key_ty <: obj_ty.key` means every possible key is
+				-- covered by the indexer, so no key can miss — the indexer's `V`
+				-- already accounts for "any key not matching a listed field".
+				local vals = {} --[[: Ty[] ]]
+				local idxval = obj_ty.val
+				if idxval ~= nil then vals[#vals + 1] = idxval end
+				for i = 1, #fields do vals[#vals + 1] = fields[i].ty end
+				return G.union(vals)
+			end
 		end
 		if obj_ty.rows == "open" then return G.unknown() end
 		-- closed `rec` under a DYNAMIC key (§6.9.2): the read may hit ANY listed

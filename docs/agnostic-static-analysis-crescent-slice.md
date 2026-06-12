@@ -1933,7 +1933,13 @@ values. The result is fully determined by `t`'s type:
 
 - `t : indexer(K, V)` and `e : K' <: K` ⇒ **`V`** (the index-signature read,
   already in `index_result`).
-- `t : rec_with_indexer` ⇒ `V` when `e <: K` (already in `index_result`).
+- `t : rec_with_indexer` ⇒ **`union(field-value-types) | V`** when `e <: K`
+  (**amended in audit round 4, A-F1 — see §9.17**). The original rule returned `V`
+  only, which is unsound when the named fields disagree with the indexer value type:
+  a dynamic key hitting a listed field yields the field's type, not the indexer `V`.
+  The field union is unioned with `V` (the indexer value covers keys not matching any
+  listed field); no `nil` is appended because `e <: K` means every key is covered by
+  the indexer and no key can miss.
 - `t : rec` **open-row** ⇒ **`unknown`** (the `...`-open-row meaning: an unlisted
   read yields `unknown` — already in `index_result`, line 452).
 - `t : rec` **closed**, no index signature, dynamic key ⇒ **the union of all
@@ -4081,3 +4087,115 @@ OUT-OF-SUBSET** (pairs_return_leak + table_construction_widening → CLEAN, both
 last boundary), 0 rejections anywhere. The fence held; the substrate was again
 **not** touched. Full report:
 `docs/artifacts/typechecker-run-2026-06-12/increment-6.md`.
+
+### 9.17 Adversarial audit round 4 — fixes (2026-06-12)
+
+Fixes for the two findings from `docs/artifacts/typechecker-run-2026-06-12/audit-round-4.md`.
+Full test suite green at **6467 assertions** (6427 + 40 net).
+
+**Adjudication tally** (round 4): **0 TRUE POSITIVE / 11 FALSE POSITIVE / 2 ANNOTATION-GAP.**
+The checker found zero real bugs in the corpus this round; all 13 CHECKED-FINDINGS
+rejections were slice precision gaps (11 wrong-rejections) or fenced out-of-subset
+annotations (2). This is honest data about where the checker is: the new dynamic-read
+and narrowing machinery reaches correct corpus code but lacks the precision to accept
+all of it — the precision gaps are exactly the known deferrals (field-path narrowing,
+cross-module alias resolution, closure/capability-closure synthesis).
+
+---
+
+#### A-F1 [HIGH soundness]: `rec_with_indexer` dynamic-key READ now unions field types
+
+**Finding (reproduced).** `index_result` over a `rec_with_indexer` under a dynamic
+key returned ONLY the index-signature value type `V`, dropping all listed field value
+types. A runtime key matching a listed field yields the field's type, not `V`; when
+the field and indexer disagree the pre-fix result was unsound (accepted an unsound
+return annotation `integer` for a table `{ a: string, [string]: integer }`).
+
+**Root cause.** The `rec_with_indexer` dynamic-key branch (§6.9.2) was a direct copy
+of the `indexer`-only path: `return obj_ty.val`. The `rec` (closed, no indexer)
+branch immediately below it DOES union the field types (§6.9.2 new rule from
+increment 5), but `rec_with_indexer` omitted the equivalent union. The branch text
+predated the slice (pass 2, `5f53fff3`) and was unreachable for dynamic reads until
+increment 5 routed `t[e]` through `index_result`'s `key_ty` path.
+
+**Fix.** `crescent_slice.lua` `index_result`'s `rec_with_indexer` dynamic-key path:
+instead of returning `obj_ty.val`, build `vals = { obj_ty.val }` then append every
+listed field's value type and return `G.union(vals)`. No `nil` appended: `key_ty <:
+obj_ty.key` means every possible key is covered by the indexer (no key can miss), so
+the indexer's `V` already accounts for "any key not matching a listed field". The
+AGREEING case (`{ a: integer, [string]: integer }`) normalizes correctly: the union
+collapses to `integer`. The §6.9.2 rule is amended above (the bullet now reads
+`union(field-value-types) | V`).
+
+**Tests.** Two new direct `index_result` call tests in
+`lib/type/analysis/crescent_slice_test.lua` (audit round 4 suite):
+- DISAGREE case: `{ a: string, [string]: integer }` dynamic read → `string | integer`
+  (not `integer` alone).
+- AGREE case: `{ a: integer, [string]: integer }` dynamic read → `integer` (normalized).
+- Static read `.a` unchanged: still returns `string` (field type, not indexer val).
+
+Two new e2e tests in `lib/type/analysis/corpus_lower_test.lua`:
+- `fixture_rec_with_indexer_dynamic_read`: function declared `-> (string | integer)` is CLEAN.
+- Inline: function declared `-> integer` is FINDINGS (type-mismatch, correctly detected).
+
+**Regression.** No pre-existing test broken.
+
+---
+
+#### Dominant false-positive: `and`-guard does not narrow its bare-variable left operand
+
+**Finding (reproduced).** The slice narrows a bare truthy test (`if x then`) but NOT
+when `x` is the left operand of an `and`-compound (`if x and <expr> then`). Three
+places all required the same fix: (1) the guard recognizer (`recognize_guard` in
+`crescent_slice_parse.lua`), (2) the lowering's AST-to-guard-node converter
+(`ast_to_guard_node` in `crescent_slice_lower.lua`), and (3) the lowering's variable
+extractor (`guard_var` in `crescent_slice_lower.lua`).
+
+**Root cause (recognition).** `recognize_guard` for `and`/`or` required BOTH operands
+to be recognized guards; if either returned nil the whole `and` returned nil, losing
+the narrowing from the recognized side. A BARE VARIABLE is itself a v1 guard form
+(the `truthy` form, present since pass 3); `if x and <unrecognized>` should narrow `x`
+via the truthy guard even when `<unrecognized>` fails recognition. For `or` this is
+NOT sound (dropping a disjunct forges a false guarantee), so only `and` is relaxed.
+
+**Root cause (lowering).** The same partial-guard problem existed in
+`ast_to_guard_node`: `x and <non-guard-AST>` returned nil (the right side failed
+conversion), so `guard_var` was never called. Additionally, `guard_var` only checked
+the top-level `g.var` and one level of `not`; it returned nil for any `and` guard
+(even when both sides were recognized), so `if x and x ~= ""` never narrowed `x`
+even with both sides recognized.
+
+**Fix (three touch points):**
+1. `recognize_guard` (`crescent_slice_parse.lua`): for `and`, when one side fails,
+   return the other (the recognized side is still sound in the truthy branch). For
+   `or`, still require both.
+2. `ast_to_guard_node` (`crescent_slice_lower.lua`): same relaxation for `and`.
+3. `guard_var` (`crescent_slice_lower.lua`): for an `and` guard, recurse into the
+   left sub-guard to extract its variable (the left conjunct narrows first; if it
+   has a variable, that is the primary refinement target).
+
+**Tests.** Four new tests in the audit round 4 suite in
+`lib/type/analysis/crescent_slice_test.lua`:
+- `x and <call>` (right unrecognized) → truthy guard for `x`.
+- `x and y ~= ""` (both recognized) → `and` guard with both conjuncts.
+- `<call> and x` (left unrecognized) → truthy guard for `x`.
+- `x or <call>` (right unrecognized) → nil (or must not drop a disjunct).
+
+Three new e2e tests in `lib/type/analysis/corpus_lower_test.lua`:
+- `fixture_and_guard_narrows_left`: `if s and s ~= ""` narrows `s` to `string` — CLEAN.
+- Inline: `if x and flag` with both recognized narrows `x` to `string` — CLEAN.
+
+**Corpus effect.** The 11 false-positive corpus files from the round-4 audit (`--e2e`)
+all retain CHECKED-FINDINGS because their remaining root causes are the documented
+§9.8 field-path-narrowing deferral or cross-module alias-resolution precision — not
+the bare-variable `and`-guard gap. The bare-variable fix operates correctly on the
+probe pattern it was designed for (B5a/B5b/B5c isolation verified CLEAN); the actual
+corpus files use FIELD PATHS (`opts_t.title`, etc.) which are the §9.8 deferral and
+are not in scope for this fix. **CHECKED-FINDINGS remains 13 (unchanged from round
+4 post-increment-6).** The 2 ANNOTATION-GAP files are unchanged (recorded, not checker
+work).
+
+**Summary:** the `and`-guard fix is at the right seam — recognition and extraction,
+not new semantics — and correctly resolves the probe isolation case. The field-path
+version of the pattern remains a §9.8 deferral, trigger for un-deferral is
+field-path narrowing.

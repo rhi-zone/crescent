@@ -1091,3 +1091,30 @@ OUT-OF-SUBSET → 6 CLEAN / 1 FINDINGS / 4 OUT-OF-SUBSET**, 0 rejections anywher
 inline sub-form test: empty-rec dynamic write (`out = {}; out[s] = 1`, CLEAN). Full
 analysis suite green at 6427 assertions (6421 + 6 net); 0 TIMEOUT; the touched lib
 file typechecks clean (0 errors, no regression). Findings in §9.16.
+
+## v1 end-to-end — after round 4 fixes (§9.17)
+
+Two fixes from the adversarial audit round 4 (`docs/artifacts/typechecker-run-2026-06-12/audit-round-4.md`).
+
+| Class | after v2 increment 6 | after round 4 fixes |
+|---|--:|--:|
+| CHECKED-CLEAN | 26 (3.0%) | **26 (3.0%)** |
+| CHECKED-FINDINGS | 13 (1.5%) | **13 (1.5%)** |
+| OUT-OF-SUBSET | 822 (94.8%) | **822 (94.8%)** |
+| NO-ANNOTATION | 6 (0.7%) | 6 (0.7%) |
+| TIMEOUT | 0 | **0** |
+
+**CHECKED-FINDINGS unchanged at 13.** The 11 false-positive corpus files from the
+round-4 audit all retain CHECKED-FINDINGS after the fixes — their remaining root
+causes are the §9.8 field-path-narrowing deferral or cross-module alias-resolution
+precision gaps, not the bare-variable `and`-guard gap that was fixed. The bare-variable
+fix correctly resolves the probe isolation case (B5a/B5b/B5c now CLEAN), but the actual
+corpus files use FIELD PATHS (`opts_t.title`, etc.) which remain the §9.8 deferral.
+The 2 ANNOTATION-GAP files are unchanged (recorded, not checker work).
+
+**New corpus fixtures** added: `fixture_rec_with_indexer_dynamic_read` (CLEAN — the
+sound `string | integer` annotation accepts), `fixture_and_guard_narrows_left` (CLEAN
+— `if s and s ~= ""` narrows `s` to `string`). Both confirm the fixes land correctly.
+
+**Analysis suite:** 6467 assertions (6427 + 40 net); 0 TIMEOUT; all touched lib
+files typecheck clean (0 errors, no regression). Findings in §9.17.

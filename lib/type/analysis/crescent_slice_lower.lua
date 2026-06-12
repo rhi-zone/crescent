@@ -1567,7 +1567,18 @@ local function ast_to_guard_node(e)
 		if v.op == "and" or v.op == "or" then
 			local l = ast_to_guard_node(v.left)
 			local r = ast_to_guard_node(v.right)
-			if not l or not r then return nil end
+			-- For `and`: a conjunct that does not convert contributes no narrowing but
+			-- we can still narrow from the other. Keeping the recognized side is SOUND:
+			-- in the truthy branch of `a and b`, everything `a` (or `b`) implies still
+			-- holds (audit round 4 fix — mirrors the recognize_guard change).
+			-- For `or`: require BOTH (dropping a disjunct is unsound).
+			if v.op == "and" then
+				if not l and not r then return nil end
+				if not r then return l end
+				if not l then return r end
+			else
+				if not l or not r then return nil end
+			end
 			return { t = "andor", op = v.op, left = l, right = r }
 		end
 	end
@@ -1629,6 +1640,10 @@ end
 M.emit_narrows = emit_narrows
 
 -- The single variable a guard refines (for narrowing the if-body context), or nil.
+-- For an `and` guard, extracts the left conjunct's variable (the chain narrows
+-- via both conjuncts in sequence, and the left variable is the "primary" one —
+-- audit round 4: `if x and <expr>` should narrow x). For an `or` guard, no
+-- single variable can be inferred (the variable only holds from one disjunct).
 --: (unknown) -> string | nil
 local function guard_var(guard_node)
 	local g = view(P.recognize_guard(guard_node))
@@ -1637,6 +1652,16 @@ local function guard_var(guard_node)
 	-- a tag_eq's refined variable is the object var.
 	local inner = view(g.inner)
 	if g.g == "not" and inner and type(inner.var) == "string" then return inner.var end
+	-- an `and` guard: recurse into both sub-guards to find a refinable variable.
+	-- The left conjunct's variable is preferred (the chain applies left first).
+	if g.g == "and" then
+		local lv --[[: string | nil ]]
+		local lguard = view(g.left)
+		if lguard and type(lguard.var) == "string" then lv = lguard.var end
+		if lv then return lv end
+		local rguard = view(g.right)
+		if rguard and type(rguard.var) == "string" then return rguard.var end
+	end
 	return nil
 end
 
