@@ -6,6 +6,66 @@ Bench machine: AMD Ryzen 7 5700G, LuaJIT 2.1.1741730670, NixOS Linux 6.12.67.
 
 ---
 
+## 2026-06-12: hosted slice checker — per-run decode + context-key memoization
+
+Benchmark: cold single `A.check` over the lowered real file
+`lib/type/v7_mr0/init.lua` (2724 claims/evidence, 713 requested), via
+`crescent_slice_lower.lua` → `A.check`. Baseline `fea86aa1` (post the substrate
+worklist optimization `00176f52`), optimization this commit. Behavior-identical:
+all 6157 assertions across `bin/cr test lib/type/analysis/` pass unchanged; the file
+still classifies accepted=713 / rejected=0 / unknown=0.
+
+**Profile first (the prior log entry GUESSED the 8.5s hosted split; this measured
+it).** Instrumenting the hosted layer on the baseline check:
+
+| Hosted op | calls | time |
+|---|--:|--:|
+| `A._serialize` (via `ctx_to_arg`, context-equality probes) | 1 748 | ~4.1 s |
+| `TA.decode` (repeated decode of shared PTy claim args) | 203 347 | ~3.7 s |
+| `TA.encode` (inside `ctx_to_arg`) | 86 178 | ~0.6 s |
+| `SUB.subtype` / `is_subtype` | 518 / 645 | ~0.002 s |
+
+The prior report's guess that **`subtype` was a cost was wrong** — it is negligible
+(518 calls), so the planned per-run subtype memo was correctly NOT built (optimize
+what the profile says). The two real hosted costs were repeated **decode** of the
+same PTy subtrees and repeated **context serialization** for Γ-equality.
+
+Three per-run memoizations in `lib/type/analysis/crescent_slice.lua`, keyed on a
+weak table over the `CheckContext.state` object (the per-run identity the
+HostedChecker contract exposes — no substrate-visible change):
+
+1. **`decode_cached`** — memoizes `TA.decode` keyed on the PTy arg table's IDENTITY.
+   Sound because claim args are immutable within a check (the substrate's own
+   `claim_key` memo depends on this; the lowering builds each arg once). 203k → 5.3k
+   decode calls.
+2. **`parse_ctx_cached`** — memoizes the parsed Γ per raw ctx-arg table, decoding
+   each binding through `decode_cached`.
+3. **`ctx_canon_key`** — replaces `A._serialize(ctx_to_arg(Γ))` (a decode→re-ENCODE
+   of every binding + deep serialize) with a key built from the parsed Γ's ordered
+   `(name, tid)` pairs. Sound: interned `tid` identity ⇔ structural type identity
+   (slice_ty hash-consing; the slice's own `ty_eq`). The lowering builds a DISTINCT
+   ctx table per claim (2206 distinct of 2206), so an identity memo cannot dedupe
+   across claims — but the (name,tid) key turns each ~49-binding encode+serialize
+   into a small concat. `A._serialize` from the hosted layer: 1 748 → 0 calls.
+
+| Case | Baseline (`fea86aa1`) | Optimized (this commit) | Speedup |
+|---|--:|--:|--:|
+| `v7_mr0` lowered check, cold single run | 13.7–14.2 s | 5.5–5.6 s | ~2.5× |
+
+Post-optimization profile: the hosted layer's instrumented cost is essentially
+gone (`_serialize` 0 calls, `decode` 5.3k/0.05s, `encode` 4.4k/0.01s). The residual
+~5.5 s is the **substrate** structural-serialization floor — the substrate's own
+`claim_key` over 2724 deep claim args — which the task scoped OUT ("likely NOT yours
+to fix"; the substrate must not be reached from a hosted checker). So the
+e2e-survey TIMEOUT (`slice_survey.lua --e2e`, 5 s per-file budget) **persists at 1**:
+the file went 14.5 s → 5.5 s, but the substrate floor alone (~5.5 s, plus the debug-
+hook poll overhead) still exceeds the 5 s budget. Clearing it now needs the separate
+substrate pass the prior entry flagged — interned/content-addressed claim keys so
+the substrate stops re-serializing deep args — out of scope for this hosted-layer
+pass.
+
+---
+
 ## 2026-06-12: analysis substrate — dependency-driven worklist + structural-key memoization
 
 Benchmark: `bin/cr run lib/type/analysis/check_bench.lua`. Baseline `13f0eb4c`

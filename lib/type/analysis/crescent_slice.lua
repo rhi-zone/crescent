@@ -74,6 +74,58 @@ function M.extend(ctx, name, ty)
 	return out
 end
 
+-- ── Per-run decode/parse memoization (cost: the same PTy subtree and the same Γ
+-- ride hundreds of claims; decode each once) ─────────────────────────────────
+--
+-- The hosted checker re-derives every conclusion from raw `ArgValue` claim args,
+-- which means it re-`TA.decode`s the SAME PTy subtree and re-`parse_ctx`/serializes
+-- the SAME Γ across the hundreds of claims that share them. On the real lowered
+-- file (lib/type/v7_mr0, 2724 claims) this dominated the hosted layer: ~200k
+-- `TA.decode` calls and ~1.7k `ctx_to_arg`+`A._serialize` context-equality probes.
+--
+-- The cache memoizes the PARSE-not-cast DECODE LAYER only — validated decode
+-- results, never skipped validation. Soundness rests on two facts:
+--   (1) Claim args are IMMUTABLE within one check run. The substrate's own
+--       per-check `claim_key` memo (init.lua `M.check`) depends on exactly this
+--       invariant, and the lowering frontend constructs each arg table once and
+--       never mutates it. So an arg table's identity uniquely determines its
+--       decoded Ty — table-identity keying never serves one ArgValue another's
+--       decode. (We rely on table IDENTITY, NOT structural keying: it is cheaper
+--       and the immutability invariant makes it exact.)
+--   (2) Lifetime is PER CHECK RUN. The cache is keyed on the `AnalysisState`
+--       object (CheckContext.state) via a WEAK-KEYED module table, so each run
+--       gets its own sub-caches and they are collected with the state. The
+--       HostedChecker contract exposes no per-run scratch slot, so keying on the
+--       state's identity (the per-run object the contract DOES expose) is the
+--       clean seam — no substrate-visible change.
+
+-- run_caches[state] = { decode = <weak-keyed>, parse = <weak-keyed>, canon = <weak-keyed> }
+-- Outer table weak on the state key; inner tables weak on their arg-table keys.
+-- The weak-keyed inner maps go arg-table-identity -> a memo WRAPPER. The wrapper's
+-- presence (not its value) signals a hit, so a validated-malformed result (`ty=nil`,
+-- `ctx=nil`) caches as a present wrapper with a nil payload — no out-of-band
+-- sentinel and no narrowing cast at the read site (a present wrapper has the
+-- concrete payload type). The canon map stores the opaque equality token directly.
+--:: DecodeMemo = { ty: Ty | nil }
+--:: ParseMemo = { ctx: { [integer]: { name: string, type: Ty } } | nil }
+--:: RunCaches = { decode: { [unknown]: DecodeMemo }, parse: { [unknown]: ParseMemo }, canon: { [unknown]: unknown } }
+local run_caches = setmetatable({}, { __mode = "k" }) --[[: { [unknown]: RunCaches } ]]
+
+--: (CheckContext) -> RunCaches
+local function caches_for(cc)
+	local st = cc.state
+	local c = run_caches[st]
+	if not c then
+		c = {
+			decode = setmetatable({}, { __mode = "k" }) --[[: { [unknown]: DecodeMemo } ]],
+			parse = setmetatable({}, { __mode = "k" }) --[[: { [unknown]: ParseMemo } ]],
+			canon = setmetatable({}, { __mode = "k" }) --[[: { [unknown]: unknown } ]],
+		}
+		run_caches[st] = c
+	end
+	return c
+end
+
 -- ── Parse-not-cast helpers (the hosted-checker trust discipline) ─────────────
 
 --: (unknown) -> Id | nil
@@ -82,6 +134,21 @@ local function arg_id(v)
 	local space, key = v.space, v.key
 	if type(space) ~= "string" or type(key) ~= "string" then return nil end
 	return { space = space, key = key }
+end
+
+-- Memoized TA.decode, keyed on the PTy arg table's identity (sound per the
+-- immutability invariant above). Non-table args (nil, etc.) are not cacheable
+-- keys, so they fall through to the uncached decode (which returns nil for them
+-- anyway). The decoded Ty (or the validated-malformed nil verdict) is cached.
+--: (CheckContext, unknown) -> Ty | nil
+local function decode_cached(cc, pty)
+	if type(pty) ~= "table" then return TA.decode(pty) end
+	local dc = caches_for(cc).decode
+	local hit = dc[pty]
+	if hit ~= nil then return hit.ty end
+	local ty = TA.decode(pty)
+	dc[pty] = { ty = ty }
+	return ty
 end
 
 -- Parse a hosted SliceCtx (list of {name, PTy}) into a binding list with each
@@ -104,6 +171,35 @@ local function parse_ctx(v)
 end
 
 M.parse_ctx = parse_ctx
+
+-- Memoized parse_ctx, keyed on the raw ctx-arg table identity. Returns the SAME
+-- parsed binding-list table for the same raw arg, which (a) avoids re-decoding
+-- every binding's PTy, and (b) gives the parsed context a STABLE IDENTITY so the
+-- downstream context-equality canonical key (ctx_canon_key) memoizes on it too.
+-- Each binding's type is decoded through decode_cached. nil-on-malformed is cached
+-- via the sentinel. Soundness: same immutability invariant as decode_cached.
+--: (CheckContext, unknown) -> { [integer]: { name: string, type: Ty } } | nil
+local function parse_ctx_cached(cc, v)
+	if v == nil then return {} end
+	if type(v) ~= "table" then return nil end
+	local pc = caches_for(cc).parse
+	local hit = pc[v]
+	if hit ~= nil then return hit.ctx end
+	local out = {} --[[: { [integer]: { name: string, type: Ty } } ]]
+	local ok = true --: boolean
+	for i = 1, #v do
+		local b = v[i]
+		if type(b) ~= "table" then ok = false; break end
+		local name = b.name
+		if type(name) ~= "string" then ok = false; break end
+		local ty = decode_cached(cc, b.type)
+		if not ty then ok = false; break end
+		out[i] = { name = name, type = ty }
+	end
+	if not ok then pc[v] = { ctx = nil }; return nil end
+	pc[v] = { ctx = out }
+	return out
+end
 
 -- Most-recent-wins lookup of `name` in a parsed Γ. Returns the bound Ty or nil.
 --: ({ [integer]: { name: string, type: Ty } }, string) -> Ty | nil
@@ -134,9 +230,9 @@ local function read_typing(cc, ref, predicate)
 	if not c or c.predicate ~= predicate then return nil end
 	local a = c.args
 	if type(a) ~= "table" then return nil end
-	local pc = parse_ctx(a.ctx)
+	local pc = parse_ctx_cached(cc, a.ctx)
 	local nref = arg_id(a.node)
-	local ty = TA.decode(a.type)
+	local ty = decode_cached(cc, a.type)
 	if not pc or not nref or not ty then return nil end
 	return { ctx = pc, node = nref, type = ty }
 end
@@ -154,6 +250,38 @@ local function ctx_to_arg(ctx)
 end
 
 M.ctx_to_arg = ctx_to_arg
+
+-- Canonical key of a parsed Γ, for context-equality probes. The hosted rules
+-- compare a conclusion's Γ to a premise's; the original key was
+-- `A._serialize(ctx_to_arg(·))` — a decode→re-ENCODE of every binding plus a deep
+-- serialize, the dominant residual hosted cost (the lowering builds a DISTINCT ctx
+-- arg table per claim, so an identity memo cannot dedupe across the ~2200 claims;
+-- each was re-encoded+serialized once, ~49 bindings deep).
+--
+-- The parsed Γ's binding types are already INTERNED Ty, and interned `tid`
+-- identity ⇔ structural type identity (slice_ty's hash-consing; this is exactly
+-- the slice's `ty_eq`). So a context's canonical identity is fully captured by its
+-- ordered (name, tid) pairs — no re-encode, no deep serialize. Two parsed contexts
+-- compare equal under this key iff they would under the old serialized form, at the
+-- cost of one small concat instead of a ~49-deep encode+serialize. Memoized on the
+-- parsed table identity (useful for synth_function's repeated `ext` probes).
+--
+-- Returns `unknown`: the key is an opaque token used ONLY for `~=` equality between
+-- two contexts, never inspected, so its precise type is irrelevant.
+--: (CheckContext, { [integer]: { name: string, type: Ty } }) -> unknown
+local function ctx_canon_key(cc, ctx)
+	local ck = caches_for(cc).canon
+	local hit = ck[ctx] --[[: unknown ]]
+	if hit ~= nil then return hit end
+	local parts = {} --[[: { [integer]: string } ]]
+	for i = 1, #ctx do
+		local b = ctx[i]
+		parts[i] = b.name .. "\0" .. tostring(b.type.tid)
+	end
+	local k = table.concat(parts, "\1")
+	ck[ctx] = k
+	return k
+end
 
 -- A raw context (list of {name, type=PTy}) directly to ArgValue, for builders.
 --: (SliceCtx) -> ArgValue
@@ -470,8 +598,8 @@ local function read_subtype(cc, ref)
 	if not c or c.predicate ~= "subtype" then return nil end
 	local args = c.args
 	if type(args) ~= "table" then return nil end
-	local a = TA.decode(args.a)
-	local b = TA.decode(args.b)
+	local a = decode_cached(cc, args.a)
+	local b = decode_cached(cc, args.b)
 	if not a or not b then return nil end
 	return { a = a, b = b }
 end
@@ -549,7 +677,7 @@ function M.checker(cc, claim, ev)
 		if method ~= "type_shape_check" then
 			return cc.UNKNOWN, "unknown well_typed_type method: " .. tostring(method), nil, nil
 		end
-		local ty = TA.decode(args.type)
+		local ty = decode_cached(cc, args.type)
 		if not ty then return cc.REJECTED, "type artifact is malformed slice Ty", nil, nil end
 		if not TA.well_formed(ty) then
 			return cc.REJECTED, "type is not well-formed (non-contractive μ or invalid shape)", nil, nil
@@ -586,11 +714,11 @@ function M.checker(cc, claim, ev)
 			return cc.UNKNOWN, "unknown narrows method: " .. tostring(method), nil, nil
 		end
 		-- args: ctx (Γ), guard (artifact ref), x (refined var), t_true, t_false.
-		local nctx = parse_ctx(args.ctx)
+		local nctx = parse_ctx_cached(cc, args.ctx)
 		local gref = arg_id(args.guard)
 		local x = args.x
-		local want_true = TA.decode(args.t_true)
-		local want_false = TA.decode(args.t_false)
+		local want_true = decode_cached(cc, args.t_true)
+		local want_false = decode_cached(cc, args.t_false)
 		if not nctx then return cc.REJECTED, "narrows context is malformed", nil, nil end
 		if not gref then return cc.REJECTED, "narrows missing guard ref", nil, nil end
 		if type(x) ~= "string" then return cc.REJECTED, "narrows missing refined variable name", nil, nil end
@@ -608,7 +736,7 @@ function M.checker(cc, claim, ev)
 		local pr = read_typing(cc, prem, "has_type")
 		if not pr then return cc.REJECTED, "narrow_guard premise is not a has_type claim", nil, nil end
 		-- premise context must equal this claim's context (the pre-guard Γ).
-		if A._serialize(ctx_to_arg(nctx)) ~= A._serialize(ctx_to_arg(pr.ctx)) then
+		if ctx_canon_key(cc, nctx) ~= ctx_canon_key(cc, pr.ctx) then
 			return cc.REJECTED, "narrow_guard premise context must match the conclusion's", nil, nil
 		end
 		-- the refined variable must be bound to the premise's type in Γ (the premise
@@ -656,9 +784,9 @@ function M.checker(cc, claim, ev)
 		return cc.ACCEPTED, nil, { dep_trust(claim.id, tb.id), dep_artifact(claim.id, nref0) }, { tb, trust_note() }
 	end
 
-	local ctx = parse_ctx(args.ctx)
+	local ctx = parse_ctx_cached(cc, args.ctx)
 	local nref = arg_id(args.node)
-	local want_ty = TA.decode(args.type)
+	local want_ty = decode_cached(cc, args.type)
 	if not ctx then return cc.REJECTED, predicate .. " context is malformed", nil, nil end
 	if not nref then return cc.REJECTED, predicate .. " missing node ref", nil, nil end
 	if not want_ty then return cc.REJECTED, predicate .. " missing/malformed type", nil, nil end
@@ -717,7 +845,7 @@ function M.checker(cc, claim, ev)
 		local pr = read_typing(cc, prem, "has_type")
 		if not pr then return cc.REJECTED, "synth_index premise is not a has_type claim", nil, nil end
 		-- premise context must equal this claim's context.
-		if A._serialize(ctx_to_arg(ctx)) ~= A._serialize(ctx_to_arg(pr.ctx)) then
+		if ctx_canon_key(cc, ctx) ~= ctx_canon_key(cc, pr.ctx) then
 			return cc.REJECTED, "synth_index premise context must match the conclusion's", nil, nil
 		end
 		-- premise node must be this index's object.
@@ -889,14 +1017,14 @@ function M.checker(cc, claim, ev)
 				ext[#ext + 1] = { name = pname, type = pty }
 			end
 		end
-		local ext_ser = A._serialize(ctx_to_arg(ext))
+		local ext_ser = ctx_canon_key(cc, ext)
 		local deps = {} --[[: Dependency[] ]]
 		for i = 1, #ev.inputs do
 			local prem = ev.inputs[i]
 			if not cc.is_accepted(prem) then return cc.UNKNOWN, nil, nil, nil end
 			local rpr = read_typing(cc, prem, "checks_against")
 			if not rpr then return cc.REJECTED, "synth_function premise is not a checks_against claim", nil, nil end
-			if A._serialize(ctx_to_arg(rpr.ctx)) ~= ext_ser then
+			if ctx_canon_key(cc, rpr.ctx) ~= ext_ser then
 				return cc.REJECTED, "synth_function return premise is not under Γ extended with the params", nil, nil
 			end
 			if not ty_eq(rpr.type, rty) then
@@ -921,7 +1049,7 @@ function M.checker(cc, claim, ev)
 		if spr.node.space ~= nref.space or spr.node.key ~= nref.key then
 			return cc.REJECTED, "check_against synth premise is not this node", nil, nil
 		end
-		if A._serialize(ctx_to_arg(ctx)) ~= A._serialize(ctx_to_arg(spr.ctx)) then
+		if ctx_canon_key(cc, ctx) ~= ctx_canon_key(cc, spr.ctx) then
 			return cc.REJECTED, "check_against synth premise context must match", nil, nil
 		end
 		local sub = read_subtype(cc, subp)
@@ -947,7 +1075,7 @@ function M.checker(cc, claim, ev)
 		if not inner_ref or spr.node.space ~= inner_ref.space or spr.node.key ~= inner_ref.key then
 			return cc.REJECTED, "check_cast synth premise is not the cast's inner expression", nil, nil
 		end
-		local cast_ty = TA.decode(node.type)
+		local cast_ty = decode_cached(cc, node.type)
 		if not cast_ty then return cc.REJECTED, "check_cast: malformed cast type", nil, nil end
 		if not ty_eq(cast_ty, want_ty) then
 			return cc.REJECTED, "check_cast: asserted type must equal the cast type", nil, nil
@@ -1003,9 +1131,9 @@ function M.checker(cc, claim, ev)
 			return cc.REJECTED, "instantiate_witness callee premise is not for this call's function node", nil, nil
 		end
 		-- the premise context must equal this claim's context.
-		local fn_pctx = parse_ctx(fn_cargs.ctx)
+		local fn_pctx = parse_ctx_cached(cc, fn_cargs.ctx)
 		if not fn_pctx then return cc.REJECTED, "instantiate_witness callee premise context is malformed", nil, nil end
-		if A._serialize(ctx_to_arg(fn_pctx)) ~= A._serialize(ctx_to_arg(ctx)) then
+		if ctx_canon_key(cc, fn_pctx) ~= ctx_canon_key(cc, ctx) then
 			return cc.REJECTED, "instantiate_witness callee premise context must match the conclusion's", nil, nil
 		end
 		-- payload.generic must structurally EQUAL the premise's asserted (generic) type.
@@ -1014,7 +1142,7 @@ function M.checker(cc, claim, ev)
 		end
 		local subst = {} --[[: { [string]: Ty } ]]
 		for name, pty in pairs(praw) do
-			local d = TA.decode(pty)
+			local d = decode_cached(cc, pty)
 			if not d then return cc.REJECTED, "instantiate_witness σ has a malformed type", nil, nil end
 			if type(name) == "string" then subst[name] = d end
 		end
@@ -1067,7 +1195,7 @@ function M.checker(cc, claim, ev)
 		if not cc.is_accepted(prem) then return cc.UNKNOWN, nil, nil, nil end
 		local pr = read_typing(cc, prem, "has_type")
 		if not pr then return cc.REJECTED, "synth_loop_var premise is not a has_type claim", nil, nil end
-		if A._serialize(ctx_to_arg(ctx)) ~= A._serialize(ctx_to_arg(pr.ctx)) then
+		if ctx_canon_key(cc, ctx) ~= ctx_canon_key(cc, pr.ctx) then
 			return cc.REJECTED, "synth_loop_var premise context must match the conclusion's", nil, nil
 		end
 		local tref = arg_id(node.table)

@@ -603,6 +603,20 @@ annotation survey ranked the type-grammar work.
    work), which the substrate must not reach into. Out of substrate scope; recorded
    for the slice semantics.
 
+   **Update (2026-06-12, hosted-checker pass; `perf(analysis)`, `docs/perf/log.md`).**
+   The hosted-semantics follow-up landed. Profiling the hosted layer corrected the
+   prior guess: the cost was repeated `TA.decode` of shared PTy claim args (203k
+   calls) and repeated context serialization for Γ-equality (`A._serialize` 1.7k
+   calls, ~4.1s) — `subtype` was negligible (518 calls), so no subtype memo was
+   built. Per-run memoization (decode keyed on arg-table identity; a Γ canonical key
+   built from interned `(name, tid)` pairs instead of decode→re-encode→serialize)
+   cut the lowered `v7_mr0` check **14.5s → ~5.5s (~2.5×)**, eliminating the hosted
+   layer's instrumented cost (`_serialize` 1.7k → 0 calls). The single TIMEOUT
+   **persists**, however: the residual ~5.5s is now the SUBSTRATE structural-
+   serialization floor (the substrate's own `claim_key` over 2724 deep claim args),
+   which alone exceeds the 5s budget. Clearing it needs the separate substrate pass
+   — interned/content-addressed claim keys — not a hosted-layer change.
+
 3. **Multi-line `--::` table aliases (the 3 CHECKED-FINDINGS).** All three
    CHECKED-FINDINGS (`lib/formats/ccv2/ccv2_types.lua` and its app mirror,
    `lib/platform/platform_types.lua`) are the **single-line-scan limitation**
