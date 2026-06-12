@@ -6,6 +6,49 @@ Bench machine: AMD Ryzen 7 5700G, LuaJIT 2.1.1741730670, NixOS Linux 6.12.67.
 
 ---
 
+## 2026-06-12: analysis substrate — dependency-driven worklist + structural-key memoization
+
+Benchmark: `bin/cr run lib/type/analysis/check_bench.lua`. Baseline `13f0eb4c`
+(pre-change `A.check`), optimization on the same tree.
+
+Two substrate changes to `A.check` (`lib/type/analysis/init.lua`), both pure
+substrate vocabulary (claims, evidence, inputs, structural keys), behavior-identical
+(same accepted/rejected/unknown classification; all 4906 assertions across the six
+hosted semantics pass unchanged):
+
+1. **Dependency-driven worklist.** The old fixpoint re-swept *every* pending
+   evidence object each round — O(rounds × evidence). The new loop seeds a queue
+   with each evidence once and, when an evidence accepts its claim, re-queues only
+   the evidence whose declared inputs reference that claim (via a `dependents`
+   index built once over all input edges). Sound because every hosted checker reads
+   accepted-ness solely through `ctx.is_accepted(ev.inputs[k])`, so an input claim's
+   acceptance is the only event that can flip a pending evidence.
+2. **Per-check structural-key memoization.** Each `is_accepted`/`accepted_result`
+   probe re-serialized the full (deep) claim args via `claim_key`. The key is now
+   cached per claim (keyed by `idk(id)`, cheap; the cached string is byte-identical),
+   so each claim serializes once instead of once per probe.
+
+| Case | Baseline (`13f0eb4c`) | Optimized | Speedup |
+|---|--:|--:|--:|
+| synthetic chain, 100 claims | 0.0022 s | 0.0004 s | ~5× |
+| synthetic chain, 1 000 claims | 0.1434 s | 0.0022 s | ~65× |
+| synthetic chain, 5 000 claims | 5.2561 s | 0.0114 s | ~460× |
+| real: `lib/type/v7_mr0/init.lua` lowered (2724 claims/evidence, 713 requested) | 21.64 s | 14.49 s | ~1.5× |
+
+The synthetic chain (a reverse-order linear dependency chain — the adversarial case
+for a re-sweeping fixpoint) confirms the worklist removes the O(N²) re-sweep: the
+curve is now linear. The real `v7_mr0` case is no longer worklist-bound; the
+remaining 14.49 s splits ~5.3 s substrate (the one-time structural serialization of
+2724 deep claim args — the floor imposed by structural claim identity) and ~8.5 s
+**inside the hosted slice checker** (repeated `parse_ctx`/`parse_type`/`subtype` on
+claim args). The substrate check loop is now optimal for this graph; the dominant
+cost has relocated into the hosted semantics, which is out of substrate scope (the
+substrate must not reach into a hosted checker). Consequently the e2e survey's 1
+TIMEOUT (`slice_survey.lua --e2e`, 5 s budget) **persists** — it is now
+hosted-checker-bound, a distinct follow-up finding, not a substrate-loop defect.
+
+---
+
 ## 2026-06-12: C_BIND_GENERICS livelock fix — full-tree parallel cold check (8× speedup)
 
 Baseline: `ec390737` (pre-fix). Fix: `bd06264e` (per-constraint instantiation cache in `lib/type/static/solve.lua`).

@@ -284,6 +284,54 @@ populate `state.claims` and `state.evidence` before checking, or the checker may
 invoke a producer under a policy. Either way, accepted claims must still carry
 evidence and trust summaries.
 
+### Check loop: dependency-driven worklist
+
+Evidence may arrive in arbitrary order, so the checker finds a valid acceptance
+order by reaching a fixpoint over the *accepted* set: an evidence object whose
+inputs are not yet accepted yields `unknown` and is retried once more of its
+inputs resolve. The discipline is a **dependency-driven worklist**, and this is a
+performance refinement of the same semantics, not a different one.
+
+The soundness premise is a substrate-level invariant on what an evidence verdict
+can depend on: an evidence object's result is a function of its claim (static),
+its claim's args (static), and *which of its declared `inputs` are accepted* — a
+hosted checker reads accepted-ness only by querying its own input Ids (in the
+mechanization, `ctx.is_accepted(ev.inputs[k])` / `accepted_result`, never an
+undeclared claim). Therefore the *only* event that can flip a pending evidence
+from `unknown` to `accepted`/`rejected` is one of **its input claims** becoming
+accepted.
+
+The loop exploits this directly. It builds, once, a `dependents` index mapping
+each claim (by its structural key) to the evidence whose inputs reference it. It
+seeds a queue with every evidence object exactly once; when an evidence accepts
+its claim, it re-queues only that claim's dependents. Evidence with no
+newly-available input is never re-examined. This replaces the earlier
+re-sweep-everything fixpoint — O(rounds × evidence) — with work proportional to
+the dependency edges actually traversed.
+
+The refinement preserves every checking property the re-sweep had, and the
+unchanged test corpus across all six hosted semantics (propositional, lambda,
+dataflow, STLC, the Crescent slice, plus the substrate probes) is the validation
+that it is the *same* semantics:
+
+- **Same classification.** Identical accepted / rejected / unknown partition; the
+  worklist drains to the same closure the re-sweep reached.
+- **Order-independence preserved.** The closure is independent of evidence
+  insertion order (the shuffled-order tests are the load-bearing guard); the queue
+  reorders work but not the result.
+- **Cycle-as-error preserved.** Mutually-blocked evidence is never re-queued by an
+  acceptance, settles `unknown`, and is reported by the same cycle-detection pass
+  (the cycle tests are the other load-bearing guard) — never nontermination.
+- **Unknown-propagation preserved.** `unknown` is still never consumed as proof;
+  an evidence stays pending until *its own* inputs are accepted.
+
+A companion micro-refinement memoizes each claim's structural key per check (the
+key is constant within a check, so serializing the — potentially deep — args once
+per claim rather than once per accepted-ness probe is byte-identical and removes
+the substrate's dominant per-probe cost on large graphs). Neither refinement
+introduces any knowledge of a hosted semantics: both speak only claims, evidence,
+inputs, dependencies, and structural keys.
+
 ## Semantics Registry
 
 A semantics registry maps a semantics identifier to its checker obligations.

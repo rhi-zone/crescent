@@ -677,14 +677,24 @@ annotation survey ranked the type-grammar work.
    high-value finding the hand-built corpus never exercised (it never ran the
    parser).
 
-2. **Substrate scaling on large graphs (RECORDED, surfaced as the 1 TIMEOUT).**
-   `lib/type/v7_mr0/init.lua` lowers to 713 requested claims; the substrate's
-   `A.check` fixpoint (which re-sweeps every pending evidence object each round)
-   exceeds the 5s per-file budget on a graph that large. This is a **substrate
-   performance** characteristic (O(sweeps × evidence) worklist), not a lowering or
-   soundness defect — the per-file budget correctly isolates it as a single
-   TIMEOUT rather than hanging the survey. Recorded for a future substrate
-   worklist-indexing optimization; out of Pass 5 scope.
+2. **Large-graph scaling — substrate loop fixed; residual TIMEOUT now
+   hosted-checker-bound.** `lib/type/v7_mr0/init.lua` lowers to 713 requested
+   claims (2724 claims/evidence) and remains the survey's single TIMEOUT against
+   the 5s per-file budget — but the root cause has moved. The substrate's `A.check`
+   fixpoint was originally O(sweeps × evidence) (it re-swept every pending evidence
+   each round) **and** re-serialized deep claim args on every accepted-ness probe.
+   Both are now fixed (`perf(analysis)`, `docs/perf/log.md` 2026-06-12): the loop is
+   a dependency-driven worklist that re-queues only the dependents of a
+   newly-accepted claim, and structural keys are memoized per check. A synthetic
+   reverse-order chain confirms the loop is now linear (5 000 claims: 5.26s →
+   0.011s, ~460×); the real file dropped 21.6s → 14.5s. The remaining 14.5s splits
+   ~5.3s substrate (the one-time structural serialization of 2724 deep claim args —
+   the floor imposed by structural claim identity) and ~8.5s **inside the hosted
+   slice checker** (repeated `parse_ctx`/`parse_type`/`subtype` on claim args). So
+   the TIMEOUT is no longer a substrate-loop defect; it is a hosted-semantics
+   performance follow-up (memoize the slice checker's per-call arg parsing/subtype
+   work), which the substrate must not reach into. Out of substrate scope; recorded
+   for the slice semantics.
 
 3. **Multi-line `--::` table aliases (the 3 CHECKED-FINDINGS).** All three
    CHECKED-FINDINGS (`lib/formats/ccv2/ccv2_types.lua` and its app mirror,

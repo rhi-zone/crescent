@@ -392,6 +392,26 @@ function M.check(req)
 
 	local state = req.state
 
+	-- Per-check memoization of structural claim keys. A Claim record is immutable
+	-- data within one check, so its canonical key (semantics|predicate|serialized
+	-- args) is constant; serializing it once per claim instead of once per lookup
+	-- turns the dominant cost on large graphs (every `is_accepted`/`accepted_result`
+	-- input probe re-serialized deep args) from O(probes × |args|) into
+	-- O(claims × |args|). Pure substrate vocabulary (claims, structural keys);
+	-- the cached string is byte-identical to recomputing it, so classification is
+	-- unchanged. Keyed by the claim's identity key `idk(id)` (unique per claim in
+	-- state, and cheap to compute: two string concats vs. a deep-args serialize).
+	local key_cache = {} --[[: { [string]: string } ]]
+	--: (Claim) -> string
+	local function ckey(claim)
+		local ik = idk(claim.id)
+		local cached = key_cache[ik]
+		if cached then return cached end
+		local k = claim_key(claim)
+		key_cache[ik] = k
+		return k
+	end
+
 	-- accepted: claim-key -> result payload returned by the hosted checker.
 	local accepted = {} --[[: { [string]: unknown } ]]
 	local accepted_claim = {} --[[: { [string]: Claim } ]]
@@ -424,7 +444,7 @@ function M.check(req)
 		is_accepted = function(id)
 			local c = state.claims[idk(id)]
 			if not c then return false end
-			return accepted[claim_key(c)] ~= nil
+			return accepted[ckey(c)] ~= nil
 		end,
 		-- Returns the hosted checker's result payload for an accepted claim,
 		-- or nil. Used to chain witnesses.
@@ -432,7 +452,7 @@ function M.check(req)
 		accepted_result = function(id)
 			local c = state.claims[idk(id)]
 			if not c then return nil end
-			return accepted[claim_key(c)]
+			return accepted[ckey(c)]
 		end,
 	}
 
@@ -444,7 +464,7 @@ function M.check(req)
 		local checker = entry.checker --[[: HostedChecker ]]
 		local result, diag, ev_deps, ev_trust = checker(ctx, claim, ev)
 		if result == M.ACCEPTED then
-			local ck = claim_key(claim)
+			local ck = ckey(claim)
 			accepted[ck] = ev.result or true
 			accepted_claim[ck] = claim
 			for _, d in ipairs(ev_deps or {}) do deps[#deps + 1] = d end
@@ -461,29 +481,80 @@ function M.check(req)
 		return result or M.UNKNOWN
 	end
 
-	-- Worklist fixpoint: repeatedly sweep pending evidence. An evidence object
-	-- that returns "unknown" (its inputs are not yet accepted) is left pending
-	-- and retried on the next sweep. We stop when a sweep accepts nothing new.
-	-- This makes the result independent of submission order (scheduling
-	-- requirement) and terminates: each sweep either grows `accepted` or the
-	-- loop ends. A dependency cycle means a set of evidence is mutually blocked
-	-- on each other's claims; no sweep ever accepts them, so they settle as
-	-- pending and we report them via a cycle diagnostic below — never loop.
-	local progress = true
-	while progress do
-		progress = false
-		for ekey, ev in pairs(state.evidence) do
-			if ev_status[ekey] == nil then
-				local r = run_evidence(ev)
-				if r == M.ACCEPTED then
-					ev_status[ekey] = M.ACCEPTED
-					progress = true
-				elseif r == M.REJECTED then
-					ev_status[ekey] = M.REJECTED
-					progress = true
-				end
-				-- r == unknown: leave pending, retry next sweep.
+	-- Dependency-driven worklist fixpoint.
+	--
+	-- An evidence object's result depends only on its claim (static), its args
+	-- (static), and which of its DECLARED INPUTS are accepted — every hosted
+	-- checker reads accepted-ness solely through `ctx.is_accepted(ev.inputs[k])`
+	-- (and `accepted_result` on those same Ids). So the ONLY event that can flip
+	-- a pending evidence from "unknown" to "accepted/rejected" is one of its
+	-- input claims becoming accepted. The old loop re-swept ALL pending evidence
+	-- every round (O(rounds × evidence)); here we re-queue only the evidence whose
+	-- inputs reference a claim that was just accepted.
+	--
+	-- This is a performance refinement of the same fixpoint: identical
+	-- accepted/rejected/unknown classification, identical order-independence (the
+	-- worklist drains to the same closure regardless of insertion order), and the
+	-- same cycle-as-error behavior (mutually-blocked evidence is never enqueued by
+	-- an acceptance, settles pending, and is reported by detect_cycle below).
+	--
+	-- `dependents[ck]` lists evidence keys whose inputs resolve (by structural
+	-- claim_key) to the claim with key `ck`. Built once, O(total input edges).
+	local dependents = {} --[[: { [string]: string[] } ]]
+	for ekey, ev in pairs(state.evidence) do
+		for _, inp in ipairs(ev.inputs) do
+			local ic = state.claims[idk(inp)]
+			if ic then
+				local k = ckey(ic)
+				local list = dependents[k]
+				if not list then list = {}; dependents[k] = list end
+				list[#list + 1] = ekey
 			end
+		end
+	end
+
+	-- The queue holds evidence keys to (re)try. We seed it with every evidence
+	-- object exactly once (each must be tried at least once: zero-input evidence
+	-- accepts immediately, and any evidence whose inputs are already accepted
+	-- resolves on its first run). `queued` guards against enqueuing the same
+	-- evidence twice while it sits pending in the queue.
+	local queue = {} --[[: string[] ]]
+	local qhead = 1 --: integer
+	local queued = {} --[[: { [string]: boolean } ]]
+	for ekey in pairs(state.evidence) do
+		queue[#queue + 1] = ekey
+		queued[ekey] = true
+	end
+
+	while qhead <= #queue do
+		local ekey = queue[qhead]
+		qhead = qhead + 1
+		queued[ekey] = false
+		if ev_status[ekey] == nil then
+			local ev = state.evidence[ekey]
+			local r = run_evidence(ev)
+			if r == M.ACCEPTED then
+				ev_status[ekey] = M.ACCEPTED
+				-- This evidence accepted its target claim. Re-queue every pending
+				-- evidence whose inputs reference that claim — those are the only
+				-- ones whose verdict can have changed.
+				local ck = ckey(state.claims[idk(ev.claim)])
+				local deps_list = dependents[ck]
+				if deps_list then
+					for _, dk in ipairs(deps_list) do
+						if ev_status[dk] == nil and not queued[dk] then
+							queue[#queue + 1] = dk
+							queued[dk] = true
+						end
+					end
+				end
+			elseif r == M.REJECTED then
+				ev_status[ekey] = M.REJECTED
+				-- A rejection does not grow the accepted set, so no other
+				-- evidence's inputs changed; nothing to re-queue.
+			end
+			-- r == unknown: leave pending. It will be re-queued if and when one of
+			-- its input claims is accepted (via that claim's dependents list).
 		end
 	end
 
@@ -503,7 +574,7 @@ function M.check(req)
 		local producer = {} --[[: { [string]: string } ]]
 		for ekey, ev in pairs(pending) do
 			local c = state.claims[idk(ev.claim)]
-			if c then producer[claim_key(c)] = ekey end
+			if c then producer[ckey(c)] = ekey end
 		end
 		-- DFS over pending evidence following input-claim edges.
 		local color = {} --[[: { [string]: number } ]]
@@ -516,7 +587,7 @@ function M.check(req)
 			for _, inp in ipairs(ev.inputs) do
 				local ic = state.claims[idk(inp)]
 				if ic then
-					local pk = producer[claim_key(ic)]
+					local pk = producer[ckey(ic)]
 					if pk then
 						if color[pk] == 1 then
 							cycle_found = true
@@ -554,7 +625,7 @@ function M.check(req)
 		if not claim then
 			diagnostics[#diagnostics + 1] = "requested claim not in state: " .. idk(cid)
 		else
-			local ck = claim_key(claim)
+			local ck = ckey(claim)
 			if accepted[ck] ~= nil then
 				accepted_out[ck] = claim
 				trust_summary[ck] = claim_trust[ck] or {}
@@ -562,7 +633,7 @@ function M.check(req)
 				-- gather this claim's evidence statuses
 				local has_ev, all_rejected = false, true
 				for ekey, ev in pairs(state.evidence) do
-					if claim_key(state.claims[idk(ev.claim)]) == ck then
+					if ckey(state.claims[idk(ev.claim)]) == ck then
 						has_ev = true
 						if ev_status[ekey] ~= M.REJECTED then all_rejected = false end
 					end
