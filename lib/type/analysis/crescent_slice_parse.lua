@@ -564,19 +564,30 @@ end
 --
 -- Pull annotation directives out of a source line. Returns one of:
 --   { kind = "alias", name, body }   for `--:: Name = T`
+--   { kind = "import", module }       for `--:: require "lib.x"` (type-only import)
 --   { kind = "sig", body }           for `--: T`   (preceding-line signature)
 --   nil                              if the line carries no annotation directive
 --
---:: AnnDirective = { kind: string, name?: string, body?: string }
+-- The `import` form (§6.6) is a TYPE-ONLY import directive: it brings the named
+-- module's top-level `--::` aliases into the current file's annotation scope under
+-- their bare declared names. It carries no runtime value and never reaches the
+-- type-grammar parser; the cross-module resolver (in the lowering/survey import
+-- pass) consumes it.
+--
+--:: AnnDirective = { kind: string, name?: string, body?: string, module?: string }
 
 --: (string) -> AnnDirective | nil
 function M.scan_annotation(line)
-	-- `--::` alias declaration.
+	-- `--::` alias declaration or type-only import directive.
 	local adecl = line:match("^%s*%-%-::%s*(.+)$")
 	if adecl then
 		local name, body = adecl:match("^([%a_][%w_]*)%s*=%s*(.+)$")
 		if name then return { kind = "alias", name = name, body = body } end
-		-- a `--::` form without `=` (e.g. `declare`/`augment`) is outside v1.
+		-- `--:: require "lib.x"` — a type-only cross-module import (§6.6.2).
+		local mod = adecl:match([[^require%s+"([^"]+)"%s*$]])
+			or adecl:match([[^require%s+'([^']+)'%s*$]])
+		if mod then return { kind = "import", module = mod } end
+		-- any other `--::` form without `=` (e.g. `declare`/`augment`) is outside v1.
 		return nil
 	end
 	-- `--:` signature (single colon, not `--::`).

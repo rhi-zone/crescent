@@ -68,7 +68,9 @@ These were documented gaps that are now correctly handled; future checkers must 
 8. `fixture_tonumber_return_type.lua` — `tonumber()` returns `number | nil` (fixed, no workaround needed).
 9. `fixture_pairs_return_leak.lua` — `$PairsReturn` does not leak into user-visible types (fixed).
 10. `fixture_coinductive_recursive_types.lua` — recursive types terminate (fixed in 56810b60 cycle guard).
-11. `fixture_cross_module_type_alias.lua` — in-file alias form works; cross-module form is the remaining gap.
+11. `fixture_cross_module_type_alias.lua` — in-file alias form works; the TRUE
+    cross-module form is now the two-file `xmod/` fixture (see "Multi-file fixtures"
+    below), checkable end-to-end as of slice v2 increment 2.
 
 ## crescent.slice.v1 Result Summary (Pass 4, 2026-06-12)
 
@@ -101,3 +103,35 @@ For FIXED fixtures: the new checker must also produce 0 errors (regression guard
 For `fixture_cross_module_type_alias.lua`: also run the checker on
 `lib/dns/tcp_client.lua` + `lib/epoll/init.lua` together and verify that
 `epoll` can be typed as `Epoll | nil` without a workaround.
+
+## Multi-file fixtures
+
+A fixture may span multiple files in a subdirectory when the gap it encodes is a
+genuinely cross-artifact relation (one file declaring something another file
+consumes). The corpus directory supports this: a subdirectory under
+`lib/type/analysis/corpus/` holds the co-operating files, and the runner drives the
+ENTRY file with a file-reading capability so the other files resolve.
+
+### `xmod/` — the TRUE cross-module type-alias form (slice v2 increment 2)
+
+The two-file realization of `fixture_cross_module_type_alias.lua`'s cross-module
+half (the tcp_client+epoll pattern its source-fire comment names):
+
+- `xmod/epoll.lua` — the EXPORTING module. Declares `--:: Epoll = { ... }` (the
+  `lib/epoll/init.lua` shape).
+- `xmod/tcp_client.lua` — the ENTRY module. References `Epoll` by **bare name** in a
+  parameter annotation (`epoll: Epoll | nil`), where `Epoll` is declared in
+  `xmod/epoll.lua`, NOT in this file — the `require` of the exporting module brings
+  its `--::` aliases into the entry's annotation scope (`docs/agnostic-static-analysis-crescent-slice.md`
+  §6.6).
+
+**Expected behavior (correct checker):** with the file-reading cap injected, `Epoll`
+resolves across the `require` boundary (it is NOT `unknown-type-name`), and the
+cross-module resolution is recorded as a visible `cross_module_alias` trust boundary
+with a Dependency per consuming claim. The entry's *statements* (a value-`require`, a
+`mod.new()` method call) are out-of-§5-subset, so the lowered file is OUT-OF-SUBSET —
+that is the orthogonal statement-lowering boundary (§9.8), not an alias-resolution
+failure. End-to-end assertions: `lib/type/analysis/crescent_slice_xmodule_test.lua`.
+
+These files are intentionally NOT held to the zero-error `bin/cr check` bar (they
+are corpus fixtures, exempt via the `.githooks/pre-commit` corpus exemption).

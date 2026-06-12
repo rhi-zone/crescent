@@ -37,10 +37,26 @@
 --
 -- Usage:  bin/cr run lib/type/analysis/slice_survey.lua [--md > docs/slice-survey-v1.md]
 
-local P = require("lib.type.analysis.crescent_slice_parse")
 local G = require("lib.type.analysis.slice_ty")
+local _G_arg = require("lib.type.analysis.slice_ty_arg")
+local _ = _G_arg
+local P = require("lib.type.analysis.crescent_slice_parse")
+local XM = require("lib.type.analysis.crescent_slice_xmodule")
 
 local M = {}
+
+-- A file-reading cap for the cross-module import pass (§6.6). This is a measurement
+-- runner driven by `bin/cr run`, so io lives at this edge; it is injected into the
+-- resolver, never reached from inside the library.
+--: (path: string) -> (string | nil, string | nil)
+local function read_file(path)
+	local fh = io.open(path, "r")
+	if not fh then return nil, "cannot open " .. path end
+	local s = fh:read("*a")
+	fh:close()
+	if type(s) ~= "string" then return nil, "read failed" end
+	return s, nil
+end
 
 -- NOTE on aliases: this runner deliberately does NOT redeclare the slice's `Ty`
 -- grammar alias, nor the adapter's `AliasEnv`. Both resolve transitively from the
@@ -123,7 +139,17 @@ local function survey_file(path)
 		return { path = path, class = "NO-ANNOTATION", diags = {}, constructs = {}, n_ann = 0 }
 	end
 
+	-- Cross-module import pass (§6.6): seed the alias env with the top-level `--::`
+	-- aliases of the modules this file requires (the `--:: require` directive and
+	-- value-require forms), so a name imported across the require boundary is no
+	-- longer `unknown-type-name`. The file's OWN aliases are declared on top below
+	-- (most-recent-wins shadowing).
 	local aliases = {}
+	local src = read_file(path)
+	if src ~= nil then
+		local imp = XM.resolve(src, { read_file = read_file })
+		for k, v in pairs(imp.env) do aliases[k] = v end
+	end
 	local diags = {} --[[: Diag[] ]]
 	local constructs = {} --[[: { [string]: boolean } ]]
 	local has_construct = false --: boolean
@@ -233,7 +259,10 @@ local function survey_file_e2e(path)
 			{ line = 0, text = "", err = "empty read" } }, constructs = {}, n_ann = 0 }
 	end
 	local src = src0 --[[: string ]]
-	local res = L.lower(src, path) --[[: { requested: { [integer]: { space: string, key: string } }, expected: string, markers: { [integer]: { line: integer, construct: string, text: string } }, state: AnalysisState } | nil ]]
+	-- inject the read_file cap so cross-module aliases (§6.6) resolve in lowered
+	-- annotations too (the e2e path is dominated by statement-lowering gaps, but the
+	-- annotation resolution is the honest, complete behavior).
+	local res = L.lower(src, path, { read_file = read_file }) --[[: { requested: { [integer]: { space: string, key: string } }, expected: string, markers: { [integer]: { line: integer, construct: string, text: string } }, state: AnalysisState } | nil ]]
 	if not res then
 		return { path = path, class = "PARSE-FAIL/OTHER", diags = {
 			{ line = 0, text = "", err = "lower failed" } }, constructs = {}, n_ann = 0 }

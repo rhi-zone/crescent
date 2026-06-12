@@ -46,6 +46,7 @@ local SUB = require("lib.type.analysis.slice_subtype")
 local NAR = require("lib.type.analysis.slice_narrow")
 local P = require("lib.type.analysis.crescent_slice_parse")
 local S = require("lib.type.analysis.crescent_slice")
+local XM = require("lib.type.analysis.crescent_slice_xmodule")
 
 local M = {}
 
@@ -61,7 +62,8 @@ local M = {}
 --                   FINDINGS = a parse/lowering defect with no construct tag).
 --   markers       : { line, construct, text }[]  the out-of-subset markers.
 --:: LowerMarker = { line: integer, construct: string, text: string }
---:: LowerResult = { state: AnalysisState, requested: Id[], observations: { [integer]: unknown }, expected: string, markers: { [integer]: LowerMarker }, aliases: AliasEnv, signatures: { [string]: Ty } }
+--:: ImportRecord = { module: string, path: string, names: string[], form: string }
+--:: LowerResult = { state: AnalysisState, requested: Id[], observations: { [integer]: unknown }, expected: string, markers: { [integer]: LowerMarker }, aliases: AliasEnv, signatures: { [string]: Ty }, imports: { [integer]: ImportRecord }, dependencies: { [integer]: Dependency } }
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- §1. The statement lexer (a focused Lua tokenizer over the v1 subset)
@@ -785,9 +787,15 @@ M.new_parser = new_parser
 
 --:: ScanResult = { aliases: AliasEnv, anns_by_line: { [integer]: string }, observations: { [integer]: unknown }, markers: { [integer]: LowerMarker } }
 
---: (string) -> ScanResult
-local function scan_source(src)
+-- `base_aliases`, when given, pre-populates the alias env with cross-module
+-- imported aliases (§6.6) BEFORE the file's own `--::` aliases are declared, so a
+-- local alias shadows an imported one (most-recent-wins, the standard lexical rule).
+--: (string, (AliasEnv | nil)) -> ScanResult
+local function scan_source(src, base_aliases)
 	local aliases = {} --[[: AliasEnv ]]
+	if base_aliases then
+		for k, v in pairs(base_aliases) do aliases[k] = v end
+	end
 	local anns_by_line = {} --[[: { [integer]: string } ]]
 	local observations = {} --[[: { [integer]: unknown } ]]
 	local markers = {} --[[: { [integer]: LowerMarker } ]]
@@ -1796,12 +1804,22 @@ end
 -- §6. Public entry: lower(source, filename) -> LowerResult
 -- ════════════════════════════════════════════════════════════════════════════
 
---: (string, string) -> (LowerResult | nil, string | nil)
-function M.lower(source, filename)
+-- `opts.read_file` (a `(path) -> (src | nil, err | nil)` cap) enables CROSS-MODULE
+-- type-alias resolution (§6.6): the entry's `require`d `lib/` modules' top-level
+-- `--::` aliases are imported into the alias env, and the cross-artifact records
+-- (exporting Artifact + per-alias Observation + one `cross_module_alias`
+-- TrustBoundary per module + a Dependency from each requested claim to that
+-- boundary) are added to the state. CAPS-FIRST: with no `read_file`, cross-module
+-- imports resolve to no aliases — never a reach for `io`.
+--: (string, string, ({ read_file?: (string) -> (string | nil, string | nil) } | nil)) -> (LowerResult | nil, string | nil)
+function M.lower(source, filename, opts)
 	G.reset()
 	local _ = filename
-	-- 1. scan annotations (aliases + signatures + their markers).
-	local scan = scan_source(source)
+	-- 0. cross-module import pass (§6.6) — assemble the imported alias base env.
+	local imp = XM.resolve(source, opts)
+	-- 1. scan annotations (aliases + signatures + their markers), seeded with the
+	--    imported cross-module aliases so a local alias shadows an imported one.
+	local scan = scan_source(source, imp.env)
 	-- 2. lex + parse the statements into the §5 AST.
 	local toks, lerr = lex(source)
 	if not toks then return nil, lerr end
@@ -1812,12 +1830,57 @@ function M.lower(source, filename)
 	-- one shared trusted boundary for force casts / stdlib (visible in the summary).
 	local tb = A.trust_boundary({ id = A.id("trust", "slice-stdlib"), kind = "stdlib_signature", issuer = "crescent.slice.v1" })
 	A.add_trust_boundary(state, tb)
+	-- cross-module records (§6.6.5/§6.6.6): one TrustBoundary per imported module,
+	-- the exporting source_text Artifact, and a per-imported-alias Observation. The
+	-- per-claim Dependency on the boundary is added after the claim graph is built.
+	local xmodule_tbs = {} --[[: { [integer]: Id } ]]
+	for _, rec in ipairs(imp.imports) do
+		local art_id = A.id("artifact", "xmod-src:" .. rec.path)
+		A.add_artifact(state, A.artifact({ id = art_id, kind = "source_text", content_ref = rec.path }))
+		for _, name in ipairs(rec.names) do
+			A.add_observation(state, A.observation({
+				id = A.id("observation", "xmod-alias:" .. rec.path .. ":" .. name),
+				predicate = "alias", args = { name = name, module = rec.module },
+				source_artifacts = { art_id }, support = "trusted",
+			}))
+		end
+		local xtb = A.trust_boundary({
+			id = A.id("trust", "xmod:" .. rec.path),
+			kind = "cross_module_alias", issuer = "crescent.slice.v1",
+			covers = { module = rec.module, path = rec.path, names = rec.names },
+			policy = "alias Ty admitted from exporting module's --:: declaration; the exporting module's parse is trusted, not re-checked",
+		})
+		A.add_trust_boundary(state, xtb)
+		xmodule_tbs[#xmodule_tbs + 1] = xtb.id
+	end
 	local b = new_builder(state)
 	local lc = { b = b, requested = {}, markers = {}, aliases = scan.aliases,
 		stdlib_tb = tb.id, state = state } --[[: LC ]]
-	-- carry the scan-phase markers (alias errors) into the result.
+	-- carry the scan-phase + import-pass markers (alias errors, dynamic requires).
 	for _, m2 in ipairs(scan.markers) do lc.markers[#lc.markers + 1] = m2 end
+	for _, m3 in ipairs(imp.markers) do lc.markers[#lc.markers + 1] = m3 end
+	for _, er in ipairs(imp.errors) do
+		lc.markers[#lc.markers + 1] = { line = 0, construct = "xmodule-alias-error",
+			text = er.module .. ":" .. er.name .. ": " .. er.err }
+	end
 	lower_block(lc, {}, chunk, nil)
+
+	-- 4b. cross-module dependency records (§6.6.3): every requested claim was checked
+	--     under the cross-module alias env, so each rides the cross_module_alias trust
+	--     boundary. Record the dependency with the correct invalidation field so an
+	--     incremental/audit tool can reason about staleness (the v1 evaluation strategy
+	--     is re-check-everything; the RECORDS are precise). Dependencies live on the
+	--     driver-level LowerResult (the object model puts them in the CheckResult
+	--     dependency graph, NOT on AnalysisState — the substrate shape is untouched).
+	local dependencies = {} --[[: { [integer]: Dependency } ]]
+	for _, tbid in ipairs(xmodule_tbs) do
+		for _, cid in ipairs(lc.requested) do
+			dependencies[#dependencies + 1] = A.dependency({
+				from_claim = cid, kind = A.DEP_TRUSTED_BOUNDARY, target = tbid,
+				invalidation = "exporting module's --:: alias body changed",
+			})
+		end
+	end
 
 	-- 4. classify the verdict.
 	local expected = "CLEAN" --: string
@@ -1837,15 +1900,21 @@ function M.lower(source, filename)
 	elseif has_finding then expected = "FINDINGS"
 	else expected = "CLEAN" end
 
-	return {
+	local sigs = {} --[[: { [string]: Ty } ]]
+	local imports_out = {} --[[: { [integer]: ImportRecord } ]]
+	for _, r in ipairs(imp.imports) do imports_out[#imports_out + 1] = r end
+	local result = {
 		state = state,
 		requested = lc.requested,
 		observations = scan.observations,
 		expected = expected,
 		markers = lc.markers,
 		aliases = scan.aliases,
-		signatures = {},
-	}
+		signatures = sigs,
+		imports = imports_out,
+		dependencies = dependencies,
+	} --[[: LowerResult ]]
+	return result
 end
 
 return M

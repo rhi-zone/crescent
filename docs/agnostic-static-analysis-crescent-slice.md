@@ -1175,6 +1175,207 @@ reach (zero lattice change); the sixth (`tuple`) is one value-universe-justified
 constructor whose subtype rule is the standard structural covariance + the EXISTING
 union exists-forall. No complement, no match types, no global solving, no HKT.
 
+## 6.6 Increment v2.2 — cross-module type-alias resolution (the multi-artifact derived whole)
+
+Status: design pass for slice **v2 increment 2**, the measured **#1** annotation
+survey demand (`docs/slice-survey-v1.md` after-increment-1: `unknown-type-name`,
+172 files). It is the first genuinely **multi-artifact** extension: every prior
+increment touched one file's annotation grammar; this one resolves a type name
+*declared in one module* against an annotation *in another module*. Derived whole
+from the **object model** (`docs/agnostic-static-analysis-object-model.md`) and the
+real `lib/` idiom — NOT improvised to make a fixture pass. The headline finding
+first: **no substrate change is required.** The object model already makes
+artifacts first-class, claims carry `subject_artifacts` (plural), dependencies
+target other artifacts' content, and trust boundaries carry `covers`. The
+multi-artifact story *exists in the model*; this increment **consumes** it. §9.2's
+prior note — "a checked cross-module relation … would need the required module's
+artifact in the same `CheckRequest`" — is realized here without a single new object
+kind: the required module's `--::` aliases enter as artifacts + observations in the
+same state, and the consuming claim records a `Dependency` to them.
+
+### 6.6.1 The real idiom (corpus reality, checked before designing)
+
+Two cross-module forms exist in real `lib/` code, both referencing the imported
+type by its **bare, unqualified declared name** (no `mod.Type` qualification idiom
+exists anywhere in the corpus — verified by grep):
+
+1. **Value-import form (the original fixture's source fire).**
+   `lib/dns/tcp_client.lua` does `require("lib.epoll")` and wants to annotate a
+   parameter `epoll: epoll | nil`, where `--:: epoll = { fd: integer, wait: ... }`
+   is declared in `lib/epoll/init.lua`. Today it is forced to write
+   `unknown | nil` with a TODO (`lib/dns/tcp_client.lua:12-15`) — the exact
+   `unknown-type-name` the survey counts.
+
+2. **Type-only-import directive form (the *dominant* idiom — 48 files).**
+   `--:: require "lib.taskgraph.taskgraph_types"` — a `--::` directive whose body
+   is `require "<modpath>"`, importing *only* that module's `--::` aliases into the
+   current file's annotation scope (`lib/taskgraph/combinators.lua` then references
+   `TaskDef`, `TaskNode` by bare name). This form is purely a *type-level* import:
+   it has no runtime value, exists only to make the names visible, and is the
+   idiom the corpus uses most. v1's `scan_annotation` already returns `nil` for a
+   `--::` without `=` (`crescent_slice_parse.lua`), so this directive is currently
+   dropped — and every name it would have imported becomes `unknown-type-name`.
+
+The design must serve **both**: the value-import form (the original fixture, the
+tcp_client+epoll pair) and the type-only-import directive (the dominant count).
+
+### 6.6.2 Q1 — the unit of cross-module knowledge, and the visibility rule
+
+**Unit (per the object model).** Each file is an **artifact** (`kind = "source_text"`
+for the exporting module, `syntax_tree` for the lowered entry). An alias
+declaration `--:: Name = T` in module M is an **observation** about M's artifact
+(`predicate = "alias"`, `args = { name, body }`, `source_artifacts = [M]`). Module
+N's annotation referencing `Name` **consumes that observation across artifacts**:
+N's `has_type`/`checks_against`/`well_typed_type` claim that uses the resolved `Ty`
+records a `Dependency { from_claim = <N's claim>, kind = "observation", target =
+<M's alias observation>, invalidation = "exporting alias body changed" }`.
+
+**Visibility rule (decided by the corpus, not invented).** Importing module M
+brings M's **top-level** `--::` aliases into N's annotation scope **under their bare
+declared names**, flat and unqualified — because that is the only form the corpus
+uses (`TaskDef`, `epoll`, never `taskgraph_types.TaskDef`). Two import triggers,
+both already present in source:
+
+- **`--:: require "lib.x.y"`** (type-only directive) → import lib/x/y's top-level
+  aliases. This is the primary, unambiguous trigger: a `--::` directive whose body
+  matches `^require%s+"(.+)"$`. It is a *type-import statement*, parsed by the
+  scanner, never reaching the type-grammar parser.
+- **`local v = require("lib.x.y")`** (value import) → ALSO import lib/x/y's
+  top-level aliases into the flat name scope. This serves the original fixture
+  (tcp_client requires lib.epoll, then annotates `epoll | nil`). The bare-name
+  flattening matches the corpus (the alias is `epoll`, referenced as `epoll`); the
+  local binding name (`v`) is irrelevant to *type* visibility, exactly as the
+  corpus never qualifies.
+
+**Module-path resolution.** `require("lib.x.y")` → `lib/x/y.lua`; `require("lib.x")`
+→ `lib/x/init.lua` if `lib/x.lua` is absent (the standard Lua package layout). Only
+**static string-literal** `require` forms inside `lib/` are resolved; a dynamic
+`require(var)` is **out-of-subset**, tagged `dynamic-require` (never silently
+ignored — a silent skip would manufacture a false-clean). A required module path
+outside `lib/` (`require("bit")`, `require("ffi")`) is not an alias source and is
+not an error — it simply contributes no aliases.
+
+**Assembly order.** The cross-module alias environment for checking N is assembled
+**before** N's own aliases and signatures are processed: (1) collect N's import
+triggers (both forms) in source order; (2) for each, read+scan the exporting
+module's top-level `--::` aliases and `declare_alias` them into a base env; (3)
+process N's own `--::` aliases on top (most-recent-wins, so a local alias shadows an
+imported one — the standard lexical rule); (4) parse N's signatures against the
+assembled env. This is exactly `scan_source`'s existing two-pass shape, prefixed
+with an import pass.
+
+**Caps-first (CLAUDE.md hard constraint).** Reading the exporting module's source is
+**I/O**, so the lowering driver accepts a `read_file` capability injected via
+`opts`. It is NEVER reached from `io.open` directly inside the library; if a caller
+needs cross-module resolution it injects the cap, and if no cap is injected
+cross-module imports resolve to **no aliases** (the names stay `unknown-type-name`,
+the honest pre-increment behavior) rather than silently reaching for `io`. The
+survey/test callers inject a thin `io.open`-backed reader at the edge.
+
+### 6.6.3 Q2 — staleness / invalidation (records correct, implementation minimal)
+
+The object model's `Dependency.invalidation` field must be **populated correctly**
+even though the v1 driver's incremental story is "re-check everything." Each
+cross-artifact `Dependency` from N's claim to M's alias observation carries
+`invalidation = "exporting alias '<Name>' body changed in <modpath>"`. A concrete
+encoding that crosses a cache boundary would additionally digest M's artifact
+content (the object model's `Artifact.digest`, optional at model level); the v1
+driver records the *relation* (which claim depends on which exporting observation)
+so an incremental/audit tool can recompute it — it does not itself diff digests.
+This satisfies the model's rule: "the substrate does not compute every invalidation
+relation by itself; it must store them so incremental and audit tools can reason."
+Re-check-everything is the acceptable v1 *evaluation* strategy; the *records* are
+the deliverable and they are precise.
+
+### 6.6.4 Q3 — cycles (mutually-requiring modules, mutually-referencing aliases)
+
+Modules legitimately require each other (`lib.taskgraph.exec` ↔ `lib.taskgraph.context`),
+and a `--:: require` cycle is possible. The resolution **terminates by a principled
+verdict**, not the μ machinery and not a hang:
+
+- **Import resolution is acyclic by construction via a visited set.** The import
+  pass tracks the set of module paths already being resolved on the current chain.
+  Re-encountering a path on the chain **stops** (the aliases it would contribute are
+  already in-flight or will be contributed once); it does not recurse into it again.
+  This is the standard import-cycle break, and it is *sound for aliases* because an
+  alias environment is a monotone accumulation — visiting M once contributes all of
+  M's top-level aliases; a second visit on the same chain would contribute nothing
+  new. So a cycle terminates with the union of every reachable module's aliases.
+
+- **Why not μ here?** The μ machinery (§3) decides *subtyping* of recursive
+  *types*; an import cycle is a cycle in the *module graph*, a different object.
+  A recursive *type* spanning modules (M's alias references N's alias which
+  references M's) still resolves to a `mu` via the existing `declare_alias`
+  recursive-binding path **once both aliases are in the same flat env** — the
+  cross-module case reduces to the in-file recursive-alias case the moment the
+  names are co-visible, and `declare_alias` already handles that (binding the name
+  to a μ placeholder while parsing the body). The import-graph cycle break and the
+  type-recursion μ are orthogonal and both already-solved; the increment composes
+  them, it does not invent a third mechanism.
+
+- **Depth bound.** The visited set bounds recursion depth to the number of distinct
+  `lib/` modules on a chain (finite); termination is structural, not timeout-based.
+
+### 6.6.5 Q4 — trust (an imported alias is cross-artifact information)
+
+**Yes — an imported alias rides a trust boundary**, and it is made visible per the
+object model's trust obligations. The importing check **trusts the exporting
+module's parse**: N's checker validates N's annotations, but it admits the *shape*
+of M's alias `Ty` on the basis of M's `--::` declaration, which N did not itself
+re-derive from M's runtime semantics. This is exactly a `TrustBoundary`:
+
+```text
+TrustBoundary {
+  kind    = "cross_module_alias",
+  issuer  = "crescent.slice.v1",
+  covers  = <the exporting module path + the imported alias name(s)>,
+  policy  = "alias Ty admitted from exporting module's --:: declaration; the
+             exporting module's parse is trusted, not re-checked"
+}
+```
+
+Each cross-module-resolved claim records a `Dependency { kind = "trusted_boundary",
+target = <this boundary> }` **in addition to** the `observation` dependency on the
+exporting alias. The trust summary therefore surfaces *every* cross-module alias
+admission, exactly as force casts and stdlib signatures are surfaced (§2.5). This
+is the honest position §9.2 named — "cross-module alias propagation is a trusted
+boundary, not a checked relation" — now made a *visible, recorded* boundary rather
+than an invisible gap. The boundary is distinct from the stdlib boundary (§7.1's
+`slice-stdlib`): a `cross_module_alias` boundary `covers` a specific exporting
+module + name set, so an audit can see precisely which other artifact each claim
+trusted.
+
+What is **checked** vs **trusted**, made precise: the *resolution* (Name → the M's
+`Ty` data) is checked — N's parser really parses M's `--::` body into the slice `Ty`
+grammar, parse-not-cast, and a malformed exporting alias is a real error attributed
+to M. What is *trusted* is that M's `--::` declaration faithfully describes M's
+exported value (the same trust v1 already grants every `--::` alias about its own
+module's values). So cross-module resolution does not *add* trust beyond what an
+in-file alias already carries; it makes the *cross-artifact* hop where that trust is
+transferred **visible** as a boundary.
+
+### 6.6.6 Mechanization surface summary
+
+| Item | Where | What it does | Substrate? |
+|---|---|---|---|
+| `--:: require "x"` scan | `crescent_slice_parse.scan_annotation` | recognize the type-only import directive → `{ kind = "import", module = "x" }` | none |
+| value-`require` import detection | the lowering/survey import pass | static-string `require("lib.x")` → module path; dynamic → `dynamic-require` marker | none |
+| module-path → file path | new pure helper | `lib.x.y` → `lib/x/y.lua` \| `lib/x/init.lua` | none |
+| top-level alias extraction | reuse `scan_annotation_at` + `declare_alias` over the exporting source | the exporting module's `--::` aliases into a base env | none |
+| import pass (cap-injected) | `crescent_slice_lower` + `slice_survey`, `opts.read_file` | acyclic-visited resolution, base env assembly before local aliases | none |
+| cross-artifact `Dependency` | the lowering builder | claim → exporting alias observation (`kind="observation"`, invalidation) | uses existing `A.dependency` |
+| `cross_module_alias` `TrustBoundary` | the lowering builder | one boundary per exporting module, `covers` = module+names | uses existing `A.trust_boundary` |
+| exporting artifacts/observations | the import pass | M's `source_text` artifact + per-alias `observation` added to the state | uses existing `A.add_artifact`/`A.add_observation` |
+
+**The fence holds and the substrate is untouched.** Every row is either a scanner /
+path / pure-helper reach (zero lattice change, no new type constructor) or a use of
+an *existing* substrate object kind (`Dependency`, `TrustBoundary`, `Artifact`,
+`Observation`) for the multi-artifact relation the object model already supports.
+No complement, no match types, no global solving, no HKT, no new claim predicate,
+no new evidence method, **no `init.lua` change.** This is the design's prediction
+discharged: cross-module resolution is a *consumer* of the multi-artifact model, not
+an extension of it.
+
 ---
 
 ## 7. Acceptance Criteria
@@ -2144,6 +2345,95 @@ all five passes AND this increment. The full analysis suite is green at 6157
 (4905 prior intact + the increment's units/codec/fuzz). `bin/cr check` is clean on
 every touched file.
 
+### 9.10 Mechanization findings — slice v2 increment 2 (§6.6, cross-module aliases)
+
+The first genuinely **multi-artifact** increment, and the design's central
+prediction was discharged exactly: **no substrate change was required.** Recorded
+honestly per the prompt — including the headline finding (no substrate requirement
+surfaced), the measured collapse with honest residue, and the tooling constraints
+the mechanization hit.
+
+- **The substrate requirement the prompt asked about did NOT surface — and that is
+  the load-bearing finding.** §6.6 predicted, and the mechanization confirmed, that
+  cross-module resolution is a *consumer* of the multi-artifact object model, not an
+  extension of it. The exporting module's source rides an existing `Artifact`
+  (`kind = "source_text"`), its `--::` aliases ride existing `Observation`s
+  (`predicate = "alias"`, plural `source_artifacts`), the cross-artifact hop rides an
+  existing `TrustBoundary` (`kind = "cross_module_alias"`, populated `covers`), and
+  each consuming claim's reliance rides an existing `Dependency` (with a populated
+  `invalidation` field). All four object kinds already existed; `init.lua` is
+  byte-for-byte unchanged. The concurrent `init.lua` work was never reached. This
+  validates the object-model claim that artifacts are first-class and the
+  multi-artifact story "exists in the model" — increment 2 only had to assemble it.
+
+- **TWO cross-module idioms in real code; the `--:: require` directive is the
+  dominant one (the corpus reality the prompt mandated checking first).** The
+  original fixture's source fire (dns/tcp_client requiring lib.epoll) is the
+  *value-require* form. But the corpus's dominant idiom (48 files, the whole
+  taskgraph cluster) is the **`--:: require "lib.x"` type-only directive** — a `--::`
+  whose body is `require "<path>"`, importing *only* that module's aliases. v1's
+  scanner returned `nil` for it (it has no `=`), so it was silently dropped and every
+  name it would import became `unknown-type-name`. Recognizing it
+  (`scan_annotation`'s new `import` kind) is what resolves the taskgraph cluster.
+  Both forms reference imported types by **bare, unqualified name** — no `mod.Type`
+  qualification idiom exists anywhere in the corpus (verified by grep), which decided
+  the flat-name visibility rule.
+
+- **The collapse is real but modest (172 → 152), and the residue is genuine, not
+  hidden failure.** Resolution fires exactly for files whose unresolved name is
+  declared as a TOP-LEVEL `--::` alias in a `require`d module. The 152-file residue
+  is honestly *not* this shape: `lib/actor/init.lua` (the former #1 example) has zero
+  cross-module imports (its `unknown-type-name` is `cdata`-adjacent / `declare`d);
+  `Ctx` (26 files) is resolved by the legacy checker through a deeper-scope path the
+  slice's top-level-alias import does not reach. The slice does not chase these by
+  special-casing — they are recorded as residue. (The CHECKED-FINDINGS rise 11 → 22
+  is the *expected* consequence of resolving names: a file whose blocking unknown
+  name now resolves can surface a deeper, previously-masked annotation finding.)
+
+- **Caps-first held with no friction.** Reading an exporting module's source is I/O;
+  the resolver (`crescent_slice_xmodule.lua`) takes a `read_file` cap and never
+  touches `io`. The lowering driver and the survey inject a thin `io.open`-backed
+  reader at their edges. With no cap, cross-module imports resolve to no aliases —
+  the honest pre-increment behavior, exercised by a test. This is the CLAUDE.md
+  caps-first constraint satisfied by construction, not retrofitted.
+
+- **Cycles terminate by a visited set, orthogonal to the μ machinery (the Q3
+  decision, confirmed).** A `--:: require` cycle (mutually-requiring modules) is a
+  cycle in the *module graph*, broken by a visited-set on module paths — distinct
+  from the μ cycle guard that decides recursive *type* subtyping. A cross-module
+  *recursive type* still reduces to a `mu` via the existing `declare_alias`
+  placeholder-binding path once both names are co-visible. Both mechanisms already
+  existed; the increment composes them. Tested with a two-module require cycle.
+
+- **The true cross-module fixture is now a two-file corpus fixture, and it exposes
+  the §5 statement-lowering boundary (honest, not hidden).** `corpus/xmod/` holds
+  the exporting `epoll.lua` (declares `Epoll`) and the entry `tcp_client.lua`
+  (references `Epoll` by bare name across the `require`). The *annotation* resolves
+  cleanly — `Epoll` is no longer `unknown-type-name`, and the resolution rides a
+  visible `cross_module_alias` trust boundary. But the entry's *statements* (a
+  value-`require`, a `mod.new()` method call) are out-of-§5-subset, so the lowered
+  file is OUT-OF-SUBSET — the same statement-lowering gaps §9.8 ranked, orthogonal to
+  the alias resolution this increment delivers. The test asserts the alias-resolution
+  win (no `unknown-type-name:Epoll`, the trust boundary present, the dependencies
+  recorded) rather than a CLEAN end-to-end verdict the §5 subset cannot yet give.
+
+- **The transitive-alias typecheck constraint (a tooling note, not a semantics
+  finding).** The new modules reference the `Ty`/`PTy` aliases the slice carries on
+  its `--::` declarations. The real typechecker resolves a bare type name in a
+  transitively-required file against the *entry's* assembled alias env, so a new file
+  that requires the slice modules must also `require` `slice_ty`/`slice_ty_arg`
+  (whose `--::` declare `Ty`/`PTy`) for those names to resolve — mirroring §9.3
+  finding 5's cross-module-alias-visibility note for the *real* checker (the same
+  phenomenon this increment addresses at the *slice* level). This is a constraint on
+  how the slice modules are written, not a property of the slice's checked semantics.
+
+**What buckled in the substrate during increment 2: nothing.** The increment adds
+two scanner/resolver modules (`crescent_slice_xmodule.lua` + its test) and threads a
+`read_file` cap through the lowering driver and the survey; `init.lua` is
+byte-for-byte unchanged. Full `bin/cr test lib/type/analysis/` green at 6193
+(6157 prior intact + 36). `bin/cr check` is clean on every new file and introduces
+no regression on every modified file.
+
 ---
 
 ## 10. Next Pass
@@ -2313,3 +2603,32 @@ desugaring/scanner reach (zero lattice change) and the sixth (`tuple`) is one
 value-universe-justified constructor whose subtype rule is covariance + the existing
 union exists-forall. The substrate (`init.lua`) was again **not** touched. Full
 analysis suite green at 6157.
+
+### 10.3 Slice v2 increment 2 — DONE (2026-06-12)
+
+Increment 2 (§6.6) landed cross-module type-alias resolution — the measured #1
+demand (`unknown-type-name`, 172 files). Design grew first (§6.6, the multi-artifact
+derived whole, consuming the object model rather than extending it), then the
+mechanization in the same commit: `crescent_slice_xmodule.lua` (the resolver — the
+`--:: require` directive + value-require trigger collection, module-path → file-path
+resolution, acyclic-visited cross-module import pass with an injected `read_file`
+cap), the `import` directive kind in `crescent_slice_parse.lua`'s `scan_annotation`,
+the import pass + cross-artifact Artifact/Observation/TrustBoundary/Dependency
+records threaded into `crescent_slice_lower.lua`'s `M.lower` (cap-injected), and the
+cross-module seeding in `slice_survey.lua` (both annotation and `--e2e` modes). The
+true cross-module fixture (the tcp_client+epoll pattern the original
+`fixture_cross_module_type_alias.lua` could only approximate in-file) is now the
+two-file `corpus/xmod/` fixture, asserted end-to-end in
+`crescent_slice_xmodule_test.lua` (36 assertions).
+
+**Survey re-run headlines** (`docs/slice-survey-v1.md`, "after v2 increment 2"):
+annotation `unknown-type-name` **172 → 152** files (−20), OUT-OF-SUBSET **29.7% →
+27.8%**, CHECKED-CLEAN 483 → 489. The collapse is real but modest and the 152
+residue is **genuine** (names with no top-level-`--::`-export source — `cdata`/
+`declare`d types, legacy-checker deeper-scope resolution), recorded honestly, never
+forced by special-casing. The e2e survey is unchanged (statement-lowering-bound).
+
+**No substrate requirement surfaced** — the central finding (§9.10): cross-module
+resolution is a pure consumer of the multi-artifact object model, so `init.lua` was
+**not** touched (the concurrent init.lua work was never reached). Full analysis suite
+green at 6193 (6157 prior intact + 36).
