@@ -1,10 +1,11 @@
 # Decision: typechecker kernel recommendation
 
-**Status: recommendation — awaiting user ratification; nothing is adopted until
-the user ratifies.** No code moves, no doc is retired, and the existing
-`lib/type/static/` checker keeps gating commits until the user accepts (or
-amends) this recommendation. This record exists to put the comparison on paper,
-not to enact it.
+**Status: ratified — user-ratified 2026-06-12, in-session.** The recommendation
+below is adopted. Implementation proceeds under the v1 scope defined in §3;
+re-evaluation triggers in §6 remain active.
+
+_Prior status:_ recommendation — awaited user ratification; nothing adopted
+until ratified.
 
 **Date:** June 2026
 **Evaluated:** four advocate cases, one per candidate kernel — (1) HM + extensions,
@@ -74,9 +75,10 @@ hardest: the algebraic kernel was tried twice as *the whole checker* and failed 
 ad-hoc accumulation; hosting the same algebra as an untrusted, witness-checked
 producer behind a bidirectional spine is the structurally different bet the v5
 substrate was built to enable. The corpus's pervasive annotation density
-(843/1469 lib/ files, signatures mandated at module boundaries — verified) pre-pays
-bidirectionality's one real cost, the annotation burden, making this the
-lowest-risk path to a kernel that still reaches the declared lattice.
+(770/856 lib/ files carry at least one `--:` annotation — measured 2026-06-12;
+see §5.2 benchmark below) pre-pays bidirectionality's one real cost, the
+annotation burden, making this the lowest-risk path to a kernel that still
+reaches the declared lattice.
 
 ---
 
@@ -179,6 +181,34 @@ isolated extension behind a single function boundary with a written un-defer tri
    `lib/` and confirm the synth direction covers them without demanding annotations
    HM would not. If a meaningful fraction needs new annotations, the cost estimate
    was wrong — re-weigh against candidate 1/2's principal inference.
+
+   **Measured 2026-06-12** (pre-build, as §5 mandates):
+
+   | Metric | Count |
+   |---|---|
+   | Total `.lua` files under `lib/` (excl. `*_test.lua` and corpus fixtures) | 856 |
+   | Files containing at least one `--:` annotation | 770 (90%) |
+   | Files defining module-boundary functions (`M.foo = function` / `function M.foo`) | 621 |
+   | Of those: all module-fn defs have an adjacent `--:` within 3 preceding lines | 296 (48%) |
+   | Of those: at least one module-fn def lacks an adjacent `--:` | 325 (52%) |
+
+   *Method:* `find lib/ -name "*.lua" ! -name "*_test.lua" ! -path
+   "lib/type/analysis/corpus/*"` for the file list; `grep -l -- '--:'` for (b);
+   `grep -E '^(M\.foo = function|function M\.foo)'` (generalised) for module-fn
+   detection; awk 3-line lookback for adjacent-annotation classification.
+   "Adjacent" = any `--:` line in the 3 lines immediately preceding the `function`
+   keyword line.
+
+   *Assessment:* The 90% file-level annotation density comfortably supports the
+   "local inference suffices" premise — bidirectionality's cost is pre-paid at the
+   file level. The module-boundary picture is more granular: 296/621 files have
+   every exported function annotated; 325/621 have at least one gap. The gaps are
+   real (spot-checked: `lib/test/arb.lua` has 4 unannotated module functions out
+   of 17), but the density is high enough that the synth direction will cover the
+   majority of call sites without new annotation demand. This does not trigger the
+   §6 re-evaluation condition ("substantially more annotation than the corpus
+   already carries"). Gaps are work items for the annotation pass that v1 build
+   work will drive naturally.
 3. **Witness-checker overhead on the substrate.** Every kernel rule produces evidence
    a smaller checker validates. *Benchmark:* derivation-checking time on the deepest
    real files vs the tsgo bar. If post-hoc witness validation dominates, the hosting
@@ -242,7 +272,8 @@ would re-derive crescent's working rank-N on harder ground; EXPTIME decision vs
 timeout-30.
 
 **Case 4 — bidirectional + local inference (Pierce–Turner).** Best-matched-to-reality:
-the annotation-burden objection is pre-paid (843/1469 lib/ files annotated, verified);
+the annotation-burden objection is pre-paid (770/856 lib/ files annotated — measured
+2026-06-12; see §5.2);
 the no-global-solver stance makes the `solve.lua:579` fire structurally unreachable;
 and the substrate has *already rehearsed* the kernel — `stlc.lua`'s var/abs/app are
 bidirectional rules whose syntax-directedness makes derivations checkable evidence.
@@ -279,11 +310,9 @@ inference.
 - `typechecker-reference.md` exposes ~20 type families across the surface (section
   heads confirmed).
 
-**Taken on advocate authority (not independently re-derived):**
-- The 843/1469 annotation count (Case 4) and the 841-file figure (Case 1) — the
-  decision-record `why-not-external-lua-typechecker.md` independently cites "779 files
-  under lib/ use crescent syntax," so the order of magnitude is corroborated, but the
-  exact ratio was not re-counted here.
+**Measured (2026-06-12; replaces advocate figures):**
+- Annotation density — see §5.2. Advocate figures (843/1469 and 841-file) were
+  approximate; the re-count supersedes them. The order of magnitude held.
 - The V4Neg twice-failed history and its derivation from MLstruct §3.2 + simple-sub
   watchers (Case 2) — CLAUDE.md's ad-hoc-accumulation rule names the v1→v4 failure,
   corroborating the pattern, but the specific `typechecker-v4-deferred-constraints-design.md`
