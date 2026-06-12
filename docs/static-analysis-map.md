@@ -248,7 +248,17 @@ Rung status (ladder, design doc):
   22 → 25 (2.9%)**; the per-construct demand fell sharply (`multi-return` 482 → 317,
   `dynamic-index` 589 → 512). The heterogeneous closed-rec dynamic write and the
   body-synthesized multi-return join are recorded §9.15 deferrals. See
-  `docs/slice-survey-v1.md` "after v2 increment 5".
+  `docs/slice-survey-v1.md` "after v2 increment 5". **Slice v2 increment 6** (§6.10)
+  burned down those deferrals — diagnosis-first, and the diagnosis was the result: a
+  per-MARKER reason histogram showed the named deferrals were the wrong shape
+  (§9.15.4 is 2548-empty / ≈1-heterogeneous), dead (§9.15.5 `return f()` spread, 0
+  corpus sites), or downstream coverage symptoms (`multi-assign`/`multi-return` block
+  on argument/value expressions, not the landed mechanism). The one sound in-fence
+  item: the empty-fresh-table dynamic write (`out = {}; out[k] = v`), `index_write_target`
+  over an empty closed rec ⇒ `unknown` (the WRITE dual of the open-row rule). One
+  branch, no new method, substrate untouched. **e2e CHECKED-CLEAN 25 → 26**;
+  `dynamic-index-assign` fell #2 → #4 (482 → 282 files; −2548 markers). See
+  `docs/slice-survey-v1.md` "after v2 increment 6".
 
 Limits:
 

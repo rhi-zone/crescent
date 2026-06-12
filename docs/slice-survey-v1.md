@@ -1015,3 +1015,79 @@ and dynamic-index write over a homogeneous closed rec (CLEAN) vs a heterogeneous
 (OUT-OF-SUBSET, the §9.15 deferral). Full analysis suite green at 6421 assertions
 (6374 + 47 new); 0 TIMEOUT in the e2e survey; both touched lib files typecheck clean.
 Findings in §9.15.
+
+<!-- ════════════════════════════════════════════════════════════════════════
+     AFTER v2 INCREMENT 6 — appended by hand. END-TO-END (--e2e) delta from the
+     empty-fresh-table dynamic write (§6.10). The GENERATED annotation survey at the
+     top is unchanged (this is statement-lowering, not annotation-grammar, work).
+     Re-run: bin/cr run lib/type/analysis/slice_survey.lua --e2e
+════════════════════════════════════════════════════════════════════════════ -->
+
+## After v2 increment 6 (the empty-fresh-table dynamic write)
+
+Slice v2 increment 6 (`docs/agnostic-static-analysis-crescent-slice.md` §6.10)
+burned down the §9.15 deferrals gating the histogram top after increment 5
+(`dynamic-index` 512, `dynamic-index-assign` 482, `multi-assign` 450,
+`multi-return` 317). **Diagnosis first, and the diagnosis was the load-bearing
+result.** A per-MARKER reason histogram (the increment-5 harness extended to report
+each marker's FIRING REASON, not just its tag) contradicted the framing of the three
+named deferrals:
+
+- **`dynamic-index-assign` (3869 markers)** is **2548 EMPTY closed-rec writes**
+  (`out = {}; out[k] = v`, the fresh-table build idiom) — NOT the heterogeneous case
+  the §9.15.4 deferral named (≈1 site). The empty case is the work.
+- **`multi-assign` (2440)** is ~1560 `local x,y = f(args)` where the producer fn IS
+  recovered but the CALL synth-fails on an ARGUMENT or an `unknown` callee — the
+  assignment mechanism landed in increment 5; the marker is downstream
+  argument-expression coverage.
+- **`multi-return` (1815)** is `return a, b` where a VALUE expression
+  (`name`/`binop`/`call`) is out-of-subset — downstream value-expression coverage.
+  The `return f()` spread (§9.15.5) occurs **0 times** in the corpus.
+- **`dynamic-index` read indexer-union-key residue** is overwhelmingly
+  `union{integer, number}` — a soundly-rejected `number` key into an `[integer]`
+  array; the gap is UPSTREAM integer-preserving arithmetic, not an index rule.
+
+The increment landed the ONE sound in-fence item: the empty-fresh-table dynamic
+write. `index_write_target` over an empty closed rec returns `unknown` (no declared
+field ⇒ no constraint; sound because the empty-rec READ rule admits nothing, so the
+accepted write licenses no unsound read — the WRITE dual of the open-row rule). ONE
+branch in ONE function. **No substrate change** (`init.lua` byte-for-byte).
+
+**End-to-end survey re-run** (`--e2e`, 867 files, per-file budget 5s, stdlib +
+read_file caps injected):
+
+| Class | after v2 increment 5 | after v2 increment 6 |
+|---|--:|--:|
+| CHECKED-CLEAN | 25 (2.9%) | **26 (3.0%)** |
+| CHECKED-FINDINGS | 9 (1.0%) | 13 (1.5%) |
+| OUT-OF-SUBSET | 827 (95.4%) | **822 (94.8%)** |
+| NO-ANNOTATION | 6 (0.7%) | 6 (0.7%) |
+| TIMEOUT | 0 | **0** |
+
+**The CONSTRUCT-histogram delta is the honest progress measure** (the whole-file
+gate is the LAST out-of-subset construct per file, so a single rule that is rarely a
+file's last blocker moves the gate by +1 but the histogram far more):
+
+| Construct | after incr 5 (files) | after incr 6 (files) | delta |
+|---|--:|--:|--:|
+| `dynamic-index-assign` | 482 (#2) | **282 (#4)** | −200 files |
+
+The per-MARKER count for `dynamic-index-assign` fell **3869 → 1321 (−2548)** —
+exactly the empty-rec writes, now in-subset. The whole-file CHECKED-CLEAN rose 25 →
+26 (the empty-rec write was the LAST blocker in only one additional file). The
+CHECKED-FINDINGS rise (9 → 13) is REACH, not regression: four files whose last
+out-of-subset construct was the empty-rec write now lower past it and surface their
+PRE-EXISTING downstream findings (recursive-type / field-path-narrowing
+type-mismatches, the §9.8 family); the one file with a rejection
+(`lib/unified/rehype_meta/init.lua`) already had `rej=1, unk=1` at HEAD — the change
+did not introduce it.
+
+**Corpus fixture movements** (`corpus_lower_test`): `pairs_return_leak`
+(`merged = {}; merged[k] = v`) and `table_construction_widening`
+(`insns = {}; insns[i] = {...}`) BOTH moved OUT-OF-SUBSET → **CLEAN** (the
+empty-fresh-table write was their last boundary; both fixtures' headers require
+acceptance). The honest 11-fixture split moved **4 CLEAN / 1 FINDINGS / 6
+OUT-OF-SUBSET → 6 CLEAN / 1 FINDINGS / 4 OUT-OF-SUBSET**, 0 rejections anywhere. New
+inline sub-form test: empty-rec dynamic write (`out = {}; out[s] = 1`, CLEAN). Full
+analysis suite green at 6427 assertions (6421 + 6 net); 0 TIMEOUT; the touched lib
+file typechecks clean (0 errors, no regression). Findings in §9.16.

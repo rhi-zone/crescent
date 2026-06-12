@@ -488,11 +488,22 @@ M.index_result = index_result
 --     (write into the index signature) — same as the read.
 --   - open-row `rec` ⇒ `unknown` (any write is admitted; the open row hides it).
 --   - CLOSED `rec` ⇒ the write may land on any listed field; v1 is flow-insensitive
---     and cannot widen the rec, so the in-fence SOUND choice is: when all listed
---     fields share ONE value type `V` (homogeneous — an array/map built field-by-
---     field), the target is `V`; a HETEROGENEOUS closed rec returns nil (the write
---     stays out-of-subset, the §9.15 deferral) rather than forge an unsound check.
---     An EMPTY closed rec also returns nil (no element type to check against).
+--     and cannot widen the rec, so the in-fence SOUND choices are:
+--       * EMPTY closed rec (`{}`, the fresh-table `out = {}; out[k] = v` build idiom —
+--         the §6.10 dominant real shape, 2548 corpus markers): target `unknown`. The
+--         rec lists NO field, so there is NO declared element type a write could
+--         violate; accepting `v ⇐ unknown` rejects no correct program. It is SOUND
+--         because the empty-rec READ rule (`index_result`) returns `nil` for every
+--         dynamic read and `nil`/reject for every static read — so accepting the write
+--         can never license an unsound read. The rec stays `{}` (flow-insensitive — no
+--         widening), which is the SEPARATE read-side deferral, not this write's concern.
+--         This is the WRITE dual of the open-row rule, not a special case: no fields ⇒
+--         no constraint, exactly as an open row hides its element type.
+--       * HOMOGENEOUS closed rec (all listed fields share ONE value type `V` — an
+--         array/map built field-by-field): target `V`.
+--       * HETEROGENEOUS closed rec (≥2 fields, conflicting types): nil (out-of-subset,
+--         the §9.16 deferral). v1 cannot pick which field the dynamic key hits; ≈1
+--         corpus site, essentially dead. Un-defer: a rec-field-widening pass.
 --: (Ty, Ty) -> Ty | nil
 local function index_write_target(obj_ty, key_ty)
 	local k = obj_ty.kind
@@ -508,12 +519,15 @@ local function index_write_target(obj_ty, key_ty)
 	if k == "rec" then
 		if obj_ty.rows == "open" then return G.unknown() end
 		local fields = obj_ty.fields or {}
-		if #fields == 0 then return nil end
+		-- EMPTY closed rec (§6.10): no declared field ⇒ no constraint ⇒ `unknown`. Sound
+		-- because the empty-rec READ rule never admits a value, so the write licenses no
+		-- unsound read. The fresh-table build idiom (`out = {}; out[k] = v`).
+		if #fields == 0 then return G.unknown() end
 		-- homogeneous? all field value types structurally equal ⇒ that one type.
 		local first = fields[1].ty
 		for i = 2, #fields do
 			if not SUB.is_subtype(fields[i].ty, first) or not SUB.is_subtype(first, fields[i].ty) then
-				return nil -- heterogeneous: the §9.15 deferral
+				return nil -- heterogeneous: the §9.16 deferral
 			end
 		end
 		return first

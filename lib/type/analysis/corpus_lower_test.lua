@@ -141,16 +141,21 @@ T.describe("corpus e2e: fixture_tonumber_return_type — stdlib-call boundary", 
 	end)
 end)
 
-T.describe("corpus e2e: fixture_pairs_return_leak — dynamic-key write + arithmetic", function()
-	T.it("`merged[k] = v` (dynamic-index-assign) and `s + v` (arith) are outside §5", function()
+T.describe("corpus e2e: fixture_pairs_return_leak — empty-fresh-table dynamic write (§6.10) — CLEAN", function()
+	T.it("`merged = {}; merged[k] = v` now lowers (empty-rec write target = unknown)", function()
 		local o = lower_fixture("pairs_return_leak")
-		T.eq(o.expected, "OUT-OF-SUBSET", "dynamic-key field write and `+` are outside §5")
-		T.ok(has_construct(o, "dynamic-index-assign") or has_construct(o, "operator-arith"),
-			"marked the dynamic-key write / arithmetic boundary")
+		-- §6.10: the fresh-table build idiom `local merged = {}` then a dynamic write
+		-- `merged[k] = v` is now IN subset. `index_write_target` over an EMPTY closed
+		-- rec returns `unknown` (no declared field ⇒ no constraint; sound because the
+		-- empty-rec READ rule never admits a value, so the write licenses no unsound
+		-- read). With `+` already in subset (§6.7.1) and `sum_values(merged)` typing
+		-- (the empty rec `<: { [string]: integer }` holds — the arg check accepts), the
+		-- fixture is now fully within §5. Its own header requires "Accepts with 0
+		-- errors"; CLEAN is the correct verdict.
+		T.eq(o.expected, "CLEAN", "the empty-fresh-table dynamic write closes the last boundary")
+		T.eq(#o.constructs, 0, "no out-of-subset markers")
 		assert_sound(o)
-		-- the in-subset part DID work: the `for _, v in pairs(t)` loop-var binding
-		-- emitted accepted synth_loop_var claims.
-		T.ok(o.requested > 0, "the pairs loop-var claims were emitted and accepted")
+		T.ok(o.requested > 0, "the pairs loop-var + write claims were emitted and accepted")
 	end)
 end)
 
@@ -172,11 +177,15 @@ T.describe("corpus e2e: fixture_coinductive_recursive_types — field-path narro
 	end)
 end)
 
-T.describe("corpus e2e: fixture_table_construction_widening — dynamic-key write boundary", function()
-	T.it("`insns[1] = {...}` (dynamic-index-assign) is the §5 boundary", function()
+T.describe("corpus e2e: fixture_table_construction_widening — empty-fresh-table write (§6.10) — CLEAN", function()
+	T.it("`insns = {}; insns[i] = {...}` now lowers (empty-rec write target = unknown)", function()
 		local o = lower_fixture("table_construction_widening")
-		T.eq(o.expected, "OUT-OF-SUBSET", "integer-key sequential writes use the dynamic-key form")
-		T.ok(has_construct(o, "dynamic-index-assign"), "marked dynamic-index-assign")
+		-- §6.10: the integer-keyed sequential build into a fresh `{}` is the same
+		-- empty-fresh-table dynamic-write idiom; `index_write_target` returns `unknown`
+		-- for the empty closed rec, so each `insns[i] = {...}` write accepts. The
+		-- fixture is now fully within §5 and its header requires acceptance.
+		T.eq(o.expected, "CLEAN", "the empty-fresh-table dynamic write closes the boundary")
+		T.eq(#o.constructs, 0, "no out-of-subset markers")
 		assert_sound(o)
 	end)
 end)
@@ -244,11 +253,15 @@ end)
 
 -- ── The headline assertion: the honest split ─────────────────────────────────
 
-T.describe("corpus e2e: the honest 11-fixture split under real lowering (v2.5)", function()
-	T.it("4 CLEAN, 1 FINDINGS, 6 OUT-OF-SUBSET, 0 rejections anywhere", function()
-		-- v2.5 (§6.9, the multi-return / dynamic-index family): closure_param_typing
-		-- moved OUT-OF-SUBSET → CLEAN — `return node, function() end` now lowers
-		-- (the §6.5.5 tuple built at the return site), which was its last boundary.
+T.describe("corpus e2e: the honest 11-fixture split under real lowering (v2.6)", function()
+	T.it("6 CLEAN, 1 FINDINGS, 4 OUT-OF-SUBSET, 0 rejections anywhere", function()
+		-- v2.6 (§6.10, the empty-fresh-table dynamic write): pairs_return_leak and
+		-- table_construction_widening BOTH moved OUT-OF-SUBSET → CLEAN — the
+		-- `merged = {}; merged[k] = v` / `insns = {}; insns[i] = {...}` fresh-table
+		-- build idiom now lowers (`index_write_target` over an empty closed rec returns
+		-- `unknown`, no constraint to violate; sound because the empty-rec READ rule
+		-- never admits a value). Both fixtures' headers require acceptance.
+		-- v2.5 had moved closure_param_typing → CLEAN (the §6.5.5 return-site tuple);
 		-- v2.3 had moved boolean_narrowing → CLEAN (operators) and coinductive →
 		-- FINDINGS (the field-path-narrow type-mismatch, the sole remaining finding).
 		-- These fixtures lower WITHOUT the injected stdlib cap (no `{ stdlib = true }`),
@@ -268,9 +281,9 @@ T.describe("corpus e2e: the honest 11-fixture split under real lowering (v2.5)",
 			elseif o.expected == "FINDINGS" then findings = findings + 1 end
 			total_rej = total_rej + o.rej
 		end
-		T.eq(clean, 4, "4 fixtures fully within §5 (local_return_narrowing, union_alias, boolean_narrowing, closure_param_typing)")
+		T.eq(clean, 6, "6 fixtures fully within §5 (local_return_narrowing, union_alias, boolean_narrowing, closure_param_typing, pairs_return_leak, table_construction_widening)")
 		T.eq(findings, 1, "1 fixture (coinductive) hits the field-path-narrow type-mismatch finding")
-		T.eq(oos, 6, "6 fixtures hit a real §5 boundary (stdlib/forward-alias/dynamic-key-write/field-path)")
+		T.eq(oos, 4, "4 fixtures hit a real §5 boundary (stdlib/forward-alias/cast/field-path)")
 		T.eq(total_rej, 0, "ZERO rejections across all 11 — every in-subset claim the lowering emits is sound")
 	end)
 end)
@@ -881,7 +894,25 @@ return { set = set }
 		T.ok(not has_construct(o, "dynamic-index-assign"), "the homogeneous closed-rec write is in subset")
 		assert_sound(o)
 	end)
-	T.it("`t[k] = v` over a HETEROGENEOUS closed rec stays out-of-subset (the §9.15 deferral)", function()
+	T.it("`out = {}; out[k] = v` over an EMPTY fresh table now lowers (§6.10) — CLEAN", function()
+		-- §6.10: the fresh-table build idiom. An empty closed rec has no declared
+		-- field, so `index_write_target` returns `unknown` (no constraint to violate).
+		-- Sound: the empty-rec READ rule never admits a value, so the accepted write
+		-- licenses no unsound read. This was the dominant real shape behind the §9.15.4
+		-- "empty" deferral (2548 corpus markers).
+		local o = lower_src([[
+local function build(s)
+  local out = {}
+  out[s] = 1
+  return out
+end
+return { build = build }
+]], false)
+		T.eq(o.expected, "CLEAN", "the empty-fresh-table dynamic write target is unknown (accepts)")
+		T.ok(not has_construct(o, "dynamic-index-assign"), "the empty-rec write is in subset")
+		assert_sound(o)
+	end)
+	T.it("`t[k] = v` over a HETEROGENEOUS closed rec stays out-of-subset (the §9.16 deferral)", function()
 		local o = lower_src([[
 --: ({ a: integer, b: string }, string, integer) -> ()
 local function set(t, k, v)

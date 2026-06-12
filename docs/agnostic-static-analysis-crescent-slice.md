@@ -2082,6 +2082,110 @@ with un-defer triggers, never forged. No complement, no match types, no global
 solving, no HKT, no name-keying. The substrate (`init.lua`) is **untouched**,
 byte-for-byte.
 
+## 6.10 Increment v2.6 — the empty-fresh-table dynamic write + the diagnose-first re-ranking of the residual family
+
+Status: design pass for slice **v2 increment 6**, the §9.15 deferrals that gate
+the histogram top after increment 5 (`dynamic-index` 512, `dynamic-index-assign`
+482, `multi-assign` 450, `multi-return` 317). Derived whole; the headline finding
+is itself the load-bearing result of the increment: **diagnosis contradicted the
+deferrals' framing.** Per-marker corpus measurement (the increment-5 harness,
+extended to report each marker's REASON, not just its tag) showed the four top
+tags are dominated NOT by the named §9.15 mechanisms — those already work — but by
+DOWNSTREAM expression coverage. One clean, sound, in-fence item remains in this
+family; everything else is correctly re-framed as substrate gaps in OTHER families.
+
+### 6.10.1 The measured demand (diagnosed before designing)
+
+The harness lowered every corpus file and bucketed each top-tag marker by its
+firing reason (total marker counts, not file counts):
+
+- **`dynamic-index-assign` (3869 markers):** `wt-nil objkind=rec-EMPTY` is **2548**
+  — the fresh-table build idiom `out = {}; out[k] = v` (a `pairs`-copy/merge,
+  `out[render_field] = …`). The heterogeneous closed-rec write the §9.15.4 deferral
+  named is **≈1 site** (essentially dead). `obj-oos` (580) and `key-oos` (452) are
+  downstream object/key coverage.
+- **`multi-assign` (2440 markers):** `local x,y = f(args)` where the producer fn IS
+  recovered but the CALL synth-fails on an ARGUMENT (924 `prodfty=fn`) or the callee
+  is `unknown`/unannotated (339 + 297 `prodfty=nil`). The multi-assign MECHANISM
+  works (increment 5 landed the method-call/field-call spread); the marker fires
+  because an *argument expression* or the *callee* is out-of-subset. The dominant
+  residue is **argument-expression coverage**, not assignment.
+- **`multi-return` (1815 markers):** `return a, b` where `flatten_values` fails on a
+  VALUE (`name` 719, `binop` 605, `call` 187, `nil` 174). The return-tuple mechanism
+  works; the marker fires because a *value expression* is out-of-subset. The
+  `return f()` SPREAD case the §9.15.5 deferral named occurs **0 times** in the
+  entire corpus.
+- **`dynamic-index` read (5058 markers):** `obj-oos` (1737, the object name/index
+  expr itself out-of-subset), object `unknown` (877), `key-oos` (745), and
+  **`indexer keyed by a union key` (876)**. The union-key residue is, on inspection,
+  overwhelmingly `union{integer, number}` (1332 of the indexer/rwi misses) — a key
+  that synthesizes to `integer | number` because integer arithmetic yields `number`.
+  `number </: integer`, so the access is SOUNDLY rejected; the precision gap is
+  UPSTREAM (integer-preserving arithmetic), not an index rule.
+
+**This diagnosis IS the increment's primary result.** It demonstrates the
+prompt's discipline — verify, don't assume: three of the four named §9.15 deferrals
+are either dead in the corpus (§9.15.5, 0 sites; §9.15.4-heterogeneous, ≈1 site) or
+not the actual blocker (the multi-assign/multi-return tags are downstream coverage
+symptoms). One genuine in-fence item survives.
+
+### 6.10.2 The empty-fresh-table dynamic write — `index_write_target` over an empty closed rec
+
+**Value-universe derivation.** `t[e] = v` where `t : rec{}` (an EMPTY closed rec,
+the fresh `out = {}` local before any field is written). The rec lists NO field, so
+there is **no declared element type a write could violate**. The sound write target
+is therefore `unknown`: `v ⇐ unknown` rejects no correct program. It is SOUND, not
+merely permissive, because the READ side is already closed off: `index_result` over
+an empty closed rec returns `nil` for every dynamic read and reject/`nil` for every
+static read (§6.9.2), so accepting the write can never license an unsound read. The
+rec stays `{}` (v1 is flow-insensitive — no widening), which is the SEPARATE
+read-side deferral, not this write's concern. This is the **WRITE dual of the
+open-row rule** (open row ⇒ `unknown` write target because the element type is
+hidden): an empty closed rec has no element type to constrain, exactly as an open
+row hides its element type. No special case — the same "no known element type ⇒ no
+constraint" principle, applied to the empty-field structural case.
+
+**Mechanization.** `index_write_target`'s `rec` branch: when `#fields == 0` (after
+the open-row check), return `G.unknown()` instead of `nil`. This is the ONLY code
+change of the increment — one branch in one function. The §9.15.3 split (the
+write target is its OWN function, NOT a reuse of `index_result`) is what makes this
+sound and local: the READ rule still returns `nil` for the empty rec (no false
+reads), while the WRITE rule returns `unknown` (accepts the write). Heterogeneous
+closed recs still return `nil` (re-deferred, §9.16 — ≈1 corpus site).
+
+### 6.10.3 The three named deferrals — verdicts against the corpus
+
+- **§9.15.4 (heterogeneous/EMPTY closed-rec write) — SPLIT and PARTIALLY CLOSED.**
+  The corpus showed the deferral was 2548-EMPTY / ≈1-heterogeneous. The EMPTY case is
+  **implemented** (§6.10.2) — its un-defer trigger ("rec-field-widening") was wrong:
+  no widening is needed, because `unknown` is the sound write target under
+  flow-insensitivity. The HETEROGENEOUS case is **re-deferred** (§9.16) with the same
+  trigger, now noted as essentially dead (≈1 site).
+- **§9.15.5 (`return f()` multi-spread) — RE-DEFERRED, zero corpus demand.** The
+  bare-spread `return f()` form occurs **0 times** across 867 corpus files; the
+  per-value `return a, b` form (in-subset since increment 5) is universal. Recorded
+  in §9.16 as a dead deferral — un-defer ONLY if a real site appears.
+- **§9.15.6 (body-synthesized multi-return join) — RE-DEFERRED, behind the shared
+  pass.** Unchanged: an unannotated multi-return body still synthesizes `unknown`,
+  behind the same local-return-type-collection pass the §6.8 closure-return join
+  waits on. Not a top-tag blocker (the top tags are downstream coverage, §6.10.1).
+
+### 6.10.4 Mechanization surface summary
+
+| Item | Where | New evidence method? | Subtype change? | Substrate? |
+|---|---|---|---|---|
+| empty-fresh-table dynamic write | `index_write_target` `rec` branch: `#fields == 0 ⇒ unknown` | none (reuses `check_against`) | none (one RESULT rule, the write dual of open-row) | none |
+
+**The fence holds — one branch, zero new methods.** No new evidence method, no
+subtype-relation change, no constructor, no solver. The single change is one RESULT
+rule in `index_write_target` (empty closed rec ⇒ `unknown` write target), the write
+dual of the open-row rule, sound because the empty-rec READ rule admits nothing. The
+diagnosis is the increment's load-bearing finding: the top tags are dominated by
+downstream coverage (argument-expression, value-expression, integer-preserving
+arithmetic) and by a deferral whose real shape (empty) the corpus re-ranked away
+from its named shape (heterogeneous). No complement, no match types, no global
+solving, no name-keying. The substrate (`init.lua`) is **untouched**, byte-for-byte.
+
 ---
 
 ## 7. Acceptance Criteria
@@ -3890,3 +3994,90 @@ follow-up). The corpus 11-fixture split moved 3 CLEAN / 1 FINDINGS / 7 OUT-OF-SU
 multi-return was its last boundary), 0 rejections anywhere. The fence held; the
 substrate was again **not** touched. Full report:
 `docs/artifacts/typechecker-run-2026-06-12/increment-5.md`.
+
+### 9.16 Mechanization findings — slice v2 increment 6 (§6.10, the empty-fresh-table dynamic write + the diagnose-first re-ranking)
+
+Recorded honestly per the prompt. The increment's primary result is the DIAGNOSIS:
+per-marker corpus measurement contradicted the framing of the three named §9.15
+deferrals. One sound in-fence item landed; the rest is correctly re-framed as
+substrate gaps in other families. No checker soundness bug.
+
+1. **The §9.15.4 deferral's real shape is EMPTY, not heterogeneous (the sharpest
+   finding).** The deferral named "heterogeneous/empty closed-rec dynamic write." The
+   corpus says: **2548 EMPTY** (`out = {}; out[k] = v`, the fresh-table build idiom),
+   **≈1 heterogeneous**. The empty case is **implemented** — `index_write_target`
+   over an empty closed rec returns `unknown` (no declared field ⇒ no constraint;
+   sound because the empty-rec READ rule never admits a value, so the accepted write
+   licenses no unsound read). The named un-defer trigger ("rec-field-widening") was
+   WRONG for the empty case: no widening is needed; `unknown` is the sound target
+   under flow-insensitivity. This is the WRITE dual of the open-row rule, not a
+   special case. Corpus marker count `dynamic-index-assign` 3869 → 1321 (−2548).
+
+2. **§9.15.5 (`return f()` multi-spread) has ZERO corpus demand.** Instrumenting the
+   spread marker across all 867 files: **0 occurrences.** The per-value `return a, b`
+   form (in-subset since increment 5) is universal; the bare-spread `return f()` does
+   not occur. Re-deferred as a DEAD deferral — un-defer only if a real site appears.
+   A worked example of "verify, don't assume": the deferral was recorded as a likely
+   blocker; the corpus says it is not one.
+
+3. **The top tags are dominated by DOWNSTREAM coverage, not the family mechanism.**
+   The per-marker reason histogram (the increment-5 harness extended to report each
+   marker's FIRING REASON) showed: `multi-assign` (2440 markers) is ~1560
+   `local x,y = f(args)` where the producer fn IS recovered but the CALL synth-fails
+   on an ARGUMENT or an `unknown` callee — argument-expression coverage, not
+   assignment. `multi-return` (1815) is `return a, b` where a VALUE expression
+   (`name`/`binop`/`call`) is out-of-subset — value-expression coverage. The
+   assignment/return MECHANISMS landed in increment 5; the markers are downstream
+   symptoms. Framed as substrate: **argument/value-expression coverage** is the next
+   front, NOT more multi-assign/return work.
+
+4. **The `dynamic-index` indexer-union-key residue is an ARITHMETIC-PRECISION gap.**
+   The 876 `indexer` reads rejected under a union key are overwhelmingly (1332 incl.
+   rwi) `union{integer, number}` — a key that synthesizes to `integer | number`
+   because integer arithmetic yields `number`. `number </: integer`, so the access is
+   SOUNDLY rejected. Framed as substrate: **integer-preserving arithmetic** (operator
+   typing), a different family — NOT an index-rule gap. Adding an "admit number into
+   `[integer]`" rule would be unsound special-casing; refused.
+
+5. **The CHECKED-FINDINGS rise (9 → 13) is reach, not regression.** Four files whose
+   LAST out-of-subset construct was the empty-rec write now lower past it and reach
+   the check stage, surfacing their PRE-EXISTING downstream findings (recursive-type /
+   field-path-narrowing type-mismatches — the §9.8 deferral family). Verified: the one
+   file with a rejection (`lib/unified/rehype_meta/init.lua`) ALREADY had `rej=1,
+   unk=1` at HEAD — the empty-rec change did not introduce it; it only stopped masking
+   it earlier. No soundness regression.
+
+**Survivals.** The empty-rec write rule is sound (the read side admits nothing).
+Homogeneous and heterogeneous closed-rec writes are unchanged (homogeneous ⇒ `V`,
+heterogeneous ⇒ out-of-subset). The §9.15.6 body-synthesized multi-return join is
+re-deferred unchanged (behind the shared local-return-type-collection pass). Full
+analysis suite green at 6427 assertions (6421 + 6 net); the touched lib file
+(`crescent_slice.lua`) typechecks clean (0 errors, same 4 warnings as HEAD — no
+regression); 0 TIMEOUT in the e2e survey.
+
+### 10.7 Slice v2 increment 6 — DONE (the empty-fresh-table dynamic write + the diagnose-first re-ranking) (2026-06-12)
+
+Increment 6 (§6.10) burned down the §9.15 deferrals gating the histogram top —
+**diagnosis-first, and the diagnosis was the load-bearing result.** Per-marker
+corpus measurement (not file-count) showed the three named deferrals were either the
+WRONG shape (§9.15.4 is 2548-empty / ≈1-heterogeneous), DEAD (§9.15.5, 0 sites), or
+not the actual blocker (the `multi-assign`/`multi-return` tags are downstream
+argument/value-expression coverage symptoms — the mechanisms landed in increment 5).
+
+One sound in-fence item landed: the **empty-fresh-table dynamic write**
+(`out = {}; out[k] = v`). `index_write_target` over an empty closed rec returns
+`unknown` (no declared field ⇒ no constraint; sound because the empty-rec READ rule
+admits nothing). ONE branch in ONE function; no new evidence method, no subtype
+change, no substrate change (`init.lua` byte-for-byte).
+
+**Survey re-run headlines** (`docs/slice-survey-v1.md`, "after v2 increment 6",
+`--e2e`, 867 files): whole-file **CHECKED-CLEAN 25 → 26**, CHECKED-FINDINGS 9 → 13
+(reach, not regression — finding 5), OUT-OF-SUBSET 827 → 822, **TIMEOUT 0**. The
+CONSTRUCT-histogram delta is the honest progress measure: **`dynamic-index-assign`
+fell from #2 (482 files) to #4 (282 files), −200 files; the per-MARKER count fell
+3869 → 1321 (−2548, exactly the empty-rec writes).** The corpus 11-fixture split
+moved 4 CLEAN / 1 FINDINGS / 6 OUT-OF-SUBSET → **6 CLEAN / 1 FINDINGS / 4
+OUT-OF-SUBSET** (pairs_return_leak + table_construction_widening → CLEAN, both their
+last boundary), 0 rejections anywhere. The fence held; the substrate was again
+**not** touched. Full report:
+`docs/artifacts/typechecker-run-2026-06-12/increment-6.md`.
