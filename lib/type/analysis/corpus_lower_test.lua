@@ -1112,3 +1112,124 @@ return { k = k }
 		T.ok(has_construct(o, "type-mismatch"), "the alias-write soundness fence rejects the re-widened read")
 	end)
 end)
+
+T.describe("slice v2.9: sub-statement happens-before invalidation fence (§6.11.2, audit round 5 F1)", function()
+	-- These tests make the SUB-STATEMENT soundness boundary EXECUTABLE: a call that is
+	-- syntactically a sibling evaluated BEFORE a path read within the SAME statement
+	-- fires before the read and may mutate the field. Lua evaluates arguments and
+	-- connectives left-to-right. The sound rule: if `lc.path_call_fired` is set (any
+	-- call has been evaluated earlier in the current expression tree), subsequent path
+	-- reads skip the live refinement and fall back to the declared field type.
+
+	T.it("call-before-read (arg order): id2(emit(o), o.f) is FINDINGS (the call fires before o.f is read)", function()
+		local o = lower_src([[
+--:: O = { f: string | nil }
+--: (string, string) -> string
+local function id2(a, b) return b end
+--: (O) -> string
+local function emit(o) return "x" end
+--: (O) -> string
+local function g(o)
+  if o.f then return id2(emit(o), o.f) end
+  return ""
+end
+]], false)
+		-- `emit(o)` is arg1 and fires before `o.f` (arg2) is read.
+		-- The sub-statement fence rejects: `o.f` falls back to `string | nil` (not a
+		-- subtype of the `string` return), correctly FINDINGS.
+		T.eq(o.expected, "FINDINGS", "call-before-read in argument position: o.f falls back to string|nil")
+		T.ok(has_construct(o, "type-mismatch"), "the sub-statement fence rejects the re-widened read")
+	end)
+
+	T.it("call-before-read (`or` connective): emit('x') or o.f is FINDINGS", function()
+		local o = lower_src([[
+--:: O = { f: string | nil }
+--: (O) -> string
+local function emit(o) return "x" end
+--: (O) -> string
+local function g(o)
+  if o.f then return emit("x") or o.f end
+  return ""
+end
+]], false)
+		-- `or` evaluates the left operand first: `emit("x")` fires before `o.f` is read.
+		T.eq(o.expected, "FINDINGS", "or-left call fires before o.f on the right: correctly FINDINGS")
+		T.ok(has_construct(o, "type-mismatch"), "the sub-statement fence rejects the re-widened read")
+	end)
+
+	T.it("call-before-read (`and` connective over μ-typed base): touch(n) and id(n.left) is FINDINGS", function()
+		local o = lower_src([[
+--:: N = { left: N | nil }
+--: (N) -> N
+local function id(n) return n end
+--: (N) -> nil
+local function touch(n) end
+--: (N) -> N
+local function g(n)
+  if n.left then
+    local r = touch(n) and id(n.left)
+    return n
+  end
+  return n
+end
+]], false)
+		-- `and` evaluates the left operand first: `touch(n)` fires before `n.left` (arg
+		-- to `id`) is read. The μ-typed base interaction (§6.11.2 + §3) is covered.
+		T.eq(o.expected, "FINDINGS", "and-left call fires before n.left on the right: correctly FINDINGS")
+	end)
+
+	T.it("read-before-call (the argument IS the call's arg): f(o.f) stays CLEAN", function()
+		local o = lower_src([[
+--:: O = { f: string | nil }
+--: (string) -> string
+local function id(s) return s end
+--: (O) -> string
+local function g(o)
+  if o.f then return id(o.f) end
+  return ""
+end
+]], false)
+		-- `o.f` is the ARGUMENT to `id` — it is synthesized LEFT-TO-RIGHT BEFORE the
+		-- call fires, so the live refinement is correctly consumed. CLEAN.
+		T.eq(o.expected, "CLEAN", "read is the call argument (happens-before the call): refinement is sound")
+		assert_sound(o)
+	end)
+end)
+
+T.describe("slice v2.9: post-exit guard narrows a field PATH (§6.11, audit round 5 F2)", function()
+	-- `if not x.f then return end` is the dominant early-return guard idiom in lib/.
+	-- The block_exits arm must narrow the PATH x.f by the guard's FALSY refinement
+	-- (the not-guard's falsy branch = the value IS truthy) for subsequent statements.
+	-- This mirrors the if-then arm's path_pre_type handling.
+
+	T.it("post-exit guard on a field path narrows x.f (CLEAN — was wrong-rejection)", function()
+		local o = lower_src([[
+--:: Box = { f: string | nil }
+--: (string) -> string
+local function id(s) return s end
+--: (Box) -> string
+local function g(x)
+  if not x.f then return "n" end
+  return id(x.f)
+end
+]], false)
+		-- `if not x.f then return "n" end` is a post-exit guard: the block_exits arm
+		-- must bind x.f to its non-nil refinement so `id(x.f)` sees `string`, not
+		-- `string | nil`. Before the fix this was FINDINGS (wrong-rejection).
+		T.eq(o.expected, "CLEAN", "post-exit guard narrows the path x.f to non-nil")
+		assert_sound(o)
+	end)
+
+	T.it("post-exit guard on a bare variable still narrows (regression guard — CLEAN)", function()
+		local o = lower_src([[
+--: (string | nil) -> string
+local function g(v)
+  if not v then return "n" end
+  return v
+end
+]], false)
+		-- Pre-existing behavior: bare-variable post-exit guard. Must stay CLEAN.
+		T.eq(o.expected, "CLEAN", "bare-var post-exit guard still narrows (no regression)")
+		assert_sound(o)
+	end)
+end)

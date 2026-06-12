@@ -2263,28 +2263,29 @@ rule, record the imprecision, and un-defer toward a purity/effects substrate
 (`docs/effects.md`) — when the slice can prove a callee pure and a base un-escaped,
 the call-invalidation relaxes. Recorded §9.18 with that trigger.
 
-**Readonly fields survive calls and writes — justified.** The grammar carries a
-`readonly` field marker (`{ key, ty, optional, readonly }`). A `readonly` field
-*cannot be reassigned through any alias* — that is exactly what the marker means in
-the value universe ("no write can occur to this field"). So a readonly path
-refinement is immune to both call-invalidation and write-invalidation: no call and no
-write, through any alias, can change a readonly field. This is not a special case —
-it is the direct value-universe reading of the readonly marker, the same reading that
-makes readonly fields covariant where mutable fields are invariant (§9.2). A readonly
-path refinement therefore survives the whole block. (The corpus's narrowed paths are
-mutable record fields, so this is a soundness-completeness statement, not a corpus
-demand; it is the principled boundary, recorded as such.)
+**Readonly fields surviving calls and writes — deferred.** The `Field` record carries
+a `readonly` slot (`slice_ty.lua:35`), and the principled reading would be: a
+`readonly` path refinement survives calls and writes (no code can mutate a readonly
+field through any alias). However, the v1 annotation grammar hardcodes `readonly =
+false` for every parsed field (`crescent_slice_parse.lua`), and `invalidate_paths`
+checks no readonly marker — so the survival case can never arise and, if it did, would
+not be honored. Recording this as a **deferred item**: readonly-field survival requires
+(1) the annotation grammar gaining readonly-field syntax, and (2) `invalidate_paths`
+skipping paths whose declared field is readonly. Un-defer trigger: a parsed readonly
+field in the corpus. Until then, all paths invalidate unconditionally — the sound-
+conservative baseline. (Audit round 5 F3; §9.20.)
 
-**Granularity: statement-level, invalidate-AFTER.** The refinement is dropped
-*after* the invalidating statement's claims are lowered, never before. This is the
-load-bearing soundness-AND-precision point: in `if node.left then s = s +
-tree_sum(node.left) end`, the body is one assignment whose RHS calls
-`tree_sum(node.left)`. The path read `node.left` is synthesized as the call argument
-*within* that statement — it reads `T_true = TreeNode` *before* the call's
-invalidation applies to subsequent statements. The read happens-before the call;
-the invalidation governs the *next* statement. Statement-granular invalidate-after is
-both sound (the call cannot have run when the argument is typed) and precise enough to
-type the guarded read (the dominant idiom: guard, then immediately use in a call).
+**Granularity: sub-statement, invalidate-AT-call.** The refinement dies at the point
+the call fires within the expression tree, not after the whole statement. Lua evaluates
+arguments left-to-right, so a path read that IS the argument to the invalidating call
+correctly reads the live refinement (the read is synthesized before the call fires).
+But a path read that appears as a LATER-evaluated sibling — `id2(emit(o), o.f)`,
+`emit("x") or o.f`, `touch(n) and id(n.left)` — has its base potentially mutated by
+the earlier call before the read executes. The implementation enforces this by calling
+`invalidate_paths(ctx)` at the end of `synth_call_expr`/`synth_methodcall_expr`: after
+the callee and all arguments are evaluated (so reads that ARE arguments read the live
+refinement), but before control returns to the caller's expression tree (so sibling
+reads after this call see the widened type). (Audit round 5 F1; §9.20.)
 
 ### 6.11.3 Aliasing — the worked example (why "any write-through-any-lvalue")
 
@@ -4528,11 +4529,12 @@ soundness-of-rejection-correct precision boundaries, never wrong types.
   refinement survive. Un-defer: a purity/effects substrate (`docs/effects.md`) that
   lets the slice prove a callee pure and a base un-escaped. Recorded honestly as the
   imprecision the conservative rule accepts.
-- **Readonly-field survival is implemented in principle, untested by corpus.** §6.11.2
-  derives that a readonly path refinement survives calls/writes (no write can reach a
-  readonly field). The corpus's narrowed paths are all mutable record fields, so this
-  is a soundness-completeness statement; if a readonly narrowed path appears, it is the
-  acceptance test for the readonly-survival branch.
+- **Readonly-field survival — deferred (vacuous carve-out).** §6.11.2 stated that a
+  readonly path refinement survives calls/writes. Audit round 5 (§9.20) confirmed this
+  carve-out is vacuous (the annotation grammar hardcodes `readonly = false`) and
+  unimplemented (`invalidate_paths` checks no marker). Removed from the fence's
+  executable claim; un-defer trigger: annotation grammar gains readonly syntax
+  AND `invalidate_paths` skips paths whose declared field is readonly.
 
 **Regression.** No pre-existing test broken; the only updated tests are the
 coinductive fixture's (FINDINGS → CLEAN) and the 11-fixture honest-split tally
@@ -4627,6 +4629,70 @@ resolution (`server_socket`/`Expr`-union), the independent-batch source-order
 invariant, the mutual-cycle honest-error fence, the `alias_decl_order` precedence
 assertion, and the cross-module forward-sibling import.
 
+### 9.20 Mechanization findings — audit round 5 (§6.11.2 fence, post-exit path narrowing)
+
+Full report `docs/artifacts/typechecker-run-2026-06-12/audit-round-5.md`.
+Full analysis suite green at **6521 assertions** (6501 + 20 new). `timeout 30 bin/cr
+check` clean on the touched files (0 errors). e2e survey: CHECKED-CLEAN **27 →
+27** (no regression from F1's tighter fence). Topo-ordering robustness confirmed (all
+round-3/4 interaction checks hold under the new fence — see survival list below).
+
+**F1 (HIGH, soundness) — sub-statement happens-before invalidation.** The
+statement-level fence was too coarse: a path refinement survived a call that was
+evaluated as a *sibling* sub-expression before the path read within the SAME
+statement. `id2(emit(o), o.f)` (call as arg1 fires before arg2 read), `emit("x") or
+o.f` (`or`-left fires before right), and `touch(n) and id(n.left)` (`and`-left over
+μ-typed base) were all accepted with an unsound result type.
+
+Fix: add `lc.path_call_fired` to the `LC` lowering context. `synth_call_expr` sets it
+true at the end (after all arguments are synthesized, before returning to the parent
+expression tree). `synth_index_expr` skips the path-refinement lookup when
+`lc.path_call_fired` is true. `lower_block` resets the flag to false at each statement
+boundary. This correctly enforces Lua's left-to-right evaluation order:
+- A path read that IS an argument to the invalidating call is synthesized INSIDE
+  `synth_call_expr` BEFORE the flag is set — it correctly sees the live refinement
+  (the coinductive `sz(n.left)` fixture remains CLEAN).
+- A path read that is a SIBLING sub-expression evaluated after the call sees
+  `path_call_fired = true` and falls back to the declared field type (the three repros
+  become FINDINGS as required).
+The flag approach does not modify `ctx`, preserving the ctx-consistency invariant the
+substrate verifier (`synth_binop` etc.) requires across sibling claims. Four new fence
+tests: the three repros (FINDINGS) and the read-before-call case (CLEAN).
+
+**F2 (MEDIUM, wrong-rejection) — post-exit guard narrows a field path.** The
+`block_exits` arm in `lower_block` called `ctx_get(ctx, var)` to find the pre-type,
+which returns nil for a path (no live refinement entry yet). The `if-then` arm
+correctly calls `path_pre_type(ctx, var)` for paths. Fix: mirror the `if-then` arm's
+logic in the `block_exits` arm — detect `is_path`, call `path_pre_type`, synthesize
+the pre-type entry into ctx (so `emit_narrows` can look it up by name), then emit the
+falsy narrow exactly as the `if-then` arm does. `if not x.f then return end` now
+narrows `x.f` to its non-nil refinement for the rest of the block. Two new tests:
+path post-exit (CLEAN, was wrong-rejection) and bare-var post-exit (CLEAN, regression
+guard).
+
+**F3 (LOW, claim-vs-implementation) — readonly-field survival carve-out removed.**
+The "readonly fields survive invalidation" claim in §6.11.2 was vacuous (the
+annotation grammar hardcodes `readonly = false`) and unimplemented (`invalidate_paths`
+checks no readonly marker). Removed from §6.11.2's executable fence text; recorded as
+a deferred item with the explicit un-defer trigger: annotation grammar gains readonly
+syntax AND `invalidate_paths` skips paths whose declared field is readonly. No code
+change; no test change (the case can never arise).
+
+**Survivals (prior-round fixes that hold under the new fence).**
+
+| Check | Round | Status |
+|---|---|---|
+| Well-formedness gate under topo reorder | 1–2 | Intact |
+| Collision detection | 2 | Intact |
+| `rec_with_indexer` dynamic-read join (A-F1) | 4 | Intact |
+| F1 module-rec rebind | 3 | Intact |
+| F1-rebind × path refinement interaction | 3×7 | Intact |
+| Coinductive `sz(n.left)` (CLEAN) | 7 | Intact (CLEAN) |
+| Statement-level invalidation after call | 7 | Intact (FINDINGS) |
+| Forward-sibling alias resolution | 8 | Intact |
+
+**No regressions.** e2e CHECKED-CLEAN 27 → 27; all 6501 prior assertions pass.
+
 ### 10.8 Slice v2 increment 8 — DONE (dependency-ordered alias declaration) (2026-06-12)
 
 Un-deferred the §9.8/§9.11 two-phase-alias deferral for its acyclic case (§6.12,
@@ -4636,3 +4702,10 @@ error behind the multi-binder-μ substrate deferral. e2e: CHECKED-CLEAN 26 → 2
 CHECKED-FINDINGS 16 → 15, OUT-OF-SUBSET 819 → 817 (`lib/socket/init.lua` FINDINGS →
 CLEAN). Suite green at 6501 assertions. Survey re-run headlines:
 `docs/slice-survey-v1.md`, "after v2 increment 8".
+
+### 10.9 Audit round 5 fixes — DONE (2026-06-12)
+
+F1 (HIGH): sub-statement happens-before invalidation via `lc.path_call_fired` (§9.20).
+F2 (MEDIUM): post-exit guard path narrowing in `block_exits` arm (§9.20).
+F3 (LOW): readonly-survival carve-out removed from §6.11.2 text; deferred with explicit
+trigger (§9.20). Suite green at 6521 assertions (+20). e2e CHECKED-CLEAN 27 → 27.

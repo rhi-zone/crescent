@@ -1029,14 +1029,20 @@ end
 
 -- ── The invalidation boundary (§6.11.2, the soundness fence) ─────────────────
 --
--- A path refinement `x.f` dies after any statement that can mutate the path or
--- alias the base. WITHOUT escape/effect analysis (v1 has neither) the sound-
--- conservative rule is: invalidate after (1) ANY call/method-call — a callee may
--- hold the base and mutate `x.f` through it or an upvalue — and (2) ANY assignment
--- — a write through the base, or through any lvalue that could alias the base
--- (§6.11.3). `node_has_call` scans an arbitrary statement/expr subtree for a
--- call/methodcall; `stmt_invalidates_paths` is the predicate the block walker
--- applies AFTER lowering each statement.
+-- A path refinement `x.f` dies at the point a call fires within the expression
+-- tree, and after any assignment. WITHOUT escape/effect analysis (v1 has neither)
+-- the sound-conservative rule is: invalidate at (1) ANY call/method-call — a
+-- callee may hold the base and mutate `x.f` through it or an upvalue — and (2)
+-- ANY assignment — a write through the base, or through any lvalue that could
+-- alias the base (§6.11.3).
+--
+-- Sub-statement (audit round 5 F1): `synth_call_expr`/`synth_methodcall_expr`
+-- call `invalidate_paths` AFTER evaluating the callee and all arguments, but
+-- BEFORE returning to the caller's expression tree. This ensures reads that ARE
+-- arguments to the invalidating call see the live refinement (they evaluate before
+-- the call fires), while sibling reads evaluated AFTER the call see the widened type.
+-- `node_has_call` and `stmt_invalidates_paths` handle the statement-level sweep.
+-- `invalidate_paths` re-binds every dotted path in ctx to its declared field type.
 
 local node_has_call --[[: (unknown) -> boolean ]]
 
@@ -1098,7 +1104,7 @@ end
 -- The lowering result accumulators ride a `LC` (lowering context) table threaded
 -- through the walk: builder, requested-claim list, marker list, alias env,
 -- trusted-boundary id (one shared stdlib boundary), and the current SliceCtx.
---:: LC = { b: Builder, requested: { [integer]: Id }, markers: { [integer]: LowerMarker }, aliases: AliasEnv, stdlib_tb: Id, state: AnalysisState, return_premise_sink?: { [integer]: { [integer]: Id } }, func_depth?: integer, module_ret_ty?: Ty, resolve_module_type?: (string) -> (Ty | nil), mod_table_aliases?: { [string]: string } }
+--:: LC = { b: Builder, requested: { [integer]: Id }, markers: { [integer]: LowerMarker }, aliases: AliasEnv, stdlib_tb: Id, state: AnalysisState, return_premise_sink?: { [integer]: { [integer]: Id } }, func_depth?: integer, module_ret_ty?: Ty, resolve_module_type?: (string) -> (Ty | nil), mod_table_aliases?: { [string]: string }, path_call_fired?: boolean }
 
 -- A typed VIEW over an AST node (`unknown` at the seam). Each consumer narrows
 -- its `unknown` node to `LV` via the `view` helper, then reads concretely-typed
@@ -1232,7 +1238,13 @@ local function synth_index_expr(lc, ctx, e)
 	-- live path refinement) synthesizes the REFINED type, not the declared field
 	-- type. The binding is dropped at the soundness boundary (invalidation, §6.11.2),
 	-- so its presence here means the refinement is still live.
-	do
+	-- Sub-statement fence (audit round 5 F1): if a call has already fired earlier
+	-- in this expression tree (`lc.path_call_fired == true`), the callee may have
+	-- mutated the field, so we skip the refinement and fall back to the declared type.
+	-- A read that IS an argument to the invalidating call is fine — it is synthesized
+	-- inside synth_call_expr BEFORE the flag is set (arguments evaluate left-to-right
+	-- before the call fires), so it sees the live refinement correctly.
+	if not lc.path_call_fired then
 		local ov = view(v.obj)
 		local oname = ov and ov.name
 		if ov and ov.k == "name" and type(oname) == "string" then
@@ -1462,6 +1474,16 @@ local function synth_call_expr(lc, ctx, e)
 	A.add_claim(lc.state, S.has_type_claim(cid, ctx, nid, result))
 	A.add_evidence(lc.state, A.evidence({ id = lc.b.fresh_ev("call"), claim = cid,
 		method = "synth_call", inputs = inputs }))
+	-- §6.11.2 sub-statement invalidation (audit round 5 F1): the call has now fired.
+	-- Record this on `lc` so that subsequent path-refinement reads in the SAME
+	-- expression tree (siblings evaluated AFTER this call) skip the live refinement
+	-- and fall back to the declared field type. Arguments are evaluated LEFT-TO-RIGHT
+	-- BEFORE the call fires (Lua semantics), so reads that WERE the arguments already
+	-- consumed the live refinement correctly — we do NOT invalidate `ctx` (which would
+	-- break the ctx-consistency invariant the substrate verifier requires across sibling
+	-- claims). Instead `synth_index_expr` checks `lc.path_call_fired` and skips the
+	-- refinement lookup when true.
+	lc.path_call_fired = true
 	return result, cid
 end
 
@@ -2596,6 +2618,10 @@ lower_block = function(lc, ctx, blk, ret_ty)
 	local stmts = b.stmts
 	if not stmts then return end
 	for _, s in ipairs(stmts) do
+		-- Reset the sub-statement call-fired flag at each statement boundary (§6.11.2,
+		-- audit round 5 F1). Each statement starts with a clean slate: a call in the
+		-- previous statement does not suppress path-refinement reads in this one.
+		lc.path_call_fired = false
 		-- post-guard narrowing: `if <guard> then <exiting body> end` (no elseif/else)
 		-- narrows the REST of this block by the guard's FALSY refinement (§6.1). We
 		-- mutate `ctx` in place so subsequent statements see the refined binding.
@@ -2610,7 +2636,21 @@ lower_block = function(lc, ctx, blk, ret_ty)
 			-- lower the if (emits the truthy-body narrowing + body claims).
 			lower_stmt(lc, ctx, s, ret_ty)
 			if var and gnode then
-				local pre = ctx_get(ctx, var)
+				-- §6.11 F2 fix (audit round 5): mirror the if-then arm's path_pre_type
+				-- handling. A bare variable reads its binding directly; a field PATH
+				-- (`"x.f"`) has no live ctx entry yet, so use path_pre_type to obtain
+				-- the declared field type, then emit the falsy narrow from that.
+				local is_path = var:find(".", 1, true) ~= nil
+				local pre --[[: Ty | nil ]]
+				if is_path then
+					pre = path_pre_type(ctx, var)
+					if pre then
+						-- bind the path into ctx so emit_narrows can find it by name.
+						ctx[#ctx + 1] = { name = var, type = TA.encode(pre) }
+					end
+				else
+					pre = ctx_get(ctx, var)
+				end
 				if pre then
 					local _, t_false = emit_narrows(lc, ctx, gnode, var, pre)
 					if t_false then
@@ -2621,11 +2661,13 @@ lower_block = function(lc, ctx, blk, ret_ty)
 		else
 			lower_stmt(lc, ctx, s, ret_ty)
 		end
-		-- §6.11.2 invalidation: a path refinement dies AFTER any statement that can
-		-- mutate the path or alias the base (any call/any write). The read inside the
-		-- statement already used the live refinement (happens-before the call); the
-		-- next statement falls back to the declared field type. Variable refinements
-		-- are unaffected (they shadow on rebind, handled elsewhere).
+		-- §6.11.2 statement-level invalidation: after a statement that contains a
+		-- call or any assignment, sweep away any surviving path refinements (any that
+		-- were not already dropped by the sub-statement invalidation in synth_call_expr).
+		-- Sub-statement invalidation (audit round 5 F1) handles intra-expression
+		-- happens-before; this sweep handles the residual (writes, and calls that were
+		-- the OUTERMOST expression in the statement and thus not shadowed by a sibling).
+		-- Variable refinements are unaffected (they shadow on rebind, handled elsewhere).
 		if stmt_invalidates_paths(s) then invalidate_paths(ctx) end
 	end
 end
