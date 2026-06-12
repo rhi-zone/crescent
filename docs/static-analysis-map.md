@@ -196,6 +196,10 @@ Rung status (ladder, design doc):
   a hard precondition; `lit_int` integer validation; `unknown` narrowing; subtype
   DAG memoization; `instantiate_witness` callee binding), each a permanent
   regression test (§9.7).
+  **Adversarial audit round 2 (2026-06-12): 4 findings fixed** (F1 collision
+  detection between exporters; F2 mutual-alias claim retracted, §6.6.4 corrected;
+  F3 malformed-path hardening; F4 content digest in dependency records), 33 new
+  regression tests, 6226 total (§9.11).
   **Survey pass landed (2026-06-12): `slice_survey.lua` over the 864-file real `lib/`
   corpus** (`docs/slice-survey-v1.md`) — 26.6% CHECKED-CLEAN, 1.6% CHECKED-FINDINGS,
   58.4% OUT-OF-SUBSET, 13.3% NO-ANNOTATION, 0 timeouts/crashes. The annotation

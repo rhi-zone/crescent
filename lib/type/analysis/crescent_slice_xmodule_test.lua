@@ -158,6 +158,195 @@ T.describe("xmodule: resolve assembles the cross-module alias env", function()
 	end)
 end)
 
+-- ── F1: collision detection between exporters ─────────────────────────────────
+
+T.describe("xmodule F1: collision detection between exporters", function()
+	T.it("a-then-b: same bare name, different tids → error (collision)", function()
+		local rf = mem_reader({
+			["lib/a.lua"] = '--:: Shared = { x: integer }\n',
+			["lib/b.lua"] = '--:: Shared = { y: string }\n',
+		})
+		local r = XM.resolve('--:: require "lib.a"\n--:: require "lib.b"\n', { read_file = rf })
+		local saw = false --: boolean
+		for _, e in ipairs(r.errors) do
+			if e.name == "Shared" and e.err:find("collision") then saw = true end
+		end
+		T.ok(saw, "collision error surfaced for Shared (a-then-b)")
+	end)
+
+	T.it("b-then-a: order-symmetric — both orderings error identically", function()
+		local rf = mem_reader({
+			["lib/a.lua"] = '--:: Shared = { x: integer }\n',
+			["lib/b.lua"] = '--:: Shared = { y: string }\n',
+		})
+		local r = XM.resolve('--:: require "lib.b"\n--:: require "lib.a"\n', { read_file = rf })
+		local saw = false --: boolean
+		for _, e in ipairs(r.errors) do
+			if e.name == "Shared" and e.err:find("collision") then saw = true end
+		end
+		T.ok(saw, "collision error surfaced for Shared (b-then-a)")
+	end)
+
+	T.it("same-type double import dedupes silently (no error, name present)", function()
+		-- same body ⇒ same interned Ty (hash-consed) ⇒ same tid ⇒ no collision.
+		local rf = mem_reader({
+			["lib/a.lua"] = '--:: Shared = { x: integer }\n',
+			["lib/b.lua"] = '--:: Shared = { x: integer }\n',
+		})
+		local r = XM.resolve('--:: require "lib.a"\n--:: require "lib.b"\n', { read_file = rf })
+		T.eq(#r.errors, 0, "no error when both exporters declare the same type")
+		T.ok(r.env.Shared ~= nil, "Shared is still present in the env")
+	end)
+
+	T.it("local --:: shadows an imported alias — allowed (not a collision)", function()
+		-- The collision check is at the import seam (import_top_level_aliases);
+		-- the local --:: shadow is applied later in scan_source with most-recent-wins.
+		-- This test exercises the full lower path to confirm the shadow still works.
+		local rf = mem_reader({
+			["lib/m.lua"] = '--:: MyT = { x: integer }\n',
+		})
+		-- entry declares its own MyT after the import → shadow, no error.
+		local entry = '--:: require "lib.m"\n--:: MyT = { z: boolean }\n'
+		local res = L.lower(entry, "entry.lua", { read_file = rf })
+		T.ok(res ~= nil, "lower succeeded")
+		if not res then return end
+		-- no collision marker expected (the shadow is in scan_source, post-import-pass).
+		local saw_collision = false --: boolean
+		for _, mk in ipairs(res.markers) do
+			if mk.construct and mk.construct:find("collision") then saw_collision = true end
+		end
+		T.eq(saw_collision, false, "local --:: shadow of imported alias is not a collision")
+	end)
+end)
+
+-- ── F2: mutual-alias honest-error pin (retraction test) ──────────────────────
+
+T.describe("xmodule F2: mutual cross-module aliases error honestly (retraction pin)", function()
+	T.it("A references B's name before B is installed → unknown-type-name in A's export", function()
+		-- A's alias body references BT; when A is parsed, BT is not yet in env.
+		-- A's export should fail with a parse error (unknown-type-name:BT).
+		local rf = mem_reader({
+			["lib/a.lua"] = '--:: AT = { child: BT }\n',
+			["lib/b.lua"] = '--:: BT = { id: integer }\n',
+		})
+		-- import a first, then b. A's body references BT which is not yet present.
+		local r = XM.resolve('--:: require "lib.a"\n--:: require "lib.b"\n', { read_file = rf })
+		-- AT should fail to parse (BT unknown when A is processed), so AT is not in env.
+		-- BT should succeed (no forward reference in B's body).
+		T.ok(r.env.BT ~= nil, "BT (standalone) resolves fine")
+		-- AT either errored or is absent (unknown-type-name:BT in A's body).
+		local at_absent = r.env.AT == nil --: boolean
+		local at_errored = false --: boolean
+		for _, e in ipairs(r.errors) do
+			if e.name == "AT" then at_errored = true end
+		end
+		T.ok(at_absent or at_errored, "mutual forward reference (AT referencing BT) errors honestly, not silently resolved")
+	end)
+end)
+
+-- ── F3: malformed-path hardening ─────────────────────────────────────────────
+
+T.describe("xmodule F3: malformed require paths refused before cap reach", function()
+	T.it("valid_modpath_segments: normal paths are valid", function()
+		T.ok(XM.valid_modpath_segments("lib.x.y"), "lib.x.y is valid")
+		T.ok(XM.valid_modpath_segments("lib"), "lib is valid")
+		T.ok(XM.valid_modpath_segments("lib.type.analysis"), "lib.type.analysis is valid")
+	end)
+
+	T.it("valid_modpath_segments: empty-segment paths are invalid", function()
+		T.eq(XM.valid_modpath_segments("lib..secret"), false, "doubled dot invalid")
+		T.eq(XM.valid_modpath_segments("lib.x....."), false, "trailing dots invalid")
+		T.eq(XM.valid_modpath_segments(".lib"), false, "leading dot invalid")
+		T.eq(XM.valid_modpath_segments("lib."), false, "trailing dot invalid")
+		T.eq(XM.valid_modpath_segments(""), false, "empty string invalid")
+	end)
+
+	T.it("resolve: malformed path emits invalid-require marker, cap is never called", function()
+		local cap_called = false --: boolean
+		--: (string) -> (string | nil, string | nil)
+		local function spy_rf(path)
+			cap_called = true
+			return nil, "spy: should not have been called for path " .. path
+		end
+		-- `lib..secret` has an empty segment — must be refused before the cap.
+		local r = XM.resolve('--:: require "lib..secret"\n', { read_file = spy_rf })
+		T.eq(cap_called, false, "cap was NOT called for malformed path")
+		local saw_marker = false --: boolean
+		for _, mk in ipairs(r.markers) do
+			if mk.construct == "out-of-subset/invalid-require" then saw_marker = true end
+		end
+		T.ok(saw_marker, "invalid-require marker emitted for malformed path")
+	end)
+
+	T.it("resolve: another attack string `lib.x.....` also refused before cap", function()
+		local cap_called = false --: boolean
+		--: (string) -> (string | nil, string | nil)
+		local function spy_rf2(_path)
+			cap_called = true
+			return nil, nil
+		end
+		local r = XM.resolve('--:: require "lib.x....."\n', { read_file = spy_rf2 })
+		T.eq(cap_called, false, "cap NOT called for `lib.x.....`")
+		local saw = false --: boolean
+		for _, mk in ipairs(r.markers) do
+			if mk.construct == "out-of-subset/invalid-require" then saw = true end
+		end
+		T.ok(saw, "invalid-require marker for `lib.x.....`")
+	end)
+
+	T.it("resolve: legitimate paths still reach the cap normally", function()
+		local cap_called = false --: boolean
+		--: (string) -> (string | nil, string | nil)
+		local function cap_rf(path)
+			cap_called = true
+			if path == "lib/x/y.lua" then return '--:: XY = integer\n', nil end
+			return nil, nil
+		end
+		local r = XM.resolve('--:: require "lib.x.y"\n', { read_file = cap_rf })
+		T.ok(cap_called, "cap IS called for a valid path")
+		T.ok(r.env.XY ~= nil, "alias from valid path imported")
+	end)
+end)
+
+-- ── F4: content digest in import records ─────────────────────────────────────
+
+T.describe("xmodule F4: content digest in import records and dependency invalidation", function()
+	T.it("resolve: ImportRecord carries a non-empty digest field", function()
+		local rf = mem_reader({ ["lib/m.lua"] = '--:: MT = { id: integer }\n' })
+		local r = XM.resolve('--:: require "lib.m"\n', { read_file = rf })
+		T.eq(#r.imports, 1, "one import record")
+		local rec = r.imports[1]
+		T.ok(type(rec.digest) == "string" and #rec.digest > 0, "digest field is a non-empty string")
+	end)
+
+	T.it("same path, changed body → different digest (staleness visible)", function()
+		local src_v1 = '--:: MT = { id: integer }\n'
+		local src_v2 = '--:: MT = { id: string }\n'
+		local rf1 = mem_reader({ ["lib/m.lua"] = src_v1 })
+		local rf2 = mem_reader({ ["lib/m.lua"] = src_v2 })
+		local r1 = XM.resolve('--:: require "lib.m"\n', { read_file = rf1 })
+		local r2 = XM.resolve('--:: require "lib.m"\n', { read_file = rf2 })
+		T.eq(#r1.imports, 1, "r1: one import")
+		T.eq(#r2.imports, 1, "r2: one import")
+		T.ok(r1.imports[1].digest ~= r2.imports[1].digest, "digests differ when source body changes")
+	end)
+
+	T.it("lower: dependency invalidation string includes the digest", function()
+		local rf = mem_reader({ ["lib/m.lua"] = '--:: MT = { id: integer }\n' })
+		local entry = '--:: require "lib.m"\n--: (x: MT) -> integer\nlocal function f(x) return x.id end\n'
+		local res = L.lower(entry, "entry.lua", { read_file = rf })
+		T.ok(res ~= nil, "lower succeeded")
+		if not res then return end
+		T.ok(#res.dependencies > 0, "dependencies recorded")
+		local found_digest = false --: boolean
+		for _, dep in ipairs(res.dependencies) do
+			local inv = dep.invalidation or ""
+			if inv:find("digest:") then found_digest = true end
+		end
+		T.ok(found_digest, "dependency invalidation string includes 'digest:' field")
+	end)
+end)
+
 -- ── end-to-end: the TRUE cross-module fixture (tcp_client + epoll) ────────────
 
 --: () -> SemanticsRegistry
@@ -203,5 +392,15 @@ T.describe("xmodule e2e: the true cross-module fixture resolves Epoll across req
 		end
 		T.ok(saw_xmod_tb, "a cross_module_alias trust boundary is recorded (visible, auditable)")
 		T.ok(#res.dependencies > 0, "cross-artifact dependencies recorded with invalidation")
+	end)
+
+	T.it("F4: the real cross-module import carries a non-empty digest", function()
+		local res = L.lower(entry or "", "xmod/tcp_client.lua", { read_file = read_file })
+			--[[: { imports: { [integer]: { digest: string } } } | nil ]]
+		T.ok(res ~= nil, "lower succeeded")
+		if not res then return end
+		T.ok(#res.imports >= 1, "import records present")
+		local imp = res.imports[1]
+		T.ok(type(imp.digest) == "string" and #imp.digest > 0, "real import carries a non-empty digest")
 	end)
 end)

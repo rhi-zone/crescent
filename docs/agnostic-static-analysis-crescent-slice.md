@@ -1304,14 +1304,20 @@ verdict**, not the μ machinery and not a hang:
 
 - **Why not μ here?** The μ machinery (§3) decides *subtyping* of recursive
   *types*; an import cycle is a cycle in the *module graph*, a different object.
-  A recursive *type* spanning modules (M's alias references N's alias which
-  references M's) still resolves to a `mu` via the existing `declare_alias`
-  recursive-binding path **once both aliases are in the same flat env** — the
-  cross-module case reduces to the in-file recursive-alias case the moment the
-  names are co-visible, and `declare_alias` already handles that (binding the name
-  to a μ placeholder while parsing the body). The import-graph cycle break and the
-  type-recursion μ are orthogonal and both already-solved; the increment composes
-  them, it does not invent a third mechanism.
+  A cross-module *type* alias whose body references another module's alias that in
+  turn references the first **does NOT reduce to the in-file recursive case** — each
+  exporting module is parsed independently, before the other's names are installed.
+  When A's alias body references B's name and A is parsed first, B's name is absent
+  from the alias env at parse time; the result is an `unknown-type-name` error in
+  A's export, not a μ binding. This is the **honest behavior**: mutual cross-module
+  aliases error at v1. It is consistent with in-file forward references (§9.8
+  deferral: names must be declared before use in the current flat env). The fix —
+  two-phase name-installation-then-parse — is a unified substrate mechanism covering
+  both in-file and cross-module forward/mutual aliases; it is recorded as a single
+  deferral item in §9.11 with its trigger condition. (Audit round 2, F2 retraction:
+  this section originally claimed mutual cross-module aliases reduce to the in-file
+  recursive case via `declare_alias`'s μ-placeholder. That claim was false and has
+  been corrected here and in `crescent_slice_xmodule.lua`'s docstring.)
 
 - **Depth bound.** The visited set bounds recursion depth to the number of distinct
   `lib/` modules on a chain (finite); termination is structural, not timeout-based.
@@ -2632,3 +2638,85 @@ forced by special-casing. The e2e survey is unchanged (statement-lowering-bound)
 resolution is a pure consumer of the multi-artifact object model, so `init.lua` was
 **not** touched (the concurrent init.lua work was never reached). Full analysis suite
 green at 6193 (6157 prior intact + 36).
+
+### 9.11 Adversarial audit round 2 (cross-module alias surface)
+
+Execution-confirmed findings against the cross-module alias surface
+(`crescent_slice_xmodule.lua`, `crescent_slice_parse.lua`, `crescent_slice_lower.lua`).
+All four findings were fixed; one prior claim was retracted. Round 1's fixes held
+throughout; the trust-recording scope (round 1 found it over-broad, never under)
+remained as recorded. Full analysis suite green at 6226 (6193 prior intact + 33 new
+regression tests).
+
+**F1 [unsound — fixed]: silent last-wins collision between exporters.** `import_top_level_aliases`
+installed bare names unconditionally. Decision: DETECTED AND REJECTED — importing a
+name already present from a DIFFERENT exporter with a DIFFERENT tid is an error
+diagnostic naming both modules and the colliding name; identical tids (same interned
+Ty) dedupe silently. Entry-local `--::` shadowing an import stays allowed (the
+shadow is applied in `scan_source` after the import pass, which is the verified
+lexical-scope rule). Implemented at the import-installation seam in
+`import_top_level_aliases` (new `origin` map tracks name → first exporter);
+`declare_alias`'s general in-file semantics are unchanged. Regression tests: a-then-b
+and b-then-a both error identically; same-type double import dedupes; local shadow
+works.
+
+**F2 [doc defect + false claim — retracted]: mutual cross-module aliases do NOT reduce
+to the in-file recursive case.** The `crescent_slice_xmodule.lua` docstring (~lines
+80-82 in the original) and §6.6.4 claimed that mutual cross-module aliases reduce to
+the in-file recursive case via `declare_alias`'s μ-placeholder the moment the names
+are co-visible in the flat env. This is false: each exporting module is parsed before
+the other's names are installed. The correct behavior is: mutual cross-module aliases
+produce `unknown-type-name` errors on the referencing side — the SAME honest-error
+behavior as in-file forward references (§9.8 deferral). Implementation: no code
+change (the honest-error behavior was already correct); corrected the docstring in
+`crescent_slice_xmodule.lua` and §6.6.4. Deferral recorded: **forward/mutual alias
+references (in-file and cross-module) both require two-phase name-installation-then-
+parse.** Trigger: a real `lib/` pair where M's alias body legitimately references N's
+alias declared in a separate module (and N's references M's). No such trigger has
+been confirmed in the corpus as a v1 gap requiring resolution; recorded for the next
+increment. Regression test: mutual forward reference errors honestly (AT referencing
+BT before BT is installed → AT absent or errored, BT succeeds).
+
+**F3 [hardening — fixed]: malformed paths reached the cap.** `candidate_paths` built
+file paths from any require string without validating segments, so `lib..secret` or
+`lib.x.....` could reach the injected `read_file` cap. Decision: validate all
+dot-separated segments (each non-empty, matching `[%a%d_]+`) BEFORE building any
+file path; malformed → `out-of-subset/invalid-require` marker, cap never called.
+Implemented in `valid_modpath_segments` (new pure helper exported as
+`M.valid_modpath_segments`); `read_module` and `resolve` call it before any path
+construction. Regression tests: both attack strings refused without cap reach; the
+`valid_modpath_segments` boundary (leading/trailing/doubled dots, empty string)
+exercised; legitimate paths still reach the cap normally.
+
+**F4 [record precision — fixed]: invalidation anchored to path, not content.** The
+exporting `Artifact` id was path-only (`"xmod-src:" .. rec.path`), so a body change
+was invisible to an id diff; the `Dependency.invalidation` string was generic ("body
+changed"). Decision: compute a CRC32-hex digest of the exporting source text (using
+`lib.hash.crc32`, the existing pure-Lua/FFI tier — no new dependency); include it in
+(a) the `Artifact` id (`"xmod-src:" .. path .. "@" .. digest`), and (b) the
+`Dependency.invalidation` string (`"exporting module " .. path .. " body changed
+(digest:" .. digest .. ")"`). The `ImportRecord` type alias gains a `digest: string`
+field. No `init.lua` change. Regression tests: same-path changed-body → different
+digest; the lower-level dependency invalidation string contains `"digest:"`.
+
+**Survivals (attacks that found nothing — evidence too):**
+
+- **No-cap behavior held.** Resolving with `opts = nil` still produces an empty env
+  and zero imports; dynamic-require markers are still emitted. The cap-first invariant
+  is unbroken.
+
+- **Cycle termination held.** The visited-set cycle break is unaffected by the
+  origin-map and collision logic; the cycle-termination regression test passes.
+
+- **Round 1 fixes held.** Well-formedness as a hard precondition of `declare_alias`,
+  `lit_int` integer validation, `unknown` narrowing, subtype DAG memoization, and
+  `instantiate_witness` callee binding all continued to pass; no regression on any
+  of the 28 round-1 regression tests.
+
+- **Trust recording scope.** Round 1 found trust recording over-broad-never-under
+  (every requested claim rides every cross-module trust boundary regardless of which
+  alias it actually used). This remains a known imprecision — the over-broad direction
+  is conservative (never under), and the fix requires per-alias claim attribution,
+  which is a future increment. The round 2 audit did not find a case where the
+  over-broad recording hides an actual soundness gap; the recorded boundaries are
+  still auditable.

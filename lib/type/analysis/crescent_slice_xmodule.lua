@@ -23,6 +23,32 @@
 -- With no cap, cross-module imports resolve to no aliases (the honest pre-increment
 -- behavior), never a silent reach for `io`.
 --
+-- COLLISION POLICY (audit round 2, F1): when importing a bare name already present
+-- in the env from a DIFFERENT exporter with a DIFFERENT tid, the import is rejected
+-- with an error diagnostic naming both modules and the colliding name. Identical
+-- tids dedupe silently (same type, no conflict). Entry-local `--::` shadowing an
+-- import stays allowed — the scan_source pass runs AFTER the import pass and uses
+-- most-recent-wins, which is the designed and tested shadowing behavior.
+--
+-- PATH VALIDATION (audit round 2, F3): require-strings with empty dot-segments
+-- (e.g. `lib..secret`, `lib.x.....`) are refused with an `invalid-require` marker;
+-- the cap is never reached for malformed paths.
+--
+-- CONTENT DIGEST (audit round 2, F4): each ImportRecord carries a `digest` field
+-- (CRC32-hex of the exporting source text) so the lowering driver can include it
+-- in the cross-artifact Dependency record. A body change is then visible as a
+-- digest diff even when the path is unchanged.
+--
+-- MUTUAL-ALIAS RETRACTION (audit round 2, F2): an earlier draft claimed that
+-- mutual cross-module aliases (A's body references B's name and B's body references
+-- A's name) reduce to the in-file recursive case via `declare_alias`'s μ-placeholder.
+-- This is FALSE: each exporting module is parsed before the other's names are
+-- installed in the flat env, so the forward reference appears as an unknown-type-name
+-- error in the exporting body. The correct behavior is: mutual cross-module aliases
+-- error honestly (unknown-type-name on the referencing side). This is the same
+-- honest-error behavior as in-file forward references (§9.8 deferral), and is
+-- acceptable at v1. See §6.6.4 (corrected) and §9.11.
+--
 -- SUBSTRATE: untouched. This is a pure consumer of the multi-artifact object model
 -- (`docs/agnostic-static-analysis-object-model.md`): it produces alias data plus the
 -- import records the lowering driver turns into Artifact / Observation / Dependency /
@@ -35,6 +61,7 @@
 local _G_ty = require("lib.type.analysis.slice_ty")
 local _ = _G_ty
 local P = require("lib.type.analysis.crescent_slice_parse")
+local CRC32 = require("lib.hash.crc32")
 
 local M = {}
 
@@ -44,10 +71,35 @@ local M = {}
 -- package layout). Only `lib.`-prefixed module paths are alias sources; anything
 -- else (`bit`, `ffi`, a non-lib path) contributes no aliases and is NOT an error.
 -- Resolution consults the injected `read_file` cap to decide which candidate exists.
+--
+-- PATH VALIDATION (audit round 2, F3): each dot-separated segment must be non-empty
+-- and composed only of the require-name charset (`[%a%d_]`). A module path with any
+-- invalid segment is refused before building file paths; the cap is never reached.
 
 --:: ReadFile = (path: string) -> (string | nil, string | nil)
 
+-- Returns true when every dot-segment of `modpath` is non-empty and matches
+-- the require-name charset (letters, digits, underscore). Dots themselves are
+-- separators, not part of a segment; a leading, trailing, or doubled dot produces
+-- an empty segment and returns false. An empty string returns false.
+--: (string) -> boolean
+local function valid_modpath_segments(modpath)
+	if modpath == "" then return false end
+	-- A leading, trailing, or doubled dot means an empty segment → invalid.
+	if modpath:sub(1, 1) == "." or modpath:sub(-1) == "." or modpath:find("%.%.") then
+		return false
+	end
+	-- Every segment must be non-empty and composed only of the require-name charset.
+	for seg in modpath:gmatch("[^%.]+") do
+		if not seg:match("^[%a%d_]+$") then return false end
+	end
+	return true
+end
+
+M.valid_modpath_segments = valid_modpath_segments
+
 -- Candidate file paths for a `lib.`-prefixed module, in precedence order.
+-- Callers must validate the modpath with `valid_modpath_segments` first.
 --: (string) -> string[]
 local function candidate_paths(modpath)
 	local rel = (modpath:gsub("%.", "/"))
@@ -56,9 +108,12 @@ end
 
 -- Resolve a module path to (source, filepath) using the cap, or (nil, nil) when the
 -- module is not a lib alias source (non-lib prefix, or no readable candidate).
+-- Returns (nil, nil) for malformed paths WITHOUT reaching the cap (F3).
 --: (string, ReadFile) -> (string | nil, string | nil)
 local function read_module(modpath, read_file)
 	if modpath:sub(1, 4) ~= "lib." and modpath ~= "lib" then return nil, nil end
+	-- validate segments before building any file path (F3: malformed paths refused).
+	if not valid_modpath_segments(modpath) then return nil, nil end
 	for _, path in ipairs(candidate_paths(modpath)) do
 		local src = read_file(path)
 		if src ~= nil then return src, path end
@@ -77,14 +132,27 @@ M.read_module = read_module
 -- an exporting alias are surfaced (a malformed exporting `--::` is a real defect),
 -- attributed to the exporting module via the returned `errors` list.
 --
--- Recursive aliases that span modules reduce to the in-file recursive case the moment
--- the names are co-visible in the same flat env, so `declare_alias`'s existing
--- μ-placeholder binding handles them (§6.6.4).
+-- COLLISION POLICY (audit round 2, F1): this function checks the env before
+-- installing each name. If `name` is already present in the env (imported by a
+-- PRIOR exporter tracked in `origin`):
+--   - same tid (identical interned Ty): silently deduped (same type, no conflict).
+--   - different tid: an error is returned naming both modules and the colliding name.
+--
+-- `origin` maps bare name → exporter modpath (maintained by the caller).
+-- Entry-local `--::` shadowing is NOT subject to this check — the scan_source pass
+-- runs after the import pass and uses most-recent-wins, which is the verified design.
+--
+-- NOTE (audit round 2, F2 retraction): mutual cross-module aliases do NOT reduce to
+-- the in-file recursive case. Each exporting module is parsed independently, before
+-- the other's names are installed. A body that references a name not yet in env
+-- produces an unknown-type-name error on the exporting side. This is the correct,
+-- honest behavior — the same as in-file forward references (§9.8 deferral). See
+-- §6.6.4 (corrected) and §9.11.
 
 --:: ExportError = { module: string, name: string, err: string }
 
---: (env: AliasEnv, src: string, modpath: string) -> (string[], ExportError[])
-local function import_top_level_aliases(env, src, modpath)
+--: (env: AliasEnv, origin: { [string]: string }, src: string, modpath: string) -> (string[], ExportError[])
+local function import_top_level_aliases(env, origin, src, modpath)
 	local lines = {} --[[: { [integer]: string } ]]
 	for ln in (src .. "\n"):gmatch("(.-)\n") do lines[#lines + 1] = ln end
 	local names = {} --[[: string[] ]]
@@ -96,11 +164,45 @@ local function import_top_level_aliases(env, src, modpath)
 		local dname = d and d.name --[[: string | nil ]]
 		local dbody = d and d.body --[[: string | nil ]]
 		if d and d.kind == "alias" and dname ~= nil and dbody ~= nil then
-			local r, e = P.declare_alias(env, dname, dbody)
-			if r then
-				names[#names + 1] = dname
+			-- F1: collision detection — check before installing.
+			local existing = env[dname] --[[: Ty | nil ]]
+			local orig_mod = origin[dname] --[[: string | nil ]]
+			if existing ~= nil and orig_mod ~= nil and orig_mod ~= modpath then
+				-- parse the new body into a candidate Ty using a fresh copy of env
+				-- so that parsing side effects don't corrupt the shared env.
+				local probe_env = {} --[[: AliasEnv ]]
+				for k2, v2 in pairs(env) do probe_env[k2] = v2 end
+				local candidate = P.declare_alias(probe_env, dname, dbody)
+				if candidate then
+					local new_ty = probe_env[dname] --[[: Ty | nil ]]
+					-- same tid: dedupe silently (same interned Ty, no conflict).
+					if new_ty ~= nil and new_ty == existing then
+						-- identical: skip (already present, same type).
+					else
+						errors[#errors + 1] = {
+							module = modpath, name = dname,
+							err = "collision: name '" .. dname .. "' already imported from '"
+								.. orig_mod .. "' with a different type; re-imported by '"
+								.. modpath .. "' with an incompatible type (tid mismatch)",
+						}
+					end
+				else
+					-- the new body itself is malformed; still a collision (report the error).
+					errors[#errors + 1] = {
+						module = modpath, name = dname,
+						err = "collision: name '" .. dname .. "' already imported from '"
+							.. orig_mod .. "'; re-import from '" .. modpath .. "' is also malformed",
+					}
+				end
 			else
-				errors[#errors + 1] = { module = modpath, name = dname, err = e or "alias error" }
+				-- no collision: install normally.
+				local r, e = P.declare_alias(env, dname, dbody)
+				if r then
+					names[#names + 1] = dname
+					if origin[dname] == nil then origin[dname] = modpath end
+				else
+					errors[#errors + 1] = { module = modpath, name = dname, err = e or "alias error" }
+				end
 			end
 		end
 		idx = idx + span
@@ -163,20 +265,27 @@ M.collect_imports = collect_imports
 --   env      : AliasEnv pre-populated with imported top-level aliases (flat, bare
 --              names). The caller declares the entry's OWN aliases on top
 --              (most-recent-wins shadowing).
---   imports  : per-resolved-module record { module, path, names, form } — the data
---              the lowering driver turns into Artifact/Observation/Dependency/
+--   imports  : per-resolved-module record { module, path, names, form, digest } —
+--              the data the lowering driver turns into Artifact/Observation/Dependency/
 --              TrustBoundary objects (§6.6.5/§6.6.6). `names` is the imported alias
---              names; `path` the resolved file path.
---   markers  : { line, construct } for dynamic requires (`dynamic-require`) — never
---              a silent drop.
---   errors   : ExportError[] — malformed exporting aliases (attributed to the module).
+--              names; `path` the resolved file path; `digest` is the CRC32-hex of
+--              the exporting source text (for staleness/invalidation records, F4).
+--   markers  : { line, construct } for dynamic requires (`dynamic-require`) and for
+--              malformed require paths (`invalid-require`, F3) — never a silent drop.
+--   errors   : ExportError[] — malformed exporting aliases or collisions (F1).
 --
 -- ACYCLIC by a visited set on module paths (§6.6.4): a module is resolved at most
 -- once per assembly; a require cycle terminates with the union of reachable aliases.
 -- With no `read_file` cap, this is a no-op (returns an empty base env) — the honest
 -- pre-increment behavior, not a reach for `io`.
+--
+-- PATH VALIDATION (F3): a require string with invalid segments is refused with an
+-- `out-of-subset/invalid-require` marker; the cap is never called for it.
+--
+-- COLLISION DETECTION (F1): importing a name already present from a different exporter
+-- with a different tid is rejected as an ExportError naming both modules.
 
---:: ImportRecord = { module: string, path: string, names: string[], form: string }
+--:: ImportRecord = { module: string, path: string, names: string[], form: string, digest: string }
 --:: ImportPassResult = { env: AliasEnv, imports: ImportRecord[], markers: { [integer]: { line: integer, construct: string } }, errors: ExportError[] }
 
 --: (string, ({ read_file?: ReadFile } | nil)) -> ImportPassResult
@@ -186,6 +295,8 @@ function M.resolve(src, opts)
 	local markers = {} --[[: { [integer]: { line: integer, construct: string } } ]]
 	local errors = {} --[[: ExportError[] ]]
 	local read_file = opts and opts.read_file --[[: ReadFile | nil ]]
+	-- origin maps bare name → exporter modpath (for collision detection, F1).
+	local origin = {} --[[: { [string]: string } ]]
 
 	local triggers = collect_imports(src)
 	if not read_file then
@@ -202,16 +313,26 @@ function M.resolve(src, opts)
 		if t.dynamic then
 			markers[#markers + 1] = { line = t.line, construct = "dynamic-require" }
 		elseif tmod ~= nil and not visited[tmod] then
-			visited[tmod] = true
-			local msrc, mpath = read_module(tmod, read_file)
-			if msrc ~= nil and mpath ~= nil then
-				local names, errs = import_top_level_aliases(env, msrc, tmod)
-				if #names > 0 then
-					imports[#imports + 1] = { module = tmod, path = mpath, names = names, form = t.form or "value" }
+			-- F3: validate path segments before any cap reach.
+			if not valid_modpath_segments(tmod) then
+				markers[#markers + 1] = {
+					line = t.line,
+					construct = "out-of-subset/invalid-require",
+				}
+			else
+				visited[tmod] = true
+				local msrc, mpath = read_module(tmod, read_file)
+				if msrc ~= nil and mpath ~= nil then
+					-- F4: compute a content digest for staleness records.
+					local digest = CRC32.crc32_hex(msrc)
+					local names, errs = import_top_level_aliases(env, origin, msrc, tmod)
+					if #names > 0 then
+						imports[#imports + 1] = { module = tmod, path = mpath, names = names, form = t.form or "value", digest = digest }
+					end
+					for _, er in ipairs(errs) do errors[#errors + 1] = er end
 				end
-				for _, er in ipairs(errs) do errors[#errors + 1] = er end
+				-- a non-lib or unreadable module contributes nothing and is not an error.
 			end
-			-- a non-lib or unreadable module contributes nothing and is not an error.
 		end
 	end
 

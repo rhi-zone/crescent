@@ -62,7 +62,7 @@ local M = {}
 --                   FINDINGS = a parse/lowering defect with no construct tag).
 --   markers       : { line, construct, text }[]  the out-of-subset markers.
 --:: LowerMarker = { line: integer, construct: string, text: string }
---:: ImportRecord = { module: string, path: string, names: string[], form: string }
+--:: ImportRecord = { module: string, path: string, names: string[], form: string, digest: string }
 --:: LowerResult = { state: AnalysisState, requested: Id[], observations: { [integer]: unknown }, expected: string, markers: { [integer]: LowerMarker }, aliases: AliasEnv, signatures: { [string]: Ty }, imports: { [integer]: ImportRecord }, dependencies: { [integer]: Dependency } }
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -1833,9 +1833,15 @@ function M.lower(source, filename, opts)
 	-- cross-module records (§6.6.5/§6.6.6): one TrustBoundary per imported module,
 	-- the exporting source_text Artifact, and a per-imported-alias Observation. The
 	-- per-claim Dependency on the boundary is added after the claim graph is built.
+	-- F4: the artifact id and dependency invalidation field include the content digest
+	-- so a body change is visible as a different id/invalidation string even when the
+	-- path is unchanged.
 	local xmodule_tbs = {} --[[: { [integer]: Id } ]]
 	for _, rec in ipairs(imp.imports) do
-		local art_id = A.id("artifact", "xmod-src:" .. rec.path)
+		local digest = rec.digest
+		-- F4: the artifact id encodes both path AND digest so a body change produces a
+		-- different artifact identity (cache-key correctness).
+		local art_id = A.id("artifact", "xmod-src:" .. rec.path .. "@" .. digest)
 		A.add_artifact(state, A.artifact({ id = art_id, kind = "source_text", content_ref = rec.path }))
 		for _, name in ipairs(rec.names) do
 			A.add_observation(state, A.observation({
@@ -1872,12 +1878,17 @@ function M.lower(source, filename, opts)
 	--     is re-check-everything; the RECORDS are precise). Dependencies live on the
 	--     driver-level LowerResult (the object model puts them in the CheckResult
 	--     dependency graph, NOT on AnalysisState — the substrate shape is untouched).
+	-- F4: the invalidation string includes the content digest so that a body change
+	-- in the exporting module produces a visibly different invalidation token.
 	local dependencies = {} --[[: { [integer]: Dependency } ]]
-	for _, tbid in ipairs(xmodule_tbs) do
+	for i, tbid in ipairs(xmodule_tbs) do
+		local rec_i = imp.imports[i]
+		local digest_i = (rec_i and rec_i.digest) or ""
+		local path_i = (rec_i and rec_i.path) or ""
 		for _, cid in ipairs(lc.requested) do
 			dependencies[#dependencies + 1] = A.dependency({
 				from_claim = cid, kind = A.DEP_TRUSTED_BOUNDARY, target = tbid,
-				invalidation = "exporting module's --:: alias body changed",
+				invalidation = "exporting module " .. path_i .. " body changed (digest:" .. digest_i .. ")",
 			})
 		end
 	end
