@@ -1022,7 +1022,7 @@ with ~20000× headroom on the worst query (`docs/perf/log.md`, 2026-06-12 entry)
 153 prior analysis assertions are intact (full suite 4607). `bin/cr check` is clean
 on every new file. Findings recorded in §9.3.
 
-**Pass 2 — Synthesis evidence methods + the `crescent.slice.v1` registry entry.**
+**Pass 2 — Synthesis evidence methods + the `crescent.slice.v1` registry entry. ✅ DONE (2026-06-12).**
 Register the semantics (§2.1). Build the parser-frontend adapter (Lua syntax →
 `syntax_tree` artifacts + `--:`/`--::` annotation observations; aliases resolved to
 `Ty`). Build the synthesis rules (`synth_lit`, `synth_var`, `synth_call`,
@@ -1035,6 +1035,34 @@ Gate: the synth/check worked examples accept; rejection produces counterevidence
 order-independence (shuffled submission) holds across the deep trees (the STLC
 discipline); §2.6 adversarial checks (no substrate object kinds; registry rejects
 solver methods) pass.
+
+*Mechanized:* `lib/type/analysis/slice_ty_arg.lua` (the `Ty` ⇄ `ArgValue`
+portable codec — types ride claim args as plain data, parse-not-cast back to
+interned `Ty` — plus `type_shape_check` well-formedness **enforcing μ
+contractiveness**, §9.3 finding 1: a non-contractive μ is a well-formedness
+rejection, never silently top), `lib/type/analysis/crescent_slice.lua` (the
+hosted checker: the registry entry with pinned evidence-method inputs per
+version, all seven synth rules + the two check rules, `subtype_witness`
+discharging the Pass 1 relation with counterexample-on-rejection,
+`instantiate_witness` validating a proposed σ post-hoc, `trusted_signature` for
+stdlib/FFI/force-cast boundaries; context-in-args throughout, the STLC
+discipline), `lib/type/analysis/crescent_slice_parse.lua` (the parser-frontend
+adapter: the v1 annotation type-grammar parser — primitives, literals, functions
+incl. multi-return/vararg, records, index signatures with the `...`-vs-indexer
+distinction preserved structurally, unions/intersections, named aliases,
+recursive aliases → μ — plus `--:`/`--::` directive scanning; reuses no legacy
+checker machinery, low coupling), and `lib/type/analysis/crescent_slice_test.lua`
+(70 assertions: §6.1's synth/check derivation, per-rule unit tests, rejection-
+with-counterevidence (§6.4 + subtype counterexample), `instantiate_witness`
+accept/reject, `trusted_signature`/`check_cast`, μ-contractiveness accept/reject,
+shuffled-order convergence, the §2.6 adversarial checks, and the adapter). Gates
+met: worked examples accept; rejections carry counterevidence; order-independence
+holds; the substrate stores no Type/Context/Subtype/Narrowing object kind and the
+registry rejects unlisted predicates/solver methods; the substrate (`init.lua`)
+was **not touched**, as §9 predicted. `bin/cr check` clean on every new file;
+full `bin/cr test lib/type/analysis/` green at 4677 (4607 prior intact + 70).
+Findings recorded in §9.4. **Pass 3** (narrowing) and **Pass 4** (corpus +
+for-in/numeric-for) remain.
 
 **Pass 3 — The flow-narrowing layer.** Build `narrow_guard` (§4) as a separate pass:
 the `narrows` claim form, the v1 guard recognizers (truthy, `type(x)==`, literal-eq,
@@ -1218,6 +1246,76 @@ implementation.
 self-contained function pair (`slice_ty` + `slice_subtype`) that does not import
 the substrate (`init.lua` untouched), exactly as §10 predicted.
 
+### 9.4 Mechanization findings — Pass 2 (synth/check methods + adapter)
+
+Recorded honestly per the prompt. None crosses the fence; all are
+implementation-shape decisions forced by the substrate/grammar, resolved
+conservatively, and now load-bearing.
+
+- **Types ride args as a *portable* encoding, not the interned `Ty` directly
+  (sharpest Pass-2 finding).** An interned `Ty` (Pass 1) carries a `tid`,
+  cross-references to other interned nodes, and **de-Bruijn `tyvar` indices** — it
+  is not serializable as a claim arg, and the substrate's structural claim
+  identity (`_serialize`) would key on unstable tids. Resolution: a PORTABLE
+  `PTy` tag-tree (no tids; μ binders named at encode time so alpha-equivalent μ
+  encode to structurally-equal trees) rides `ArgValue`, and the checker
+  `parse-not-casts` it back through the interner (`slice_ty_arg.lua`). This is the
+  exact STLC `parse_type` discipline applied to a richer grammar. Claim identity is
+  then over the canonical portable form, so `has_type(Γ, n, μX.…)` is stable across
+  interner generations. (The substrate still learns nothing — it sees only opaque
+  `ArgValue`.)
+
+- **Local generic instantiation keeps free type-parameters in the portable layer
+  ONLY — never interned.** §2.4 frames the `instantiate_witness` input as
+  `has_type(Γ, f_node, G)` "where G is the callee's generic type." But G has FREE
+  type-parameter variables, and **free `tyvar`s are not a v1 grammar construct**
+  (the grammar has no `forall`; `tyvar` exists only bound under a μ). Interning a
+  free-tyvar `Ty` is therefore impossible. Resolution: the generic callee G is
+  carried in the *witness payload* as a portable `PTy` with free `{k="tyvar",
+  var=name}` nodes, and σ-application is a **portable-tree substitution**
+  (`apply_subst_pty`) that produces a monomorphic `PTy`, decoded to an interned
+  `Ty` only after σ is applied. The checker validates the σ-applied application
+  post-hoc; it never infers σ — the fixpoint-rung witness pattern, intact. This is
+  a *tightening* of §2.4's framing (G lives in the payload, not in a has_type
+  premise that could never intern), not a contradiction.
+
+- **The rejection-with-counterevidence slot is the diagnostic string.** §6.4 and
+  the object model speak of `RejectedClaim.counterevidence`, but the substrate's
+  `HostedChecker` return tuple has no dedicated counterexample slot (it returns
+  `(result, diagnostic, deps, trust)`). Resolution: the `subtype_witness`
+  counterexample (the offending constructor pair) and the `synth_index`
+  no-such-field datum are surfaced **in the diagnostic string** the substrate
+  already records on rejection. This is honest (the counterevidence is visible and
+  testable) and needs no substrate change; a structured counterevidence slot would
+  be a substrate extension, deferred with no v1 demand beyond the string.
+
+- **`synth_table` array entries synthesize an `indexer(integer, V)`, not
+  integer-literal-keyed fields.** §2.3 says synth_table yields a `rec` or
+  `rec_with_indexer` "if positional/integer-keyed entries are present." A naive
+  "tuple as integer-literal-string-keyed `rec`" does NOT subtype a declared
+  `{ [integer]: Insn, ... }` (the field key `lit_str("1")` is not `<: integer`).
+  Resolution: positional entries synthesize a precise `indexer(integer,
+  union-of-elements)` (or a `rec_with_indexer` when named fields coexist), so the
+  precise element union flows to the checking boundary and widens to the declared
+  element type via the Pass-1 indexer rule. This is the clarification that makes
+  the table-construction-widening fixture's checking boundary work without a store
+  model (§9.1) — recorded because the "tuple" framing is the wrong lowering here.
+
+- **`CheckResult.accepted_claims` is requested-scoped (test-harness note, not a
+  spec finding).** The substrate populates `accepted_claims` only for
+  `requested_claims`; a premise accepted internally but not requested does not
+  appear there. Slice tests that assert a *premise* was accepted must request it
+  explicitly. Inherited substrate behavior, surfaced here because the slice's deep
+  trees make it easy to assert on an un-requested premise.
+
+**What buckled in the substrate during Pass 2: nothing** — the slice is a pure
+consumer of the unchanged claim database, dependency tracker, and worklist
+checker. `init.lua` is byte-for-byte unchanged; the value-universe semantics is
+hosted with no new substrate object kind, exactly as STLC and §9 predicted. The
+strain was entirely in the *encoding* of types-as-args (resolved by the portable
+codec) and the *framing* of generic instantiation (resolved by keeping free
+tyvars portable), never against the substrate's shape.
+
 ---
 
 ## 10. Next Pass
@@ -1229,12 +1327,21 @@ benchmark, all in `lib/type/analysis/slice_{ty,subtype}.lua` (+ `_test`/`_bench`
 with findings in §9.3 and benchmark numbers in `docs/perf/log.md`. The substrate was
 not touched, as predicted.
 
-**Next: Pass 2** (§8) — the synthesis/checking evidence methods + the
-`crescent.slice.v1` registry entry, the parser-frontend adapter, `trusted_signature`
-and `instantiate_witness`. This is the first pass that imports the substrate
-(`lib/type/analysis/init.lua`); if mechanization forces a substrate change, that is
-a finding to record here and in the object-model doc, never a silent edit — but §9
-predicts none, on the STLC precedent.
+**Pass 2 is DONE** (2026-06-12): the synthesis/checking evidence methods + the
+`crescent.slice.v1` registry entry + the parser-frontend adapter +
+`trusted_signature` + `instantiate_witness` + `type_shape_check` (μ
+contractiveness enforced), in `lib/type/analysis/{slice_ty_arg,crescent_slice,
+crescent_slice_parse}.lua` (+ `crescent_slice_test.lua`, 70 assertions). This was
+the first pass that imports the substrate — and it forced **no** substrate change
+(`init.lua` byte-for-byte unchanged), exactly as §9 predicted on the STLC
+precedent. Findings in §9.4.
+
+**Next: Pass 3** (§8) — the flow-narrowing layer (`narrow_guard`, the `narrows`
+claim form, the v1 guard recognizers, positive-decomposition truthy / sound-wider
+falsy), wired into synthesis via Γ-extension. Then **Pass 4** — corpus validation
++ `for-in pairs`/`ipairs` + numeric-`for`. Nothing in Pass 2 precludes them: the
+node grammar reserves `narrows`/`narrow_guard` in the registry (unimplemented
+until Pass 3), and the adapter's annotation/alias environment is corpus-ready.
 
 This is the ladder's final rung. When it lands, the agnostic substrate has been
 validated from propositional logic through a real Crescent slice without a single

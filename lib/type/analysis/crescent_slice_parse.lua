@@ -1,0 +1,399 @@
+-- lib/type/analysis/crescent_slice_parse.lua
+--
+-- The parser-frontend ADAPTER for `crescent.slice.v1`
+-- (docs/agnostic-static-analysis-crescent-slice.md §5, §8 Pass 2). It converts
+-- Crescent/Lua source in v1's syntax subset into slice ARTIFACTS (syntax_tree
+-- nodes) and OBSERVATIONS (`--:` / `--::` annotations), plus the alias
+-- environment (`--::` aliases resolved to the portable Ty grammar, recursive
+-- aliases → μ). It produces DATA the evidence methods consume; it does NOT pull
+-- legacy checker semantics in (the static checker's arena/intern/solver
+-- machinery is untouched — low coupling, per the project principle).
+--
+-- Scope is the v1 annotation type grammar ONLY (§5.1): primitives, literals,
+-- functions `(P) -> R` incl. multi-return and vararg, records `{ f: T, ... }`,
+-- index signatures `{ [K]: V }`, unions `A | B`, intersections `A & B`, named
+-- aliases, recursive aliases → μ. The `...`-vs-indexer distinction is preserved
+-- structurally (open `rows` vs an `indexer` node), per CLAUDE.md.
+--
+-- This module's primary, load-bearing export is the ANNOTATION TYPE PARSER
+-- (`parse_type_ann`): a focused recursive-descent over the v1 type grammar that
+-- yields an interned slice Ty. The expression/statement lowering
+-- (`lower_*`) builds the node grammar of crescent_slice.lua. Parse errors are
+-- returned as (nil, errmsg); the adapter never throws for malformed input.
+
+local G = require("lib.type.analysis.slice_ty")
+
+local M = {}
+
+-- ── Annotation type lexer ────────────────────────────────────────────────────
+--
+-- A tiny tokenizer over a single-line type annotation string (§9.3 finding 5:
+-- `--::` declarations are single-line). Tokens: identifiers, string/number
+-- literals, and the punctuation the v1 type grammar uses.
+
+--:: TyTok = { kind: string, text: string }
+
+--: (string) -> (TyTok[] | nil, string | nil)
+local function lex_type(src)
+	local toks = {} --[[: TyTok[] ]]
+	local i = 1 --: integer
+	local n = #src
+	while i <= n do
+		local c = src:sub(i, i)
+		if c == " " or c == "\t" then
+			i = i + 1
+		elseif c:match("[%a_]") then
+			local j = i
+			while j <= n and src:sub(j, j):match("[%w_]") do j = j + 1 end
+			toks[#toks + 1] = { kind = "ident", text = src:sub(i, j - 1) }
+			i = j
+		elseif c:match("[%d]") or (c == "-" and src:sub(i + 1, i + 1):match("[%d]")) then
+			local j = i
+			if c == "-" then j = j + 1 end
+			while j <= n and src:sub(j, j):match("[%d%.]") do j = j + 1 end
+			toks[#toks + 1] = { kind = "number", text = src:sub(i, j - 1) }
+			i = j
+		elseif c == '"' or c == "'" then
+			local q = c
+			local j = i + 1
+			while j <= n and src:sub(j, j) ~= q do j = j + 1 end
+			if j > n then return nil, "unterminated string literal in type" end
+			toks[#toks + 1] = { kind = "string", text = src:sub(i + 1, j - 1) }
+			i = j + 1
+		elseif src:sub(i, i + 1) == "->" then
+			toks[#toks + 1] = { kind = "arrow", text = "->" }
+			i = i + 2
+		elseif src:sub(i, i + 2) == "..." then
+			toks[#toks + 1] = { kind = "ellipsis", text = "..." }
+			i = i + 3
+		else
+			local punct = "(){}[]|&,:?<>" --: string
+			if punct:find(c, 1, true) then
+				toks[#toks + 1] = { kind = c, text = c }
+				i = i + 1
+			else
+				return nil, "unexpected character in type: '" .. c .. "'"
+			end
+		end
+	end
+	return toks
+end
+
+M.lex_type = lex_type
+
+-- ── Annotation type parser ───────────────────────────────────────────────────
+--
+-- Recursive descent. `aliases` maps a named-type to its interned Ty (the `--::`
+-- environment). A name not in `aliases` and not a primitive is an error UNLESS it
+-- is the name currently being declared recursively (handled by the caller binding
+-- a placeholder via the μ mechanism).
+--
+-- Grammar (precedence low→high): union (`|`) > inter (`&`) > postfix (`?`,
+-- `[K]`) > atom. Functions `(P) -> R` are atoms beginning with `(`.
+
+--:: AliasEnv = { [string]: Ty }
+
+local PRIMS = {
+	["nil"] = true, boolean = true, number = true, integer = true,
+	string = true, ["function"] = true, unknown = true, never = true,
+}
+
+-- Parser state is a closure over the token list and a cursor.
+--: (TyTok[], AliasEnv) -> { parse: () -> (Ty | nil, string | nil) }
+local function new_type_parser(toks, aliases)
+	local pos = 1 --: integer
+	local err --: string | nil
+
+	--: () -> TyTok | nil
+	local function peek() return toks[pos] end
+	--: () -> nil
+	local function bump() pos = pos + 1 end
+	--: (string) -> boolean
+	local function accept(kind)
+		local t = toks[pos]
+		if t and t.kind == kind then pos = pos + 1; return true end
+		return false
+	end
+
+	local parse_union --[[: () -> Ty | nil ]]
+
+	--: () -> Ty | nil
+	local function fail(m) err = m; return nil end
+
+	-- Parse a record/index-signature body after `{`. Distinguishes `{ [K]: V }`
+	-- (index signature → indexer) from `{ f: T, ... }` (record, open if `...`).
+	--: () -> Ty | nil
+	local function parse_table_type()
+		-- after the opening `{` is consumed.
+		local fields = {} --[[: Field[] ]]
+		local rows = "closed" --: string
+		local idx_key --: Ty | nil
+		local idx_val --: Ty | nil
+		if accept("}") then return G.rec(fields, "closed") end
+		while true do
+			local t = peek()
+			if not t then return fail("unterminated table type") end
+			if t.kind == "ellipsis" then
+				bump()
+				rows = "open"
+				if not accept("}") then return fail("`...` must be the last table entry") end
+				break
+			elseif t.kind == "[" then
+				-- index signature `[K]: V`
+				bump()
+				local kty = parse_union()
+				if not kty then return nil end
+				if not accept("]") then return fail("expected `]` in index signature") end
+				if not accept(":") then return fail("expected `:` in index signature") end
+				local vty = parse_union()
+				if not vty then return nil end
+				idx_key = kty
+				idx_val = vty
+			elseif t.kind == "ident" or t.kind == "string" then
+				-- named field `key: T` (key may be quoted)
+				bump()
+				local key = t.text
+				local optional = false --: boolean
+				if accept("?") then optional = true end
+				if not accept(":") then return fail("expected `:` after field name '" .. key .. "'") end
+				local fty = parse_union()
+				if not fty then return nil end
+				fields[#fields + 1] = { key = key, ty = fty, optional = optional, readonly = false }
+			else
+				return fail("unexpected token in table type: '" .. t.text .. "'")
+			end
+			if accept("}") then break end
+			if not accept(",") then return fail("expected `,` or `}` in table type") end
+			if accept("}") then break end
+		end
+		if idx_key and idx_val then
+			if #fields == 0 then return G.indexer(idx_key, idx_val) end
+			return G.rec_with_indexer(fields, rows, { key = idx_key, val = idx_val })
+		end
+		return G.rec(fields, rows)
+	end
+
+	-- Parse a parameter/return tuple inside `(...)`. Returns { fixed, vararg }.
+	--: () -> { fixed: Ty[], vararg?: Ty } | nil
+	local function parse_tuple()
+		local fixed = {} --[[: Ty[] ]]
+		local vararg --: Ty | nil
+		if accept(")") then return { fixed = fixed } end
+		while true do
+			if accept("ellipsis") then
+				local vt = parse_union()
+				if not vt then return nil end
+				vararg = vt
+				if not accept(")") then fail("expected `)` after vararg"); return nil end
+				break
+			end
+			local ty = parse_union()
+			if not ty then return nil end
+			fixed[#fixed + 1] = ty
+			if accept(")") then break end
+			if not accept(",") then fail("expected `,` or `)` in tuple"); return nil end
+		end
+		if vararg ~= nil then return { fixed = fixed, vararg = vararg } end
+		return { fixed = fixed }
+	end
+
+	-- Atom: primitives, literals, named aliases, `( ... )` (group / function
+	-- params), `{ ... }` table types.
+	--: () -> Ty | nil
+	local function parse_atom()
+		local t = peek()
+		if not t then return fail("unexpected end of type") end
+		if t.kind == "number" then
+			bump()
+			if t.text:find("%.") then return G.lit_num(tonumber(t.text) or 0) end
+			return G.lit_int(tonumber(t.text) or 0)
+		end
+		if t.kind == "string" then
+			bump()
+			return G.lit_str(t.text)
+		end
+		if t.kind == "{" then
+			bump()
+			return parse_table_type()
+		end
+		if t.kind == "(" then
+			bump()
+			local tup = parse_tuple()
+			if not tup then return nil end
+			-- a `( ... ) -> R` function, or a parenthesized group / return tuple.
+			if accept("arrow") then
+				-- return: either `( ... )` tuple or a single type.
+				local rtup --: { fixed: Ty[], vararg?: Ty } | nil
+				if accept("(") then
+					rtup = parse_tuple()
+				else
+					local rt = parse_union()
+					if not rt then return nil end
+					rtup = { fixed = { rt } }
+				end
+				if not rtup then return nil end
+				return G.fn(tup, rtup)
+			end
+			-- a parenthesized group: single element, or a bare return-tuple used as
+			-- a type is not valid outside a function; treat single as the group.
+			if #tup.fixed == 1 and not tup.vararg then return tup.fixed[1] end
+			return fail("a multi-element tuple is only valid as function params/return")
+		end
+		if t.kind == "ident" then
+			bump()
+			local name = t.text
+			if PRIMS[name] then
+				if name == "nil" then return G.nil_() end
+				if name == "boolean" then return G.boolean() end
+				if name == "number" then return G.number() end
+				if name == "integer" then return G.integer() end
+				if name == "string" then return G.string() end
+				if name == "function" then return G.func() end
+				if name == "unknown" then return G.unknown() end
+				return G.never()
+			end
+			if name == "true" then return G.lit_bool(true) end
+			if name == "false" then return G.lit_bool(false) end
+			local a = aliases[name]
+			if a then return a end
+			return fail("unknown type name: '" .. name .. "'")
+		end
+		return fail("unexpected token in type: '" .. t.text .. "'")
+	end
+
+	-- Postfix `?` makes `T?` = `T | nil`.
+	--: () -> Ty | nil
+	local function parse_postfix()
+		local a = parse_atom()
+		if not a then return nil end
+		while accept("?") do a = G.union({ a, G.nil_() }) end
+		return a
+	end
+
+	-- Intersection: `A & B`.
+	--: () -> Ty | nil
+	local function parse_inter()
+		local a = parse_postfix()
+		if not a then return nil end
+		if peek() and peek().kind == "&" then
+			local members = { a } --[[: Ty[] ]]
+			while accept("&") do
+				local b = parse_postfix()
+				if not b then return nil end
+				members[#members + 1] = b
+			end
+			return G.inter(members)
+		end
+		return a
+	end
+
+	-- Union: `A | B`.
+	--: () -> Ty | nil
+	parse_union = function()
+		local a = parse_inter()
+		if not a then return nil end
+		if peek() and peek().kind == "|" then
+			local members = { a } --[[: Ty[] ]]
+			while accept("|") do
+				local b = parse_inter()
+				if not b then return nil end
+				members[#members + 1] = b
+			end
+			return G.union(members)
+		end
+		return a
+	end
+
+	return {
+		--: () -> (Ty | nil, string | nil)
+		parse = function()
+			local r = parse_union()
+			if not r then return nil, err or "type parse failed" end
+			if pos <= #toks then return nil, "trailing tokens in type" end
+			return r
+		end,
+	}
+end
+
+-- Parse a v1 type annotation string into an interned Ty, given the alias
+-- environment. Returns (Ty, nil) or (nil, errmsg).
+--: (string, AliasEnv) -> (Ty | nil, string | nil)
+function M.parse_type_ann(src, aliases)
+	local toks, lerr = lex_type(src)
+	if not toks then return nil, lerr end
+	local p = new_type_parser(toks, aliases or {})
+	return p.parse()
+end
+
+-- ── Alias declarations (`--:: Name = T`, incl. recursive → μ) ─────────────────
+--
+-- A `--::` declaration `Name = <type>` adds `Name` to the alias environment. A
+-- RECURSIVE alias — one whose body references `Name` — is parsed as an
+-- equirecursive μ: we bind `Name` to the μ binder's placeholder while parsing the
+-- body, so a self-reference resolves to the bound variable (§5.1). Whether the
+-- alias is recursive is detected by a textual occurrence of `Name` in the body;
+-- non-recursive aliases bind directly.
+--
+-- Returns the updated alias environment (mutated in place and returned), or
+-- (nil, errmsg).
+
+-- A name occurs in `body` as a standalone identifier token?
+--: (string, string) -> boolean
+local function name_occurs(body, name)
+	for tok in body:gmatch("[%a_][%w_]*") do
+		if tok == name then return true end
+	end
+	return false
+end
+
+--: (AliasEnv, string, string) -> (AliasEnv | nil, string | nil)
+function M.declare_alias(aliases, name, body)
+	if name_occurs(body, name) then
+		-- recursive: bind Name to the μ binder while parsing the body.
+		local perr --: string | nil
+		local mu = G.mu(name, function(placeholder)
+			local prev = aliases[name]
+			aliases[name] = placeholder
+			local ty, e = M.parse_type_ann(body, aliases)
+			aliases[name] = prev
+			if not ty then perr = e; return G.never() end
+			return ty
+		end)
+		if perr then return nil, perr end
+		aliases[name] = mu
+		return aliases
+	end
+	local ty, e = M.parse_type_ann(body, aliases)
+	if not ty then return nil, e end
+	aliases[name] = ty
+	return aliases
+end
+
+-- ── Annotation line scanning (`--:` / `--::`) ────────────────────────────────
+--
+-- Pull annotation directives out of a source line. Returns one of:
+--   { kind = "alias", name, body }   for `--:: Name = T`
+--   { kind = "sig", body }           for `--: T`   (preceding-line signature)
+--   nil                              if the line carries no annotation directive
+--
+--:: AnnDirective = { kind: string, name?: string, body?: string }
+
+--: (string) -> AnnDirective | nil
+function M.scan_annotation(line)
+	-- `--::` alias declaration.
+	local adecl = line:match("^%s*%-%-::%s*(.+)$")
+	if adecl then
+		local name, body = adecl:match("^([%a_][%w_]*)%s*=%s*(.+)$")
+		if name then return { kind = "alias", name = name, body = body } end
+		-- a `--::` form without `=` (e.g. `declare`/`augment`) is outside v1.
+		return nil
+	end
+	-- `--:` signature (single colon, not `--::`).
+	local sig = line:match("^%s*%-%-:%s+(.+)$")
+	if sig and not line:match("^%s*%-%-::") then
+		return { kind = "sig", body = sig }
+	end
+	return nil
+end
+
+return M
