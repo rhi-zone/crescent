@@ -16,16 +16,35 @@ adversarially stress-tested), or **[aspirational]** (a target, not yet built).
 The position deliberately does **not** assert novelty or guaranteed value; see
 §Prior-Art Positioning and §Claims Requiring Adversarial Verification.
 
+**Adversarial-review status (2026-06-14).** This thesis has now been through one
+round of execution-led adversarial review (three critics, artifacts under
+`docs/artifacts/typechecker-run-2026-06-12/critique-*.md`). The verdict: the
+thesis **survives as a *direction*** — the core stance (coverage-gradual, sound
+over the covered domain, sound-⊤ for the uncovered) is intact and the prior-art
+gap is real — but two of its load-bearing claims were **falsified** and two were
+**partially** sustained, driving the corrections folded in below. The honest
+summary: a sound direction with one **live soundness defect** (mutable-field
+covariant write-through; see §"Known soundness defect") and one named category
+the original dichotomy missed (variance/identity). It is neither vindicated
+wholesale nor refuted; it is refined. The per-claim outcomes are recorded in
+§Claims Requiring Adversarial Verification (now annotated with results).
+
 ---
 
 ## Thesis (one sentence)
 
-The crescent typechecker is **gradual in semantic *coverage* but fully *sound* in
-type-safety** — unhandled constructs receive a sound `unknown` (⊤, must-narrow-
-before-use), never an unsound `any` — assembled as a single de-special-cased
-value-set lattice plus a few orthogonal judgement layers, so that *each
-error-class is caught soundly across the whole corpus* rather than each file
-being fully checked.
+The crescent typechecker is **gradual in semantic *coverage* but aims to be fully
+*sound* in type-safety** — unhandled constructs receive a sound `unknown` (⊤,
+must-narrow-before-use), never an unsound `any` — assembled as a single
+de-special-cased value-set lattice, plus *variance/identity facts threaded through
+that one subtype relation*, plus a few orthogonal judgement layers, so that *each
+error-class is caught soundly across the whole corpus* rather than each file being
+fully checked.
+
+*(Revised post-review: "fully sound" → "aims to be fully sound" — there is one
+**open soundness defect**, mutable-field covariant write-through (§4b); and the
+decomposition is three categories, not two, the variance/identity clause being the
+correction the original sentence lacked.)*
 
 ---
 
@@ -85,25 +104,84 @@ Siek–Taha's `?` than to a blocked-until-narrowed sound ⊤ **[argued, sourced]
 (`prior-art-modular-sound-gradual.md` §11 and "Adversarial Verification of Key
 Claims"; Castagna–Duboc, arXiv 2408.14345).
 
+**The near-miss that forces precision: TypeScript's `unknown`.** The prior-art
+critic (claim 2) confirmed the gap is real but showed it rests on a **thin
+margin**, because the sound-⊤ mechanism is *not* a crescent invention.
+TypeScript's `unknown` is a genuine **production sound-⊤**: assignable from
+everything, assignable to nothing but `unknown`/`any`, must be narrowed before
+use. So the bare statement "nobody has a sound ⊤" is **false** — TypeScript and
+pyright ship the constructor. The non-gerrymandered claim is narrower and must be
+stated exactly:
+
+> The unoccupied region is a sound ⊤ **routed to uncovered constructs, with no
+> unsound escape hatch anywhere in the system.**
+
+TypeScript has the sound-⊤ constructor but does **not** route it to uncovered
+positions (it reaches for the *unsound* `any` there) and keeps an `any` escape
+hatch that makes the whole system unsound. That routing-plus-no-escape-hatch
+conjunction is what stays unoccupied — not the ⊤ mechanism itself. This keeps the
+"under-explored, not novel" register honest: novelty is claimed for *where the
+sound-⊤ is routed and what is absent system-wide*, not for the ⊤ itself (which is
+textbook gradual-typing theory: Siek — the dynamic type must not be the top of
+the subtyping order; consistency keeps it non-transitive). **[argued, sourced]**
+(`critique-priorart.md`; Siek "What is Gradual Typing".)
+
 ---
 
-## 3. Decomposition: one value-set lattice + a few orthogonal judgement layers
+## 3. Decomposition: three categories (value-set, variance/identity, orthogonal layers)
 
-Most "features" are **not separate passes**. They are enrichments of **one
+Most "features" are **not separate passes**. Many are enrichments of **one
 value-set / subtyping lattice**: nil, unions, records, literals, recursion, and
 refinements are all the same kind of thing under `{ <: }`. `| nil` is no
 different from `| integer` — both are union members of the value lattice.
 
-The discriminator is sharp:
+**The original dichotomy was wrong — there are three categories, not two.** This
+thesis first asserted a clean two-way split (value-subset → no pass; otherwise →
+orthogonal layer). The soundness critic falsified it (claim 1) by driving
+mutable-field variance through the real substrate, and the falsification holds:
+the correct decomposition has **three** categories.
 
-> **Is the property a subset of the value universe, checkable by subtyping?**
-> If **yes** → it is not a pass; it falls out of the one lattice.
-> If **no** → it earns its own composable judgement layer — which must *itself*
-> be de-special-cased (effects-as-rows, not per-effect flags).
+1. **Value-set properties — fall out of the one lattice.** A property that is a
+   subset of the value universe, checkable by subtyping: nil, unions, records,
+   literals, recursion, refinements. Not a pass; an enrichment of the one `<:`
+   relation.
 
-Genuinely-non-value properties — **effects, linearity / usage, taint,
-termination** — are the ones that earn a layer, because they are about *how* a
-value is produced or used, not *which* values it can be. **[argued]**
+2. **Variance & identity (mutability) — intrinsic to *how subtyping treats
+   mutable structure*.** This is the category the dichotomy denied. It is
+   **neither** a value-subset fact **nor** a separable judgement layer. The
+   decisive case is **mutable-field variance**. By the value-set membership test,
+   `{ f: integer } <: { f: number }` is correct (the values inhabiting the former
+   *are* a subset) — and the lattice's covariant `_rec_sub` computes exactly that.
+   But that answer is *unsound for a mutable field*: read-set inclusion holds,
+   write-safety does not (you can write a `number` through the widened alias into
+   an `integer` field — see §"Known soundness defect"). The principled fix the
+   slice spec itself prescribes (§3.2, §9.2) lives **inside the one subtype
+   relation** — split readonly fields (covariant) from mutable fields (invariant)
+   in the depth rule of `_rec_sub`, keyed on a per-field mutability bit. That is
+   not an orthogonal layer beside `<:`, and it is not a value-subset; it is a
+   **variance annotation on a structural constructor**, threaded *through* `<:`.
+   The vestigial `readonly` slot in `slice_ty.lua` (parsed but hardcoded `false`,
+   never set true — audit round 5 F3) is the design's own admission of this
+   category: it exists because the clean dichotomy had nowhere else to put it.
+   **Object identity / aliasing** corroborates (the checker cannot distinguish two
+   structurally-equal records by `==`, because identity is not a value-set
+   property and has no layer) — but mutability is the decisive instance, because
+   its prescribed fix lands inside the subtype relation rather than beside it.
+   **[falsified-then-corrected; soundness critic claim 1]**
+
+3. **Orthogonal judgement layers — earn their own de-special-cased layer.**
+   Genuinely-non-value properties — **effects, linearity / usage, taint,
+   termination** — are about *how* a value is produced or used, not *which* values
+   it can be, nor how `<:` treats mutable structure. They compose as separate
+   row/usage judgements that do not touch the subtype relation. Each must *itself*
+   be de-special-cased (effects-as-rows, not per-effect flags). **[argued]**
+
+The old discriminator ("is it a value-subset, yes/no?") is therefore necessary
+but not sufficient: it correctly separates category 1 from category 3, but it has
+no correct answer for category 2 — *yes* by value-set membership (and that yes is
+unsound), *no* by write-safety (and that no is not an orthogonal layer). Variance
+is the intrinsic third thing, sitting inside the lattice's subtype rule yet not
+being a value-subset fact.
 
 This decomposition is grounded in the design as built:
 
@@ -129,7 +207,7 @@ This decomposition is grounded in the design as built:
 
 ---
 
-## 4. Current keystone gap: totality
+## 4. Current gap: totality (a precondition, not the keystone)
 
 The lowering currently **chokes** at unsupported constructs: an unannotated
 `local x = <out-of-subset expr>` leaves `x` *unbound* (absent from the typing
@@ -163,9 +241,106 @@ reconciles them.** Under whole-file `CLEAN%`, totality looks like a +3-file
 rounding error. Under error-classes-caught-corpus-wide, it is the enabling
 substrate: it is what makes "this property is checked everywhere it appears" true
 instead of "checked everywhere it appears *unless an earlier construct on the
-line was uncovered*." The keystone claim is therefore that totality is
-high-leverage **on the correct axis**, and this very disagreement is a flagged
-item for adversarial verification (§Claims, claim 4).
+line was uncovered*."
+
+**"Keystone" was an overclaim — corrected (claim 4 PARTIAL).** The leverage
+critic measured the per-property axis directly with `per_property_metric.lua`
+over the `lib/` corpus and the keystone framing does not survive intact. Baseline
+**Sound-Verdict (SV) sites = 83,226** (82,371 accepted + 373 rejected + 482
+unknown), against 51,848 abandoned out-of-subset markers — **61.6% SV coverage of
+all potential sites**. On that axis:
+
+- **Totality recovers +10,058 SV conservatively (+12.1%)** — which **beats any
+  *single* root construct** (`dynamic-index` alone is +6,719 / +8.1%). On
+  "beats the top single root construct," totality holds.
+- But the **top-4 root constructs combined recover +13,464 SV (+16.2%)** —
+  `dynamic-index` + `multi-assign` + `multi-return` + `expr` — which **exceeds**
+  totality's conservative gain and dominates it on the per-property axis.
+- And **~half of totality's headline gain is contingent on stdlib fixes**: its
+  upper bound (+20,170 / +24.2%, the "cuts the histogram nearly in half" figure)
+  requires also modeling `require`/`ffi`/`coroutine`, because ~10,112 of the
+  20,170 cascade markers are rooted in unbound-name gaps the unbound→⊤ patch does
+  not touch. Totality *alone* delivers [+10,058, +20,170], realistically near the
+  floor.
+
+**Reframed honestly.** Totality and root-construct coverage are **complementary,
+and "keystone" is dropped.** Totality is the **thesis-defining *semantic*
+precondition**: it is what makes the sound-⊤ of §2 *real at the choke point* —
+without unbound→⊤, an uncovered RHS abandons its local entirely (not even a ⊤),
+so "sound over the covered domain, ⊤ for the uncovered" is not yet literally true
+inside a single expression. Root-construct coverage is the **larger near-term
+coverage lever** on the SV metric. They do not compete for a single keystone slot;
+the semantic precondition and the coverage lever are different jobs.
+(`critique-leverage.md`; `per_property_metric.lua`; `gap-cascade-magnitude.md`
+§3–§4, whose own "fix substrate gaps first, totality for signal quality"
+recommendation the critic found more accurate than the keystone framing.)
+
+---
+
+## 4b. Known soundness defect (OPEN — must fix)
+
+> **Status: OPEN, live, must-fix.** This falsifies the original claim 5 ("soundness
+> holds over the covered domain"). It is recorded here prominently rather than
+> buried because it is a *current* unsound accept on *fully in-subset v1 syntax*,
+> not a future increment. The thesis's "sound over the covered domain" half is
+> therefore **false as previously stated**; the honest statement is "sound over
+> the covered domain *except* mutable-field variance, a known live hole."
+
+**The defect: covariant field write-through.** A `number` can be written into an
+`integer` field through a widened alias, accepted CLEAN. Reproduced end-to-end
+(`crescent_slice_lower.lower → A.check`, re-verified 2026-06-14 in this synthesis
+pass, matching `critique-soundness.md`):
+
+```lua
+--:: IntBox = { f: integer }
+--:: NumBox = { f: number }
+--: (IntBox, number) -> integer
+local function corrupt(ib, x)
+  --: NumBox
+  local nb = ib       -- IntBox <: NumBox accepted (covariant field) — CLEAN
+  nb.f = x            -- x:number written into ib's integer field — accepted
+  return ib.f         -- read back as integer; at runtime may be 1.5
+end
+```
+
+Observed: `expected=CLEAN acc=3 rej=0 unk=0`, zero markers. Two controls pin it as
+a genuine covariant-accept, not noise: a **direct** `b.f = x` (`x:number`,
+`b.f:integer`) is correctly **REJECTED** (`type-mismatch`); and the widen step
+with **no write** is correctly CLEAN. The false negative is precisely (covariant
+widen) ∘ (write through the wider view) — two steps each sound in isolation
+composing into an unsound whole.
+
+**Root cause.** `lib/type/analysis/slice_subtype.lua` `_rec_sub` compares field
+types **covariantly and unconditionally** (no readonly/mutable discriminator).
+`slice_ty.lua` carries a `readonly` slot but `crescent_slice_parse.lua` hardcodes
+`readonly = false` and nothing ever sets it true (audit round 5 F3) — every field
+is mutable in practice and every field is checked covariantly, the exact unsound
+combination.
+
+**Shared root with claim 1.** This is the same fact as category 2 of §3
+(variance/identity): the value-set lattice is correct *for reads* and the wrong
+tool *for writes through a mutable reference*. The defect and the falsified
+dichotomy are one underlying gap.
+
+**The fix is a design choice — recorded, not decided here.** Two principled
+answers, with their tradeoffs:
+
+- **Invariant mutable fields** (the standard sound answer): in `_rec_sub`, a
+  mutable field requires `af.ty` and `bf.ty` to be *mutually* subtypes (invariant),
+  only readonly fields stay covariant. *Pro:* the textbook-correct, minimal change;
+  matches how every sound system treats mutable references. *Con:* rejects some
+  currently-accepted widenings that are read-only in practice but not marked so —
+  precision cost until a readonly story exists.
+- **Readonly/mutable variance split**: thread the per-field `readonly` bit (already
+  vestigial in `slice_ty.lua`) through parse and the depth rule, covariant for
+  readonly, invariant for mutable. *Pro:* recovers the precision the blanket-invariant
+  answer loses. *Con:* more machinery — the bit must be inferred or annotated, and a
+  variance-marked structural constructor is exactly the category-2 hybrid §3 names;
+  it must be built de-special-cased, not as a field-keyed carve-out.
+
+No recommendation is made here; the choice is the user's. What is fixed is the
+verdict: **this is an open soundness bug, and the §9.2 "unreachable in v1 syntax"
+fence is disproven** (see the corrected slice doc §9.2).
 
 ---
 
@@ -173,17 +348,26 @@ item for adversarial verification (§Claims, claim 4).
 
 The four-property combination —
 
-- **(A)** sound ⊤ for uncovered positions + fully sound over the covered domain,
+- **(A)** a sound ⊤ **routed to uncovered constructs, with no unsound escape hatch
+  system-wide** (stated in this precise form — *not* "nobody has a sound ⊤";
+  TypeScript's `unknown` is a production sound-⊤, so the bare form is false), plus
+  soundness over the covered domain **[currently violated by the §4b defect — an
+  *aspiration* the design targets, not a present fact]**,
 - **(B)** pluggable / modular, independently-usable analyses,
 - **(C)** for a real dynamically-typed language with unannotated code,
 - **(D)** a single de-special-cased value-set lattice,
 
 — has **no clear single prior-art occupant** per the survey
-(`prior-art-modular-sound-gradual.md`, verdict and summary table). The closest
+(`prior-art-modular-sound-gradual.md`, verdict and summary table) — a verdict the
+prior-art critic re-confirmed against the production lineages the survey
+under-examined (Luau, Sorbet, Hack, pyright, Typed Racket all fail (A)+(B) the
+same way; `critique-priorart.md`). The gap is the **unoccupied intersection** of
+four independently-occupied regions, not any single empty cell. The closest
 near-misses each lack a *named* property **[argued, sourced]**:
 
 | Work | Missing property |
 |---|---|
+| **TypeScript (`unknown`)** | (B) monolithic, no plugin-analysis surface (the cleanest miss); and the system-level half of (A) — it *has* the sound-⊤ constructor but does not route it to uncovered constructs and keeps an unsound `any` escape hatch. The strongest single candidate, which is why (A) must be stated in its routed form. |
 | Elixir set-theoretic types | (B) monolithic, and (A) precisely (`dynamic()` is bounded-any, not blocked-until-narrowed ⊤) |
 | Cousot abstract interpretation + reduced product | (C) as a *user-facing* modular type system for dynamic-language programmers — the theory is there (⊤ = sound unknown, reduced product = modular combination, analyses as lattice enrichments) but was never productized as one |
 | Checker Framework | (A) unsound by default (unannotated code is *trusted*, not assigned ⊤), and (C) Java only |
@@ -228,13 +412,97 @@ reachable from here by enrichment, not rebuild.
 
 ---
 
-## Claims Requiring Adversarial Verification
+## Claims Requiring Adversarial Verification — RESULTS (round 1, 2026-06-14)
 
-The following load-bearing claims are **not yet stress-tested**. They are the
-target list for the adversarial passes that follow. Each is stated to be
-falsifiable.
+These five load-bearing claims have now been through one execution-led adversarial
+round. Each is annotated with its **verdict** and the artifact that established it.
+Summary: **2 FALSIFIED, 2 PARTIAL, 1 SURVIVED.** The falsifications and partials
+drove the §2/§3/§4/§4b corrections above.
 
-1. **The value-set / judgement dichotomy partitions cleanly.** Claim 3 asserts
+1. **The value-set / judgement dichotomy partitions cleanly — FALSIFIED.** The
+   original claim: every property is *either* a value-subset (→ lattice enrichment)
+   *or* a genuinely-orthogonal judgement (→ its own layer), with no third category.
+   **Falsified** by `critique-soundness.md`: **mutable-field variance is a third
+   category** — it lives *inside* the subtype relation yet is not a value-subset
+   fact, and its prescribed fix is a per-field variance hybrid the clean dichotomy
+   cannot name (the vestigial `readonly` slot is the design's own admission). §3 is
+   rewritten to three categories (value-set / variance & identity / orthogonal).
+
+2. **The prior-art gap is real, not a missed occupant — SURVIVED (tightened).**
+   No surveyed-or-new system holds (A)+(B)+(C)+(D); the production lineages the
+   survey under-examined reinforce rather than overturn the verdict
+   (`critique-priorart.md`). **Tightening forced:** the strongest candidate is
+   **TypeScript `unknown`** (a real production sound-⊤), so (A) must be stated as
+   "sound ⊤ *routed to uncovered constructs, no unsound escape hatch system-wide*,"
+   not "nobody has a sound ⊤" (which is false). §2 and §5 now carry the routed form.
+
+3. **Sound ⊤ is genuinely distinct from `any`/`dynamic()` in practice — PARTIAL.**
+   Half (b) **SURVIVES**: `unknown` genuinely *blocks* — direct arith/index/call on
+   an `unknown` are all rejected, never silently accepted; it is *not* a bounded-any
+   on the soundness axis. Half (a), the critic's claimed unusable false positive
+   (`type(x)=="number"` not narrowing `unknown`), was **re-run end-to-end and does
+   NOT reproduce as a narrowing failure** — see the reconciliation below. ⊤-narrowing
+   works (audit round 1 finding 3 / §9.7 of the slice, which the critic mis-attributed
+   to round 4 / §9.17). The narrowing layer *is* wired for `unknown`. The genuine,
+   narrower residual is a **precision asymmetry** (recorded below), not a usability
+   gap, and not the pressure-toward-bounded-any the critic asserted.
+
+   > **Reconciliation (the contradiction the synthesis pass was charged to resolve).**
+   > The soundness critic (claim 3) reported `if type(x)=="number" then x+1` does not
+   > narrow an `unknown`-typed `x`. Round 1 finding 3 (§9.7 — *not* round 4 / §9.17,
+   > which fixed the unrelated `rec_with_indexer` dynamic-read union) reported fixing
+   > exactly `unknown`-narrows-to-the-positive-set. Re-running both end-to-end through
+   > `crescent_slice_lower.lower → A.check`:
+   >
+   > | Probe | Result |
+   > |---|---|
+   > | `(unknown)->number`, `type(x)=="number"`, `return x` | **CLEAN** — narrows |
+   > | `(unknown)->string`, `type(x)=="string"`, `return x` (the critic's exact idiom) | **CLEAN** — narrows |
+   > | `(unknown)->number`, `type(x)=="number"`, `return x+1` | **CLEAN** — narrows, arith ok |
+   > | `(unknown)->integer`, `type(x)=="number"`, `return x+1` (the critic's `C3e`) | **FINDINGS** |
+   > | `(number)->integer`, `return x+1` (no narrowing at all) | **FINDINGS** |
+   >
+   > The critic's `C3e` rejection is **a correct number/integer type mismatch, not a
+   > narrowing failure**: narrowing `unknown` by `type=="number"` yields the *positive
+   > set* `number` (`unknown ∩ positive = positive`), so `x:number`, `x+1:number`,
+   > which is **not** `<: integer` — the last row shows the identical rejection with no
+   > narrowing involved. The critic's "control" `C3h` (`integer|string`) was CLEAN only
+   > because a **union** narrows to its matching *member* `integer` (`m ∩ positive = m`),
+   > making `x+1:integer <: integer`. The two cases differ in narrowed *result type*,
+   > both correct; the critic compared them and mis-read the difference as a narrowing
+   > failure. **Verdict: round 1 did fix ⊤-narrowing and it holds; the critic's claim-3
+   > usability repro is stale/incorrect.**
+   >
+   > **The genuine residual (recorded honestly):** `unknown` narrows only to the broad
+   > positive set (`number`), never to a sharper member (`integer`), whereas a union
+   > narrows to its precise member. So a guarded `unknown` is *sound but less precise*
+   > than a guarded union — a real precision asymmetry, not an unusable false positive
+   > and not bounded-any pressure. This is the honest, narrower (a)-residual.
+
+4. **Totality is highest-leverage *on the correct axis* — PARTIAL ("keystone"
+   corrected).** Against any *single* root construct, totality wins (+12.1% SV vs
+   `dynamic-index` +8.1%). But the **top-4 root constructs combined dominate**
+   (+16.2% SV), and ~half of totality's headline gain is contingent on stdlib fixes
+   (`critique-leverage.md`, `per_property_metric.lua`, baseline SV=83,226 / 61.6%
+   coverage). "Keystone" is dropped (§4): totality is the *thesis-defining semantic
+   precondition* (makes sound-⊤ real at the choke point), root-construct coverage is
+   the larger near-term coverage lever — complementary, not competing.
+
+5. **Soundness holds over the covered domain — FALSIFIED (live bug).** A fully
+   in-subset program writes a `number` into an `integer` field through a widened
+   alias and is accepted CLEAN (`critique-soundness.md`, re-verified this pass; see
+   §4b "Known soundness defect", OPEN/must-fix). Shares a root with claim 1
+   (mutable-field covariance). The honest statement is now "sound over the covered
+   domain *except* mutable-field variance, a known live hole."
+
+---
+
+## Appendix: original falsifiable framing (pre-review, retained for the record)
+
+The pre-review version stated the five claims as not-yet-stress-tested targets.
+Retained verbatim so the before/after is auditable.
+
+1. **The value-set / judgement dichotomy partitions cleanly.** Asserts
    every property is *either* a subset of the value universe checkable by
    subtyping (→ lattice enrichment, no pass) *or* a genuinely-orthogonal judgement
    (→ its own de-special-cased layer), with no third category and no property that
@@ -243,20 +511,20 @@ falsifiable.
    cleanly a value-subset *nor* cleanly an orthogonal layer — forcing a special
    case or a hybrid that the dichotomy does not name.
 
-2. **The prior-art gap is real, not a missed occupant.** Claim 5 asserts no single
+2. **The prior-art gap is real, not a missed occupant.** Asserts no single
    system occupies (A)+(B)+(C)+(D). *Falsifier:* a system (surveyed or not) that in
    fact holds all four — or a demonstration that one of the four properties is
    defined so as to be trivially unoccupiable (making the "gap" an artifact of the
    definition rather than of the literature).
 
 3. **`dynamic()` / `any` is genuinely distinct from our sound ⊤ in practice, not
-   just on paper.** Claim 2 leans on `unknown`-blocks-until-narrowed being a real,
+   just on paper.** Leans on `unknown`-blocks-until-narrowed being a real,
    enforced difference. *Falsifier:* a corpus pattern where our `unknown`
    propagation either (a) is forced to behave like a bounded-any to avoid
    unusable false positives, or (b) produces an unsound accept — i.e. the
    sound-⊤/unsound-any distinction collapses under real code.
 
-4. **Totality is highest-leverage *on the correct axis*.** Claim 4 asserts the
+4. **Totality is highest-leverage *on the correct axis*.** Asserts the
    unbound→⊤ fix is the keystone, reconciling the measurement's low *whole-file*
    leverage against high *per-property* leverage. *Falsifier:* a measurement on
    the per-property metric showing totality delivers little error-classes-caught

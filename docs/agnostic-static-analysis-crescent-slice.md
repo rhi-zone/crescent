@@ -2807,11 +2807,26 @@ substrate. This is the rung's data; recorded honestly, not smoothed.
 - **Mutable-field invariance.** §3.2 treats record fields covariantly. Sound
   subtyping of *mutable* table fields is invariant (a writable `{x: integer}` is
   not `<: {x: number}`). v1's covariant treatment is **unsound for mutation through
-  an aliased wider type** — but no v1 corpus fixture writes through a widened field
-  alias, so the unsoundness is unreachable in v1's checked syntax. Recorded as a
-  must-fix when the slice grows write-through-alias syntax: field variance must
-  split readonly (covariant) from mutable (invariant). This is the sharpest strain;
-  it is fenced (unreachable in v1) but explicitly named, not hidden.
+  an aliased wider type**. Field variance must split readonly (covariant) from
+  mutable (invariant). This is the sharpest strain.
+
+  > **SUPERSEDED — the "unreachable in v1's checked syntax" fence is DISPROVEN
+  > (adversarial review, 2026-06-14).** This bullet originally claimed the
+  > unsoundness was *unreachable* in v1 because "no v1 corpus fixture writes through
+  > a widened field alias." That confused **corpus-absence** with
+  > **grammar-inexpressibility** — the same mistake-class as a SIGSEGV diagnosis that
+  > blames the wrong cause; recorded here, not deleted, so the reasoning error is
+  > auditable. It is **REACHABLE**: annotated `local`, alias assignment, field write,
+  > and field read are each independently in-subset, so the pattern composes entirely
+  > within v1's checked syntax. Reproduced end-to-end (`crescent_slice_lower.lower →
+  > A.check`): `--:: IntBox = { f: integer }` / `--:: NumBox = { f: number }`, then
+  > `--: NumBox local nb = ib; nb.f = x; return ib.f` (with `x : number`) is accepted
+  > **CLEAN** while writing a `number` into an `integer` field — a live false
+  > negative on fully in-subset syntax. See `docs/typechecker-design-thesis.md` §4b
+  > "Known soundness defect" and
+  > `docs/artifacts/typechecker-run-2026-06-12/critique-soundness.md` (claim 5). The
+  > gap is therefore **OPEN and live, not fenced**. The must-fix stands; the
+  > "unreachable" qualifier is withdrawn.
 
 - **Open-row-vs-closed / open-row-vs-indexer conservative `false`.** §3.2 returns
   `false` for an open `rec` against a closed `rec` or an `indexer`. The full lattice
@@ -3266,10 +3281,16 @@ per the prompt — including the prior sections' claims this audit FALSIFIED, an
 
 **Survivals (attacks that found nothing — evidence too):**
 
-- **Record-field covariance unsoundness is unreachable within v1 syntax.** The
-  §9.2 mutable-field-invariance gap (fields treated covariantly) was probed; it
-  remains *unreachable* in v1's checked syntax (no fixture writes through a widened
-  field alias), so the audit did not disprove the §9.2 fencing — it stands.
+- **Record-field covariance unsoundness is unreachable within v1 syntax.**
+  > **SUPERSEDED — DISPROVEN by adversarial review (2026-06-14).** This survival
+  > echoed the §9.2 fence and is withdrawn for the same reason: the gap *is*
+  > reachable in v1's checked syntax (annotated-local + alias + field-write +
+  > field-read all compose in-subset), and is a live false negative reproduced
+  > end-to-end. This round's probes did not write through a widened alias, so it
+  > read as a survival; a later adversarial probe that *did* write through the alias
+  > falsified it. The §9.2 fencing does **not** stand — see the SUPERSEDED note in
+  > §9.2 and `docs/typechecker-design-thesis.md` §4b. Retained, not deleted, so the
+  > false-survival is auditable.
 - **Memo-poisoning withstood.** After adding memoization (finding 4), the attacker
   probed for a coinductive result poisoned by a cached provisional `true`; the
   contravariant-recursion and equirecursive-μ tests stayed green, confirming only
