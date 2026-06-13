@@ -2503,12 +2503,22 @@ elaborator the vacuous-binder collapse with NO new Ty kind, NO grammar/relation 
 
 ## 6.14 Increment v2.10 — sound closure of the covariant-field write-through defect
 
-**Status: DESIGNED, pending implementation.** This section closes the one open
-soundness defect (`docs/typechecker-design-thesis.md` §4b; the disproven §9.2
-fence). Soundness is a HARD invariant: an unsound safety-validator is worthless, so
-this is not an accepted-aim — it must be, and is, closeable. The design below is
-validated against the real lowering and subtype code; the implementation has no
-surprises.
+**Status: FIXED (2026-06-14).** This section's design is **landed**, closing the one
+open soundness defect (`docs/typechecker-design-thesis.md` §4b; the disproven §9.2
+fence). The 6-step mechanization below shipped exactly as designed:
+`check_table_expr` + the `check_table` evidence method (check-mode construction),
+the `check_expr` mode-switch routing a `table` node against a record/union target,
+the single-return path routed through `check_expr`, invariant mutable-field depth in
+`_rec_sub` / the indexer rules / `_indexer_obligation`, and the corrected unit
+assertions that had encoded the unsound covariant-depth rule. **Verification:** the
+two bug repros (`FN_widen_alias_write`, `FN_widen_alias_write_numvar`) now REJECT as
+permanent regression tests (`corpus_lower_test.lua`); the 5 sound construction
+fixtures (`local_return_narrowing`, `union_alias_over_named_types`,
+`coinductive_recursive_types`, `closure_param_typing`, `table_construction_widening`)
+stay CLEAN with every requested claim accepted; the full `lib/type/analysis/` suite
+is green. The `readonly` precision-recovery layer (§6.14.5, the alias-and-read
+residual) remains DEFERRED — it only *adds* acceptances and the corpus does not
+exhibit the pattern. The design below records what shipped; soundness argument intact.
 
 ### 6.14.1 The defect, restated precisely
 

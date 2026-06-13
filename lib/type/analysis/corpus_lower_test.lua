@@ -1236,3 +1236,91 @@ end
 		assert_sound(o)
 	end)
 end)
+
+-- ── §6.14 soundness regression: covariant write-through is CLOSED ────────────
+-- The claim-5 false negative (docs/typechecker-design-thesis.md §4b;
+-- docs/artifacts/typechecker-run-2026-06-12/critique-soundness.md): a record alias
+-- widened to a supertype with a mutable field, then written through, corrupts a read
+-- through the narrower alias. With INVARIANT mutable-field subtyping the widen step
+-- (`local nb: NumBox = ib` with `ib : IntBox`) is REJECTED at the alias site, before
+-- the write. These are the critic's EXACT shapes, pinned as permanent regression
+-- tests. The dual property — fresh construction stays covariant via check-mode — is
+-- the 5 construction fixtures above (local_return_narrowing, union_alias_over_named_
+-- types, coinductive_recursive_types, closure_param_typing, table_construction_widening),
+-- all asserted CLEAN.
+T.describe("§6.14 soundness: covariant write-through unsoundness is CLOSED (claim 5)", function()
+	-- A FINDINGS verdict with ≥1 type-mismatch marker means the unsound widen was
+	-- rejected. (Pre-fix these lowered CLEAN — the live false negative.)
+	--: (Outcome) -> boolean
+	local function rejected(o)
+		if o.expected ~= "FINDINGS" then return false end
+		for _, c in ipairs(o.constructs) do if c == "type-mismatch" then return true end end
+		return false
+	end
+
+	T.it("FN_widen_alias_write: literal write through a widened mutable alias is REJECTED", function()
+		local o = lower_src([[
+--:: IntBox = { f: integer }
+--:: NumBox = { f: number }
+--: (IntBox) -> integer
+local function corrupt(ib)
+  --: NumBox
+  local nb = ib
+  nb.f = 1
+  return ib.f
+end
+]], false)
+		T.ok(rejected(o), "IntBox </: NumBox under invariant mutable depth — the alias widen is rejected")
+	end)
+
+	T.it("FN_widen_alias_write_numvar: param write through a widened mutable alias is REJECTED", function()
+		local o = lower_src([[
+--:: IntBox = { f: integer }
+--:: NumBox = { f: number }
+--: (IntBox, number) -> integer
+local function corrupt(ib, x)
+  --: NumBox
+  local nb = ib
+  nb.f = x
+  return ib.f
+end
+]], false)
+		T.ok(rejected(o), "the number-param write-through (runtime 1.5 into an integer field) is rejected at the widen")
+	end)
+
+	T.it("control: a DIRECT bad write (no aliasing) is still REJECTED", function()
+		local o = lower_src([[
+--:: IntBox = { f: integer }
+--: (IntBox, number) -> integer
+local function w(b, x)
+  b.f = x
+  return b.f
+end
+]], false)
+		T.ok(rejected(o), "writing a number into an integer field rejects directly (unchanged)")
+	end)
+
+	T.it("control: an annotated local at a non-subtype is still REJECTED", function()
+		local o = lower_src([[
+--:: StrBox = { f: string }
+--:: NumBox = { f: number }
+--: (StrBox) -> number
+local function w(sb)
+  --: NumBox
+  local nb = sb
+  return nb.f
+end
+]], false)
+		T.ok(rejected(o), "the annotated local enforces its annotation (StrBox </: NumBox)")
+	end)
+
+	T.it("construction control: a fresh record literal still widens covariantly via check-mode — CLEAN", function()
+		local o = lower_src([[
+--:: TaskNode = { id: string, done: boolean }
+--: () -> TaskNode
+local function mk() return { id = "root", done = false } end
+]], false)
+		T.eq(o.expected, "CLEAN", "fresh literal `{ id=\"root\", done=false }` check-mode-constructs against TaskNode (covariant per field)")
+		assert_sound(o)
+	end)
+end)

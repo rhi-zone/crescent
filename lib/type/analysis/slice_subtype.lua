@@ -279,13 +279,17 @@ decide = function(a, b, seen, memo)
 		return true
 	end
 
-	-- (Indexers: contravariant key, covariant value. §3.2.)
+	-- (Indexers: contravariant key, INVARIANT value. §6.14.3 — an index signature
+	--  `t[k] = v` is read-write, so the value type is invariant like a mutable field;
+	--  the key stays contravariant.)
 	if ak == "indexer" and bk == "indexer" then
 		local ka, va = a.key, a.val
 		local kb, vb = b.key, b.val
 		if ka == nil or va == nil or kb == nil or vb == nil then return false end
 		if not sub(kb, ka, seen, memo) then return false end
-		return sub(va, vb, seen, memo)
+		if not sub(va, vb, seen, memo) then return false end
+		if not sub(vb, va, seen, memo) then return false end
+		return true
 	end
 
 	-- (A = rec/rwi with integer-literal fields (a tuple) <: indexer(integer, V).
@@ -298,15 +302,17 @@ decide = function(a, b, seen, memo)
 		local fs = fields_of(a)
 		for i = 1, #fs do
 			-- the field's key, as a singleton, must be <: the indexer key, and the
-			-- field's value <: the indexer value.
+			-- field's value INVARIANT with the indexer value (§6.14.3: the indexer is a
+			-- write surface, so the value is invariant like a mutable field).
 			local key_ty = G.lit_str(fs[i].key)
 			if not sub(key_ty --[[: Ty ]], kb, seen, memo) then return false end
-			if not sub(fs[i].ty, vb, seen, memo) then return false end
+			if not (sub(fs[i].ty, vb, seen, memo) and sub(vb, fs[i].ty, seen, memo)) then return false end
 		end
 		if ak == "rec_with_indexer" then
 			local ka2, va2 = a.key, a.val
 			if ka2 == nil or va2 == nil then return false end
-			if not (sub(kb, ka2, seen, memo) and sub(va2, vb, seen, memo)) then return false end
+			-- key contravariant; value invariant (write surface).
+			if not (sub(kb, ka2, seen, memo) and sub(va2, vb, seen, memo) and sub(vb, va2, seen, memo)) then return false end
 		end
 		return true
 	end
@@ -339,16 +345,34 @@ function M._rec_sub(a, b, seen, memo)
 				return false  -- required B field absent in closed A.
 			end
 		else
-			-- depth: covariant field type (v1 treats fields covariantly; the
-			-- mutable-field-invariance gap is recorded in §9.2).
+			-- depth (§6.14.3): a MUTABLE field is INVARIANT — the field types must be
+			-- mutually subtypes (`A.f <: B.f` AND `B.f <: A.f`), because the field can
+			-- be written through the wider (B) reference, which would corrupt a read
+			-- through the narrower (A) reference if B.f admitted values A.f does not.
+			-- A `readonly` field admits no write, so it stays covariant (read-set
+			-- inclusion only). The slot is parsed-but-hardcoded-false in v1, so every
+			-- field is mutable ⇒ every shared field is invariant. Width stays covariant
+			-- (the loop is over B's fields; A's extras are unconstrained). Construction
+			-- of fresh literals is covariant via the check-mode `check_table_expr`
+			-- (lowering), never reaching this subtype path — see §6.14.2/§6.14.4.
+			local ro = bf.readonly and af.readonly
 			if bf.optional then
 				-- A's field may be `<: (B.ty | nil)`; build that union once.
 				local bopt = G.union({ bf.ty --[[: Ty ]], G.nil_() })
 				if not sub(af.ty, bopt --[[: Ty ]], seen, memo) then return false end
+				if not ro then
+					-- mutable optional field: also require the reverse direction over the
+					-- same (B.ty | nil) widening so write-through is invariant.
+					if not sub(bopt --[[: Ty ]], af.ty, seen, memo) then return false end
+				end
 			else
 				-- required B field: A's must be present, non-optional, and <:.
 				if af.optional then return false end
 				if not sub(af.ty, bf.ty, seen, memo) then return false end
+				if not ro then
+					-- mutable field: invariant — require the reverse direction too.
+					if not sub(bf.ty, af.ty, seen, memo) then return false end
+				end
 			end
 		end
 	end
@@ -369,17 +393,19 @@ function M._indexer_obligation(a, b, seen, memo)
 		-- only to keys not covered by a named field. Skip B-named keys here.
 		if find_field(b_named, fa[i].key) == nil then
 			local key_ty = G.lit_str(fa[i].key)
-			-- if this field's key is admitted by the indexer key, its value must be <: vb.
+			-- if this field's key is admitted by the indexer key, its value must be
+			-- INVARIANT with vb (§6.14.3: the indexer is a write surface).
 			if sub(key_ty, kb, seen, memo) then
-				if not sub(fa[i].ty, vb, seen, memo) then return false end
+				if not (sub(fa[i].ty, vb, seen, memo) and sub(vb, fa[i].ty, seen, memo)) then return false end
 			end
 		end
 	end
-	-- if A is itself rec_with_indexer, its indexer must refine B's.
+	-- if A is itself rec_with_indexer, its indexer must refine B's (key contravariant,
+	-- value invariant — write surface).
 	if a.kind == "rec_with_indexer" then
 		local ka2, va2 = a.key, a.val
 		if ka2 == nil or va2 == nil then return false end
-		if not (sub(kb, ka2, seen, memo) and sub(va2, vb, seen, memo)) then return false end
+		if not (sub(kb, ka2, seen, memo) and sub(va2, vb, seen, memo) and sub(vb, va2, seen, memo)) then return false end
 	end
 	return true
 end

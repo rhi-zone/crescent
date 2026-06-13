@@ -278,10 +278,16 @@ T.describe("corpus: fixture_table_construction_widening — writes widen to Insn
 		local insn1 = G.rec({ fld("op", G.lit_str("add")), fld("dst", G.lit_int(0)), fld("pos", G.lit_int(1)) }, "closed")
 		-- insns[2] = { op="ret", dst=nil, pos=2 } — different literal record.
 		local insn2 = G.rec({ fld("op", G.lit_str("ret")), fld("dst", G.nil_()), fld("pos", G.lit_int(2)) }, "closed")
-		-- the load-bearing claim: each write's value checks against the DECLARED element
-		-- type (Insn), not against the first literal — so both widen to Insn.
-		T.ok(SUB.is_subtype(insn1, Insn), "insn1 (op:add, dst:0, pos:1) <: Insn (write-checks-against-declared)")
-		T.ok(SUB.is_subtype(insn2, Insn), "insn2 (op:ret, dst:nil, pos:2) <: Insn (NOT locked at insn1's literal)")
+		-- §6.14: a literal record is NOT <: a widened named record under the now-sound
+		-- INVARIANT depth rule (`lit_str("add") </: string` reverse-fails) — this
+		-- *subtype-level* covariant assertion encoded the now-CLOSED write-through
+		-- unsoundness. The fixture's ACTUAL construction path (the empty-`{}` dynamic
+		-- write, e2e in corpus_lower_test) widens each fresh literal via CHECK-mode
+		-- construction (§6.14.2), which stays covariant per field and remains CLEAN —
+		-- it never reaches this invariant subtype relation. Correcting the assertion to
+		-- the sound behavior here; the e2e clean-ness is asserted in corpus_lower_test.
+		T.fail(SUB.is_subtype(insn1, Insn), "insn1 </: Insn at the subtype level (depth invariant; construction widens via check-mode)")
+		T.fail(SUB.is_subtype(insn2, Insn), "insn2 </: Insn at the subtype level (depth invariant)")
 		-- the two literals are NOT subtypes of each other (the legacy literal-lock).
 		T.fail(SUB.is_subtype(insn2, insn1), "insn2 is not <: insn1 — the legacy lock would have rejected it")
 		-- the checked cast `--[[:! { [integer]: Insn, ... }]]` is admitted as a trusted

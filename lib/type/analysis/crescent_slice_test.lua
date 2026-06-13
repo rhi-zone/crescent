@@ -1420,14 +1420,19 @@ T.describe("audit round 1 — finding 4: subtype memoization defeats the shared-
 		return t
 	end
 
-	T.it("dag(30) lit_int(1) <: dag(30) integer decides quickly and correctly", function()
+	T.it("dag(30) integer <: dag(30) integer decides quickly and correctly", function()
+		-- §6.14: depth is now INVARIANT in mutable fields, so the leaves must be EQUAL
+		-- for the DAG subtype to HOLD (this assertion previously used lit_int(1)<:integer,
+		-- which encoded the now-closed covariant-depth unsoundness — the PERF property is
+		-- what matters here: a deep shared-subterm DAG must decide via memoization, not
+		-- blow up exponentially).
 		G.reset()
-		local a = dag(30, G.lit_int(1))
+		local a = dag(30, G.integer())
 		local b = dag(30, G.integer())
 		local t0 = os.clock()
 		local r = SUB.is_subtype(a, b)
 		local dt = os.clock() - t0
-		T.ok(r, "the DAG subtype holds (lit_int(1) <: integer at every leaf)")
+		T.ok(r, "the DAG subtype holds (integer <: integer at every leaf, invariant)")
 		T.ok(dt < 1.0, "decides in well under a second (was >120s pre-memoization); took " .. string.format("%.4fs", dt))
 	end)
 

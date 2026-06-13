@@ -1275,6 +1275,132 @@ function M.checker(cc, claim, ev)
 		end
 		return accept({ dep_claim(claim.id, sp), dep_claim(claim.id, subp) }, { trust_note() })
 
+	-- ── check_table (§6.14: check-mode construction of a record/array LITERAL) ──
+	-- The construction analogue of `check_func_expr`. A `table` node checked against
+	-- an expected record / rec_with_indexer / indexer (or a union of those) is checked
+	-- FIELD-BY-FIELD COVARIANTLY: each named entry's value carries a `checks_against`
+	-- premise against the EXPECTED field type, each array entry against the expected
+	-- indexer value type. This is sound because a literal is FRESH — it has a single
+	-- reference, so no narrower-typed alias exists for a later write to corrupt
+	-- (§6.14.4 case 1). The verifier re-derives the field-wise check from the premises;
+	-- no substrate learning. The node carries each entry's value node ref so a premise
+	-- cannot be mismatched onto the wrong field. For a union `want`, acceptance is
+	-- "exists a member every entry checks against and whose required fields are all
+	-- covered" — the same disjunction as subtype's B=union rule, evaluated in check
+	-- mode (§6.14.2).
+	elseif method == "check_table" then
+		if predicate ~= "checks_against" then
+			return cc.REJECTED, "check_table produces a checks_against claim", nil, nil
+		end
+		if node.t ~= "table" then return cc.REJECTED, "check_table applied to a non-table node", nil, nil end
+		local entries = node.entries
+		local array = node.array
+		if entries ~= nil and type(entries) ~= "table" then return cc.REJECTED, "check_table malformed entries", nil, nil end
+		if array ~= nil and type(array) ~= "table" then return cc.REJECTED, "check_table malformed array", nil, nil end
+		-- gather the per-entry premises (positional: named entries first, then array),
+		-- each a checks_against(value_node, T). Pair them with the entry's value node
+		-- ref so we can confirm the premise is about THIS entry's value.
+		local nentries = type(entries) == "table" and #entries or 0
+		local narr = type(array) == "table" and #array or 0
+		if #ev.inputs ~= nentries + narr then
+			return cc.REJECTED, "check_table premise count must equal the entry count", nil, nil
+		end
+		local deps = {} --[[: Dependency[] ]]
+		-- named-entry premises: { key, value-node-ref, asserted field type }.
+		local named_checks = {} --[[: { [integer]: { key: string, ty: Ty } } ]]
+		local arr_checks = {} --[[: Ty[] ]]
+		local ip = 1 --: integer
+		for i = 1, nentries do
+			local e = entries[i]
+			if type(e) ~= "table" then return cc.REJECTED, "check_table entry malformed", nil, nil end
+			local ekey = e.key
+			if type(ekey) ~= "string" then return cc.REJECTED, "check_table entry malformed", nil, nil end
+			local vref = arg_id(e.vnode)
+			if not vref then return cc.REJECTED, "check_table entry missing value node ref", nil, nil end
+			local prem = ev.inputs[ip]; ip = ip + 1
+			if not cc.is_accepted(prem) then return cc.UNKNOWN, nil, nil, nil end
+			local pr = read_typing(cc, prem, "checks_against")
+			if not pr then return cc.REJECTED, "check_table premise is not a checks_against claim", nil, nil end
+			if pr.node.space ~= vref.space or pr.node.key ~= vref.key then
+				return cc.REJECTED, "check_table premise is not this entry's value", nil, nil
+			end
+			if ctx_canon_key(cc, ctx) ~= ctx_canon_key(cc, pr.ctx) then
+				return cc.REJECTED, "check_table premise context must match the conclusion's", nil, nil
+			end
+			named_checks[#named_checks + 1] = { key = ekey, ty = pr.type }
+			deps[#deps + 1] = dep_claim(claim.id, prem)
+		end
+		for i = 1, narr do
+			local e = array[i]
+			if type(e) ~= "table" then return cc.REJECTED, "check_table array entry malformed", nil, nil end
+			local vref = arg_id(e.vnode)
+			if not vref then return cc.REJECTED, "check_table array entry missing value node ref", nil, nil end
+			local prem = ev.inputs[ip]; ip = ip + 1
+			if not cc.is_accepted(prem) then return cc.UNKNOWN, nil, nil, nil end
+			local pr = read_typing(cc, prem, "checks_against")
+			if not pr then return cc.REJECTED, "check_table array premise is not a checks_against claim", nil, nil end
+			if pr.node.space ~= vref.space or pr.node.key ~= vref.key then
+				return cc.REJECTED, "check_table array premise is not this entry's value", nil, nil
+			end
+			arr_checks[#arr_checks + 1] = pr.type
+		end
+		-- A candidate member is satisfied iff every named entry checked against the
+		-- member's field of the SAME key (covariant: the premise type IS that field
+		-- type), every required member field is covered by an entry, and every array
+		-- entry checked against the member's indexer value type.
+		--: (Ty) -> boolean
+		local function member_ok(m)
+			local mk = m.kind
+			if mk ~= "rec" and mk ~= "rec_with_indexer" and mk ~= "indexer" then return false end
+			local mfields = m.fields or {}
+			-- every named entry: the member must name that key, and the premise type
+			-- must equal the member's declared field type (covariant check, by premise).
+			for j = 1, #named_checks do
+				local nc = named_checks[j]
+				local mf = nil --[[: Field | nil ]]
+				for f = 1, #mfields do if mfields[f].key == nc.key then mf = mfields[f]; break end end
+				if mf then
+					if not ty_eq(nc.ty, mf.ty) then return false end
+				elseif mk == "rec_with_indexer" or mk == "indexer" then
+					-- not a named field: must be admitted by the indexer (key+value).
+					local mv = m.val
+					local mkey = m.key
+					if not mv or not mkey then return false end
+					if not SUB.is_subtype(G.lit_str(nc.key), mkey --[[: Ty ]]) then return false end
+					if not ty_eq(nc.ty, mv) then return false end
+				else
+					return false  -- extra named entry the closed record does not declare.
+				end
+			end
+			-- every required member field must be supplied by an entry.
+			for f = 1, #mfields do
+				if not mfields[f].optional then
+					local supplied = false --: boolean
+					for j = 1, #named_checks do if named_checks[j].key == mfields[f].key then supplied = true; break end end
+					if not supplied then return false end
+				end
+			end
+			-- every array entry: against the member's indexer value type.
+			if #arr_checks > 0 then
+				if mk ~= "rec_with_indexer" and mk ~= "indexer" then return false end
+				local mv = m.val
+				if not mv then return false end
+				for j = 1, #arr_checks do if not ty_eq(arr_checks[j], mv) then return false end end
+			end
+			return true
+		end
+		local ok = false --: boolean
+		if want_ty.kind == "union" then
+			local ms = want_ty.members or {}
+			for i = 1, #ms do if member_ok(ms[i]) then ok = true; break end end
+		else
+			ok = member_ok(want_ty)
+		end
+		if not ok then
+			return cc.REJECTED, "check_table: the literal does not check against the expected record/union type", nil, nil
+		end
+		return accept(deps, { trust_note() })
+
 	-- ── check_cast (e --[[: T]] — a checking boundary, never inference) ──
 	elseif method == "check_cast" then
 		if node.t ~= "cast" then return cc.REJECTED, "check_cast applied to a non-cast node", nil, nil end
@@ -1517,7 +1643,7 @@ function M.register(registry)
 			"synth_lit", "synth_var", "synth_call", "synth_table", "synth_index",
 			"synth_function", "synth_and_or_not", "synth_tuple",
 			"synth_binop", "synth_unop",
-			"check_against", "check_cast",
+			"check_against", "check_table", "check_cast",
 			"subtype_witness", "instantiate_witness", "narrow_guard",
 			"synth_loop_var", "synth_numeric_for_var",
 			"type_shape_check", "trusted_signature",

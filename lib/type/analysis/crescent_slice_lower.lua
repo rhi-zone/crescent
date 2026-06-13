@@ -1173,6 +1173,7 @@ local synth_expr --[[: (LC, SliceCtx, unknown) -> (Ty | nil, Id | nil) ]]
 -- and everything else through synth + subtype.
 local synth_func_expr --[[: (LC, SliceCtx, unknown) -> (Ty | nil, Id | nil) ]]
 local check_func_expr --[[: (LC, SliceCtx, unknown, Ty) -> (Ty | nil, Id | nil) ]]
+local check_table_expr --[[: (LC, SliceCtx, unknown, Ty) -> (Ty | nil, Id | nil) ]]
 local check_expr --[[: (LC, SliceCtx, unknown, Ty) -> (Ty | nil, Id | nil) ]]
 
 -- Lower a literal expression to a slice node + has_type claim. Returns
@@ -2002,12 +2003,158 @@ check_func_expr = function(lc, ctx, e, want)
 	return want, cid
 end
 
+-- §6.14 CHECK-mode construction of a record/array literal — the table-node analogue
+-- of `check_func_expr`. A `table` node checked against an expected record /
+-- rec_with_indexer / indexer (or a union of those) is checked FIELD-BY-FIELD
+-- COVARIANTLY: each named entry's value is checked (recursively, via `check_expr`)
+-- against the EXPECTED field type, each array entry against the expected indexer value
+-- type. Sound because a literal is FRESH (single reference, §6.14.4 case 1), so a
+-- write through a wider alias cannot exist to corrupt. Returns (want, checks_against
+-- claim id) or (nil, nil) with a marker. Recursion handles nested literals; union
+-- targets select the matching member (the §6.14.2 "exists" rule in check mode).
+--
+-- Field lookup helper over a Ty's fields.
+--: (Ty, string) -> Ty | nil
+local function ty_field_ty(want, key)
+	local fs = want.fields or {}
+	for i = 1, #fs do
+		local f = fs[i] --[[: { key: string, ty: Ty, optional: boolean, readonly: boolean } ]]
+		if f.key == key then return f.ty end
+	end
+	return nil
+end
+
+-- Select the union member a record literal with named keys `keyset` should check
+-- against: the first member that is a rec/rwi/indexer naming every entry key (or
+-- admitting it via its indexer) and whose required fields are all in `keyset`.
+-- Pure shape selection, no claim emission. Returns the member Ty or nil.
+--: (Ty, { [string]: boolean }) -> Ty | nil
+local function select_union_member(want, keyset)
+	local ms = want.members or {}
+	for i = 1, #ms do
+		local m = ms[i]
+		local mk = m.kind
+		if mk == "rec" or mk == "rec_with_indexer" or mk == "indexer" then
+			local ok = true --: boolean
+			local mfields = m.fields or {}
+			-- every entry key is named (or indexer-admitted).
+			for k in pairs(keyset) do
+				local named = false --: boolean
+				for f = 1, #mfields do if mfields[f].key == k then named = true; break end end
+				if not named and not (mk == "rec_with_indexer" or mk == "indexer") then ok = false; break end
+			end
+			-- every required member field is present in the literal.
+			if ok then
+				for f = 1, #mfields do
+					if not mfields[f].optional and not keyset[mfields[f].key] then ok = false; break end
+				end
+			end
+			if ok then return m end
+		end
+	end
+	return nil
+end
+
+check_table_expr = function(lc, ctx, e, want)
+	local v = view(e)
+	if not v then return nil, nil end
+	-- a literal table with dynamic keys is out-of-subset for synth; the same applies
+	-- here. v.entries carry string keys (named), v.array the positional values.
+	-- select the target member when `want` is a union of records.
+	local target = want --[[: Ty ]]
+	if want.kind == "union" then
+		local keyset = {} --[[: { [string]: boolean } ]]
+		for _, ent in ipairs(v.entries or {}) do
+			if type(ent.key) == "string" then keyset[ent.key] = true end
+		end
+		local m = select_union_member(want, keyset)
+		if not m then
+			mark(lc, { line = 0, construct = "type-mismatch", text = "table literal matches no union member" })
+			return nil, nil
+		end
+		target = m
+	end
+	if target.kind ~= "rec" and target.kind ~= "rec_with_indexer" and target.kind ~= "indexer" then
+		-- not a record/indexer target: fall back to synth + subtype (the caller's
+		-- ordinary boundary handles the rejection/acceptance).
+		return nil, nil
+	end
+	local entry_nodes = {} --[[: { [integer]: unknown } ]]
+	local arr_nodes = {} --[[: { [integer]: unknown } ]]
+	local inputs = {} --[[: { [integer]: Id } ]]
+	-- named entries: each value CHECK-mode'd against the expected field type.
+	for _, ent in ipairs(v.entries or {}) do
+		local ekey = ent.key
+		if type(ekey) ~= "string" then
+			-- a dynamic key constructor is out-of-subset (no synth_table form either).
+			mark(lc, { line = 0, construct = "dynamic-key", text = "table literal with a non-string key" })
+			return nil, nil
+		end
+		local fty = ty_field_ty(target, ekey)
+		if not fty and (target.kind == "rec_with_indexer" or target.kind == "indexer") then
+			fty = target.val --[[: Ty | nil ]]
+		end
+		if not fty then
+			mark(lc, { line = 0, construct = "type-mismatch", text = "table literal field '" .. ekey .. "' not in expected type" })
+			return nil, nil
+		end
+		local _, ecid = check_expr(lc, ctx, ent.value, fty)
+		if not ecid then return nil, nil end
+		local vref = node_ref_of(lc, ecid)
+		if not vref then return nil, nil end
+		entry_nodes[#entry_nodes + 1] = { key = ekey, vnode = { space = vref.space, key = vref.key } }
+		inputs[#inputs + 1] = ecid
+	end
+	-- array entries: each value CHECK-mode'd against the expected indexer value type.
+	for _, ae in ipairs(v.array or {}) do
+		local vt = (target.kind == "rec_with_indexer" or target.kind == "indexer") and target.val or nil
+		if not vt then
+			mark(lc, { line = 0, construct = "type-mismatch", text = "table literal has array entries but expected type has no index signature" })
+			return nil, nil
+		end
+		local _, acid = check_expr(lc, ctx, ae, vt --[[: Ty ]])
+		if not acid then return nil, nil end
+		local vref = node_ref_of(lc, acid)
+		if not vref then return nil, nil end
+		arr_nodes[#arr_nodes + 1] = { vnode = { space = vref.space, key = vref.key } }
+		inputs[#inputs + 1] = acid
+	end
+	-- emit checks_against(Γ, table_node, want) via the check_table evidence method,
+	-- with one checks_against premise per entry value. The asserted type is the
+	-- ORIGINAL `want` (union or member) — for a union, `check_table`'s exists-rule
+	-- re-derives the selected member from the premises.
+	local nid = lc.b.node({ t = "table", entries = entry_nodes, array = arr_nodes })
+	local caid = lc.b.fresh_claim("checktab")
+	A.add_claim(lc.state, S.checks_against_claim(caid, ctx, nid, want))
+	A.add_evidence(lc.state, A.evidence({ id = lc.b.fresh_ev("checktab"), claim = caid,
+		method = "check_table", inputs = inputs }))
+	return want, caid
+end
+
+M.check_table_expr = check_table_expr
+
 -- The mode switch (§6.8 check-mode closure typing). To check `e ⇐ want`: when `e`
 -- is a `func` node and `want` is an `fn` type, route into CHECK-mode closure typing
 -- (push the expected param types inward). Otherwise synthesize `e` and require
 -- `subtype(synth(e), want)` — the ordinary `check_against` boundary. Returns
 -- (value_ty, claim_id) where claim_id is a checks_against claim (or the closure's
 -- has_type for the check-mode closure path), or (nil, nil) with a marker.
+-- True when `want` is a record/rec_with_indexer/indexer, or a union with at least
+-- one such member — i.e. a target a record/array LITERAL can construct against.
+--: (Ty) -> boolean
+local function is_record_target(want)
+	local k = want.kind
+	if k == "rec" or k == "rec_with_indexer" or k == "indexer" then return true end
+	if k == "union" then
+		local ms = want.members or {}
+		for i = 1, #ms do
+			local mk = ms[i].kind
+			if mk == "rec" or mk == "rec_with_indexer" or mk == "indexer" then return true end
+		end
+	end
+	return false
+end
+
 check_expr = function(lc, ctx, e, want)
 	local v = view(e)
 	local scid --[[: Id | nil ]]
@@ -2018,6 +2165,18 @@ check_expr = function(lc, ctx, e, want)
 		-- (subtype(want, want) holds trivially) so the result is a `checks_against`
 		-- claim a caller (call-arg / local / return) can use uniformly.
 		sty, scid = check_func_expr(lc, ctx, e, want)
+	elseif v and v.k == "table" and is_record_target(want) then
+		-- CHECK-mode construction (§6.14): a record/array LITERAL against a record /
+		-- union-of-records target is checked field-by-field COVARIANTLY (sound: the
+		-- literal is fresh). `check_table_expr` emits the checks_against claim directly
+		-- (with check_table evidence), so we return it WITHOUT the synth+subtype
+		-- wrapper below — construction never reaches the invariant subtype path.
+		local _, ctid = check_table_expr(lc, ctx, e, want)
+		if ctid then return want, ctid end
+		-- check_table_expr already emitted a type-mismatch marker on rejection;
+		-- propagate the failure (do NOT fall back to synth+subtype, which would
+		-- re-check and double-report).
+		return nil, nil
 	else
 		sty, scid = synth_expr(lc, ctx, e)
 	end
@@ -2302,15 +2461,14 @@ local function lower_stmt(lc, ctx, s, ret_ty)
 			return
 		end
 		-- single-return: check value ⇐ ret_ty.
-		local vty, vcid = synth_expr(lc, ctx, values[1])
-		if not vty or not vcid then
-			return
-		end
 		local rt = ret_ty
 		if rt then
-			local vpc = lc.state.claims[A.idk(vcid)]
-			local vref = vpc and vpc.args and vpc.args.node --[[: unknown ]]
-			local caid = emit_check_against(lc, ctx, vcid, vref, vty, rt)
+			-- §6.14 step 3: route through `check_expr` so a `return { … }` literal
+			-- check-mode-CONSTRUCTS against the declared return type (covariant per
+			-- field, sound because fresh) rather than synth+invariant-subtype. A
+			-- `func` return likewise check-modes; everything else falls to synth +
+			-- subtype inside `check_expr` (unchanged behavior).
+			local _, caid = check_expr(lc, ctx, values[1], rt)
 			if caid then
 				lc.requested[#lc.requested + 1] = caid
 				-- when this return is inside a closure body being built (§6.8), the
@@ -2319,6 +2477,10 @@ local function lower_stmt(lc, ctx, s, ret_ty)
 				if sink then sink[#sink + 1] = caid end
 			end
 		else
+			local vty, vcid = synth_expr(lc, ctx, values[1])
+			if not vty or not vcid then
+				return
+			end
 			lc.requested[#lc.requested + 1] = vcid
 			-- MODULE-VALUE-TYPE capture (§6.7.2): a `return <expr>` at the module top
 			-- level (not inside ANY function body, func_depth == 0) fixes the module's

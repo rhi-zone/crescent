@@ -189,16 +189,26 @@ T.describe("slice_subtype rules", function()
 		T.ok(S.is_subtype(f_var, f_one), "(...number)->() <: (integer)->() (vararg covers fixed)")
 	end)
 
-	T.it("record width, depth, optional", function()
+	T.it("record width covariant, depth INVARIANT in mutable fields (§6.14)", function()
+		-- §6.14: mutable shared fields are INVARIANT, not covariant — a write through
+		-- the wider view (`{a:num}`) would corrupt a read through the narrower (`{a:int}`).
+		-- These assertions previously encoded the now-CLOSED covariant-depth unsoundness
+		-- (see docs/agnostic-static-analysis-crescent-slice.md §6.14 / thesis §4b).
 		local r_ab = G.rec({ fld("a", G.integer()), fld("b", G.string()) }, "closed")
 		local r_a  = G.rec({ fld("a", G.number()) }, "closed")
-		T.ok(S.is_subtype(r_ab, r_a), "{a:int,b:str} <: {a:num} (width + depth)")
-		T.fail(S.is_subtype(r_a, r_ab), "{a:num} </: {a:int,b:str} (missing field)")
+		T.fail(S.is_subtype(r_ab, r_a), "{a:int,b:str} </: {a:num} (depth invariant: int ≠ num)")
+		T.fail(S.is_subtype(r_a, r_ab), "{a:num} </: {a:int,b:str} (missing field + invariant)")
+		-- WIDTH is still covariant: extra A fields with an EQUAL shared field is <:.
+		local r_ab_eq = G.rec({ fld("a", G.number()), fld("b", G.string()) }, "closed")
+		T.ok(S.is_subtype(r_ab_eq, r_a), "{a:num,b:str} <: {a:num} (width covariant, shared field equal)")
 		-- optional field on B may be absent in A.
 		local r_a_optb = G.rec({ fld("a", G.integer()), fld("b", G.string(), true) }, "closed")
 		T.ok(S.is_subtype(G.rec({ fld("a", G.integer()) }, "closed"), r_a_optb), "absent optional field OK")
-		-- depth covariance.
-		T.ok(S.is_subtype(G.rec({ fld("a", G.lit_int(1)) }, "closed"), G.rec({ fld("a", G.integer()) }, "closed")), "field depth covariant")
+		-- depth is INVARIANT: a literal-typed field is NOT <: its widened base under a
+		-- mutable record (it WAS, covariantly, before §6.14 closed the hole).
+		T.fail(S.is_subtype(G.rec({ fld("a", G.lit_int(1)) }, "closed"), G.rec({ fld("a", G.integer()) }, "closed")), "field depth invariant (lit_int(1) ≠ integer)")
+		-- equal shared field types ARE <: (reflexive depth).
+		T.ok(S.is_subtype(G.rec({ fld("a", G.integer()) }, "closed"), G.rec({ fld("a", G.integer()) }, "closed")), "equal field depth <:")
 	end)
 
 	T.it("open-row rules and the ...-vs-indexer distinction", function()
@@ -213,24 +223,36 @@ T.describe("slice_subtype rules", function()
 		T.fail(S.is_subtype(open_named, idx), "{name:str,...} </: {[str]:unknown} (open ≠ indexer)")
 	end)
 
-	T.it("indexer contravariant key, covariant value", function()
+	T.it("indexer contravariant key, INVARIANT value (§6.14)", function()
+		-- §6.14: an index signature `t[k]=v` is a WRITE surface, so the value is
+		-- INVARIANT (not covariant). The covariant-value assertions below previously
+		-- encoded the now-CLOSED write-through unsoundness.
 		local i_str_int = G.indexer(G.string(), G.integer())
 		local i_str_num = G.indexer(G.string(), G.number())
-		T.ok(S.is_subtype(i_str_int, i_str_num), "{[str]:int} <: {[str]:num} (value covariant)")
+		T.fail(S.is_subtype(i_str_int, i_str_num), "{[str]:int} </: {[str]:num} (value invariant)")
 		T.fail(S.is_subtype(i_str_num, i_str_int), "{[str]:num} </: {[str]:int}")
-		-- a closed tuple-shaped rec <: indexer(integer, V) iff every field <: V.
+		-- equal value type IS <: (key contravariant in general; here equal).
+		T.ok(S.is_subtype(i_str_int, G.indexer(G.string(), G.integer())), "{[str]:int} <: {[str]:int} (value equal)")
+		-- a closed tuple-shaped rec <: indexer(integer, V) iff every field is INVARIANT
+		-- with V (write surface). Literal-typed fields are NOT invariant with `number`,
+		-- so this is now rejected (it WAS accepted covariantly before §6.14).
 		local tup = G.rec({ fld("1", G.lit_int(1)), fld("2", G.lit_int(2)) }, "closed")
-		-- (keys are integer-literal strings here only nominally; subtype uses the key
-		--  string as a singleton, so use string-keyed index for this structural check)
 		local sidx = G.indexer(G.string(), G.number())
-		T.ok(S.is_subtype(tup, sidx), "closed rec with number fields <: {[str]:num}")
+		T.fail(S.is_subtype(tup, sidx), "closed rec with lit fields </: {[str]:num} (value invariant)")
+		-- with fields EQUAL to the indexer value, the rec <: indexer holds.
+		local tup_eq = G.rec({ fld("1", G.number()), fld("2", G.number()) }, "closed")
+		T.ok(S.is_subtype(tup_eq, sidx), "closed rec with number fields <: {[str]:num} (equal)")
 	end)
 
-	T.it("rec_with_indexer decomposes to rec part and indexer part", function()
+	T.it("rec_with_indexer decomposes to rec part and indexer part (INVARIANT value, §6.14)", function()
 		local rwi = G.rec_with_indexer({ fld("tag", G.string()) }, "closed", { key = G.string(), val = G.number() })
-		-- a record providing tag:str and a number-valued field satisfies it.
+		-- §6.14: the indexer value is INVARIANT (write surface). A refining indexer
+		-- value (integer) is NO LONGER <: (it was, covariantly, before §6.14).
 		local a = G.rec_with_indexer({ fld("tag", G.string()) }, "closed", { key = G.string(), val = G.integer() })
-		T.ok(S.is_subtype(a, rwi), "rwi value-covariant indexer refinement")
+		T.fail(S.is_subtype(a, rwi), "rwi value-INVARIANT: integer-valued indexer </: number-valued")
+		-- an EQUAL indexer value (number) satisfies the obligation.
+		local a_eq = G.rec_with_indexer({ fld("tag", G.string()) }, "closed", { key = G.string(), val = G.number() })
+		T.ok(S.is_subtype(a_eq, rwi), "rwi equal-value indexer <:")
 	end)
 
 	T.it("§6.2 worked example — HamtNode μ subtyping without stack overflow", function()
