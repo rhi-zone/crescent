@@ -115,7 +115,9 @@ it reached its STLC-capable binder-replay milestone with tests.
 ## Agnostic Static Analysis
 
 The active design direction is a fully agnostic static-analysis substrate.
-Entry point: `docs/agnostic-static-analysis-design.md`.
+Entry point: `docs/agnostic-static-analysis-design.md`. The durable *position* —
+what this typechecker is as a design stance (sound, coverage-gradual, modular) —
+is stated in `docs/typechecker-design-thesis.md`.
 
 It is not a Crescent checker first. It should be able to host static semantics
 for very small calculi, for conventional typed languages, and eventually for
