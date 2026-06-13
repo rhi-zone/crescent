@@ -277,14 +277,20 @@ recommendation the critic found more accurate than the keystone framing.)
 
 ---
 
-## 4b. Known soundness defect (OPEN — must fix)
+## 4b. Known soundness defect (CLOSURE DESIGNED — pending implementation)
 
-> **Status: OPEN, live, must-fix.** This falsifies the original claim 5 ("soundness
-> holds over the covered domain"). It is recorded here prominently rather than
-> buried because it is a *current* unsound accept on *fully in-subset v1 syntax*,
-> not a future increment. The thesis's "sound over the covered domain" half is
-> therefore **false as previously stated**; the honest statement is "sound over
-> the covered domain *except* mutable-field variance, a known live hole."
+> **Status: soundness is a HARD invariant; closure design below; status =
+> DESIGNED, pending implementation.** This falsifies the original claim 5
+> ("soundness holds over the covered domain"). It is recorded here prominently
+> rather than buried because it is a *current* unsound accept on *fully in-subset
+> v1 syntax*, not a future increment. The thesis's "sound over the covered domain"
+> half is therefore **false as currently implemented** — but it is **not an
+> accepted aim**: an unsound safety-validator is worthless, so this defect MUST
+> close, and the design that closes it (validated against the real lowering and
+> subtype code) is now specified in
+> `docs/agnostic-static-analysis-crescent-slice.md` §6.14. Until that increment
+> lands, the honest statement is "sound over the covered domain *except*
+> mutable-field variance, a known live hole with a designed, feasible closure."
 
 **The defect: covariant field write-through.** A `number` can be written into an
 `integer` field through a widened alias, accepted CLEAN. Reproduced end-to-end
@@ -322,25 +328,36 @@ combination.
 tool *for writes through a mutable reference*. The defect and the falsified
 dichotomy are one underlying gap.
 
-**The fix is a design choice — recorded, not decided here.** Two principled
-answers, with their tradeoffs:
+**The fix is DECIDED (slice §6.14).** The blanket-invariant answer alone was
+implemented and **reverted** — it broke 5 of ~13 in-subset fixtures, all sound
+record-*construction*
+(`docs/artifacts/typechecker-run-2026-06-12/variance-fix-cost.md`). The validated
+closure decouples the two operations invariance conflated:
 
-- **Invariant mutable fields** (the standard sound answer): in `_rec_sub`, a
-  mutable field requires `af.ty` and `bf.ty` to be *mutually* subtypes (invariant),
-  only readonly fields stay covariant. *Pro:* the textbook-correct, minimal change;
-  matches how every sound system treats mutable references. *Con:* rejects some
-  currently-accepted widenings that are read-only in practice but not marked so —
-  precision cost until a readonly story exists.
-- **Readonly/mutable variance split**: thread the per-field `readonly` bit (already
-  vestigial in `slice_ty.lua`) through parse and the depth rule, covariant for
-  readonly, invariant for mutable. *Pro:* recovers the precision the blanket-invariant
-  answer loses. *Con:* more machinery — the bit must be inferred or annotated, and a
-  variance-marked structural constructor is exactly the category-2 hybrid §3 names;
-  it must be built de-special-cased, not as a field-keyed carve-out.
+- **Construction** (`local t: T = { … }`, `return { … }`, `f({ … })`) — the value is
+  fresh, single-reference, so covariant per-field checking is **sound**. Route it to
+  **CHECK mode** (`check_table_expr`, the table-node analogue of the existing
+  `check_func_expr`), keyed on the syntactic `table`-node form.
+- **Aliasing / all other record flow** — two references at different types to one
+  table, so a mutable field must be **invariant** in `_rec_sub` (`af.ty` and `bf.ty`
+  mutually `<:`); readonly fields stay covariant.
 
-No recommendation is made here; the choice is the user's. What is fixed is the
-verdict: **this is an open soundness bug, and the §9.2 "unreachable in v1 syntax"
-fence is disproven** (see the corrected slice doc §9.2).
+The soundness argument (slice §6.14.4): the widen step that created the defect is now
+invariant whenever the field is writable, and construction never produces a widened
+alias — so the (covariant widen) ∘ (write-through) composition cannot form. This is
+**not special-casing**: the discriminator is the structural construction/elimination
+split the bidirectional spine already encodes (node-kind, not type-name).
+
+The **residual** is a sound *alias-and-read* (widen a mutable record to a supertype,
+only read it) that the invariant rule now rejects conservatively. Measured **rare**
+(no corpus fixture exhibits it; the blanket-invariant corpus delta was −1, itself a
+construction regression this design removes). **Verdict: defer `readonly`** — it is a
+pure precision-recovery layer for a pattern the corpus does not contain; the soundness
+closure does not depend on it.
+
+What is fixed: **this is a must-fix soundness bug with a designed, feasible closure,
+and the §9.2 "unreachable in v1 syntax" fence is disproven** (see the corrected slice
+doc §9.2 and the closure in §6.14).
 
 ---
 
@@ -488,12 +505,17 @@ drove the §2/§3/§4/§4b corrections above.
    precondition* (makes sound-⊤ real at the choke point), root-construct coverage is
    the larger near-term coverage lever — complementary, not competing.
 
-5. **Soundness holds over the covered domain — FALSIFIED (live bug).** A fully
-   in-subset program writes a `number` into an `integer` field through a widened
-   alias and is accepted CLEAN (`critique-soundness.md`, re-verified this pass; see
-   §4b "Known soundness defect", OPEN/must-fix). Shares a root with claim 1
-   (mutable-field covariance). The honest statement is now "sound over the covered
-   domain *except* mutable-field variance, a known live hole."
+5. **Soundness holds over the covered domain — FALSIFIED (live bug; closure
+   designed).** A fully in-subset program writes a `number` into an `integer` field
+   through a widened alias and is accepted CLEAN (`critique-soundness.md`,
+   re-verified this pass; see §4b). Shares a root with claim 1 (mutable-field
+   covariance). Soundness is a **HARD invariant**, so this is must-fix, not an
+   accepted aim: the closure is now **designed and validated** against the real
+   lowering/subtype code (slice §6.14) — check-mode covariant construction +
+   invariant-mutable record subtyping, with the residual alias-and-read cost
+   measured rare and `readonly` deferred. Status: designed, pending implementation.
+   The honest statement is "sound over the covered domain *except* mutable-field
+   variance, a known live hole with a designed, feasible closure."
 
 ---
 

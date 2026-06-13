@@ -2501,6 +2501,228 @@ elaborator the vacuous-binder collapse with NO new Ty kind, NO grammar/relation 
 
 ---
 
+## 6.14 Increment v2.10 — sound closure of the covariant-field write-through defect
+
+**Status: DESIGNED, pending implementation.** This section closes the one open
+soundness defect (`docs/typechecker-design-thesis.md` §4b; the disproven §9.2
+fence). Soundness is a HARD invariant: an unsound safety-validator is worthless, so
+this is not an accepted-aim — it must be, and is, closeable. The design below is
+validated against the real lowering and subtype code; the implementation has no
+surprises.
+
+### 6.14.1 The defect, restated precisely
+
+`_rec_sub` (`slice_subtype.lua`) compares record fields **covariantly and
+unconditionally**. That is correct for *reads* and unsound for *writes through a
+widened mutable alias*. The live false negative (re-verified this pass):
+
+```lua
+--:: IntBox = { f: integer }
+--:: NumBox = { f: number }
+--: (IntBox, number) -> integer
+local function corrupt(ib, x)
+  --: NumBox
+  local nb = ib       -- IntBox <: NumBox accepted (covariant field) — CLEAN
+  nb.f = x            -- number written into ib's integer field — accepted
+  return ib.f         -- read back as integer; at runtime may be 1.5
+end
+```
+
+The naive fix — make `_rec_sub` invariant in every field — was implemented and
+**reverted** (`docs/artifacts/typechecker-run-2026-06-12/variance-fix-cost.md`): it
+broke **5 of ~13** in-subset fixtures, all of them **sound record-literal
+construction** (`{ id = "root", done = false }` against `TaskNode = { id: string,
+done: boolean }` — `"root" <: string` and `lit_bool(false) <: boolean` hold but are
+not *equal*, which invariance demands). The cost artifact correctly stopped and
+named the substrate gap: invariance conflates two operations that must be decoupled.
+
+### 6.14.2 The decoupling — construction is not aliasing (the validated hypothesis)
+
+Construction and aliasing are **different operations**, and the soundness of
+covariance differs between them:
+
+- **Construction** (`local t: T = { … }`, `return { … }`, `f({ … })`): the value is
+  **fresh** with a **single reference**. There is no second, narrower-typed alias
+  that a write through the wider view could violate. Per-field **covariant** checking
+  is **SOUND** — `{ id = "root" } <: { id: string }` is exactly right, because no
+  `{ id: "root" }`-typed alias of this literal exists to be corrupted.
+- **Aliasing** (`local nb: NumBox = ib` where `ib : IntBox`): two references at
+  **different static types** to the **same** table. A write through the wider
+  reference (`nb.f = …`) violates the read through the narrower one (`ib.f`).
+  Covariance here is **UNSOUND**; the mutable-field obligation must be **invariant**.
+
+This is precisely the distinction **bidirectional typing** draws natively, and the
+substrate **already has both modes** (`synth_func_expr` / `check_func_expr`, routed
+by `check_expr`, §6.8):
+
+- **Construction = CHECK mode.** Push the expected record type *inward*, field by
+  field, covariant per field. Sound because the value is fresh.
+- **Aliasing = a record-to-record SUBTYPE obligation.** `synth` the variable's type,
+  then `subtype(synth, expected)` with mutable fields **invariant**.
+
+**Validated against the code (probes run this pass; reverted):**
+
+1. **How `local x: T = <e>` lowers today.** `lower_stmt` (k=="local", annotated
+   branch, `crescent_slice_lower.lua:2058`) calls `check_expr(lc, ctx, val, dt)`.
+   `check_expr` (`:2011`) is **already the mode switch**: a `func` node against an
+   `fn` type routes to `check_func_expr`; **everything else** (including a `table`
+   literal *and* a bare `var`) falls to `synth_expr` + `emit_check_against` —
+   i.e. `subtype(synth, want)`. **So construction and aliasing are conflated at the
+   `check_expr` else-branch today** — both go through the one covariant subtype. This
+   is *why* invariance broke construction: the literal's synthesized type
+   (`{ id: "root", done: lit_bool(false) }`) is fed to the same `subtype` the alias
+   uses. **[validated — read + probe]**
+
+2. **Construction can be cleanly check-moded.** The mechanism already exists: extend
+   `check_expr`'s switch so a `table` node against a record/union-of-records `want`
+   routes to a new `check_table_expr` (the construction analogue of
+   `check_func_expr`), which checks each entry's value **covariantly** against the
+   corresponding expected field type — recursing through `check_expr` for nested
+   literals (`{ a = { n = 1 } }`) and selecting the matching union member for
+   `want = LoginCmd | LogoutCmd`. Verified the three construction shapes are CLEAN on
+   baseline and are pure covariant construction: nested literal, literal-in-arg, and
+   literal-vs-union all `expected=CLEAN markers=0`. **[validated — probe]**
+
+   - **Nested literals**: handled by recursion (`check_table_expr` calls `check_expr`
+     on each field value with the expected field type as `want`). No obstacle.
+   - **Literals in arg position**: `synth_call_expr` already calls `check_expr` per
+     argument (`:1465`) — the same switch fires, so `f({ … })` check-modes for free.
+   - **Union target**: `check_table_expr` tries each union member; success on any one
+     member is acceptance (mirrors `subtype`'s existing `B = union` "exists" rule, so
+     no new semantics — it is the same disjunction, evaluated in check mode).
+
+3. **Invariant aliasing + check-moded construction: the combined verdict.**
+
+   - **(a) Rejects the bug.** The alias `local nb: NumBox = ib` is a `var` node, not
+     a `table` node, so it stays on the `subtype` path; with mutable fields
+     **invariant**, `IntBox </: NumBox` (`integer ≠ number`) — the widen is rejected
+     at the alias site, before any write. The write-through hole is closed at its
+     root. **[traced; matches the reverted-fix probe, which showed REJECT for exactly
+     this shape]**
+   - **(b) Preserves all 5 regressed fixtures.** Every one is record-literal
+     construction (`local_return_narrowing`, `union_alias_over_named_types`,
+     `coinductive_recursive_types`, `closure_param_typing` all use `return { … }` or
+     `local … = { … }`; `table_construction_widening` is the empty-`{}`-dynamic-write
+     idiom plus a force cast, untouched by the depth rule). With construction routed
+     to covariant check-mode, the literal never reaches the invariant subtype. **All
+     stay CLEAN. [traced + fixture-source confirmed]**
+   - **(c) Residual = alias-AND-READ only.** The single pattern that *was* sound under
+     covariance and *is* now rejected: an alias widened to a supertype that is **only
+     read, never written** (`local nb: NumBox = ib; return nb.f`). This is sound
+     (no write, no corruption) but the invariant alias rule rejects it conservatively.
+     This is the entire residual cost — narrow and recoverable later (§6.14.4).
+
+### 6.14.3 The sound rule (decided)
+
+**Construction (check-mode, covariant):** a record/array **literal** checked against
+an expected record (or union of records) type is checked **field-by-field
+covariantly**, via `check_table_expr` routed from `check_expr`. Sound because a
+freshly-constructed value has a single reference — no aliased narrower view exists to
+be violated by a later write.
+
+**Aliasing / all non-literal record flow (subtype, invariant-in-mutable-fields):**
+`_rec_sub`'s depth rule requires, for each field present in both `A` and `B`, that
+the field types be **mutually subtypes** (`sub(af.ty, bf.ty) and sub(bf.ty, af.ty)`)
+— **invariant** — *unless* the field is `readonly` (then covariant, §6.14.4). Width
+stays covariant (extra `A` fields fine; the loop is over `B`'s fields). The indexer
+value is likewise invariant (`t[k] = v` is a write), key contravariant — matching the
+reverted patch's indexer treatment, which was correct.
+
+This is **not special-casing**: the discriminator is *structural* — a `table`-node
+syntactic form (the construction site) vs the subtype relation (every other record
+flow). It is the same construction/elimination split the kernel's bidirectional spine
+already encodes; `check_table_expr` is the exact analogue of the existing
+`check_func_expr`, keyed on node kind, not on type name.
+
+### 6.14.4 Soundness argument (explicit)
+
+The combination has **no remaining write-through hole**, by the following case
+analysis over every way a record value at type `B` can arise where `B`'s field `f` is
+mutable:
+
+1. **`B` arose by constructing a literal** (`{ f = e, … }` checked against `B`). The
+   value is fresh: at the moment of construction there is exactly one reference, typed
+   `B`. Covariant field-check requires `synth(e) <: B.f`, so every write the program
+   can later make through *this* reference writes a value `<: B.f` — and **every**
+   reference to this table is typed `B` or a supertype reached by a subsequent
+   subtype step (case 2/3), so reads through any reference see a value `<: their
+   field type`. No narrower-typed alias can exist *yet*, because the value was just
+   born. Covariance is sound. ∎(construction)
+
+2. **`B` arose by a subtype step from some `A`** (`A <: B`, e.g. an alias
+   `local nb: B = a` with `a : A`, or passing `a : A` where `B` is expected). The
+   invariant depth rule requires `A.f` and `B.f` **mutually `<:`**, i.e.
+   *equal as value-sets*. So the wider reference (`B`) and the narrower (`A`) admit
+   the **same** set of writable values into `f`. A write through `B` therefore cannot
+   introduce a value that violates a read through `A`, because their field types are
+   identical. The classic hole — write `number` through `B`, read `integer` through
+   `A` — is impossible: `A.f = integer` and `B.f = number` are **not** mutually `<:`,
+   so the subtype step that created the alias is **rejected**. ∎(aliasing)
+
+3. **`B`'s field is `readonly`** (§6.14.5, deferred-precision layer). A readonly field
+   admits **no writes** through *any* reference. With writes excluded, only reads
+   remain, and reads are sound under covariance (read-set inclusion). So a readonly
+   field may stay covariant in the depth rule. ∎(readonly)
+
+Cases 1–3 are exhaustive over the origin of any record-typed value (a value is either
+freshly constructed or reached by a subtype step; its fields are either mutable or
+readonly). Construction never produces a widened alias; aliasing never widens a
+mutable field; readonly never admits a write. **The write-through composition that
+was the defect — (covariant widen) ∘ (write through the wider view) — cannot form,
+because the widen step is now invariant whenever the field is writable.** ∎
+
+The argument's load-bearing premise is the freshness of constructed values, which the
+lowering guarantees: a `table` node is a literal allocation expression — it has no
+prior identity, so no prior alias. This is the **provenance fact** the bidirectional
+node-kind switch reads for free (the node IS the construction site); no separate
+provenance bit is needed.
+
+### 6.14.5 Residual cost + readonly verdict (DEFER)
+
+The residual is **alias-and-read**: widening a mutable record to a supertype and only
+reading it (never writing) is sound but now rejected. Recovering it needs the
+`readonly`/mutable variance split (the vestigial `readonly` slot in `slice_ty.lua`,
+parsed but hardcoded `false`): a field provably never written through any reachable
+reference is `readonly` and stays covariant.
+
+**Measured frequency — rare; readonly is DEFERRABLE, not needed-now:**
+
+- The cost artifact's corpus survey already measured the blanket-invariant delta at
+  **−1 CLEAN over 869 files** — and that −1 was a *construction* regression, which
+  this design eliminates. The alias-and-read regression is a strict subset of even
+  that.
+- The alias-and-read pattern requires a programmer to (i) bind a local to an existing
+  record value, (ii) annotate that local at a **strict supertype** of the value's
+  type, and (iii) **only read** it. Annotating a local at a supertype of its
+  initializer is already unusual (the annotation is doing nothing for the reader); the
+  corpus's ~468 construction-shaped annotated locals are dominated by fresh literals,
+  not supertype-widening aliases of existing records. No corpus fixture exhibits the
+  alias-and-read shape (the same reason §9.2's original "unreachable" claim was made —
+  it was wrong about *write*-through reachability, but the *read-only* widened alias
+  genuinely does not appear).
+
+**Verdict: ship invariant-mutable + check-mode construction now; defer readonly.**
+The soundness closure does not depend on readonly — it is a pure precision-recovery
+layer for a pattern the corpus does not contain. Building it now would be
+substrate-ahead-of-demand. It is recorded as a named un-defer trigger: a `lib/` site
+that widens a record alias to a supertype and only reads it, which the invariant rule
+rejects, fires the readonly build. Until then, the conservative rejection is sound
+(wider rejection, never unsound) and monotone (un-deferring readonly only *adds*
+acceptances — §3.4 coherence preserved).
+
+### 6.14.6 Mechanization surface
+
+| Seam | File | Change |
+|---|---|---|
+| Construction check-mode | `crescent_slice_lower.lua` | new `check_table_expr(lc, ctx, e, want)` — the table-node analogue of `check_func_expr`; field-by-field covariant check via recursive `check_expr`, union-member selection for `want` a union of records, array/indexer entries against the indexer value type |
+| Mode switch | `crescent_slice_lower.lua` | extend `check_expr` (`:2015`) so a `table` node against a `rec`/`rec_with_indexer`/union-of-those `want` routes to `check_table_expr`; the `func`/`fn` branch is the existing precedent |
+| Return position | `crescent_slice_lower.lua` | the single-return path (`:2304`) currently `synth_expr` + `emit_check_against`; route through `check_expr` so `return { … }` check-modes (4 of the 5 fixtures construct at return position) |
+| Subtype depth | `slice_subtype.lua` | `_rec_sub` depth rule: mutable fields **invariant** (`sub(af.ty,bf.ty) and sub(bf.ty,af.ty)`), `readonly` fields covariant (slot stays `false` in v1 ⇒ all-invariant); indexer value invariant, key contravariant (matches the reverted patch) |
+| Synth-emit check evidence | `crescent_slice.lua` | a new `check_table` evidence method (or reuse `check_against` with a synth-table premise whose synth is the literal type) so the construction check produces a `checks_against` claim the substrate verifies; the verifier re-derives the field-wise covariant check from premises (no substrate learning) |
+| Unit tests | `slice_subtype_test.lua` | update the 4 assertions that encoded the OLD covariant-depth rule (`:195`, `:219`, `:233`, `crescent_slice_test.lua:1430`) to assert the new invariant-depth rule — these encoded the unsound behavior and *should* change |
+
+---
+
 ## 7. Acceptance Criteria
 
 ### 7.1 Per-fixture acceptance mapping
