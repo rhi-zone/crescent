@@ -260,6 +260,89 @@ and `denote_head`, and the extended `denote_dec`: **Closed under the global
 context** — no axioms, no `Admitted`, no `Classical`. Whole dev compiles
 (`coqc proof/subtype.v`).
 
+## Increment 6 — GENERAL emptiness-based decision procedure (records)
+
+Increment 4's head-enumeration decider is correct only on the `atomic` fragment:
+records inspect a table's *contents*, so a fixed finite set of head-reps cannot
+witness the value space (recorded as the increment-5 scope limitation). Increment
+6 builds the standard **MLstruct / semantic-subtyping** decider.
+
+`proof/subtype.v` (new section, additive — increments 1–5 untouched; the atomic
+`decide_dsub` stays as-is, `gdecide` is the new general relation):
+
+- **The reduction lemma — GENERAL, all `a b : BTy`.** `dsub_iff_empty`:
+  `(forall v, denote a v -> denote b v) <-> (forall v, ~ denote (BInter a (BNeg
+  b)) v)`. Subtyping **is** emptiness of `A ∧ ¬B`. Proved directly by unfolding
+  `denote`, using `classic_denote'` (decidability of `denote`) for the `<-`
+  direction. Holds *with records present* — no fragment restriction. So the
+  problem reduces to deciding emptiness of one type.
+
+- **DNF normalization, with negated records.** A literal is a positive/negative
+  atom or a positive/negative **record** (`LPosAtom | LNegAtom | LPosRec |
+  LNegRec`). `to_dnf` / `to_dnf_neg` are a mutually-structural pair (NNF + De
+  Morgan + double-negation distribution). Because `LNegRec` faithfully denotes
+  `~ denote (BRec f)`, the **preservation lemma is UNCONDITIONAL**:
+  `to_dnf_pres : denote_dnf (to_dnf t) v <-> denote t v` (and the negative dual),
+  proved by one structural fixpoint; the De Morgan / double-negation directions
+  use `classic_denote'`. `Qed`.
+
+- **Emptiness by witness construction.** `find_wit_fuel n t : option V`
+  *constructs* an inhabitant of `t` (or `None`). `decide_empty t := match
+  find_wit_fuel (S (S (rdepth t))) t with None => true | _ => false end`;
+  `gdecide a b := decide_empty (BInter a (BNeg b))`. Per clause of the DNF:
+  - **scalar clause** (no positive record): decided by the six
+    head-representatives — `LPosAtom`/`LNegAtom`/`LNegRec` literals are
+    head-monotone (`lit_denote_head`), so a satisfiable scalar clause is
+    satisfied by some rep.
+  - **positive-record clause**: build a witness *table* from the merged per-key
+    field requirements `field_inter k (concat positive-records)`, recursing
+    `find_wit_fuel` on each intersected field type; a positive record + a
+    positive scalar atom in the same clause is empty (table ≠ scalar).
+  - **one negated record** `Nj`: violate it by an *absent* key (a key of `Nj`
+    not positively required — the built table omits it) or by a *forced wrong
+    value* at one positively-required key (`field_inter k allf ∩ ¬field_inter k
+    Nj` inhabited).
+
+- **TERMINATION — by construction.** Measure `rdepth t` = record-nesting depth.
+  Every recursive `find_wit_fuel` call is on a field-intersection type whose
+  `rdepth` is **strictly smaller** (`dnf_recs_shallow` + `field_inter` depth =
+  max field depth). `find_wit_fuel` is a plain **structural nat recursion on
+  fuel** (no `Fix`, no well-founded combinator) — it cannot loop; fuel
+  `S (S (rdepth t))` is provably sufficient.
+
+- **FRAGMENT decided (honestly delimited).** `decide_empty`/`gdecide` are proved
+  sound + complete **under two predicates**:
+  - `flat t` — every record's field types are record-free (`no_rec`); records do
+    not nest. Covers atoms and one level of records — exactly width / depth /
+    record-vs-atom disjointness.
+  - `dnf_ok (to_dnf t)` — each record-clause of the DNF has **at most one
+    negated record**.
+  The **coupled case — ≥2 negated records sharing keys** (which arises from a
+  *union of records on the right* of a subtyping query) — is **DEFERRED**: that
+  branch of `clause_wit` returns `None`. This keeps the decider **globally
+  SOUND** (`find_wit_sound`, *unconditional* — it never fabricates a false
+  witness); only **completeness** is fragment-restricted. Nested records (depth
+  ≥ 2 field types) are likewise deferred via `flat`.
+
+- **Correctness.** `decide_empty_correct : flat t -> dnf_ok (to_dnf t) ->
+  (decide_empty t = true <-> forall v, ~ denote t v)`; `gdecide_correct` is the
+  subtyping corollary via `dsub_iff_empty`. Both `Qed`. The DNF-preservation
+  `to_dnf_pres`, the global `find_wit_sound`, and the fragment completeness
+  `find_wit_complete` are all `Qed`.
+
+- **Non-vacuity / agreement.** `Compute`/`reflexivity` confirm the right answers
+  on records and atoms (the decider COMPUTES): `gdecide {f:Int;g:Bool} {f:Int} =
+  true` (width), `gdecide {f:Int} {f:Str} = false` (depth), `gdecide {f:Int} Int
+  = false` (record vs atom), `gdecide ({f:Int} ∩ Int) Bot = true` (disjoint),
+  `gdecide Int Num = true` / `gdecide Num Int = false` (atoms, agreeing with the
+  old `decide_dsub`). `agree_width` routes the width answer through
+  `gdecide_correct` to a real `dsub` fact — so `gdecide` decides *exactly* `dsub`
+  on the covered fragment, not some other relation.
+
+`Print Assumptions dsub_iff_empty`, `decide_empty_correct`, `gdecide_correct`,
+`to_dnf_pres`, `find_wit_sound`: **Closed under the global context** — no axioms,
+no `Admitted`, no `Classical`. Whole dev compiles (`coqc proof/subtype.v`).
+
 ## Staging
 
 - **[done]** mechanized lattice + subtype `refl`/`trans` (Rocq);
@@ -294,14 +377,41 @@ context** — no axioms, no `Admitted`, no `Classical`. Whole dev compiles
   head-decider re-scoped to the `atomic` fragment (`denote_head`,
   `decide_dsub_correct` under `atomic`) — TRUE theorems, not broken.
   Non-vacuity proved. Closed under the global context.
-- **[next — structural type formers, continued]** candidates, substrate-first:
-  **(a)** the **emptiness-based / MLstruct-style decision procedure** (decide
-  `dsub a b` via emptiness of `a ∩ ¬b`) — the general decider records need, now
-  that `denote` is no longer head-determined; **(b)** **index signatures and
-  closed/exact records** (the deferred record refinements; closed records need a
-  "no other keys" denotation, index sigs a `∀ key`-quantified field); **(c)** a
-  first-class **table atom** (so records subtype an atom, not just `BRec []`);
-  **(d)** **arrows** with co/contra-variance.
+- **[done — increment 6: emptiness-based decision procedure]** the general
+  MLstruct-style decider. Reduction lemma `dsub_iff_empty` (GENERAL — subtyping =
+  emptiness of `A ∧ ¬B`, all `a b`). DNF normalization with negated-record
+  literals, faithful through records (`to_dnf_pres`, unconditional). Emptiness by
+  witness construction `find_wit_fuel` (structural fuel recursion; measure
+  `rdepth` = record-nesting depth, strictly decreasing — terminating by
+  construction, no `Fix`). Decided fragment: `flat` (records' field types
+  record-free — one level of records) + `dnf_ok` (≤1 negated record per
+  record-clause). Globally SOUND (`find_wit_sound`); complete on the fragment
+  (`decide_empty_correct`, `gdecide_correct`). `Compute`/agreement non-vacuity on
+  width/depth/record-vs-atom/disjoint/atom cases. Closed under the global
+  context.
+- **[next — close the emptiness deferrals, substrate-first]** in priority order,
+  each an enabling substrate before its consumers:
+  **(a)** **coupled negated records** — ≥2 negated records sharing keys in one
+  conjunct (arising from unions of records on the right). The principled fix is a
+  per-negated-record witnessing-key *assignment search* with per-key intersected
+  `¬`-requirements; lifts `dnf_ok`'s "≤1 negated record" restriction.
+  **(b)** **nested records** — field types that are themselves records; lifts the
+  `flat` restriction. The `find_wit_fuel`/`rdepth` machinery already supports the
+  recursion structurally; the proof obligation is threading the field-completeness
+  through deeper `rdepth`, not new substrate.
+  **(c)** **index signatures and closed/exact records** (deferred record
+  refinements; closed records need a "no other keys" denotation, index sigs a
+  `∀ key`-quantified field); **(d)** a first-class **table atom** (records
+  subtype an atom, not just `BRec []`).
+- **[then — arrows with variance — LIKELY DESIGN FORK]** function types with
+  co/contra-variance. **Flagged as a probable no-default fork:** modelling
+  function VALUES in the concrete domain `V` is the open question — a function is
+  not a finite structure like a table, so the head-class / finite-witness style
+  that drives `find_wit_fuel` does not obviously transfer. Options span
+  (i) an *extensional* finite-graph approximation, (ii) an *intensional* opaque
+  arrow atom with a separate variance rule, (iii) a step-indexed / logical-
+  relation denotation. This should be decided (design-it-twice) before
+  implementation, not chosen by default.
 - **[then — equirecursive μ]** extend `BTy` with recursive types (`μ`) and
   coinductive/contractive denotation; re-establish the laws and the decision
   procedure under recursion.

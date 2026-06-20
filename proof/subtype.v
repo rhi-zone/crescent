@@ -1450,3 +1450,1330 @@ Proof.
   destruct (Hall "g"%string (BAtom AInt) (or_intror (or_introl eq_refl))) as [vv [Elk _]].
   simpl in Elk. discriminate Elk.
 Qed.
+
+(* ===========================================================================
+   INCREMENT 6 — GENERAL EMPTINESS-BASED DECISION PROCEDURE (records).
+
+   Increment 4's head-enumeration decider is correct only on the [atomic]
+   fragment (no records); records inspect table CONTENTS, so a fixed finite set
+   of head-representatives cannot witness the value space. This increment builds
+   the standard MLstruct / semantic-subtyping decider:
+
+     subtyping  =  EMPTINESS of  A ∧ ¬B    (the reduction lemma, GENERAL —
+                                            [dsub_iff_empty], all [a b : BTy]).
+
+   So the problem reduces to deciding emptiness of ONE type. We decide emptiness
+   by DNF normalization + per-conjunct witness construction:
+
+   - [to_dnf] / [to_dnf_neg] normalize a [BTy] to disjunctive normal form over
+     LITERALS (positive/negative atom, positive/negative RECORD). With a negated-
+     record literal [LNegRec] the normalization is FAITHFUL through records, so
+     preservation [to_dnf_pres] holds UNCONDITIONALLY (uses [classic_denote'] /
+     [denote_dec] for the De Morgan + double-negation directions). [Qed].
+
+   - [find_wit_fuel n t] CONSTRUCTS a witness value of [t] (or [None]); emptiness
+     is [None]. It works clause-by-clause: a scalar clause is decided by the six
+     head-representatives (head-determined for non-positive-record literals); a
+     record clause builds a witness table from the merged per-key field
+     requirements ([field_inter]), recursing [find_wit_fuel] on the intersected
+     field types; a single negated record is violated by an absent key or by a
+     forced wrong value at one key.
+
+   TERMINATION MEASURE: [rdepth t] — record-nesting depth. Each recursion into a
+   field type strictly decreases [rdepth]; [find_wit_fuel] takes fuel
+   [S (S (rdepth t))], a STRUCTURAL nat recursion (no [Fix], cannot loop).
+
+   FRAGMENT (honestly delimited — see docs/proof-kernel.md):
+   - [flat t]    : every record's field types are record-free ([no_rec]) — i.e.
+                   records do not nest. (Covers atoms and one level of records:
+                   exactly the record width/depth/atom-disjointness cases.)
+   - [dnf_ok (to_dnf t)] : each record-clause of the DNF has AT MOST ONE negated
+                   record. The COUPLED case (≥2 negated records sharing keys, from
+                   unions of records on the right) is DEFERRED: that branch of
+                   [clause_wit] returns [None], which keeps the decider GLOBALLY
+                   SOUND ([find_wit_sound], unconditional); only COMPLETENESS is
+                   fragment-restricted.
+
+   [decide_empty_correct] / [gdecide_correct] : sound + complete under the
+   fragment. [Qed]. Nested records and coupled negated records are the next
+   increment (see docs/proof-kernel.md roadmap).
+   =========================================================================== *)
+(* ============ DNF machinery ============ *)
+Inductive Lit :=
+  | LPosAtom : Atom -> Lit
+  | LNegAtom : Atom -> Lit
+  | LPosRec  : list (string * BTy) -> Lit
+  | LNegRec  : list (string * BTy) -> Lit.
+
+Definition denote_lit (l:Lit)(v:V) : Prop :=
+  match l with
+  | LPosAtom a => atom_denote a v
+  | LNegAtom a => ~ atom_denote a v
+  | LPosRec f  => denote (BRec f) v
+  | LNegRec f  => ~ denote (BRec f) v
+  end.
+
+Definition Clause := list Lit.
+Fixpoint denote_clause (c:Clause)(v:V) : Prop :=
+  match c with [] => True | l::r => denote_lit l v /\ denote_clause r v end.
+
+Definition Dnf := list Clause.
+Fixpoint denote_dnf (d:Dnf)(v:V) : Prop :=
+  match d with [] => False | c::r => denote_clause c v \/ denote_dnf r v end.
+
+(* combinators *)
+Definition dnf_or (d1 d2:Dnf) : Dnf := d1 ++ d2.
+Definition dnf_and (d1 d2:Dnf) : Dnf :=
+  flat_map (fun c1 => map (fun c2 => c1 ++ c2) d2) d1.
+
+Lemma denote_clause_app : forall c1 c2 v,
+  denote_clause (c1 ++ c2) v <-> denote_clause c1 v /\ denote_clause c2 v.
+Proof.
+  induction c1; intros c2 v; simpl.
+  - tauto.
+  - rewrite IHc1. tauto.
+Qed.
+
+Lemma denote_dnf_app : forall d1 d2 v,
+  denote_dnf (d1 ++ d2) v <-> denote_dnf d1 v \/ denote_dnf d2 v.
+Proof.
+  induction d1; intros d2 v; simpl.
+  - tauto.
+  - rewrite IHd1. tauto.
+Qed.
+
+Lemma denote_dnf_or : forall d1 d2 v,
+  denote_dnf (dnf_or d1 d2) v <-> denote_dnf d1 v \/ denote_dnf d2 v.
+Proof. intros; apply denote_dnf_app. Qed.
+
+Lemma denote_dnf_and : forall d1 d2 v,
+  denote_dnf (dnf_and d1 d2) v <-> denote_dnf d1 v /\ denote_dnf d2 v.
+Proof.
+  induction d1; intros d2 v; unfold dnf_and; simpl.
+  - tauto.
+  - rewrite denote_dnf_app. fold (dnf_and d1 d2). rewrite IHd1.
+    (* first part: map (fun c2 => a ++ c2) d2 *)
+    assert (Hmap : denote_dnf (map (fun c2 => a ++ c2) d2) v
+                   <-> denote_clause a v /\ denote_dnf d2 v).
+    { clear IHd1. induction d2; simpl.
+      - tauto.
+      - rewrite denote_clause_app, IHd2. tauto. }
+    rewrite Hmap. tauto.
+Qed.
+
+(* ============ neg_atomic fragment + to_dnf ============ *)
+(* neg_atomic t: no BNeg has a BRec in its scope. Records may appear positively;
+   negation may only be applied to (compositions of) atoms. *)
+Fixpoint neg_atomic (t:BTy) : Prop :=
+  match t with
+  | BAtom _ => True | BTop => True | BBot => True
+  | BUnion a b => neg_atomic a /\ neg_atomic b
+  | BInter a b => neg_atomic a /\ neg_atomic b
+  | BNeg a => neg_atomic a /\ (fix no_rec (s:BTy) : Prop :=
+      match s with
+      | BAtom _ | BTop | BBot => True
+      | BUnion x y | BInter x y => no_rec x /\ no_rec y
+      | BNeg x => no_rec x
+      | BRec _ => False end) a
+  | BRec fields => (fix nar (fs:list (string*BTy)) : Prop :=
+      match fs with [] => True | (_,T)::r => neg_atomic T /\ nar r end) fields
+  end.
+
+(* positive / negative DNF, mutually defined by structural recursion. *)
+Fixpoint to_dnf (t:BTy) : Dnf :=
+  match t with
+  | BAtom a => [[LPosAtom a]]
+  | BTop => [[]]            (* one empty clause: always true *)
+  | BBot => []             (* no clause: always false *)
+  | BUnion a b => dnf_or (to_dnf a) (to_dnf b)
+  | BInter a b => dnf_and (to_dnf a) (to_dnf b)
+  | BNeg a => to_dnf_neg a
+  | BRec f => [[LPosRec f]]
+  end
+with to_dnf_neg (t:BTy) : Dnf :=
+  match t with
+  | BAtom a => [[LNegAtom a]]
+  | BTop => []             (* ~Top = Bot *)
+  | BBot => [[]]           (* ~Bot = Top *)
+  | BUnion a b => dnf_and (to_dnf_neg a) (to_dnf_neg b)  (* De Morgan *)
+  | BInter a b => dnf_or (to_dnf_neg a) (to_dnf_neg b)
+  | BNeg a => to_dnf a     (* double negation *)
+  | BRec f => [[LNegRec f]]
+  end.
+
+(* Preservation, mutual + UNCONDITIONAL. With [LNegRec] in the literal language,
+   [to_dnf_neg] faithfully denotes negation even through records, so no fragment
+   restriction is needed at the DNF level. (The fragment restriction reappears,
+   if at all, only in the per-clause emptiness decider.) Bundled into one
+   conjunction so a single structural fix discharges both directions; the De
+   Morgan / double-negation directions use decidability of [denote]. *)
+Lemma to_dnf_pres_both : forall t v,
+  (denote_dnf (to_dnf t) v <-> denote t v)
+  /\ (denote_dnf (to_dnf_neg t) v <-> ~ denote t v).
+Proof.
+  fix IH 1. intros t v. destruct t; simpl; split.
+  - (* BAtom pos *) simpl. tauto.
+  - (* BAtom neg *) simpl. tauto.
+  - (* BTop pos *) simpl. tauto.
+  - (* BTop neg *) simpl. tauto.
+  - (* BBot pos *) simpl. tauto.
+  - (* BBot neg *) simpl. tauto.
+  - (* BUnion pos *) rewrite denote_dnf_or.
+    rewrite (proj1 (IH t1 v)), (proj1 (IH t2 v)). tauto.
+  - (* BUnion neg *) rewrite denote_dnf_and.
+    rewrite (proj2 (IH t1 v)), (proj2 (IH t2 v)). tauto.
+  - (* BInter pos *) rewrite denote_dnf_and.
+    rewrite (proj1 (IH t1 v)), (proj1 (IH t2 v)). tauto.
+  - (* BInter neg *) rewrite denote_dnf_or.
+    rewrite (proj2 (IH t1 v)), (proj2 (IH t2 v)).
+    destruct (classic_denote' t1 v); destruct (classic_denote' t2 v); tauto.
+  - (* BNeg pos *) simpl. rewrite (proj2 (IH t v)). tauto.
+  - (* BNeg neg *) simpl. rewrite (proj1 (IH t v)).
+    destruct (classic_denote' t v); tauto.
+  - (* BRec pos *) simpl. tauto.
+  - (* BRec neg *) simpl. tauto.
+Qed.
+
+Definition to_dnf_pres : forall t v,
+  (denote_dnf (to_dnf t) v <-> denote t v) := fun t v => proj1 (to_dnf_pres_both t v).
+Definition to_dnf_neg_pres : forall t v,
+  (denote_dnf (to_dnf_neg t) v <-> ~ denote t v) := fun t v => proj2 (to_dnf_pres_both t v).
+
+(* record-nesting depth: the TERMINATION MEASURE. Each recursion into a record
+   field type strictly decreases rdepth. *)
+Fixpoint rdepth (t:BTy) : nat :=
+  match t with
+  | BAtom _ | BTop | BBot => 0
+  | BUnion a b | BInter a b => Nat.max (rdepth a) (rdepth b)
+  | BNeg a => rdepth a
+  | BRec fs => S ((fix md (xs:list (string*BTy)) : nat :=
+      match xs with [] => 0 | (_,T)::r => Nat.max (rdepth T) (md r) end) fs)
+  end.
+
+(* scalar-only clause satisfaction at a head value (only atom literals matter;
+   a LPosRec literal is never present in the scalar branch). atoms_sat checks
+   every literal at v, treating LPosRec as unsatisfiable for a scalar. *)
+Definition lit_satb (l:Lit)(v:V) : bool :=
+  match l with
+  | LPosAtom a => if atom_dec a v then true else false
+  | LNegAtom a => if atom_dec a v then false else true
+  | LPosRec f  => if denote_dec (BRec f) v then true else false
+  | LNegRec f  => if denote_dec (BRec f) v then false else true
+  end.
+Fixpoint clause_satb (c:Clause)(v:V) : bool :=
+  match c with [] => true | l::r => lit_satb l v && clause_satb r v end.
+
+Lemma lit_satb_iff : forall l v, lit_satb l v = true <-> denote_lit l v.
+Proof.
+  intros l v; destruct l; unfold lit_satb, denote_lit.
+  - destruct (atom_dec a v) as [Ha|Ha]; split; intro H.
+    + exact Ha.
+    + reflexivity.
+    + discriminate H.
+    + contradiction.
+  - destruct (atom_dec a v) as [Ha|Ha]; split; intro H.
+    + discriminate H.
+    + contradiction.
+    + exact Ha.
+    + reflexivity.
+  - destruct (denote_dec (BRec l) v) as [Hd|Hd]; split; intro H.
+    + exact Hd.
+    + reflexivity.
+    + discriminate H.
+    + contradiction.
+  - destruct (denote_dec (BRec l) v) as [Hd|Hd]; split; intro H.
+    + discriminate H.
+    + contradiction.
+    + exact Hd.
+    + reflexivity.
+Qed.
+
+Lemma clause_satb_iff : forall c v, clause_satb c v = true <-> denote_clause c v.
+Proof.
+  induction c; intros v; simpl.
+  - split; [intros _; exact I | reflexivity].
+  - rewrite andb_true_iff, lit_satb_iff, IHc. tauto.
+Qed.
+
+(* ===== field intersection ===== *)
+(* fold all types listed at key k in fs into one BInter (BTop if none). *)
+Fixpoint field_inter (k:string)(fs:list (string*BTy)) : BTy :=
+  match fs with
+  | [] => BTop
+  | (k',T)::r => if string_dec k k' then BInter T (field_inter k r) else field_inter k r
+  end.
+
+(* membership in field_inter <-> conjunction over matching entries. *)
+Lemma denote_field_inter : forall k fs v,
+  denote (field_inter k fs) v <-> (forall T, In (k,T) fs -> denote T v).
+Proof.
+  induction fs as [|[k' T'] r IH]; intros v; simpl.
+  - split; [intros _ T []| intros _; exact I].
+  - destruct (string_dec k k') as [<-|Hne]; simpl.
+    + rewrite IH. split.
+      * intros [HT Hr] T [Heq|Hin]. injection Heq as <-. exact HT. apply Hr; exact Hin.
+      * intros H. split. apply (H T'); left; reflexivity.
+        intros T Hin. apply H; right; exact Hin.
+    + rewrite IH. split.
+      * intros Hr T [Heq|Hin]. injection Heq as Ek <-. congruence. apply Hr; exact Hin.
+      * intros H T Hin. apply H; right; exact Hin.
+Qed.
+
+(* field_inter's types are drawn from fs; size bound proved later via subterm. *)
+
+(* ===== the witness finder (fuel = tsize bound) ===== *)
+(* clause analysis: collect positive records (as field-lists). *)
+Fixpoint pos_recs (c:Clause) : list (list (string*BTy)) :=
+  match c with [] => [] | LPosRec f :: r => f :: pos_recs r | _ :: r => pos_recs r end.
+Fixpoint has_pos_atom (c:Clause) : bool :=
+  match c with [] => false | LPosAtom _ :: _ => true | _ :: r => has_pos_atom r end.
+
+(* find first head rep satisfying all literals of a (scalar) clause. *)
+Definition scalar_wit (c:Clause) : option V :=
+  find (fun h => clause_satb c h) head_reps.
+
+(* build a witness table from a field requirement list, given a per-key witness
+   finder [wf : BTy -> option V]. Returns Some ents iff every key's intersected
+   type yields a witness. *)
+Definition table_wit (allf:list (string*BTy)) (wf:BTy -> option V) : option V :=
+  if forallb (fun kT => match wf (field_inter (fst kT) allf) with Some _ => true | None => false end) allf
+  then Some (VTable (map (fun kT => (fst kT, match wf (field_inter (fst kT) allf) with Some v => v | None => VNil end)) allf))
+  else None.
+
+(* negated records present in a clause. *)
+Fixpoint neg_recs (c:Clause) : list (list (string*BTy)) :=
+  match c with [] => [] | LNegRec f :: r => f :: neg_recs r | _ :: r => neg_recs r end.
+
+Definition in_keys (k:string)(fs:list (string*BTy)) : bool :=
+  existsb (fun kT => if string_dec k (fst kT) then true else false) fs.
+
+(* first Some in a list of option V. *)
+Fixpoint first_some (l:list (option V)) : option V :=
+  match l with [] => None | Some v :: _ => Some v | None :: r => first_some r end.
+
+(* table witness for a clause with positive fields [allf] and ONE negated record
+   [Nj] to violate. Either Nj has a key not required by allf (base table omits it
+   => violated by absence), or we force a wrong value at one of Nj's keys. *)
+Definition table_wit_neg (allf Nj:list (string*BTy)) (wf:BTy -> option V) : option V :=
+  if existsb (fun kT => negb (in_keys (fst kT) allf)) Nj
+  then table_wit allf wf
+  else first_some (map (fun kT =>
+         table_wit (allf ++ [(fst kT, BNeg (field_inter (fst kT) Nj))]) wf) Nj).
+
+Definition clause_wit (c:Clause) (wf:BTy -> option V) : option V :=
+  match pos_recs c with
+  | [] => scalar_wit c
+  | prs => if has_pos_atom c then None
+           else match neg_recs c with
+                | [] => table_wit (List.concat prs) wf
+                | Nj :: nil => table_wit_neg (List.concat prs) Nj wf
+                | _ :: _ :: _ =>
+                    (* >1 negated record in a record clause: the coupled
+                       field-constraint case, DEFERRED (out of the proven
+                       fragment [clause_ok]). Returning None keeps the decider
+                       globally SOUND (it never fabricates a false witness); only
+                       COMPLETENESS is fragment-restricted. *)
+                    None
+                end
+  end.
+
+(* find witness over a whole DNF: first clause that yields one. *)
+Fixpoint dnf_wit (d:Dnf) (wf:BTy -> option V) : option V :=
+  match d with
+  | [] => None
+  | c :: r => match clause_wit c wf with Some v => Some v | None => dnf_wit r wf end
+  end.
+
+Fixpoint find_wit_fuel (n:nat) (t:BTy) : option V :=
+  match n with
+  | 0 => None
+  | S n' => dnf_wit (to_dnf t) (find_wit_fuel n')
+  end.
+
+Definition decide_empty (t:BTy) : bool :=
+  match find_wit_fuel (S (S (rdepth t))) t with None => true | Some _ => false end.
+
+Definition gdecide (a b:BTy) : bool := decide_empty (BInter a (BNeg b)).
+
+(* sanity computes *)
+Definition Rfg := BRec [("f"%string,BAtom AInt);("g"%string,BAtom ABool)].
+Definition Rf  := BRec [("f"%string,BAtom AInt)].
+Definition RfStr := BRec [("f"%string,BAtom AStr)].
+Compute gdecide Rfg Rf.        (* width: should be true *)
+Compute gdecide Rf RfStr.      (* depth: should be false *)
+Compute gdecide Rf (BAtom AInt). (* record vs atom: should be false (record not int) *)
+Compute gdecide (BInter Rf (BAtom AInt)) BBot. (* rec & atom disjoint: true *)
+Compute gdecide (BAtom AInt) (BAtom ANum).     (* true *)
+Compute gdecide (BAtom ANum) (BAtom AInt).     (* false *)
+Compute gdecide (BAtom AStr) (BAtom AInt).     (* false *)
+Compute gdecide (BInter (BAtom AInt) (BAtom AStr)) BBot. (* true *)
+
+(* ===================== CORRECTNESS ===================== *)
+
+(* head monotonicity for literals that are NOT positive records. *)
+Lemma lit_denote_head : forall l v, (forall f, l <> LPosRec f) ->
+  denote_lit l v -> denote_lit l (head v).
+Proof.
+  intros l v Hnp H. destruct l; simpl in *.
+  - destruct a; destruct v; simpl in *; tauto.
+  - destruct a; destruct v; simpl in *; tauto.
+  - exfalso. apply (Hnp l); reflexivity.
+  - (* LNegRec: ~denote (BRec l) v -> ~denote (BRec l) (head v).
+       head v is either a scalar (not a table => not in BRec) or VTable []
+       (which is in BRec l only if l = []; but then v was a table in BRec [] too). *)
+    intro Hc. apply H. destruct v; simpl in Hc.
+    + destruct Hc as [ents [Hbad _]]; discriminate.
+    + destruct Hc as [ents [Hbad _]]; discriminate.
+    + destruct Hc as [ents [Hbad _]]; discriminate.
+    + destruct Hc as [ents [Hbad _]]; discriminate.
+    + destruct Hc as [ents [Hbad _]]; discriminate.
+    + (* head (VTable l0) = VTable []; Hc : denote (BRec l) (VTable []) *)
+      destruct Hc as [ents [Heq Hfields]]. injection Heq as <-.
+      (* every field of l is in [] -> assoc_lookup returns None -> contradiction
+         UNLESS l = []. If l=[], BRec [] holds for any table incl VTable l0. *)
+      exists l0. split; [reflexivity|].
+      (* Hfields says every field of l is present in the EMPTY ents []; if l has
+         any field, that's contradictory (assoc_lookup _ [] = None). So l = []
+         and the goal (all fields present in l0) is vacuously True. *)
+      destruct l as [|[k T] r]; simpl in *.
+      * exact I.
+      * destruct Hfields as [[vv [Hlk _]] _]. simpl in Hlk. discriminate Hlk.
+Qed.
+
+(* a clause with no positive-record literal: every literal is head-monotone. *)
+Fixpoint no_pos_rec (c:Clause) : Prop :=
+  match c with [] => True | LPosRec _ :: _ => False | _ :: r => no_pos_rec r end.
+
+Lemma pos_recs_nil_no_pos_rec : forall c, pos_recs c = [] -> no_pos_rec c.
+Proof.
+  induction c as [|l r IH]; simpl; intros H.
+  - exact I.
+  - destruct l; simpl in *; try (apply IH; exact H). discriminate H.
+Qed.
+
+Lemma clause_denote_head : forall c v, no_pos_rec c ->
+  denote_clause c v -> denote_clause c (head v).
+Proof.
+  induction c as [|l r IH]; intros v Hnp Hd; simpl in *.
+  - exact I.
+  - destruct Hd as [Hl Hr]. destruct l; simpl in *.
+    + split; [apply (lit_denote_head (LPosAtom a) v); [discriminate|exact Hl]| apply IH; assumption].
+    + split; [apply (lit_denote_head (LNegAtom a) v); [discriminate|exact Hl]| apply IH; assumption].
+    + contradiction.
+    + split; [apply (lit_denote_head (LNegRec l) v); [discriminate|exact Hl]| apply IH; assumption].
+Qed.
+
+Lemma scalar_wit_sound : forall c v, scalar_wit c = Some v -> denote_clause c v.
+Proof.
+  intros c v H. unfold scalar_wit in H. apply find_some in H. destruct H as [_ Hsat].
+  apply clause_satb_iff. exact Hsat.
+Qed.
+
+Lemma scalar_wit_complete : forall c, no_pos_rec c ->
+  scalar_wit c = None -> forall v, ~ denote_clause c v.
+Proof.
+  intros c Hnp H v Hd.
+  (* head v is a rep; it satisfies c (head-monotone); but find returned None *)
+  assert (Hh : denote_clause c (head v)) by (apply clause_denote_head; assumption).
+  unfold scalar_wit in H.
+  pose proof (find_none _ _ H (head v) (head_in_reps v)) as Hf. cbn beta in Hf.
+  apply clause_satb_iff in Hh. rewrite Hh in Hf. discriminate Hf.
+Qed.
+
+(* ===== table_wit correctness ===== *)
+(* the built entry list. *)
+Definition built (allf:list (string*BTy))(wf:BTy->option V) : list (string*V) :=
+  map (fun kT => (fst kT, match wf (field_inter (fst kT) allf) with Some v => v | None => VNil end)) allf.
+
+(* lookup in the built table: if k occurs in allf, the looked-up value is the
+   wf-witness of (field_inter k allf). *)
+(* generalized: lookup over a list mapped by an arbitrary key-indexed [sel]. *)
+Lemma assoc_lookup_map_sel : forall (sel:string->V)(fs:list (string*BTy)) k,
+  (exists T, In (k,T) fs) ->
+  assoc_lookup k (map (fun kT => (fst kT, sel (fst kT))) fs) = Some (sel k).
+Proof.
+  intros sel fs k. induction fs as [|[k0 T0] r IH]; simpl.
+  - intros [T []].
+  - intros [T Hin]. destruct (string_dec k k0) as [<-|Hne]; simpl.
+    + reflexivity.
+    + apply IH. destruct Hin as [Heq|Hin']. injection Heq as Ek <-. congruence.
+      exists T; exact Hin'.
+Qed.
+
+Lemma built_lookup : forall allf wf k T,
+  In (k,T) allf ->
+  assoc_lookup k (built allf wf) = Some (match wf (field_inter k allf) with Some v => v | None => VNil end).
+Proof.
+  intros allf wf k T Hin. unfold built.
+  apply (assoc_lookup_map_sel
+           (fun kk => match wf (field_inter kk allf) with Some v => v | None => VNil end)
+           allf k).
+  exists T; exact Hin.
+Qed.
+
+(* a value MODELS a field requirement list: it is a table all of whose required
+   fields are present at the right (per-key intersected) type. *)
+Definition table_models (allf:list (string*BTy)) (v:V) : Prop :=
+  exists ents, v = VTable ents /\
+    forall k, (exists T, In (k,T) allf) ->
+      exists w, assoc_lookup k ents = Some w /\ denote (field_inter k allf) w.
+
+(* modeling allf => satisfies every positive record f whose fields ⊆ allf. *)
+Lemma table_models_posrec : forall allf v f,
+  (forall k T, In (k,T) f -> In (k,T) allf) ->
+  table_models allf v -> denote (BRec f) v.
+Proof.
+  intros allf v f Hsub [ents [Hv Hall]]. subst v. exists ents. split; [reflexivity|].
+  (* fold over f *)
+  assert (Hgen : forall fs, (forall k T, In (k,T) fs -> In (k,T) allf) ->
+    (fix af (xs:list (string*BTy)) : Prop := match xs with [] => True
+      | (k,T)::rest => (exists vv, assoc_lookup k ents = Some vv /\ denote T vv) /\ af rest end) fs).
+  { induction fs as [|[k T] r IH]; simpl; intros Hs.
+    - exact I.
+    - split.
+      + destruct (Hall k (ex_intro _ T (Hs k T (or_introl eq_refl)))) as [w [Hlk Hw]].
+        exists w. split; [exact Hlk|]. apply (denote_field_inter k allf w); [exact Hw|].
+        apply Hs. left; reflexivity.
+      + apply IH. intros k' T' Hin. apply Hs. right; exact Hin. }
+  apply Hgen. exact Hsub.
+Qed.
+
+(* table is not a scalar: a VTable satisfies every negated atom literal. *)
+Lemma table_neg_atom : forall ents a, ~ atom_denote a (VTable ents).
+Proof. intros ents a. destruct a; simpl; auto. Qed.
+
+(* table_wit soundness: if it returns a value, that value models allf. *)
+Lemma table_wit_models : forall allf wf v,
+  (forall T w, wf T = Some w -> denote T w) ->
+  table_wit allf wf = Some v -> table_models allf v.
+Proof.
+  intros allf wf v Hwfs H. unfold table_wit in H.
+  destruct (forallb (fun kT => match wf (field_inter (fst kT) allf) with Some _ => true | None => false end) allf) eqn:Hfb;
+    [|discriminate H].
+  injection H as <-. exists (built allf wf). split; [reflexivity|].
+  intros k [T Hin].
+  rewrite (built_lookup allf wf k T Hin).
+  rewrite forallb_forall in Hfb.
+  pose proof (Hfb (k,T) Hin) as Hk. simpl in Hk.
+  destruct (wf (field_inter k allf)) as [w|] eqn:Ew; [|discriminate Hk].
+  exists w. split; [reflexivity|]. apply Hwfs. exact Ew.
+Qed.
+
+(* forallb = false yields an explicit failing element. *)
+Lemma forallb_false_in : forall (A:Type)(f:A->bool)(l:list A),
+  forallb f l = false -> exists x, In x l /\ f x = false.
+Proof.
+  intros A f l. induction l as [|a r IH]; simpl; intros H.
+  - discriminate.
+  - destruct (f a) eqn:Ea; simpl in H.
+    + destruct (IH H) as [x [Hin Hf]]. exists x. split; [right; exact Hin | exact Hf].
+    + exists a. split; [left; reflexivity | exact Ea].
+Qed.
+
+(* the truly record-free predicate (no BRec anywhere) — needed early. *)
+Fixpoint no_rec (s:BTy) : Prop :=
+  match s with
+  | BAtom _ | BTop | BBot => True
+  | BUnion x y | BInter x y => no_rec x /\ no_rec y
+  | BNeg x => no_rec x
+  | BRec _ => False end.
+
+(* field_inter over a list whose every field type is no_rec is no_rec. *)
+Lemma field_inter_no_rec : forall k fs,
+  (forall k0 T, In (k0,T) fs -> no_rec T) -> no_rec (field_inter k fs).
+Proof.
+  intros k fs. induction fs as [|[k0 T0] r IH]; simpl; intros H.
+  - exact I.
+  - destruct (string_dec k k0) as [<-|Hne]; simpl.
+    + split; [apply (H k T0); left; reflexivity | apply IH; intros ka Ta Hin; apply (H ka Ta); right; exact Hin].
+    + apply IH. intros ka Ta Hin. apply (H ka Ta). right; exact Hin.
+Qed.
+
+(* table_wit completeness: if None, some required key has an empty field type,
+   so NO value can model allf. wf-completeness needed only on the queried
+   field-intersection types, which are no_rec when allf's fields are no_rec. *)
+Lemma table_wit_none : forall allf wf,
+  (forall k0 T, In (k0,T) allf -> no_rec T) ->
+  (forall T, no_rec T -> wf T = None -> forall v, ~ denote T v) ->
+  table_wit allf wf = None -> forall v, ~ table_models allf v.
+Proof.
+  intros allf wf Hnr Hwfc H v Hm. unfold table_wit in H.
+  destruct (forallb (fun kT => match wf (field_inter (fst kT) allf) with Some _ => true | None => false end) allf) eqn:Hfb;
+    [discriminate H|].
+  destruct (forallb_false_in _ _ _ Hfb) as [[k T] [Hin Hk]]. simpl in Hk.
+  destruct (wf (field_inter k allf)) as [w|] eqn:Ew; [discriminate Hk|].
+  destruct Hm as [ents [Hv Hall]].
+  destruct (Hall k (ex_intro _ T Hin)) as [w [Hlk Hw]].
+  exact (Hwfc _ (field_inter_no_rec k allf Hnr) Ew w Hw).
+Qed.
+
+(* ===== decompose a table clause's denotation into record requirements ===== *)
+Lemma denote_clause_of_table : forall c ents,
+  has_pos_atom c = false ->
+  (forall f, In f (pos_recs c) -> denote (BRec f) (VTable ents)) ->
+  (forall g, In g (neg_recs c) -> ~ denote (BRec g) (VTable ents)) ->
+  denote_clause c (VTable ents).
+Proof.
+  induction c as [|l r IH]; intros ents Hpa Hpr Hnr; simpl in *.
+  - exact I.
+  - destruct l; simpl in *.
+    + discriminate Hpa.   (* LPosAtom excluded *)
+    + split; [apply table_neg_atom | apply IH; auto].
+    + split; [apply Hpr; left; reflexivity | apply IH; auto].
+    + split; [apply Hnr; left; reflexivity | apply IH; auto].
+Qed.
+
+Lemma denote_clause_components : forall c v,
+  denote_clause c v ->
+  (forall f, In f (pos_recs c) -> denote (BRec f) v) /\
+  (forall g, In g (neg_recs c) -> ~ denote (BRec g) v).
+Proof.
+  induction c as [|l r IH]; intros v Hd; simpl in *.
+  - split; intros ? [].
+  - destruct l; simpl in *; destruct Hd as [Hl Hr]; destruct (IH v Hr) as [Hpr Hnr].
+    + split; assumption.
+    + split; assumption.
+    + split; [intros f [Hf|Hf]; [subst; exact Hl | apply Hpr; exact Hf] | exact Hnr].
+    + split; [exact Hpr | intros g [Hg|Hg]; [subst; exact Hl | apply Hnr; exact Hg]].
+Qed.
+
+(* a value satisfying any positive record is a table. *)
+Lemma posrec_is_table : forall f v, denote (BRec f) v -> exists ents, v = VTable ents.
+Proof. intros f v [ents [Hv _]]. exists ents; exact Hv. Qed.
+
+(* In f prs => f's fields ⊆ concat prs. *)
+Lemma in_concat_sub : forall (prs:list (list (string*BTy))) f k T,
+  In f prs -> In (k,T) f -> In (k,T) (List.concat prs).
+Proof.
+  intros prs f k T Hf Hkt. apply in_concat. exists f; split; assumption.
+Qed.
+
+(* a value modeling (concat prs) satisfies every positive record in prs. *)
+Lemma table_models_allpos : forall prs v,
+  table_models (List.concat prs) v -> forall f, In f prs -> denote (BRec f) v.
+Proof.
+  intros prs v Hm f Hf. apply (table_models_posrec (List.concat prs) v f).
+  - intros k T Hkt. apply (in_concat_sub prs f); assumption.
+  - exact Hm.
+Qed.
+
+(* extract a field from a positive-record membership. *)
+Lemma denote_rec_field : forall f ents k T,
+  In (k,T) f -> denote (BRec f) (VTable ents) ->
+  exists w, assoc_lookup k ents = Some w /\ denote T w.
+Proof.
+  intros f ents k T Hin Hd. destruct Hd as [ents' [Heq Hfold]]. injection Heq as <-.
+  revert Hin Hfold. induction f as [|[k0 T0] r IH]; simpl; intros Hin Hfold.
+  - contradiction.
+  - destruct Hfold as [Hhd Htl]. destruct Hin as [Heq|Hin'].
+    + injection Heq as <- <-. exact Hhd.
+    + apply IH; assumption.
+Qed.
+
+(* conversely: if v (a table) satisfies every positive record in prs, it models
+   concat prs (every required field present at the per-key intersected type). *)
+Lemma allpos_table_models : forall prs ents,
+  (forall f, In f prs -> denote (BRec f) (VTable ents)) ->
+  table_models (List.concat prs) (VTable ents).
+Proof.
+  intros prs ents Hpos. exists ents. split; [reflexivity|].
+  intros k [T Hin].
+  (* the looked-up value at k (from any record requiring k) is unique; it lies in
+     every type at k, hence in field_inter k (concat prs). *)
+  (* first get SOME witness via the entry (k,T). *)
+  apply in_concat in Hin. destruct Hin as [f0 [Hf0 Hkt0]].
+  destruct (denote_rec_field f0 ents k T Hkt0 (Hpos f0 Hf0)) as [w [Hlk _]].
+  exists w. split; [exact Hlk|].
+  apply denote_field_inter. intros T' Hin'.
+  apply in_concat in Hin'. destruct Hin' as [f1 [Hf1 Hkt1]].
+  destruct (denote_rec_field f1 ents k T' Hkt1 (Hpos f1 Hf1)) as [w' [Hlk' Hw']].
+  rewrite Hlk in Hlk'. injection Hlk' as <-. exact Hw'.
+Qed.
+
+(* ===== algebra of field_inter and in_keys ===== *)
+Lemma field_inter_app : forall k l1 l2 v,
+  denote (field_inter k (l1 ++ l2)) v <-> (denote (field_inter k l1) v /\ denote (field_inter k l2) v).
+Proof.
+  intros k l1 l2 v. rewrite !denote_field_inter. split.
+  - intros H. split; intros T HT; apply H; apply in_or_app; [left|right]; exact HT.
+  - intros [H1 H2] T HT. apply in_app_or in HT. destruct HT; [apply H1|apply H2]; assumption.
+Qed.
+
+Lemma field_inter_single : forall k X v,
+  denote (field_inter k [(k,X)]) v <-> denote X v.
+Proof.
+  intros k X v. simpl. destruct (string_dec k k) as [_|Hne]; [|congruence].
+  simpl. tauto.
+Qed.
+
+Lemma in_keys_true : forall k fs, in_keys k fs = true <-> exists T, In (k,T) fs.
+Proof.
+  intros k fs. unfold in_keys. rewrite existsb_exists. split.
+  - intros [[k0 T0] [Hin Hdec]]. simpl in Hdec. destruct (string_dec k k0); [|discriminate].
+    subst. exists T0; exact Hin.
+  - intros [T Hin]. exists (k,T). split; [exact Hin|]. simpl.
+    destruct (string_dec k k); [reflexivity|congruence].
+Qed.
+
+Lemma in_keys_false : forall k fs, in_keys k fs = false <-> ~ exists T, In (k,T) fs.
+Proof.
+  intros k fs. rewrite <- not_true_iff_false, in_keys_true. tauto.
+Qed.
+
+(* ===== violation of a negated record ===== *)
+(* lookup of a key NOT in allf returns None in the built table. *)
+Lemma assoc_lookup_map_none : forall (g:string*BTy->V)(fs:list (string*BTy)) k,
+  (~ exists T, In (k,T) fs) -> assoc_lookup k (map (fun kT => (fst kT, g kT)) fs) = None.
+Proof.
+  intros g fs k. induction fs as [|[k0 T0] r IH]; simpl; intros Hni.
+  - reflexivity.
+  - destruct (string_dec k k0) as [<-|Hne].
+    + exfalso. apply Hni. exists T0. left; reflexivity.
+    + apply IH. intros [T Hin]. apply Hni. exists T. right; exact Hin.
+Qed.
+
+Lemma built_lookup_none : forall allf wf k,
+  (~ exists T, In (k,T) allf) -> assoc_lookup k (built allf wf) = None.
+Proof.
+  intros allf wf k Hni. unfold built. apply assoc_lookup_map_none. exact Hni.
+Qed.
+
+(* if some Nj-key is absent in ents, BRec Nj fails. *)
+Lemma violate_absent : forall Nj ents k T,
+  In (k,T) Nj -> assoc_lookup k ents = None -> ~ denote (BRec Nj) (VTable ents).
+Proof.
+  intros Nj ents k T Hin Hnone Hd.
+  destruct (denote_rec_field Nj ents k T Hin Hd) as [w [Hlk _]].
+  rewrite Hnone in Hlk. discriminate Hlk.
+Qed.
+
+(* if at some Nj-key the value violates field_inter k Nj, BRec Nj fails. *)
+Lemma violate_value : forall Nj ents k w,
+  assoc_lookup k ents = Some w -> (exists T, In (k,T) Nj) ->
+  ~ denote (field_inter k Nj) w -> ~ denote (BRec Nj) (VTable ents).
+Proof.
+  intros Nj ents k w Hlk [T Hin] Hnv Hd.
+  apply Hnv. apply denote_field_inter. intros T' Hin'.
+  destruct (denote_rec_field Nj ents k T' Hin' Hd) as [w' [Hlk' Hw']].
+  rewrite Hlk in Hlk'. injection Hlk' as <-. exact Hw'.
+Qed.
+
+(* models is monotone: modeling a larger requirement list implies modeling a prefix. *)
+Lemma table_models_app_l : forall l1 l2 v,
+  table_models (l1 ++ l2) v -> table_models l1 v.
+Proof.
+  intros l1 l2 v [ents [Hv Hall]]. exists ents. split; [exact Hv|].
+  intros k [T Hin].
+  destruct (Hall k (ex_intro _ T (in_or_app _ _ _ (or_introl Hin)))) as [w [Hlk Hw]].
+  exists w. split; [exact Hlk|]. apply (field_inter_app k l1 l2 w) in Hw. tauto.
+Qed.
+
+(* first_some semantics. *)
+Lemma first_some_some : forall l v, first_some l = Some v -> In (Some v) l.
+Proof.
+  induction l as [|x r IH]; simpl; intros v H.
+  - discriminate.
+  - destruct x as [w|]. injection H as <-. left; reflexivity. right; apply IH; exact H.
+Qed.
+
+Lemma first_some_none : forall l, first_some l = None -> forall x, In x l -> x = None.
+Proof.
+  induction l as [|x r IH]; simpl; intros H y Hin.
+  - contradiction.
+  - destruct x as [w|]. discriminate H. destruct Hin as [<-|Hin']. reflexivity. apply IH; assumption.
+Qed.
+
+(* ===== table_wit_neg correctness ===== *)
+(* "models allf and violates Nj" — the spec a table-clause-with-one-neg needs. *)
+Definition tmv (allf Nj:list (string*BTy)) (v:V) : Prop :=
+  table_models allf v /\ ~ denote (BRec Nj) v.
+
+Lemma table_wit_neg_sound : forall allf Nj wf v,
+  (forall T w, wf T = Some w -> denote T w) ->
+  table_wit_neg allf Nj wf = Some v -> tmv allf Nj v.
+Proof.
+  intros allf Nj wf v Hwfs H. unfold table_wit_neg in H.
+  destruct (existsb (fun kT => negb (in_keys (fst kT) allf)) Nj) eqn:Habs.
+  - (* absence branch: v = table_wit allf wf, violates Nj by an absent key *)
+    pose proof (table_wit_models allf wf v Hwfs H) as Hm. split; [exact Hm|].
+    apply existsb_exists in Habs. destruct Habs as [[k T] [Hin Hneg]].
+    simpl in Hneg. apply negb_true_iff in Hneg.
+    rewrite in_keys_false in Hneg.
+    (* v is the built table; lookup k = None *)
+    destruct Hm as [ents [Hv _]].
+    unfold table_wit in H.
+    destruct (forallb _ allf) eqn:Hfb; [|discriminate H]. injection H as <-.
+    injection Hv as <-.
+    apply (violate_absent Nj (built allf wf) k T Hin).
+    apply built_lookup_none. exact Hneg.
+  - (* value branch: v from some key kT of Nj, augmented requirement *)
+    pose proof (first_some_some _ _ H) as Hinmap.
+    rewrite in_map_iff in Hinmap. destruct Hinmap as [[k T] [Heq Hin]].
+    simpl in Heq.
+    (* Heq : table_wit (allf ++ [(k, BNeg (field_inter k Nj))]) wf = Some v *)
+    pose proof (table_wit_models _ wf v Hwfs Heq) as Hm.
+    split.
+    + apply (table_models_app_l allf [(k, BNeg (field_inter k Nj))]). exact Hm.
+    + (* v models the augmented list; at key k, value ∉ field_inter k Nj => violates Nj *)
+      destruct Hm as [ents [Hv Hall]]. subst v.
+      assert (Hink : In (k, BNeg (field_inter k Nj)) (allf ++ [(k, BNeg (field_inter k Nj))])).
+      { apply in_or_app. right. left. reflexivity. }
+      destruct (Hall k (ex_intro _ (BNeg (field_inter k Nj)) Hink)) as [w [Hlk Hw]].
+      apply (field_inter_app k allf [(k, BNeg (field_inter k Nj))] w) in Hw.
+      destruct Hw as [_ Hw2]. rewrite field_inter_single in Hw2. simpl in Hw2.
+      apply (violate_value Nj ents k w Hlk).
+      * exists T; exact Hin.
+      * exact Hw2.
+Qed.
+
+(* if BRec Nj fails on a table whose every Nj-key is present, the failure is a
+   wrong VALUE at some Nj key. *)
+Lemma violation_wrong_key : forall Nj ents,
+  (forall k T, In (k,T) Nj -> exists w, assoc_lookup k ents = Some w) ->
+  ~ denote (BRec Nj) (VTable ents) ->
+  exists k T w, In (k,T) Nj /\ assoc_lookup k ents = Some w /\ ~ denote T w.
+Proof.
+  induction Nj as [|[k0 T0] r IH]; intros ents Hpres Hviol; simpl in *.
+  - exfalso. apply Hviol. exists ents. split; [reflexivity| exact I].
+  - (* either head fails or rest fails *)
+    destruct (Hpres k0 T0 (or_introl eq_refl)) as [w0 Hlk0].
+    destruct (denote_dec T0 w0) as [Hd0 | Hnd0].
+    + (* head ok; recurse on r *)
+      assert (Hviolr : ~ denote (BRec r) (VTable ents)).
+      { intro Hr. apply Hviol. destruct Hr as [ents' [Heq Hrf]]. injection Heq as <-.
+        exists ents. split; [reflexivity|]. split.
+        - exists w0. split; [exact Hlk0 | exact Hd0].
+        - exact Hrf. }
+      destruct (IH ents (fun k T Hin => Hpres k T (or_intror Hin)) Hviolr)
+        as [k [T [w [Hin [Hlk Hnd]]]]].
+      exists k, T, w. split; [right; exact Hin | split; assumption].
+    + (* head fails: that's our witness *)
+      exists k0, T0, w0. split; [left; reflexivity | split; [exact Hlk0 | exact Hnd0]].
+Qed.
+
+(* helper: existsb false => forall element predicate false. *)
+Lemma existsb_false_forall : forall (A:Type)(f:A->bool)(l:list A),
+  existsb f l = false -> forall x, In x l -> f x = false.
+Proof.
+  intros A f l H x Hin. destruct (f x) eqn:E; [|reflexivity].
+  exfalso. assert (existsb f l = true) by (apply existsb_exists; exists x; auto).
+  rewrite H in *; discriminate.
+Qed.
+
+Lemma table_wit_neg_complete : forall allf Nj wf,
+  (forall k0 T, In (k0,T) allf -> no_rec T) ->
+  (forall k0 T, In (k0,T) Nj -> no_rec T) ->
+  (forall T, no_rec T -> wf T = None -> forall v, ~ denote T v) ->
+  table_wit_neg allf Nj wf = None -> forall v, ~ tmv allf Nj v.
+Proof.
+  intros allf Nj wf HnrA HnrN Hwfc H v [Hm Hviol]. unfold table_wit_neg in H.
+  destruct (existsb (fun kT => negb (in_keys (fst kT) allf)) Nj) eqn:Habs.
+  - (* absence branch returned None: table_wit allf wf = None => no model of allf *)
+    exact (table_wit_none allf wf HnrA Hwfc H v Hm).
+  - (* value branch: every Nj key is in allf (Habs=false), so present in v;
+       violation is by a wrong value => that key's augmented table_wit is Some,
+       contradicting first_some=None. *)
+    destruct Hm as [ents [Hv Hall]]. subst v.
+    (* all Nj keys present *)
+    assert (Hpres : forall k T, In (k,T) Nj -> exists w, assoc_lookup k ents = Some w).
+    { intros k T Hin.
+      pose proof (existsb_false_forall _ _ _ Habs (k,T) Hin) as Hf. simpl in Hf.
+      apply negb_false_iff in Hf. rewrite in_keys_true in Hf.
+      destruct (Hall k Hf) as [w [Hlk _]]. exists w; exact Hlk. }
+    destruct (violation_wrong_key Nj ents Hpres Hviol) as [k [T [w [Hin [Hlk Hnd]]]]].
+    (* from ~denote T w with In (k,T) Nj, get ~denote (field_inter k Nj) w *)
+    assert (Hnfi : ~ denote (field_inter k Nj) w).
+    { intro Hc. apply Hnd. rewrite denote_field_inter in Hc. apply Hc; exact Hin. }
+    (* the augmented table_wit at key (k,T) should be Some, but first_some=None *)
+    pose proof (first_some_none _ H
+      (table_wit (allf ++ [(fst (k,T), BNeg (field_inter (fst (k,T)) Nj))]) wf)
+      (in_map _ _ (k,T) Hin)) as Hnone. simpl in Hnone.
+    assert (HnrAug : forall k0 T0, In (k0,T0) (allf ++ [(k, BNeg (field_inter k Nj))]) -> no_rec T0).
+    { intros k0 T0 Hin0. apply in_app_or in Hin0. destruct Hin0 as [Hin0|Hin0].
+      - apply (HnrA k0 T0 Hin0).
+      - simpl in Hin0. destruct Hin0 as [Heq|[]]. injection Heq as <- <-.
+        simpl. apply field_inter_no_rec. exact HnrN. }
+    pose proof (table_wit_none (allf ++ [(k, BNeg (field_inter k Nj))]) wf HnrAug Hwfc Hnone (VTable ents)) as Hno.
+    apply Hno.
+    (* k is in allf (Habs=false => in_keys k allf=true): get its allf membership *)
+    assert (HkA : exists T', In (k,T') allf).
+    { pose proof (existsb_false_forall _ _ _ Habs (k,T) Hin) as Hf. simpl in Hf.
+      apply negb_false_iff in Hf. rewrite in_keys_true in Hf. exact Hf. }
+    (* the value at k lies in field_inter k allf *)
+    assert (HwA : denote (field_inter k allf) w).
+    { destruct (Hall k HkA) as [w' [Hlk' Hw']]. rewrite Hlk in Hlk'. injection Hlk' as <-.
+      exact Hw'. }
+    (* VTable ents models allf ++ [(k, ¬field_inter k Nj)] *)
+    exists ents. split; [reflexivity|].
+    intros k0 [T0 Hin0].
+    apply in_app_or in Hin0. destruct Hin0 as [Hin0|Hin0].
+    + destruct (Hall k0 (ex_intro _ T0 Hin0)) as [w0 [Hlk0 Hw0]].
+      exists w0. split; [exact Hlk0|]. rewrite field_inter_app; split; [exact Hw0|].
+      simpl. destruct (string_dec k0 k) as [Ek|Hne]; simpl.
+      * subst k0. rewrite Hlk in Hlk0. injection Hlk0 as <-.
+        split; [exact Hnfi | exact I].
+      * exact I.
+    + simpl in Hin0. destruct Hin0 as [Heq|[]]. injection Heq as <- <-.
+      exists w. split; [exact Hlk|]. rewrite field_inter_app; split; [exact HwA|].
+      simpl. destruct (string_dec k k) as [_|Hne]; [|congruence]. simpl.
+      split; [exact Hnfi | exact I].
+Qed.
+
+(* ===== clause_wit correctness (under the clause fragment predicate) ===== *)
+(* A clause is in the DECIDED fragment iff it has no positive record (pure
+   scalar/atom/neg-record clause, handled by head enumeration) OR it has at most
+   one negated record. The >1-negated-record-in-a-record-clause case (coupled
+   field constraints) is DEFERRED. *)
+Definition clause_ok (c:Clause) : Prop :=
+  pos_recs c = [] \/ Datatypes.length (neg_recs c) <= 1.
+
+(* wf spec: sound + complete witness finder for smaller types. *)
+Definition wf_ok (wf:BTy->option V) : Prop :=
+  (forall T w, wf T = Some w -> denote T w) /\
+  (forall T, wf T = None -> forall v, ~ denote T v).
+
+(* SOUNDNESS is GLOBAL — needs only wf-soundness, no fragment hypothesis: the
+   >1-negated-record branch returns None, so no false witness is ever produced. *)
+Lemma clause_wit_sound : forall c wf v,
+  (forall T w, wf T = Some w -> denote T w) -> clause_wit c wf = Some v -> denote_clause c v.
+Proof.
+  intros c wf v Hwfs H. unfold clause_wit in H.
+  destruct (pos_recs c) as [|p ps] eqn:Hpr.
+  - (* scalar branch *) apply scalar_wit_sound. exact H.
+  - (* record clause *)
+    destruct (has_pos_atom c) eqn:Hpa; [discriminate H|].
+    destruct (neg_recs c) as [|Nj rest] eqn:Hnr.
+    + (* no negated records *)
+      pose proof (table_wit_models _ wf v Hwfs H) as Hm.
+      destruct Hm as [ents [Hv Hall]]. subst v.
+      apply denote_clause_of_table; [exact Hpa | | ].
+      * intros f Hf. apply (table_models_allpos (pos_recs c)).
+        rewrite Hpr. exists ents; split; [reflexivity| exact Hall]. exact Hf.
+      * rewrite Hnr. intros g [].
+    + destruct rest as [|Nj2 rest2].
+      * (* exactly one negated record *)
+        pose proof (table_wit_neg_sound (List.concat (p::ps)) Nj wf v Hwfs H) as Hs.
+        destruct Hs as [Hm Hviol].
+        destruct Hm as [ents [Hv Hall]]. subst v.
+        apply denote_clause_of_table; [exact Hpa | | ].
+        -- intros f Hf. apply (table_models_allpos (pos_recs c)).
+           rewrite Hpr. exists ents; split; [reflexivity| exact Hall]. exact Hf.
+        -- rewrite Hnr. intros g [Hg|[]]. subst g. exact Hviol.
+      * (* >1 negated record: clause_wit returned None, contradicting H *)
+        discriminate H.
+Qed.
+
+Definition fields_no_rec (f:list (string*BTy)) : Prop := forall k T, In (k,T) f -> no_rec T.
+Definition good_clause (c:Clause) : Prop :=
+  (forall f, In f (pos_recs c) -> fields_no_rec f) /\
+  (forall f, In f (neg_recs c) -> fields_no_rec f).
+
+Lemma clause_wit_complete : forall c wf,
+  (forall T, no_rec T -> wf T = None -> forall v, ~ denote T v) ->
+  good_clause c -> clause_ok c -> clause_wit c wf = None -> forall v, ~ denote_clause c v.
+Proof.
+  intros c wf Hwfc [Hgp Hgn] Hok H v Hd. unfold clause_wit in H.
+  destruct (pos_recs c) as [|p ps] eqn:Hpr.
+  - (* scalar *) apply (scalar_wit_complete c (pos_recs_nil_no_pos_rec c Hpr) H v Hd).
+  - (* record clause: v must be a table satisfying all positive records *)
+    destruct (has_pos_atom c) eqn:Hpa.
+    + (* has_pos_atom = true AND a positive record present: v would be both a
+         scalar and a table — impossible. *)
+      clear H Hok.
+      assert (Hpex : In p (pos_recs c)) by (rewrite Hpr; left; reflexivity).
+      pose proof (denote_clause_components c v Hd) as [Hprc _].
+      destruct (posrec_is_table p v (Hprc p Hpex)) as [ents Hve]. subst v.
+      (* now show some positive atom holds at VTable ents — contradiction *)
+      clear Hpr Hpex Hprc Hgp Hgn Hwfc. revert Hd Hpa. induction c as [|l r IH]; simpl; intros Hd Hpa.
+      * discriminate Hpa.
+      * destruct Hd as [Hl Hd]. destruct l; simpl in *.
+        -- apply (table_neg_atom ents a); exact Hl.
+        -- apply IH; assumption.
+        -- apply IH; assumption.
+        -- apply IH; assumption.
+    + (* no positive atom *)
+      pose proof (denote_clause_components c v Hd) as [Hprc Hnrc].
+      (* v is a table (satisfies p, a positive record) *)
+      assert (Hpex : In p (pos_recs c)) by (rewrite Hpr; left; reflexivity).
+      destruct (posrec_is_table p v (Hprc p Hpex)) as [ents ->].
+      assert (Hmodels : table_models (List.concat (p::ps)) (VTable ents)).
+      { apply allpos_table_models. intros f Hf. apply Hprc. rewrite Hpr. exact Hf. }
+      (* fields of concat(p::ps) are no_rec (good_clause positive part) *)
+      assert (HnrAllf : forall k0 T, In (k0,T) (List.concat (p::ps)) -> no_rec T).
+      { intros k0 T Hin. apply in_concat in Hin. destruct Hin as [f [Hf Hkt]].
+        exact (Hgp f Hf k0 T Hkt). }
+      destruct (neg_recs c) as [|Nj rest] eqn:Hnr.
+      * (* no neg records *)
+        apply (table_wit_none _ wf HnrAllf Hwfc H (VTable ents)). exact Hmodels.
+      * destruct rest as [|Nj2 rest2].
+        -- (* one neg record *)
+           assert (HnrNj : forall k0 T, In (k0,T) Nj -> no_rec T).
+           { intros k0 T Hin. apply (Hgn Nj (or_introl eq_refl) k0 T Hin). }
+           apply (table_wit_neg_complete (List.concat (p::ps)) Nj wf HnrAllf HnrNj Hwfc H (VTable ents)).
+           split.
+           ++ exact Hmodels.
+           ++ exact (Hnrc Nj (or_introl eq_refl)).
+        -- exfalso. destruct Hok as [Hpr0|Hlen].
+           ++ rewrite Hpr in Hpr0; discriminate.
+           ++ rewrite Hnr in Hlen; simpl in Hlen; lia.
+Qed.
+
+(* ===== the input fragment: records with neg_atomic (record-free) fields ===== *)
+(* fields_flat fs: every field type is neg_atomic (no nested records). *)
+Definition fields_flat (fs:list (string*BTy)) : Prop :=
+  forall k T, In (k,T) fs -> neg_atomic T.
+
+(* record-free clause predicate *)
+Definition cl_rf (c:Clause) : Prop := pos_recs c = [] /\ neg_recs c = [].
+
+Lemma pos_recs_app : forall c1 c2, pos_recs (c1 ++ c2) = pos_recs c1 ++ pos_recs c2.
+Proof. induction c1 as [|l r IH]; simpl; intros c2. reflexivity. destruct l; simpl; rewrite IH; reflexivity. Qed.
+Lemma neg_recs_app : forall c1 c2, neg_recs (c1 ++ c2) = neg_recs c1 ++ neg_recs c2.
+Proof. induction c1 as [|l r IH]; simpl; intros c2. reflexivity. destruct l; simpl; rewrite IH; reflexivity. Qed.
+
+Lemma cl_rf_app : forall c1 c2, cl_rf c1 -> cl_rf c2 -> cl_rf (c1 ++ c2).
+Proof.
+  intros c1 c2 [Hp1 Hn1] [Hp2 Hn2]. unfold cl_rf.
+  rewrite pos_recs_app, neg_recs_app, Hp1, Hp2, Hn1, Hn2. split; reflexivity.
+Qed.
+
+Lemma Forall_cl_rf_and : forall d1 d2,
+  Forall cl_rf d1 -> Forall cl_rf d2 -> Forall cl_rf (dnf_and d1 d2).
+Proof.
+  intros d1 d2 H1 H2. unfold dnf_and. apply Forall_flat_map.
+  rewrite Forall_forall in H1 |- *. intros c1 Hc1.
+  apply Forall_map. rewrite Forall_forall. intros c2 Hc2.
+  apply cl_rf_app; [apply H1; exact Hc1 | rewrite Forall_forall in H2; apply H2; exact Hc2].
+Qed.
+
+Lemma Forall_cl_rf_or : forall d1 d2,
+  Forall cl_rf d1 -> Forall cl_rf d2 -> Forall cl_rf (dnf_or d1 d2).
+Proof. intros d1 d2 H1 H2. unfold dnf_or. apply Forall_app. split; assumption. Qed.
+
+Lemma no_rec_no_rec_lits : forall t,
+  no_rec t -> Forall cl_rf (to_dnf t) /\ Forall cl_rf (to_dnf_neg t).
+Proof.
+  fix IH 1. intros t Hnr. destruct t; simpl in *.
+  - split; (constructor; [split; reflexivity | constructor]).
+  - split; [ (constructor; [split; reflexivity | constructor]) | constructor ].
+  - split; [ constructor | (constructor; [split; reflexivity | constructor]) ].
+  - destruct Hnr as [Ha Hb]. split.
+    + apply Forall_cl_rf_or; [apply (IH t1 Ha)| apply (IH t2 Hb)].
+    + apply Forall_cl_rf_and; [apply (IH t1 Ha)| apply (IH t2 Hb)].
+  - destruct Hnr as [Ha Hb]. split.
+    + apply Forall_cl_rf_and; [apply (IH t1 Ha)| apply (IH t2 Hb)].
+    + apply Forall_cl_rf_or; [apply (IH t1 Ha)| apply (IH t2 Hb)].
+  - split; [ apply (proj2 (IH t Hnr)) | apply (proj1 (IH t Hnr)) ].
+  - contradiction.
+Qed.
+
+(* clauses that are record-free are clause_ok. *)
+Lemma cl_rf_ok : forall c, cl_rf c -> clause_ok c.
+Proof. intros c [Hp _]. left; exact Hp. Qed.
+
+Definition dnf_ok (d:Dnf) : Prop := Forall clause_ok d.
+
+(* no_rec field types in every record literal of a clause. *)
+(* flat t: every BRec subterm has no_rec field types. *)
+Fixpoint flat (t:BTy) : Prop :=
+  match t with
+  | BAtom _ | BTop | BBot => True
+  | BUnion a b | BInter a b => flat a /\ flat b
+  | BNeg a => flat a
+  | BRec fs => (fix ff (xs:list (string*BTy)) : Prop :=
+      match xs with [] => True | (_,T)::r => no_rec T /\ ff r end) fs
+  end.
+
+Lemma no_rec_flat : forall t, no_rec t -> flat t.
+Proof.
+  fix IH 1. intros t H. destruct t; simpl in *; try exact I.
+  - destruct H; split; [apply IH|apply IH]; assumption.
+  - destruct H; split; [apply IH|apply IH]; assumption.
+  - apply IH; exact H.
+  - contradiction.
+Qed.
+
+(* field types of a flat record are no_rec. *)
+Lemma flat_field_no_rec : forall fs k T,
+  (fix ff (xs:list (string*BTy)) : Prop :=
+     match xs with [] => True | (_,T)::r => no_rec T /\ ff r end) fs ->
+  In (k,T) fs -> no_rec T.
+Proof.
+  induction fs as [|[k0 T0] r IH]; simpl; intros k T Hff Hin.
+  - contradiction.
+  - destruct Hff as [Hh Ht]. destruct Hin as [Heq|Hin']. injection Heq as <- <-. exact Hh.
+    apply (IH k T Ht Hin').
+Qed.
+
+
+Lemma good_clause_app : forall c1 c2, good_clause c1 -> good_clause c2 -> good_clause (c1 ++ c2).
+Proof.
+  intros c1 c2 [Hp1 Hn1] [Hp2 Hn2]. unfold good_clause.
+  rewrite pos_recs_app, neg_recs_app. split.
+  - intros f Hin. apply in_app_or in Hin. destruct Hin as [Hin|Hin]; [apply Hp1|apply Hp2]; exact Hin.
+  - intros f Hin. apply in_app_or in Hin. destruct Hin as [Hin|Hin]; [apply Hn1|apply Hn2]; exact Hin.
+Qed.
+
+Lemma good_clause_and : forall d1 d2,
+  Forall good_clause d1 -> Forall good_clause d2 -> Forall good_clause (dnf_and d1 d2).
+Proof.
+  intros d1 d2 H1 H2. unfold dnf_and. apply Forall_flat_map.
+  rewrite Forall_forall in H1 |- *. intros c1 Hc1. apply Forall_map.
+  rewrite Forall_forall. intros c2 Hc2. apply good_clause_app;
+    [apply H1; exact Hc1 | rewrite Forall_forall in H2; apply H2; exact Hc2].
+Qed.
+Lemma good_clause_or : forall d1 d2,
+  Forall good_clause d1 -> Forall good_clause d2 -> Forall good_clause (dnf_or d1 d2).
+Proof. intros d1 d2 H1 H2. unfold dnf_or. apply Forall_app; split; assumption. Qed.
+
+(* flat t => every record literal in the DNF carries no_rec field types. *)
+Lemma flat_good_clauses : forall t,
+  flat t -> Forall good_clause (to_dnf t) /\ Forall good_clause (to_dnf_neg t).
+Proof.
+  fix IH 1. intros t Hf. destruct t; simpl in *.
+  - split; (repeat constructor); intros f [].
+  - split; [ repeat constructor; intros f [] | constructor ].
+  - split; [ constructor | repeat constructor; intros f [] ].
+  - destruct Hf as [Ha Hb]. split.
+    + apply good_clause_or; [apply (IH t1 Ha)|apply (IH t2 Hb)].
+    + apply good_clause_and; [apply (IH t1 Ha)|apply (IH t2 Hb)].
+  - destruct Hf as [Ha Hb]. split.
+    + apply good_clause_and; [apply (IH t1 Ha)|apply (IH t2 Hb)].
+    + apply good_clause_or; [apply (IH t1 Ha)|apply (IH t2 Hb)].
+  - split; [ apply (proj2 (IH t Hf)) | apply (proj1 (IH t Hf)) ].
+  - (* BRec: to_dnf = [[LPosRec l]], to_dnf_neg = [[LNegRec l]] *)
+    split; (constructor; [|constructor]).
+    + split; [ intros f [Heq|[]]; subst f; intros k T Hin; exact (flat_field_no_rec l k T Hf Hin)
+             | intros f [] ].
+    + split; [ intros f [] | intros f [Heq|[]]; subst f; intros k T Hin; exact (flat_field_no_rec l k T Hf Hin) ].
+Qed.
+
+(* a no_rec type has rdepth 0. *)
+Lemma no_rec_rdepth0 : forall t, no_rec t -> rdepth t = 0.
+Proof.
+  fix IH 1. intro t. destruct t; simpl; intro H; try reflexivity.
+  - destruct H. rewrite (IH t1), (IH t2); auto.
+  - destruct H. rewrite (IH t1), (IH t2); auto.
+  - apply IH; exact H.
+  - contradiction.
+Qed.
+
+(* records appearing in the DNF of t have rdepth <= rdepth t. *)
+Definition clause_recs_shallow (d:nat)(c:Clause) : Prop :=
+  (forall f, In f (pos_recs c) -> rdepth (BRec f) <= d) /\
+  (forall f, In f (neg_recs c) -> rdepth (BRec f) <= d).
+
+Lemma clause_recs_shallow_app : forall d c1 c2,
+  clause_recs_shallow d c1 -> clause_recs_shallow d c2 -> clause_recs_shallow d (c1 ++ c2).
+Proof.
+  intros d c1 c2 [Hp1 Hn1] [Hp2 Hn2]. unfold clause_recs_shallow.
+  rewrite pos_recs_app, neg_recs_app. split; intros f Hin; apply in_app_or in Hin.
+  - destruct Hin; [apply Hp1|apply Hp2]; assumption.
+  - destruct Hin; [apply Hn1|apply Hn2]; assumption.
+Qed.
+
+Lemma crs_mono : forall d d' c, d <= d' -> clause_recs_shallow d c -> clause_recs_shallow d' c.
+Proof.
+  intros d d' c Hle [Hp Hn]. split; intros f Hin;
+    [pose proof (Hp f Hin)|pose proof (Hn f Hin)]; lia.
+Qed.
+
+Lemma Forall_crs_and : forall d d1 d2,
+  Forall (clause_recs_shallow d) d1 -> Forall (clause_recs_shallow d) d2 ->
+  Forall (clause_recs_shallow d) (dnf_and d1 d2).
+Proof.
+  intros d d1 d2 H1 H2. unfold dnf_and. apply Forall_flat_map.
+  rewrite Forall_forall in H1 |- *. intros c1 Hc1. apply Forall_map. rewrite Forall_forall.
+  intros c2 Hc2. apply clause_recs_shallow_app;
+    [apply H1; exact Hc1 | rewrite Forall_forall in H2; apply H2; exact Hc2].
+Qed.
+Lemma Forall_crs_or : forall d d1 d2,
+  Forall (clause_recs_shallow d) d1 -> Forall (clause_recs_shallow d) d2 ->
+  Forall (clause_recs_shallow d) (dnf_or d1 d2).
+Proof. intros d d1 d2 H1 H2. unfold dnf_or. apply Forall_app; split; assumption. Qed.
+
+Lemma Forall_crs_mono : forall d d' dd,
+  d <= d' -> Forall (clause_recs_shallow d) dd -> Forall (clause_recs_shallow d') dd.
+Proof.
+  intros d d' dd Hle. apply Forall_impl. intros c Hc. apply (crs_mono d d' c Hle Hc).
+Qed.
+
+Lemma dnf_recs_shallow : forall t,
+  Forall (clause_recs_shallow (rdepth t)) (to_dnf t)
+  /\ Forall (clause_recs_shallow (rdepth t)) (to_dnf_neg t).
+Proof.
+  fix IH 1. intro t. destruct t; simpl.
+  - split; (constructor; [split; intros f []|constructor]).
+  - split; [ constructor; [split; intros f []|constructor] | constructor ].
+  - split; [ constructor | constructor; [split; intros f []|constructor] ].
+  - split.
+    + apply Forall_crs_or.
+      * apply (Forall_crs_mono (rdepth t1)); [lia | apply (proj1 (IH t1))].
+      * apply (Forall_crs_mono (rdepth t2)); [lia | apply (proj1 (IH t2))].
+    + apply Forall_crs_and.
+      * apply (Forall_crs_mono (rdepth t1)); [lia | apply (proj2 (IH t1))].
+      * apply (Forall_crs_mono (rdepth t2)); [lia | apply (proj2 (IH t2))].
+  - split.
+    + apply Forall_crs_and.
+      * apply (Forall_crs_mono (rdepth t1)); [lia | apply (proj1 (IH t1))].
+      * apply (Forall_crs_mono (rdepth t2)); [lia | apply (proj1 (IH t2))].
+    + apply Forall_crs_or.
+      * apply (Forall_crs_mono (rdepth t1)); [lia | apply (proj2 (IH t1))].
+      * apply (Forall_crs_mono (rdepth t2)); [lia | apply (proj2 (IH t2))].
+  - split; [ apply (proj2 (IH t)) | apply (proj1 (IH t)) ].
+  - (* BRec l: to_dnf = [[LPosRec l]]; rdepth (BRec l) <= rdepth (BRec l) *)
+    split; (constructor; [|constructor]).
+    + split; [ intros f [Heq|[]]; subst f; apply Nat.le_refl | intros f [] ].
+    + split; [ intros f [] | intros f [Heq|[]]; subst f; apply Nat.le_refl ].
+Qed.
+
+(* ===== dnf_wit correctness ===== *)
+Lemma dnf_wit_sound : forall d wf v,
+  (forall T w, wf T = Some w -> denote T w) -> dnf_wit d wf = Some v -> denote_dnf d v.
+Proof.
+  induction d as [|c r IH]; intros wf v Hwfs H; simpl in *.
+  - discriminate.
+  - destruct (clause_wit c wf) as [w|] eqn:Ec.
+    + injection H as Hwv. left. rewrite <- Hwv. apply (clause_wit_sound c wf w Hwfs Ec).
+    + right. apply (IH wf v Hwfs H).
+Qed.
+
+Lemma dnf_wit_complete : forall d wf,
+  (forall T, no_rec T -> wf T = None -> forall v, ~ denote T v) ->
+  Forall good_clause d -> dnf_ok d -> dnf_wit d wf = None -> forall v, ~ denote_dnf d v.
+Proof.
+  induction d as [|c r IH]; intros wf Hwfc Hgd Hok H v Hd; simpl in *.
+  - exact Hd.
+  - pose proof (Forall_inv Hgd) as Hgc. pose proof (Forall_inv_tail Hgd) as Hgr.
+    pose proof (Forall_inv Hok) as Hokc. pose proof (Forall_inv_tail Hok) as Hokr.
+    destruct (clause_wit c wf) as [w|] eqn:Ec; [discriminate H|].
+    destruct Hd as [Hd|Hd].
+    + exact (clause_wit_complete c wf Hwfc Hgc Hokc Ec v Hd).
+    + exact (IH wf Hwfc Hgr Hokr H v Hd).
+Qed.
+
+(* ===== MASTER: find_wit_fuel soundness (GLOBAL, unconditional) ===== *)
+Lemma find_wit_sound : forall n t v, find_wit_fuel n t = Some v -> denote t v.
+Proof.
+  induction n as [|n IHn]; intros t v H; simpl in H.
+  - discriminate.
+  - (* find_wit_fuel (S n) t = dnf_wit (to_dnf t) (find_wit_fuel n) *)
+    apply to_dnf_pres.
+    apply (dnf_wit_sound (to_dnf t) (find_wit_fuel n) v).
+    + intros T w. apply IHn.
+    + exact H.
+Qed.
+
+(* ===== completeness for RECORD-FREE DNF: wf is never consulted ===== *)
+(* a scalar clause (cl_rf) is decided by scalar_wit, ignoring wf. *)
+Lemma clause_wit_scalar : forall c wf, cl_rf c -> clause_wit c wf = scalar_wit c.
+Proof.
+  intros c wf [Hp _]. unfold clause_wit. rewrite Hp. reflexivity.
+Qed.
+
+Lemma dnf_wit_complete_scalar : forall d wf,
+  Forall cl_rf d -> dnf_wit d wf = None -> forall v, ~ denote_dnf d v.
+Proof.
+  induction d as [|c r IH]; intros wf Hcl H v Hd; simpl in *.
+  - exact Hd.
+  - pose proof (Forall_inv Hcl) as Hc. pose proof (Forall_inv_tail Hcl) as Hr.
+    rewrite (clause_wit_scalar c wf Hc) in H.
+    destruct (scalar_wit c) eqn:Es; [discriminate H|].
+    destruct Hd as [Hd|Hd].
+    + apply (scalar_wit_complete c (pos_recs_nil_no_pos_rec c (proj1 Hc)) Es v Hd).
+    + exact (IH wf Hr H v Hd).
+Qed.
+
+(* find_wit on a no_rec type: complete at any positive fuel, wf-independent. *)
+Lemma find_wit_norec_complete : forall n T,
+  no_rec T -> find_wit_fuel (S n) T = None -> forall v, ~ denote T v.
+Proof.
+  intros n T Hnr H v Hd. simpl in H.
+  apply (dnf_wit_complete_scalar (to_dnf T) (find_wit_fuel n)
+           (proj1 (no_rec_no_rec_lits T Hnr)) H v).
+  apply to_dnf_pres. exact Hd.
+Qed.
+
+(* ===== MASTER completeness + the decision-procedure correctness ===== *)
+Lemma find_wit_complete : forall t,
+  flat t -> dnf_ok (to_dnf t) ->
+  find_wit_fuel (S (S (rdepth t))) t = None -> forall v, ~ denote t v.
+Proof.
+  intros t Hflat Hok H v Hd. simpl in H.
+  apply (dnf_wit_complete (to_dnf t) (find_wit_fuel (S (rdepth t)))
+           (fun T HT => find_wit_norec_complete (rdepth t) T HT)
+           (proj1 (flat_good_clauses t Hflat))
+           Hok H v).
+  apply to_dnf_pres. exact Hd.
+Qed.
+
+(* decide_empty is sound + complete on the fragment [flat t] (records have
+   record-free field types) with [dnf_ok (to_dnf t)] (<=1 negated record per
+   record-clause). *)
+Theorem decide_empty_correct : forall t,
+  flat t -> dnf_ok (to_dnf t) ->
+  (decide_empty t = true <-> (forall v, ~ denote t v)).
+Proof.
+  intros t Hflat Hok. unfold decide_empty.
+  destruct (find_wit_fuel (S (S (rdepth t))) t) as [w|] eqn:E.
+  - (* Some w: nonempty *) split.
+    + discriminate.
+    + intro Hempty. exfalso. apply (Hempty w). apply (find_wit_sound _ _ _ E).
+  - (* None: empty *) split.
+    + intros _. apply (find_wit_complete t Hflat Hok E).
+    + intros _. reflexivity.
+Qed.
+
+(* the reduction lemma, GENERAL (all a b): subtyping = emptiness of a ∧ ¬b. *)
+Theorem dsub_iff_empty : forall a b,
+  (forall v, denote a v -> denote b v) <-> (forall v, ~ denote (BInter a (BNeg b)) v).
+Proof.
+  intros a b. split.
+  - intros Hsub v [Ha Hnb]. apply Hnb. apply Hsub. exact Ha.
+  - intros Hemp v Ha. destruct (classic_denote' b v) as [Hb|Hb]; [exact Hb|].
+    exfalso. apply (Hemp v). split; [exact Ha | exact Hb].
+Qed.
+
+(* gdecide decides subtyping on the fragment. *)
+Theorem gdecide_correct : forall a b,
+  flat (BInter a (BNeg b)) -> dnf_ok (to_dnf (BInter a (BNeg b))) ->
+  (gdecide a b = true <-> (forall v, denote a v -> denote b v)).
+Proof.
+  intros a b Hflat Hok. unfold gdecide.
+  rewrite (decide_empty_correct _ Hflat Hok).
+  symmetry. apply dsub_iff_empty.
+Qed.
+
+(* ===== NON-VACUITY: gdecide decides exactly dsub on record + atom cases ===== *)
+(* The fragment hypotheses [flat] and [dnf_ok (to_dnf ...)] are DECIDABLE and
+   hold for all these cases — discharged by computation. *)
+
+(* width: {f:Int,g:Bool} <: {f:Int}. *)
+Example gd_width : gdecide Rfg Rf = true.
+Proof. reflexivity. Qed.
+Example agree_width : forall v, denote Rfg v -> denote Rf v.
+Proof.
+  assert (Hflat : flat (BInter Rfg (BNeg Rf))) by (simpl; tauto).
+  assert (Hok : dnf_ok (to_dnf (BInter Rfg (BNeg Rf)))).
+  { unfold dnf_ok. apply Forall_forall. intros c Hc. vm_compute in Hc.
+    destruct Hc as [Hc|[]]. subst c. right. vm_compute. lia. }
+  apply (gdecide_correct Rfg Rf Hflat Hok). reflexivity.
+Qed.
+
+(* depth: {f:Int} </: {f:Str}. *)
+Example gd_depth : gdecide Rf RfStr = false.
+Proof. reflexivity. Qed.
+
+(* record vs atom: a record is not an Int. *)
+Example gd_rec_atom : gdecide Rf (BAtom AInt) = false.
+Proof. reflexivity. Qed.
+
+(* disjointness: {f:Int} ∩ Int <: Bot. *)
+Example gd_disj : gdecide (BInter Rf (BAtom AInt)) BBot = true.
+Proof. reflexivity. Qed.
+
+(* atom cases agreeing with the old decide_dsub. *)
+Example gd_int_num : gdecide (BAtom AInt) (BAtom ANum) = true.
+Proof. reflexivity. Qed.
+Example gd_num_int : gdecide (BAtom ANum) (BAtom AInt) = false.
+Proof. reflexivity. Qed.
