@@ -199,9 +199,26 @@ Each increment is independently useful.
   the host-double exactly-representable window — needs an int64 substrate) and
   bitops (LuaJIT 32-bit `bit.*` ≠ 5.3/5.4 native 64-bit — same substrate need).
 
-- **S3 — Loop-β soundness property.** `checker accepts ⟹ ¬fault` against the
-  spec, with **structure-aware alias-targeting generators**. Acceptance test:
-  **re-derive the known variance unsoundness as a shrunk counterexample**.
+- **S3 — Loop-β soundness property. (DONE.)** `checker accepts ⟹ ¬fault` run
+  against the deterministic spec, NOT real interpreters (the two-loop separation
+  held). `lib/sem/diff/beta_test.lua` drives a **pluggable checker oracle**: the
+  REAL crescent slice checker (`crescent_slice_lower.lower` → `A.check`, accept ⟺
+  CLEAN) and a **synthetic UNSOUND oracle** that re-derives the pre-fix COVARIANT
+  `_rec_sub` rule (§6.14.1) from the real `slice_subtype.is_subtype` primitive in
+  the forward direction — the real checker is untouched (demonstration path (b)).
+  The **structure-aware alias-targeting generator** (`lib/sem/diff/arb_alias.lua`)
+  CONSTRUCTS the measure-zero aliasing shape every trial (fresh annotated table,
+  wide-typed alias, write through wide, read+use through narrow) rather than
+  sampling uniformly. **Acceptance result:** the variance unsoundness is
+  MECHANICALLY DETECTED — the generator + unsound oracle produce a counterexample
+  (accept ∧ spec-fault) every run; the minimal witness is
+  `local a={f=N}:NarrowBox; local b=a:WideBox{f:unknown}; b.f="…"; return a.f+1`
+  (a string written through the `unknown`-widened alias, read back as a number →
+  `arith-on-non-number` fault). The REAL (sound) checker REJECTS that exact witness
+  and finds **0 violations** over the alias generator (~27/60 accepted, all
+  non-faulting). Coverage bound: the alias-widen shape with field types in
+  {number, string, boolean, unknown}; broader general v1 Loop-β coverage is a
+  recorded follow-up (TODO.md).
 
 - **S4 — second language.** A λ-calculus with sum types + static arities as a
   Profile. Clears the cross-language bar (no core edit).
