@@ -310,38 +310,77 @@ witness the value space (recorded as the increment-5 scope limitation). Incremen
   fuel** (no `Fix`, no well-founded combinator) — it cannot loop; fuel
   `S (S (rdepth t))` is provably sufficient.
 
-- **FRAGMENT decided (honestly delimited).** `decide_empty`/`gdecide` are proved
-  sound + complete **under two predicates**:
+- **FRAGMENT decided (honestly delimited).** The BOOL emptiness test
+  `decide_empty`/`gsub_empty` is proved sound + complete **under two predicates**:
   - `flat t` — every record's field types are record-free (`no_rec`); records do
     not nest. Covers atoms and one level of records — exactly width / depth /
     record-vs-atom disjointness.
   - `dnf_ok (to_dnf t)` — each record-clause of the DNF has **at most one
     negated record**.
   The **coupled case — ≥2 negated records sharing keys** (which arises from a
-  *union of records on the right* of a subtyping query) — is **DEFERRED**: that
-  branch of `clause_wit` returns `None`. This keeps the decider **globally
-  SOUND** (`find_wit_sound`, *unconditional* — it never fabricates a false
-  witness); only **completeness** is fragment-restricted. Nested records (depth
-  ≥ 2 field types) are likewise deferred via `flat`.
+  *union of records on the right* of a subtyping query) — and **nested records**
+  (`flat` violations) are **DEFERRED**. See the corrected sub-increment below for
+  how the deferral is surfaced soundly.
 
-- **Correctness.** `decide_empty_correct : flat t -> dnf_ok (to_dnf t) ->
-  (decide_empty t = true <-> forall v, ~ denote t v)`; `gdecide_correct` is the
-  subtyping corollary via `dsub_iff_empty`. Both `Qed`. The DNF-preservation
+- **Correctness (bool form).** `decide_empty_correct : flat t -> dnf_ok (to_dnf t)
+  -> (decide_empty t = true <-> forall v, ~ denote t v)`; `gsub_empty_correct` is
+  the subtyping corollary via `dsub_iff_empty`. Both `Qed`. The DNF-preservation
   `to_dnf_pres`, the global `find_wit_sound`, and the fragment completeness
   `find_wit_complete` are all `Qed`.
 
-- **Non-vacuity / agreement.** `Compute`/`reflexivity` confirm the right answers
-  on records and atoms (the decider COMPUTES): `gdecide {f:Int;g:Bool} {f:Int} =
-  true` (width), `gdecide {f:Int} {f:Str} = false` (depth), `gdecide {f:Int} Int
-  = false` (record vs atom), `gdecide ({f:Int} ∩ Int) Bot = true` (disjoint),
-  `gdecide Int Num = true` / `gdecide Num Int = false` (atoms, agreeing with the
-  old `decide_dsub`). `agree_width` routes the width answer through
-  `gdecide_correct` to a real `dsub` fact — so `gdecide` decides *exactly* `dsub`
-  on the covered fragment, not some other relation.
+### Increment 6 CORRECTED — three-valued, UNCONDITIONALLY SOUND `gdecide`
 
-`Print Assumptions dsub_iff_empty`, `decide_empty_correct`, `gdecide_correct`,
-`to_dnf_pres`, `find_wit_sound`: **Closed under the global context** — no axioms,
-no `Admitted`, no `Classical`. Whole dev compiles (`coqc proof/subtype.v`).
+**The defect (adversarial audit).** The bool form was **fail-OPTIMISTIC**
+outside its fragment. `find_wit_fuel` returns `None` both when it has *proved*
+no witness AND when it *deferred* (the ≥2-coupled-negated-record branch of
+`clause_wit`, and nested-record fuel exhaustion). Since `None ⇒ decide_empty =
+true ⇒ "subtype"`, a bare `bool` conflates "proven subtype" with "decision
+deferred", and can claim `a <: b` for a genuine NON-subtype. Demonstrated
+witness: `a = {h:Int}`, `b = {f:Int} ∪ {g:Int}` → `gsub_empty a b = true`
+(`trap_old_bool_wrong`) but `~ dsub a b` (`trap_not_dsub`, witness
+`VTable[("h",VInt 0)]`). A confident WRONG answer — a latent unsoundness trap.
+
+**The fix.** The witness finder is made **three-valued**:
+`wit_result := Found (v:V) | NoWitness | Deferred`. The deferred clause (≥2
+coupled negated records) and **fuel exhaustion** both return `Deferred` —
+**never** `NoWitness` — so `NoWitness` now genuinely means "proved witness-free".
+Propagation over the DNF disjunction: `Found` anywhere ⇒ `Found`; else any
+`Deferred` ⇒ `Deferred`; else `NoWitness`. The table builders (`table_wit3`,
+`table_wit_neg3`) propagate `Deferred` from any deferred sub-query. The exported
+`gdecide a b : decision` (`DSub | DNotSub | DUnknown`) maps `Found ⇒ DNotSub`,
+`NoWitness ⇒ DSub`, `Deferred ⇒ DUnknown`.
+
+- **TWO UNCONDITIONAL soundness theorems** (no `flat`/`dnf_ok` hypothesis, for
+  ALL `a b : BTy` — a definite answer is *never* wrong):
+  - `gdecide_DSub_sound : gdecide a b = DSub -> dsub a b`. Rests on
+    `find_wit3_nowit_empty : find_wit3 n t = NoWitness -> forall v, ~ denote t v`
+    (proved unconditionally — the NoWitness path was reworked to establish
+    emptiness genuinely, using a per-query "`wf3 T = NoWitness ⇒ T empty`"
+    invariant rather than the old `no_rec`/`dnf_ok` hypotheses) + `dsub_iff_empty`.
+  - `gdecide_DNotSub_sound : gdecide a b = DNotSub -> ~ dsub a b`. From
+    `find_wit3_sound : find_wit3 n t = Found v -> denote t v` (witness validity).
+- **Completeness, fragment-restricted.** `gdecide_complete : flat (a ∧ ¬b) ->
+  dnf_ok (to_dnf (a ∧ ¬b)) -> gdecide a b <> DUnknown` — on the fragment the
+  answer is always definite; `gdecide_fragment_correct` then shows that definite
+  answer matches `dsub`. The fragment predicates now characterize **completeness
+  (no-`DUnknown`) only** — soundness no longer depends on them.
+- **The trap is gone, verified.** `gdecide {h:Int} ({f:Int}∪{g:Int}) = DUnknown`
+  (`trap_gdecide_unknown`, by `reflexivity`), and `trap_not_dsub_claim :
+  gdecide ... <> DSub`. In-fragment cases still definite and correct:
+  `gdecide {f:Int;g:Bool} {f:Int} = DSub` (width), `gdecide {f:Int} {f:Str} =
+  DNotSub` (depth), `gdecide {f:Int} Int = DNotSub` (record vs atom),
+  `gdecide ({f:Int}∩Int) Bot = DSub` (disjoint), atoms agreeing with the old
+  `decide_dsub`. `gd3_agree_width`/`gd3_agree_depth` route definite answers
+  through the unconditional soundness theorems to real `dsub` / `~dsub` facts.
+
+The old bool `decide_dsub` (atomic fragment) and `gsub_empty` (the internal
+fragment workhorse, retained for `gsub_empty_correct`) stay; `gdecide` is the
+three-valued general relation.
+
+`Print Assumptions dsub_iff_empty`, `decide_empty_correct`, `gsub_empty_correct`,
+`to_dnf_pres`, `find_wit_sound`, **`gdecide_DSub_sound`, `gdecide_DNotSub_sound`,
+`gdecide_complete`**: **Closed under the global context** — no axioms, no
+`Admitted`, no `Classical`. Whole dev compiles (`coqc proof/subtype.v`).
 
 ## Staging
 
@@ -383,16 +422,29 @@ no `Admitted`, no `Classical`. Whole dev compiles (`coqc proof/subtype.v`).
   literals, faithful through records (`to_dnf_pres`, unconditional). Emptiness by
   witness construction `find_wit_fuel` (structural fuel recursion; measure
   `rdepth` = record-nesting depth, strictly decreasing — terminating by
-  construction, no `Fix`). Decided fragment: `flat` (records' field types
-  record-free — one level of records) + `dnf_ok` (≤1 negated record per
-  record-clause). Globally SOUND (`find_wit_sound`); complete on the fragment
-  (`decide_empty_correct`, `gdecide_correct`). `Compute`/agreement non-vacuity on
-  width/depth/record-vs-atom/disjoint/atom cases. Closed under the global
+  construction, no `Fix`). **CORRECTED (audit fix):** the exported decision is
+  the **three-valued** `gdecide : BTy -> BTy -> decision`
+  (`DSub | DNotSub | DUnknown`), **UNCONDITIONALLY SOUND by construction** —
+  `DSub ⇒ dsub` and `DNotSub ⇒ ¬dsub` for **all** types (`gdecide_DSub_sound`,
+  `gdecide_DNotSub_sound`, no fragment hypothesis), `DUnknown` on deferred cases.
+  This replaces the prior `bool` `gsub_empty`, which was fail-optimistic
+  (`None`-deferred ⇒ "subtype") and could claim a false subtype — the latent
+  trap an adversarial audit found (`a={h:Int}`, `b={f:Int}∪{g:Int}`). The
+  three-valued finder distinguishes "proved no witness" (`NoWitness`) from
+  "deferred" (`Deferred`); fuel exhaustion and the coupled-negated-record clause
+  both yield `Deferred`. Fragment predicates `flat` (one level of records) +
+  `dnf_ok` (≤1 negated record per record-clause) now characterize
+  **completeness only** (`gdecide_complete`: no `DUnknown` on the fragment). The
+  bool `gsub_empty`/`decide_empty` are retained as internal fragment workhorses.
+  `Compute`/`reflexivity` non-vacuity: trap → `DUnknown`; width/depth/
+  record-vs-atom/disjoint/atom cases definite + correct. Closed under the global
   context.
 - **[next — close the emptiness deferrals, substrate-first]** in priority order,
   each an enabling substrate before its consumers:
   **(a)** **coupled negated records** — ≥2 negated records sharing keys in one
-  conjunct (arising from unions of records on the right). The principled fix is a
+  conjunct (arising from unions of records on the right). Currently surfaced as
+  `gdecide ... = DUnknown` (the `Deferred` clause), so no wrong answer is ever
+  produced; closing it makes those cases definite. The principled fix is a
   per-negated-record witnessing-key *assignment search* with per-key intersected
   `¬`-requirements; lifts `dnf_ok`'s "≤1 negated record" restriction.
   **(b)** **nested records** — field types that are themselves records; lifts the

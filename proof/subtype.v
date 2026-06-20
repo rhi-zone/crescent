@@ -1793,20 +1793,22 @@ Fixpoint find_wit_fuel (n:nat) (t:BTy) : option V :=
 Definition decide_empty (t:BTy) : bool :=
   match find_wit_fuel (S (S (rdepth t))) t with None => true | Some _ => false end.
 
-Definition gdecide (a b:BTy) : bool := decide_empty (BInter a (BNeg b)).
+(* [gsub_empty] is the BOOL emptiness-of-(a∧¬b) test. It is FRAGMENT-restricted
+   and — crucially — FAIL-OPTIMISTIC outside its fragment, exactly the latent
+   trap an adversarial audit found: [find_wit_fuel] returns [None] both when it
+   PROVED no witness and when it DEFERRED (the ≥2-coupled-negated-record branch
+   of [clause_wit], and nested-record fuel exhaustion), and [None ⇒ true ⇒
+   "subtype"]. So a bare [bool] conflates "proven subtype" with "decision
+   deferred" and can answer "subtype" for a genuine non-subtype. It is retained
+   ONLY as the internal workhorse for the proved-fragment correctness theorems
+   ([gsub_empty_correct]); the EXPORTED decision is the three-valued [gdecide]
+   below, which is UNCONDITIONALLY SOUND by construction. *)
+Definition gsub_empty (a b:BTy) : bool := decide_empty (BInter a (BNeg b)).
 
 (* sanity computes *)
 Definition Rfg := BRec [("f"%string,BAtom AInt);("g"%string,BAtom ABool)].
 Definition Rf  := BRec [("f"%string,BAtom AInt)].
 Definition RfStr := BRec [("f"%string,BAtom AStr)].
-Compute gdecide Rfg Rf.        (* width: should be true *)
-Compute gdecide Rf RfStr.      (* depth: should be false *)
-Compute gdecide Rf (BAtom AInt). (* record vs atom: should be false (record not int) *)
-Compute gdecide (BInter Rf (BAtom AInt)) BBot. (* rec & atom disjoint: true *)
-Compute gdecide (BAtom AInt) (BAtom ANum).     (* true *)
-Compute gdecide (BAtom ANum) (BAtom AInt).     (* false *)
-Compute gdecide (BAtom AStr) (BAtom AInt).     (* false *)
-Compute gdecide (BInter (BAtom AInt) (BAtom AStr)) BBot. (* true *)
 
 (* ===================== CORRECTNESS ===================== *)
 
@@ -2734,12 +2736,12 @@ Proof.
     exfalso. apply (Hemp v). split; [exact Ha | exact Hb].
 Qed.
 
-(* gdecide decides subtyping on the fragment. *)
-Theorem gdecide_correct : forall a b,
+(* [gsub_empty] decides subtyping on the fragment (BOOL form). *)
+Theorem gsub_empty_correct : forall a b,
   flat (BInter a (BNeg b)) -> dnf_ok (to_dnf (BInter a (BNeg b))) ->
-  (gdecide a b = true <-> (forall v, denote a v -> denote b v)).
+  (gsub_empty a b = true <-> (forall v, denote a v -> denote b v)).
 Proof.
-  intros a b Hflat Hok. unfold gdecide.
+  intros a b Hflat Hok. unfold gsub_empty.
   rewrite (decide_empty_correct _ Hflat Hok).
   symmetry. apply dsub_iff_empty.
 Qed.
@@ -2749,7 +2751,7 @@ Qed.
    hold for all these cases — discharged by computation. *)
 
 (* width: {f:Int,g:Bool} <: {f:Int}. *)
-Example gd_width : gdecide Rfg Rf = true.
+Example gd_width : gsub_empty Rfg Rf = true.
 Proof. reflexivity. Qed.
 Example agree_width : forall v, denote Rfg v -> denote Rf v.
 Proof.
@@ -2757,23 +2759,665 @@ Proof.
   assert (Hok : dnf_ok (to_dnf (BInter Rfg (BNeg Rf)))).
   { unfold dnf_ok. apply Forall_forall. intros c Hc. vm_compute in Hc.
     destruct Hc as [Hc|[]]. subst c. right. vm_compute. lia. }
-  apply (gdecide_correct Rfg Rf Hflat Hok). reflexivity.
+  apply (gsub_empty_correct Rfg Rf Hflat Hok). reflexivity.
 Qed.
 
 (* depth: {f:Int} </: {f:Str}. *)
-Example gd_depth : gdecide Rf RfStr = false.
+Example gd_depth : gsub_empty Rf RfStr = false.
 Proof. reflexivity. Qed.
 
 (* record vs atom: a record is not an Int. *)
-Example gd_rec_atom : gdecide Rf (BAtom AInt) = false.
+Example gd_rec_atom : gsub_empty Rf (BAtom AInt) = false.
 Proof. reflexivity. Qed.
 
 (* disjointness: {f:Int} ∩ Int <: Bot. *)
-Example gd_disj : gdecide (BInter Rf (BAtom AInt)) BBot = true.
+Example gd_disj : gsub_empty (BInter Rf (BAtom AInt)) BBot = true.
 Proof. reflexivity. Qed.
 
 (* atom cases agreeing with the old decide_dsub. *)
-Example gd_int_num : gdecide (BAtom AInt) (BAtom ANum) = true.
+Example gd_int_num : gsub_empty (BAtom AInt) (BAtom ANum) = true.
 Proof. reflexivity. Qed.
-Example gd_num_int : gdecide (BAtom ANum) (BAtom AInt) = false.
+Example gd_num_int : gsub_empty (BAtom ANum) (BAtom AInt) = false.
 Proof. reflexivity. Qed.
+
+(* ===========================================================================
+   INCREMENT 6, CORRECTED — THREE-VALUED, SOUND-BY-CONSTRUCTION DECISION.
+
+   ADVERSARIAL-AUDIT FINDING (the defect this section fixes). The bool decider
+   [gsub_empty] above is FAIL-OPTIMISTIC outside its proven fragment: the
+   witness finder [find_wit_fuel] returns [None] both when it has PROVED there
+   is no witness AND when it has DEFERRED (the ≥2-coupled-negated-record branch
+   of [clause_wit], and nested-record fuel exhaustion). Since [None ⇒
+   decide_empty = true ⇒ "subtype"], the bool conflates "proven subtype" with
+   "decision deferred", and can claim [a <: b] for a GENUINE NON-subtype it
+   cannot actually decide. Concrete witness: a = {h:Int}, b = {f:Int} ∪ {g:Int}.
+   Then [a ∧ ¬b] has the coupled-negated-record conjunct, [clause_wit] returns
+   [None] (deferred), [gsub_empty a b = true] — but [VTable[("h",VInt 0)]]
+   inhabits [a ∧ ¬b], so [~ dsub a b]. A confident WRONG answer.
+
+   THE FIX — distinguish the two meanings of [None] at the source. The witness
+   finder becomes THREE-VALUED: [Found v] (a real witness, so a∧¬b nonempty),
+   [NoWitness] (PROVED witness-free, so a∧¬b empty), or [Deferred] (could not
+   decide). Propagation over a disjunction (DNF): [Found] anywhere ⇒ [Found];
+   else any [Deferred] ⇒ [Deferred]; else [NoWitness]. Fuel exhaustion and the
+   coupled-negated-record clause both return [Deferred] — NEVER [NoWitness] — so
+   [NoWitness] genuinely means empty. The exported [gdecide] maps [Found ⇒
+   DNotSub], [NoWitness ⇒ DSub], [Deferred ⇒ DUnknown]; the first two are
+   UNCONDITIONALLY SOUND (no [flat]/[dnf_ok] hypothesis), the whole point being
+   that no confident-wrong answer is ever produced.
+   =========================================================================== *)
+
+Inductive wit_result := Found (v:V) | NoWitness | Deferred.
+Inductive decision   := DSub | DNotSub | DUnknown.
+
+(* coercion to the bool-era option-V world (Found↦Some, else None). *)
+Definition wr_to_opt (r:wit_result) : option V :=
+  match r with Found v => Some v | _ => None end.
+
+(* a three-valued [wf3] is "tame" on a type [T] when it does not defer there. *)
+Definition wf3_tame (wf3:BTy->wit_result) (T:BTy) : Prop := wf3 T <> Deferred.
+
+(* the option-V projection of a [wf3]. *)
+Definition wf3_opt (wf3:BTy->wit_result) : BTy -> option V :=
+  fun T => wr_to_opt (wf3 T).
+
+(* ---- three-valued table builders -----------------------------------------
+   A table clause queries [wf3] at each per-key field-intersection. If ANY query
+   defers, the whole table builder defers (we cannot prove the field nonempty OR
+   empty). Otherwise every query is Found/NoWitness, the [wf3_opt] projection is
+   a faithful option-V finder, and we delegate to the bool-era [table_wit] /
+   [table_wit_neg], lifting their [option V] back to [wit_result]. This makes the
+   three-valued builders agree with the bool-era ones EXACTLY when no deferral
+   occurs (the bridge lemmas), so their soundness/emptiness reduce to the
+   already-proved [table_wit_models] / [table_wit_none] etc. *)
+
+(* the field-intersection types a [table_wit allf] call queries. *)
+Definition tw_queries (allf:list (string*BTy)) : list BTy :=
+  map (fun kT => field_inter (fst kT) allf) allf.
+
+(* the extra augmented queries a [table_wit_neg allf Nj] call may issue (one per
+   Nj key, the value-branch augmented requirement lists' per-key intersections).
+   For DEFERRAL DETECTION we conservatively also include every base query and,
+   for each Nj key k, the queries of the augmented list. Over-approximating the
+   query set only loses completeness, never soundness. *)
+Definition twn_queries (allf Nj:list (string*BTy)) : list BTy :=
+  tw_queries allf ++
+  flat_map (fun kT => tw_queries (allf ++ [(fst kT, BNeg (field_inter (fst kT) Nj))])) Nj.
+
+Definition any_defer (wf3:BTy->wit_result) (ts:list BTy) : bool :=
+  existsb (fun T => match wf3 T with Deferred => true | _ => false end) ts.
+
+Definition table_wit3 (allf:list (string*BTy)) (wf3:BTy->wit_result) : wit_result :=
+  if any_defer wf3 (tw_queries allf) then Deferred
+  else match table_wit allf (wf3_opt wf3) with
+       | Some v => Found v
+       | None => NoWitness
+       end.
+
+Definition table_wit_neg3 (allf Nj:list (string*BTy)) (wf3:BTy->wit_result) : wit_result :=
+  if any_defer wf3 (twn_queries allf Nj) then Deferred
+  else match table_wit_neg allf Nj (wf3_opt wf3) with
+       | Some v => Found v
+       | None => NoWitness
+       end.
+
+(* ---- three-valued clause / dnf / fuel finder ----------------------------- *)
+Definition clause_wit3 (c:Clause) (wf3:BTy->wit_result) : wit_result :=
+  match pos_recs c with
+  | [] => match scalar_wit c with Some v => Found v | None => NoWitness end
+  | prs => if has_pos_atom c then NoWitness   (* table ∧ positive scalar atom: empty *)
+           else match neg_recs c with
+                | [] => table_wit3 (List.concat prs) wf3
+                | Nj :: nil => table_wit_neg3 (List.concat prs) Nj wf3
+                | _ :: _ :: _ => Deferred       (* coupled negated records: DEFERRED *)
+                end
+  end.
+
+(* DNF combine: Found wins; else Deferred is contagious; else NoWitness. *)
+Fixpoint dnf_wit3 (d:Dnf) (wf3:BTy->wit_result) : wit_result :=
+  match d with
+  | [] => NoWitness
+  | c :: r =>
+      match clause_wit3 c wf3 with
+      | Found v => Found v
+      | NoWitness => dnf_wit3 r wf3
+      | Deferred => match dnf_wit3 r wf3 with Found v => Found v | _ => Deferred end
+      end
+  end.
+
+Fixpoint find_wit3 (n:nat) (t:BTy) : wit_result :=
+  match n with
+  | 0 => Deferred                 (* fuel exhausted: NEVER claim empty *)
+  | S n' => dnf_wit3 (to_dnf t) (find_wit3 n')
+  end.
+
+Definition gdecide (a b:BTy) : decision :=
+  match find_wit3 (S (S (rdepth (BInter a (BNeg b))))) (BInter a (BNeg b)) with
+  | Found _ => DNotSub
+  | NoWitness => DSub
+  | Deferred => DUnknown
+  end.
+
+(* ===== bridge: when no deferral, three-valued = bool-era option-V ===== *)
+Lemma clause_wit3_found_bridge : forall c wf3 v,
+  clause_wit3 c wf3 = Found v -> clause_wit c (wf3_opt wf3) = Some v.
+Proof.
+  intros c wf3 v H. unfold clause_wit3, clause_wit in *.
+  destruct (pos_recs c) as [|p ps].
+  - destruct (scalar_wit c) as [w|]; [injection H as <-; reflexivity | discriminate].
+  - destruct (has_pos_atom c); [discriminate|].
+    destruct (neg_recs c) as [|Nj rest].
+    + unfold table_wit3 in H.
+      destruct (any_defer wf3 (tw_queries (List.concat (p::ps)))); [discriminate|].
+      destruct (table_wit (List.concat (p::ps)) (wf3_opt wf3)) as [w|];
+        [injection H as <-; reflexivity | discriminate].
+    + destruct rest as [|Nj2 rest2].
+      * unfold table_wit_neg3 in H.
+        destruct (any_defer wf3 (twn_queries (List.concat (p::ps)) Nj)); [discriminate|].
+        destruct (table_wit_neg (List.concat (p::ps)) Nj (wf3_opt wf3)) as [w|];
+          [injection H as <-; reflexivity | discriminate].
+      * discriminate.
+Qed.
+
+Lemma clause_wit3_sound : forall c wf3 v,
+  (forall T w, wf3 T = Found w -> denote T w) ->
+  clause_wit3 c wf3 = Found v -> denote_clause c v.
+Proof.
+  intros c wf3 v Hwfs H.
+  apply (clause_wit_sound c (wf3_opt wf3) v).
+  - intros T w HT. unfold wf3_opt, wr_to_opt in HT.
+    destruct (wf3 T) as [w'| |] eqn:E; try discriminate HT.
+    injection HT as <-. apply (Hwfs T w' E).
+  - apply clause_wit3_found_bridge. exact H.
+Qed.
+
+Lemma dnf_wit3_sound : forall d wf3 v,
+  (forall T w, wf3 T = Found w -> denote T w) ->
+  dnf_wit3 d wf3 = Found v -> denote_dnf d v.
+Proof.
+  induction d as [|c r IH]; intros wf3 v Hwfs H; simpl in H.
+  - discriminate.
+  - destruct (clause_wit3 c wf3) as [w| |] eqn:Ec.
+    + injection H as <-. left. apply (clause_wit3_sound c wf3 w Hwfs Ec).
+    + right. apply (IH wf3 v Hwfs H).
+    + destruct (dnf_wit3 r wf3) as [w| |] eqn:Er; try discriminate H.
+      injection H as <-. right. apply (IH wf3 w Hwfs Er).
+Qed.
+
+(* ===== UNCONDITIONAL SOUNDNESS of Found witnesses ===== *)
+Theorem find_wit3_sound : forall n t v, find_wit3 n t = Found v -> denote t v.
+Proof.
+  induction n as [|n IHn]; intros t v H; simpl in H.
+  - discriminate.
+  - apply to_dnf_pres.
+    apply (dnf_wit3_sound (to_dnf t) (find_wit3 n) v).
+    + intros T w. apply IHn.
+    + exact H.
+Qed.
+
+(* ===== UNCONDITIONAL emptiness of NoWitness ===== *)
+(* per-key NoWitness emptiness for table_wit3 (no [no_rec] hypothesis: the only
+   witness-finder fact used is the IH "wf3 T = NoWitness ⇒ T empty", on ALL T). *)
+Lemma table_wit3_nowit_empty : forall allf wf3,
+  (forall T, wf3 T = NoWitness -> forall v, ~ denote T v) ->
+  table_wit3 allf wf3 = NoWitness -> forall v, ~ table_models allf v.
+Proof.
+  intros allf wf3 Hwfn H v Hm. unfold table_wit3 in H.
+  destruct (any_defer wf3 (tw_queries allf)) eqn:Hdef; [discriminate|].
+  destruct (table_wit allf (wf3_opt wf3)) as [w|] eqn:Etw; [discriminate|].
+  (* table_wit = None: some required key has wf3_opt = None, i.e. wf3 = NoWitness
+     (not Deferred since any_defer=false), so that field type is empty. *)
+  unfold table_wit in Etw.
+  destruct (forallb (fun kT => match wf3_opt wf3 (field_inter (fst kT) allf) with Some _ => true | None => false end) allf) eqn:Hfb;
+    [discriminate Etw|].
+  destruct (forallb_false_in _ _ _ Hfb) as [[k T] [Hin Hk]]. simpl in Hk.
+  unfold wf3_opt, wr_to_opt in Hk.
+  destruct (wf3 (field_inter k allf)) as [w'| |] eqn:Ew; try discriminate Hk.
+  - (* NoWitness: field type empty *)
+    destruct Hm as [ents [Hv Hall]].
+    destruct (Hall k (ex_intro _ T Hin)) as [w [Hlk Hw]].
+    exact (Hwfn (field_inter k allf) Ew w Hw).
+  - (* Deferred: contradicts any_defer=false (field_inter k allf ∈ tw_queries) *)
+    exfalso. unfold any_defer in Hdef.
+    assert (existsb (fun T0 => match wf3 T0 with Deferred => true | _ => false end) (tw_queries allf) = true).
+    { apply existsb_exists. exists (field_inter k allf). split.
+      - unfold tw_queries. apply in_map_iff. exists (k,T). split; [reflexivity|exact Hin].
+      - rewrite Ew. reflexivity. }
+    rewrite Hdef in H0; discriminate.
+Qed.
+
+(* table_wit_neg3 NoWitness emptiness, likewise unconditional. We mirror
+   table_wit_neg_complete but replace its [no_rec]+blanket-wf hypotheses with the
+   per-type IH "wf3 T = NoWitness ⇒ T empty". The augmented-list queries went
+   through any_defer, so any None there is also a genuine NoWitness/empty. *)
+Lemma table_wit_neg3_nowit_empty : forall allf Nj wf3,
+  (forall T, wf3 T = NoWitness -> forall v, ~ denote T v) ->
+  table_wit_neg3 allf Nj wf3 = NoWitness -> forall v, ~ tmv allf Nj v.
+Proof.
+  intros allf Nj wf3 Hwfn H v [Hm Hviol]. unfold table_wit_neg3 in H.
+  destruct (any_defer wf3 (twn_queries allf Nj)) eqn:Hdef; [discriminate|].
+  destruct (table_wit_neg allf Nj (wf3_opt wf3)) as [w|] eqn:Etwn; [discriminate|].
+  (* wf3_opt is a sound+complete-ENOUGH option finder here: every query the
+     bool-era table_wit_neg issues is in twn_queries, hence non-Deferred, hence
+     wf3_opt=None ⇔ wf3=NoWitness ⇒ empty. Reduce to table_wit_neg_complete by
+     constructing its required hypotheses on the queried types only. *)
+  (* It is simplest to redo the case analysis directly. *)
+  unfold table_wit_neg in Etwn.
+  destruct (existsb (fun kT => negb (in_keys (fst kT) allf)) Nj) eqn:Habs.
+  - (* absence branch: table_wit allf (wf3_opt) = None => no model of allf *)
+    assert (Hnomodel : forall u, ~ table_models allf u).
+    { apply (table_wit3_nowit_empty allf wf3 Hwfn).
+      unfold table_wit3. unfold any_defer in *.
+      assert (Hsub : forall x, In x (tw_queries allf) -> In x (twn_queries allf Nj)).
+      { intros x Hx. unfold twn_queries. apply in_or_app. left. exact Hx. }
+      destruct (existsb (fun T => match wf3 T with Deferred => true | _ => false end) (tw_queries allf)) eqn:Ein.
+      - apply existsb_exists in Ein. destruct Ein as [x [Hx Hxd]].
+        assert (existsb (fun T => match wf3 T with Deferred => true | _ => false end) (twn_queries allf Nj) = true).
+        { apply existsb_exists. exists x. split; [apply Hsub; exact Hx | exact Hxd]. }
+        rewrite Hdef in H0; discriminate.
+      - rewrite Etwn. reflexivity. }
+    exact (Hnomodel v Hm).
+  - (* value branch: every Nj key present in allf; violation is a wrong value;
+       so the augmented table_wit for that key would be Some, contradicting None. *)
+    destruct Hm as [ents [Hv Hall]]. subst v.
+    assert (Hpres : forall k T, In (k,T) Nj -> exists w, assoc_lookup k ents = Some w).
+    { intros k T Hin.
+      pose proof (existsb_false_forall _ _ _ Habs (k,T) Hin) as Hf. simpl in Hf.
+      apply negb_false_iff in Hf. rewrite in_keys_true in Hf.
+      destruct (Hall k Hf) as [w0 [Hlk _]]. exists w0; exact Hlk. }
+    destruct (violation_wrong_key Nj ents Hpres Hviol) as [k [T [w0 [Hin [Hlk Hnd]]]]].
+    assert (Hnfi : ~ denote (field_inter k Nj) w0).
+    { intro Hc. apply Hnd. rewrite denote_field_inter in Hc. apply Hc; exact Hin. }
+    (* the augmented requirement list for key k *)
+    set (aug := allf ++ [(k, BNeg (field_inter k Nj))]).
+    (* first_some over the value branch is None *)
+    assert (Hfn : first_some (map (fun kT =>
+        table_wit (allf ++ [(fst kT, BNeg (field_inter (fst kT) Nj))]) (wf3_opt wf3)) Nj) = None)
+      by exact Etwn.
+    pose proof (first_some_none _ Hfn
+      (table_wit aug (wf3_opt wf3)) (in_map _ _ (k,T) Hin)) as Hnone.
+    simpl in Hnone. fold aug in Hnone.
+    (* k present in allf *)
+    assert (HkA : exists T', In (k,T') allf).
+    { pose proof (existsb_false_forall _ _ _ Habs (k,T) Hin) as Hf. simpl in Hf.
+      apply negb_false_iff in Hf. rewrite in_keys_true in Hf. exact Hf. }
+    assert (HwA : denote (field_inter k allf) w0).
+    { destruct (Hall k HkA) as [w' [Hlk' Hw']]. rewrite Hlk in Hlk'. injection Hlk' as <-.
+      exact Hw'. }
+    (* VTable ents models aug, so table_wit aug = None forces an empty queried
+       field type at one of aug's keys — but the model exhibits a value there,
+       contradiction. We replay table_wit3_nowit_empty on aug. *)
+    assert (Hnomodel_aug : forall u, ~ table_models aug u).
+    { apply (table_wit3_nowit_empty aug wf3 Hwfn).
+      unfold table_wit3.
+      (* no deferral over aug's queries: they are a subset of twn_queries *)
+      assert (Hsub : forall x, In x (tw_queries aug) -> In x (twn_queries allf Nj)).
+      { intros x Hx. unfold twn_queries. apply in_or_app. right.
+        apply in_flat_map. exists (k,T). split; [exact Hin|].
+        unfold aug in Hx. simpl in Hx. exact Hx. }
+      destruct (any_defer wf3 (tw_queries aug)) eqn:Eaug.
+      - unfold any_defer in Eaug. apply existsb_exists in Eaug.
+        destruct Eaug as [x [Hx Hxd]].
+        assert (existsb (fun T0 => match wf3 T0 with Deferred => true | _ => false end) (twn_queries allf Nj) = true).
+        { apply existsb_exists. exists x. split; [apply Hsub; exact Hx | exact Hxd]. }
+        unfold any_defer in Hdef. rewrite Hdef in H0; discriminate.
+      - rewrite Hnone. reflexivity. }
+    apply (Hnomodel_aug (VTable ents)).
+    (* VTable ents models aug *)
+    exists ents. split; [reflexivity|].
+    intros k0 [T0 Hin0]. unfold aug in Hin0. apply in_app_or in Hin0.
+    destruct Hin0 as [Hin0|Hin0].
+    + destruct (Hall k0 (ex_intro _ T0 Hin0)) as [w1 [Hlk1 Hw1]].
+      exists w1. split; [exact Hlk1|]. unfold aug. rewrite field_inter_app; split; [exact Hw1|].
+      simpl. destruct (string_dec k0 k) as [Ek|Hne]; simpl.
+      * subst k0. rewrite Hlk in Hlk1. injection Hlk1 as <-.
+        split; [exact Hnfi | exact I].
+      * exact I.
+    + simpl in Hin0. destruct Hin0 as [Heq|[]]. injection Heq as <- <-.
+      exists w0. split; [exact Hlk|]. unfold aug. rewrite field_inter_app; split; [exact HwA|].
+      simpl. destruct (string_dec k k) as [_|Hne]; [|congruence]. simpl.
+      split; [exact Hnfi | exact I].
+Qed.
+
+(* clause-level NoWitness emptiness — UNCONDITIONAL (no good_clause / clause_ok /
+   flat hypotheses). The fragment predicates are NOT needed because every branch
+   that returns NoWitness is genuinely witness-free, and the coupled-negated-
+   record branch returns Deferred (not NoWitness). *)
+Lemma clause_wit3_nowit_empty : forall c wf3,
+  (forall T, wf3 T = NoWitness -> forall v, ~ denote T v) ->
+  clause_wit3 c wf3 = NoWitness -> forall v, ~ denote_clause c v.
+Proof.
+  intros c wf3 Hwfn H v Hd. unfold clause_wit3 in H.
+  destruct (pos_recs c) as [|p ps] eqn:Hpr.
+  - (* scalar *)
+    destruct (scalar_wit c) as [w|] eqn:Es; [discriminate|].
+    exact (scalar_wit_complete c (pos_recs_nil_no_pos_rec c Hpr) Es v Hd).
+  - destruct (has_pos_atom c) eqn:Hpa.
+    + (* positive record + positive scalar atom: v both table and scalar — empty *)
+      assert (Hpex : In p (pos_recs c)) by (rewrite Hpr; left; reflexivity).
+      pose proof (denote_clause_components c v Hd) as [Hprc _].
+      destruct (posrec_is_table p v (Hprc p Hpex)) as [ents Hve]. subst v.
+      clear H Hpr Hpex Hprc Hwfn. revert Hd Hpa. induction c as [|l r IH]; simpl; intros Hd Hpa.
+      * discriminate Hpa.
+      * destruct Hd as [Hl Hd]. destruct l; simpl in *.
+        -- apply (table_neg_atom ents a); exact Hl.
+        -- apply IH; assumption.
+        -- apply IH; assumption.
+        -- apply IH; assumption.
+    + (* no positive atom: v is a table satisfying all positive records *)
+      pose proof (denote_clause_components c v Hd) as [Hprc Hnrc].
+      assert (Hpex : In p (pos_recs c)) by (rewrite Hpr; left; reflexivity).
+      destruct (posrec_is_table p v (Hprc p Hpex)) as [ents ->].
+      assert (Hmodels : table_models (List.concat (p::ps)) (VTable ents)).
+      { apply allpos_table_models. intros f Hf. apply Hprc. rewrite Hpr. exact Hf. }
+      destruct (neg_recs c) as [|Nj rest] eqn:Hnr.
+      * (* no neg records *)
+        exact (table_wit3_nowit_empty _ wf3 Hwfn H (VTable ents) Hmodels).
+      * destruct rest as [|Nj2 rest2].
+        -- (* one neg record *)
+           apply (table_wit_neg3_nowit_empty (List.concat (p::ps)) Nj wf3 Hwfn H (VTable ents)).
+           split; [exact Hmodels | exact (Hnrc Nj (or_introl eq_refl))].
+        -- (* ≥2 neg records: clause_wit3 = Deferred, contradicting NoWitness *)
+           discriminate H.
+Qed.
+
+(* dnf-level NoWitness emptiness: dnf_wit3 = NoWitness only if NO clause was
+   Found and NONE was Deferred — every clause is NoWitness, hence empty. *)
+Lemma dnf_wit3_nowit_empty : forall d wf3,
+  (forall T, wf3 T = NoWitness -> forall v, ~ denote T v) ->
+  dnf_wit3 d wf3 = NoWitness -> forall v, ~ denote_dnf d v.
+Proof.
+  induction d as [|c r IH]; intros wf3 Hwfn H v Hd; simpl in *.
+  - exact Hd.
+  - destruct (clause_wit3 c wf3) as [w| |] eqn:Ec.
+    + discriminate H.
+    + destruct Hd as [Hd|Hd].
+      * exact (clause_wit3_nowit_empty c wf3 Hwfn Ec v Hd).
+      * exact (IH wf3 Hwfn H v Hd).
+    + destruct (dnf_wit3 r wf3); discriminate H.
+Qed.
+
+(* ===== UNCONDITIONAL: NoWitness from the master finder ⇒ type empty ===== *)
+Theorem find_wit3_nowit_empty : forall n t,
+  find_wit3 n t = NoWitness -> forall v, ~ denote t v.
+Proof.
+  induction n as [|n IHn]; intros t H v Hd; simpl in H.
+  - discriminate.
+  - apply (dnf_wit3_nowit_empty (to_dnf t) (find_wit3 n) IHn H v).
+    apply to_dnf_pres. exact Hd.
+Qed.
+
+(* ===========================================================================
+   THE TWO UNCONDITIONAL SOUNDNESS THEOREMS — no [flat]/[dnf_ok] hypothesis.
+   A definite answer (DSub / DNotSub) is ALWAYS correct, for ALL a b : BTy.
+   =========================================================================== *)
+
+(* DSub ⇒ dsub. NoWitness genuinely establishes emptiness of a∧¬b. *)
+Theorem gdecide_DSub_sound : forall a b, gdecide a b = DSub -> dsub a b.
+Proof.
+  intros a b H. unfold gdecide in H.
+  destruct (find_wit3 (S (S (rdepth (BInter a (BNeg b))))) (BInter a (BNeg b))) eqn:E;
+    try discriminate H.
+  (* NoWitness: a∧¬b is empty *)
+  unfold dsub. apply dsub_iff_empty.
+  intros v. apply (find_wit3_nowit_empty _ _ E).
+Qed.
+
+(* DNotSub ⇒ ~dsub. The Found witness inhabits a∧¬b. *)
+Theorem gdecide_DNotSub_sound : forall a b, gdecide a b = DNotSub -> ~ dsub a b.
+Proof.
+  intros a b H. unfold gdecide in H.
+  destruct (find_wit3 (S (S (rdepth (BInter a (BNeg b))))) (BInter a (BNeg b))) as [w| |] eqn:E;
+    try discriminate H.
+  (* Found w: w ∈ a ∧ ¬b, so ¬ (a ⊆ b) *)
+  pose proof (find_wit3_sound _ _ _ E) as Hw. simpl in Hw. destruct Hw as [Hwa Hwb].
+  intro Hsub. apply Hwb. apply Hsub. exact Hwa.
+Qed.
+
+(* ===========================================================================
+   COMPLETENESS, FRAGMENT-RESTRICTED: on the proved fragment the answer is
+   DEFINITE (never DUnknown). The definite answer then matches dsub by the
+   unconditional soundness theorems above.
+   =========================================================================== *)
+
+(* On the fragment, the three-valued finder is never Deferred. We reduce to the
+   bool-era completeness: under [flat]/[dnf_ok] the bool finder returns [None]
+   when empty and [Some] otherwise; the three-valued finder returns Found / NoWit
+   correspondingly and — critically — cannot be Deferred. We prove this by a
+   bridge: on the record-free recursion (flat fields), wf3 never defers, the
+   coupled-negated-record clause never occurs (dnf_ok), and fuel suffices. *)
+
+(* A record-free clause's three-valued witness is the scalar branch (Found or
+   NoWitness), never Deferred — for ANY wf3. *)
+Lemma clause_wit3_clrf_not_deferred : forall c wf3,
+  cl_rf c -> clause_wit3 c wf3 <> Deferred.
+Proof.
+  intros c wf3 [Hp _] H. unfold clause_wit3 in H. rewrite Hp in H.
+  destruct (scalar_wit c); discriminate H.
+Qed.
+
+(* dnf_wit3 over a record-free DNF is never Deferred (every clause is scalar). *)
+Lemma dnf_wit3_clrf_not_deferred : forall d wf3,
+  Forall cl_rf d -> dnf_wit3 d wf3 <> Deferred.
+Proof.
+  induction d as [|c r IH]; intros wf3 Hcl H; simpl in H.
+  - discriminate.
+  - pose proof (Forall_inv Hcl) as Hc. pose proof (Forall_inv_tail Hcl) as Hr.
+    destruct (clause_wit3 c wf3) as [w| |] eqn:Ec.
+    + discriminate H.
+    + exact (IH wf3 Hr H).
+    + exact (clause_wit3_clrf_not_deferred c wf3 Hc Ec).
+Qed.
+
+(* A record-free type's three-valued finder, at positive fuel, is never Deferred. *)
+Lemma find_wit3_norec_not_deferred : forall n T,
+  no_rec T -> find_wit3 (S n) T <> Deferred.
+Proof.
+  intros n T Hnr. simpl.
+  apply (dnf_wit3_clrf_not_deferred (to_dnf T) (find_wit3 n)
+           (proj1 (no_rec_no_rec_lits T Hnr))).
+Qed.
+
+(* clause_wit3 on a good + clause_ok clause is never Deferred when wf3 doesn't
+   defer on the record-free field types it queries. *)
+Lemma clause_wit3_not_deferred : forall c wf3,
+  (forall T, no_rec T -> wf3 T <> Deferred) ->
+  good_clause c -> clause_ok c -> clause_wit3 c wf3 <> Deferred.
+Proof.
+  intros c wf3 Hwf [Hgp Hgn] Hok H. unfold clause_wit3 in H.
+  destruct (pos_recs c) as [|p ps] eqn:Hpr.
+  - (* scalar *) destruct (scalar_wit c); discriminate H.
+  - destruct (has_pos_atom c); [discriminate H|].
+    (* fields of concat(p::ps) are no_rec (good_clause) *)
+    assert (HnrAllf : forall k0 T, In (k0,T) (List.concat (p::ps)) -> no_rec T).
+    { intros k0 T Hin. apply in_concat in Hin. destruct Hin as [f [Hf Hkt]].
+      apply (Hgp f Hf k0 T Hkt). }
+    destruct (neg_recs c) as [|Nj rest] eqn:Hnr.
+    + (* no neg records: table_wit3 — every query is field_inter k (concat),
+         which is no_rec, so wf3 doesn't defer => any_defer=false => not Deferred *)
+      unfold table_wit3 in H.
+      destruct (any_defer wf3 (tw_queries (List.concat (p::ps)))) eqn:Hdef.
+      * unfold any_defer in Hdef. apply existsb_exists in Hdef.
+        destruct Hdef as [x [Hx Hxd]]. unfold tw_queries in Hx.
+        rewrite in_map_iff in Hx. destruct Hx as [[k T] [Hxeq Hin]]. subst x.
+        assert (no_rec (field_inter k (List.concat (p::ps)))) by
+          (apply field_inter_no_rec; exact HnrAllf).
+        destruct (wf3 (field_inter (fst (k,T)) (List.concat (p::ps)))) eqn:E; try discriminate Hxd.
+        simpl in E. exact (Hwf _ H0 E).
+      * destruct (table_wit (List.concat (p::ps)) (wf3_opt wf3)); discriminate H.
+    + destruct rest as [|Nj2 rest2].
+      * (* one neg record: twn_queries are all field_inter k of no_rec lists =>
+           no_rec => wf3 not Deferred => any_defer=false => not Deferred *)
+        assert (HnrNj : forall k0 T, In (k0,T) Nj -> no_rec T).
+        { intros k0 T Hin. apply (Hgn Nj (ltac:(left; reflexivity)) k0 T Hin). }
+        unfold table_wit_neg3 in H.
+        destruct (any_defer wf3 (twn_queries (List.concat (p::ps)) Nj)) eqn:Hdef.
+        -- unfold any_defer in Hdef. apply existsb_exists in Hdef.
+           destruct Hdef as [x [Hx Hxd]].
+           unfold twn_queries in Hx. apply in_app_or in Hx. destruct Hx as [Hx|Hx].
+           ++ unfold tw_queries in Hx. rewrite in_map_iff in Hx.
+              destruct Hx as [[k T] [Hxeq Hin]]. subst x.
+              assert (Hnr0 : no_rec (field_inter (fst (k,T)) (List.concat (p::ps)))) by
+                (apply field_inter_no_rec; exact HnrAllf).
+              destruct (wf3 (field_inter (fst (k,T)) (List.concat (p::ps)))) eqn:E;
+                simpl in Hxd; try discriminate Hxd.
+              exact (Hwf _ Hnr0 E).
+           ++ apply in_flat_map in Hx. destruct Hx as [[kj Tj] [Hinj Hx]].
+              unfold tw_queries in Hx. rewrite in_map_iff in Hx.
+              destruct Hx as [[k T] [Hxeq Hin]]. subst x.
+              (* field_inter of (allf ++ [(kj, BNeg (field_inter kj Nj))]) is no_rec:
+                 allf fields are no_rec; the appended field is BNeg of field_inter of
+                 Nj's (no_rec) fields, which is no_rec. *)
+              assert (Haug : forall k0 T0, In (k0,T0) (List.concat (p::ps) ++ [(fst (kj,Tj), BNeg (field_inter (fst (kj,Tj)) Nj))]) -> no_rec T0).
+              { intros k0 T0 Hin0. apply in_app_or in Hin0. destruct Hin0 as [Hin0|Hin0].
+                - exact (HnrAllf k0 T0 Hin0).
+                - simpl in Hin0. destruct Hin0 as [Heq|[]]. injection Heq as <- <-.
+                  simpl. apply field_inter_no_rec. exact HnrNj. }
+              assert (Hnr0 : no_rec (field_inter (fst (k,T)) (List.concat (p::ps) ++ [(fst (kj,Tj), BNeg (field_inter (fst (kj,Tj)) Nj))]))) by
+                (apply field_inter_no_rec; exact Haug).
+              destruct (wf3 (field_inter (fst (k,T)) (List.concat (p::ps) ++ [(fst (kj,Tj), BNeg (field_inter (fst (kj,Tj)) Nj))]))) eqn:E;
+                simpl in Hxd; try discriminate Hxd.
+              exact (Hwf _ Hnr0 E).
+        -- destruct (table_wit_neg (List.concat (p::ps)) Nj (wf3_opt wf3)); discriminate H.
+      * (* ≥2 neg records: excluded by clause_ok *)
+        exfalso. destruct Hok as [Hpr0|Hlen].
+        -- rewrite Hpr in Hpr0; discriminate.
+        -- rewrite Hnr in Hlen; simpl in Hlen; lia.
+Qed.
+
+Lemma dnf_wit3_not_deferred : forall d wf3,
+  (forall T, no_rec T -> wf3 T <> Deferred) ->
+  Forall good_clause d -> dnf_ok d -> dnf_wit3 d wf3 <> Deferred.
+Proof.
+  induction d as [|c r IH]; intros wf3 Hwf Hgd Hok H; simpl in H.
+  - discriminate.
+  - pose proof (Forall_inv Hgd) as Hgc. pose proof (Forall_inv_tail Hgd) as Hgr.
+    pose proof (Forall_inv Hok) as Hokc. pose proof (Forall_inv_tail Hok) as Hokr.
+    destruct (clause_wit3 c wf3) as [w| |] eqn:Ec.
+    + discriminate H.
+    + exact (IH wf3 Hwf Hgr Hokr H).
+    + exact (clause_wit3_not_deferred c wf3 Hwf Hgc Hokc Ec).
+Qed.
+
+(* MASTER fragment completeness: on [flat]/[dnf_ok], the finder is never Deferred
+   at the standard fuel. *)
+Lemma find_wit3_not_deferred : forall t,
+  flat t -> dnf_ok (to_dnf t) ->
+  find_wit3 (S (S (rdepth t))) t <> Deferred.
+Proof.
+  intros t Hflat Hok. simpl.
+  apply (dnf_wit3_not_deferred (to_dnf t) (find_wit3 (S (rdepth t)))
+           (fun T HT => find_wit3_norec_not_deferred (rdepth t) T HT)
+           (proj1 (flat_good_clauses t Hflat)) Hok).
+Qed.
+
+(* gdecide is DEFINITE (≠ DUnknown) on the fragment. *)
+Theorem gdecide_complete : forall a b,
+  flat (BInter a (BNeg b)) -> dnf_ok (to_dnf (BInter a (BNeg b))) ->
+  gdecide a b <> DUnknown.
+Proof.
+  intros a b Hflat Hok H. unfold gdecide in H.
+  destruct (find_wit3 (S (S (rdepth (BInter a (BNeg b))))) (BInter a (BNeg b))) eqn:E;
+    try discriminate H.
+  exact (find_wit3_not_deferred _ Hflat Hok E).
+Qed.
+
+(* and on the fragment the definite answer matches dsub. *)
+Theorem gdecide_fragment_correct : forall a b,
+  flat (BInter a (BNeg b)) -> dnf_ok (to_dnf (BInter a (BNeg b))) ->
+  (gdecide a b = DSub <-> dsub a b) /\ (gdecide a b = DNotSub <-> ~ dsub a b).
+Proof.
+  intros a b Hflat Hok.
+  pose proof (gdecide_complete a b Hflat Hok) as Hdef.
+  split; split.
+  - apply gdecide_DSub_sound.
+  - intro Hsub. destruct (gdecide a b) eqn:E; [reflexivity| |contradiction].
+    exfalso. apply (gdecide_DNotSub_sound a b E). exact Hsub.
+  - apply gdecide_DNotSub_sound.
+  - intro Hns. destruct (gdecide a b) eqn:E; [|reflexivity|contradiction].
+    exfalso. apply Hns. apply (gdecide_DSub_sound a b E).
+Qed.
+
+(* ===========================================================================
+   THE AUDIT-FOUND TRAP IS GONE.
+
+   a = {h:Int}, b = {f:Int} ∪ {g:Int}. The bool decider answered "subtype"
+   (DSub-equivalent: gsub_empty a b = true) because [a ∧ ¬b] reduces to a clause
+   with TWO coupled negated records and [clause_wit] deferred to [None] ⇒ true.
+   But [VTable[("h",VInt 0)]] inhabits [a ∧ ¬b], so [~ dsub a b]. The new
+   three-valued [gdecide] returns DUnknown there (NEVER DSub) — no confident
+   wrong answer.
+   =========================================================================== *)
+
+Definition Ah := BRec [("h"%string, BAtom AInt)].
+Definition Bfg := BUnion (BRec [("f"%string, BAtom AInt)])
+                          (BRec [("g"%string, BAtom AInt)]).
+
+(* The OLD bool decider was WRONG here: it claimed "empty" (= subtype). *)
+Example trap_old_bool_wrong : gsub_empty Ah Bfg = true.
+Proof. reflexivity. Qed.
+
+(* But the relation is GENUINELY not a subtype, witnessed by {h=0}. *)
+Theorem trap_not_dsub : ~ dsub Ah Bfg.
+Proof.
+  unfold dsub. intro H.
+  specialize (H (VTable [("h"%string, VInt 0)])).
+  assert (Hpre : denote Ah (VTable [("h"%string, VInt 0)])).
+  { apply denote_rec_iff. exists [("h"%string, VInt 0)]. split; [reflexivity|].
+    intros k T Hin. simpl in Hin. destruct Hin as [Heq|[]].
+    injection Heq as <- <-. exists (VInt 0). simpl. split; [reflexivity| exact I]. }
+  specialize (H Hpre). simpl in H. destruct H as [Hf|Hg].
+  - destruct Hf as [ents [Hv [[vv [Hlk _]] _]]]. injection Hv as <-.
+    simpl in Hlk. discriminate Hlk.
+  - destruct Hg as [ents [Hv [[vv [Hlk _]] _]]]. injection Hv as <-.
+    simpl in Hlk. discriminate Hlk.
+Qed.
+
+(* The new three-valued decider DEFERS instead of lying: DUnknown, not DSub. *)
+Example trap_gdecide_unknown : gdecide Ah Bfg = DUnknown.
+Proof. reflexivity. Qed.
+
+(* The load-bearing guarantee: it is IMPOSSIBLE for gdecide to claim DSub here. *)
+Theorem trap_not_dsub_claim : gdecide Ah Bfg <> DSub.
+Proof. discriminate. Qed.
+
+(* ===========================================================================
+   IN-FRAGMENT CASES — the decider still gives correct DEFINITE answers.
+   =========================================================================== *)
+
+(* width: {f:Int,g:Bool} <: {f:Int}  =>  DSub. *)
+Example gd3_width : gdecide Rfg Rf = DSub.
+Proof. reflexivity. Qed.
+(* depth fail: {f:Int} </: {f:Str}  =>  DNotSub. *)
+Example gd3_depth : gdecide Rf RfStr = DNotSub.
+Proof. reflexivity. Qed.
+(* record vs atom: {f:Int} </: Int  =>  DNotSub. *)
+Example gd3_rec_atom : gdecide Rf (BAtom AInt) = DNotSub.
+Proof. reflexivity. Qed.
+(* disjointness: {f:Int} ∩ Int <: Bot  =>  DSub. *)
+Example gd3_disj : gdecide (BInter Rf (BAtom AInt)) BBot = DSub.
+Proof. reflexivity. Qed.
+(* atom cases, agreeing with the old decide_dsub. *)
+Example gd3_int_num : gdecide (BAtom AInt) (BAtom ANum) = DSub.
+Proof. reflexivity. Qed.
+Example gd3_num_int : gdecide (BAtom ANum) (BAtom AInt) = DNotSub.
+Proof. reflexivity. Qed.
+Example gd3_str_int : gdecide (BAtom AStr) (BAtom AInt) = DNotSub.
+Proof. reflexivity. Qed.
+Example gd3_int_str_bot : gdecide (BInter (BAtom AInt) (BAtom AStr)) BBot = DSub.
+Proof. reflexivity. Qed.
+
+(* width DSub routed to a real dsub fact via the unconditional soundness theorem. *)
+Example gd3_agree_width : dsub Rfg Rf.
+Proof. apply gdecide_DSub_sound. reflexivity. Qed.
+(* depth DNotSub routed to a real ~dsub fact. *)
+Example gd3_agree_depth : ~ dsub Rf RfStr.
+Proof. apply gdecide_DNotSub_sound. reflexivity. Qed.
+
+(* ===========================================================================
+   PRINT ASSUMPTIONS — the three unconditional/headline theorems are closed
+   under the global context (no axioms, no Admitted, no Classical).
+   =========================================================================== *)
+Print Assumptions gdecide_DSub_sound.
+Print Assumptions gdecide_DNotSub_sound.
+Print Assumptions gdecide_complete.
