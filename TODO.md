@@ -96,6 +96,33 @@ Op-sem parity must hold at every commit. After the handler deletion, the adversa
 
 - [ ] **Investigate `setmetatable(t, nil)` support** (v5 item 5 backlog). Medium prio. Sandboxing's strongest use case served by fresh-table pattern. v5.x decision may be "document fresh-table as canonical idiom; never support setmetatable(t, nil)." If supporting it: open question whether monotone substitution can be preserved.
 
+## Typechecker soundness methodology — open fork
+
+> *Open threads from a previous session. Treat as starting context, not instructions — verify relevance before acting.*
+
+**Background:** the slice typechecker's soundness is established by adversarial testing (critic agents imagining attacks). The variance write-through unsoundness (fixed `cdc5b2a6` + re-verified `a4d85035`) survived 5 feature-audit rounds before a 6th adversarial pass caught it; an embedded-alias sub-hole only surfaced because someone happened to imagine that exact case. The methodology, not any single bug, may be the weak link — adversarial testing shows presence of bugs, never absence.
+
+**Fork (three methodologies — different cost/strength; needs design-it-twice before deciding):**
+
+1. **Mechanized type-safety proof** (progress+preservation against a formal Lua semantics). Strongest — proves absence — but PhD/research-scale and re-extended every increment. Cuts against the project's "stop anytime / each granularity independently useful" goal. Plausible as a long-term aspiration layered on later, not a prerequisite.
+
+2. **Executable reference Lua semantics as differential-testing oracle** — generate programs, run under the reference semantics, assert the checker never accepts one that faults at runtime. Middle weight; systematic and automatic (would have caught embedded-alias without anyone imagining it). Fits the substrate's `artifact + semantics + evidence ⇒ claim` shape. Grounds the existing work rather than replacing it.
+
+3. **Per-feature paper soundness arguments** (already partially practiced — see `docs/agnostic-static-analysis-crescent-slice.md` §6.14 closure's "3-case exhaustive" argument). Lightest; still relies on a human enumerating cases correctly — exactly what failed for variance.
+
+**Leaning (advisory):** NOT mechanized-proof-first (too heavy); lean toward option 2 + option 3 per feature, option 1 as deferred long-term aspiration. Needs design-it-twice before adopting.
+
+**Open sub-questions (verify before acting):** prior Lua-formalization art may exist (believed: Soldevila et al.; a PLT Redex model), but targets reference Lua 5.3/5.4, not LuaJIT 5.1. The subset-scoping crescent uses might make it far smaller than a full formalization. Verify via research; don't trust session memory. Suggested treatment: (a) research prior art, (b) design-it-twice on the soundness-methodology decision.
+
+**Pointers:** `docs/typechecker-design-thesis.md` (§4b/claim 5 now FIXED; "fully sound is a HARD invariant" stance); `docs/agnostic-static-analysis-crescent-slice.md` §6.14 (variance closure design + soundness argument); `docs/artifacts/typechecker-run-2026-06-12/` (prior-art survey, 3 design-thesis critiques, gap-cascade-magnitude, per-property-metric, variance-fix-cost + design + reverify).
+
+## Slice typechecker — coverage and precision open threads
+
+> *Open threads from a previous session. Treat as starting context, not instructions — verify relevance before acting.*
+
+- **Success metric reframing:** the survey reframed from whole-file-CLEAN% to sound-verdict-sites / error-classes-caught-corpus-wide. Remaining coverage front by measured demand: operators, dynamic-index, multi-assign, multi-return root constructs — prioritized by corpus frequency, not exhaustiveness.
+- **`readonly`/mutable variance split deferred:** recovers sound alias-and-read (the embedded-alias sub-hole would not arise); corpus doesn't currently exhibit the pattern that demands it. Mark as precision layer, not soundness blocker — revisit when corpus evidence justifies it.
+
 ## Platform isolation migration (mandatory, not eventual)
 
 Architectural reframing settled this session: capabilities are the
