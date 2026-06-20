@@ -64,6 +64,7 @@ local C_RETURN        = constrain.C_RETURN
 local C_COMPARE       = constrain.C_COMPARE
 local C_BOUND         = constrain.C_BOUND
 local C_OR            = constrain.C_OR
+local C_AND           = constrain.C_AND
 local C_BIND_GENERICS = constrain.C_BIND_GENERICS
 local C_CHECK_ARGS    = constrain.C_CHECK_ARGS
 local C_OVERLAP       = constrain.C_OVERLAP
@@ -859,9 +860,65 @@ local function solve_escape_check(ctx, c)
     return true
 end
 
+-- The truthy part of a single (non-union) concrete type: it with {false, nil}
+-- removed. Returns a tid, or nil if the type contributes nothing truthy.
+--   nil / lit nil / lit false -> nil (no contribution: always falsy)
+--   boolean                   -> true   (boolean splits into true|false; only true is truthy)
+--   lit true                  -> true
+--   any other concrete type   -> itself (always truthy)
+--   any                       -> any
+--   unknown                   -> unknown
+--: (Ctx, integer) -> integer | nil
+local function truthy_part_single(ctx, tid)
+    local t = ctx.types:get(tid)
+    local tag = t.tag
+    if tag == TAG_NIL then return nil end
+    if tag == TAG_LITERAL then
+        local k = types_mod.lit_kind(t)
+        if k == defs.LIT_NIL then return nil end
+        if k == defs.LIT_BOOLEAN then
+            -- lit true is truthy; lit false contributes nothing.
+            if types_mod.lit_bool(t) == 1 then return tid end
+            return nil
+        end
+        return tid
+    end
+    if tag == TAG_BOOLEAN then
+        return types_mod.make_literal(ctx, defs.LIT_BOOLEAN, 1)
+    end
+    -- any / unknown / every other concrete type is (possibly) truthy as-is.
+    return tid
+end
+
+-- The truthy part of a (possibly union) type: it with {false, nil} removed.
+-- Returns T_NEVER when the type is always falsy.
+--: (Ctx, integer) -> integer
+local function truthy_part(ctx, tid)
+    tid = find(ctx, tid)
+    local t = ctx.types:get(tid)
+    if t.tag == TAG_UNION then
+        --: { [integer]: integer, ... }
+        local parts = {}
+        local us, ul = types_mod.agg_members_start(t), types_mod.agg_members_len(t)
+        for i = us, us + ul - 1 do
+            local mid = find(ctx, ctx.lists:get(i))
+            local tp = truthy_part_single(ctx, mid)
+            if tp ~= nil then parts[#parts + 1] = tp end
+        end
+        if #parts == 0 then return ctx.T_NEVER end
+        if #parts == 1 then return parts[1] end
+        return types_mod.make_union(ctx, parts)
+    end
+    local tp = truthy_part_single(ctx, tid)
+    if tp == nil then return ctx.T_NEVER end
+    return tp
+end
+
 -- Solve a deferred `or` expression: C_OR = { C_OR, left_tid, right_tid, result_tid, line, col }
 -- Defers while left_tid is still a free TAG_VAR (not yet resolved).
--- Once concrete: result = subtract(left, nil) | right.
+-- Once concrete: result = truthy_part(left) | right. `a or b` yields `a` only
+-- when `a` is truthy, so the left contributes its non-falsy part (nil AND false
+-- removed); when `a` is falsy the result is `b`.
 -- Special case: when left is T_UNKNOWN and right is a non-falsy typed default,
 -- result is right. `unknown or 0` means the programmer is asserting the result
 -- type via the fallback — the or-default IS the narrowing. Not applied when right
@@ -893,8 +950,100 @@ local function solve_or(ctx, c)
             resolved = types_mod.make_union(ctx, { ctx.T_UNKNOWN, right })
         end
     else
-        local non_nil_left = types_mod.subtract(ctx, left, ctx.T_NIL)
-        resolved = types_mod.make_union(ctx, { non_nil_left, right })
+        local truthy_left = truthy_part(ctx, left)
+        if truthy_left == ctx.T_NEVER then
+            resolved = right
+        else
+            resolved = types_mod.make_union(ctx, { truthy_left, right })
+        end
+    end
+    unify_mod.unify(ctx, result_tid, resolved)
+    return true
+end
+
+-- The falsy part of a single (non-union) concrete type: its intersection with
+-- {false, nil}. Returns a tid, or nil if the type contributes nothing falsy.
+--   nil / lit nil      -> nil
+--   boolean            -> false   (boolean splits into true|false; only false is falsy)
+--   lit false          -> false
+--   lit true / any other always-truthy type -> nil (no contribution)
+--   any                -> any      (a falsy value is possible and unconstrained)
+--   unknown            -> nil|false (conservative: could be either falsy value)
+--: (Ctx, integer) -> integer | nil
+local function falsy_part_single(ctx, tid)
+    local t = ctx.types:get(tid)
+    local tag = t.tag
+    if tag == TAG_NIL then return ctx.T_NIL end
+    if tag == TAG_LITERAL then
+        local k = types_mod.lit_kind(t)
+        if k == defs.LIT_NIL then return ctx.T_NIL end
+        if k == defs.LIT_BOOLEAN then
+            -- lit false is falsy; lit true contributes nothing.
+            if types_mod.lit_bool(t) == 0 then return tid end
+            return nil
+        end
+        return nil
+    end
+    if tag == TAG_BOOLEAN then
+        return types_mod.make_literal(ctx, defs.LIT_BOOLEAN, 0)
+    end
+    if tag == TAG_ANY then return ctx.T_ANY end
+    if tag == TAG_UNKNOWN then
+        local false_lit = types_mod.make_literal(ctx, defs.LIT_BOOLEAN, 0)
+        return types_mod.make_union(ctx, { ctx.T_NIL, false_lit })
+    end
+    -- All other concrete types are always truthy: no falsy contribution.
+    return nil
+end
+
+-- The falsy part of a (possibly union) type: its intersection with {false, nil}.
+-- Returns T_NEVER when the type is always truthy.
+--: (Ctx, integer) -> integer
+local function falsy_part(ctx, tid)
+    tid = find(ctx, tid)
+    local t = ctx.types:get(tid)
+    if t.tag == TAG_UNION then
+        --: { [integer]: integer, ... }
+        local parts = {}
+        local us, ul = types_mod.agg_members_start(t), types_mod.agg_members_len(t)
+        for i = us, us + ul - 1 do
+            local mid = find(ctx, ctx.lists:get(i))
+            local fp = falsy_part_single(ctx, mid)
+            if fp ~= nil then parts[#parts + 1] = fp end
+        end
+        if #parts == 0 then return ctx.T_NEVER end
+        if #parts == 1 then return parts[1] end
+        return types_mod.make_union(ctx, parts)
+    end
+    local fp = falsy_part_single(ctx, tid)
+    if fp == nil then return ctx.T_NEVER end
+    return fp
+end
+
+-- Solve a deferred `and` expression: C_AND = { C_AND, left_tid, right_tid, result_tid, line, col }
+-- Defers while left_tid is still a free TAG_VAR (not yet resolved).
+-- Once concrete: `a and b` is `a` when `a` is falsy, else `b`, so
+-- result = falsy_part(left) | right. Symmetric with solve_or.
+-- any: constraint arrays are heterogeneous — see solve_unify comment.
+--: (Ctx, { [integer]: unknown, ... }) -> boolean
+local function solve_and(ctx, c)
+    local left_tid   = constrain.and_left(c)
+    local right_tid  = constrain.and_right(c)
+    local result_tid = constrain.and_result(c)
+
+    local left = find(ctx, left_tid)
+    local lt = ctx.types:get(left)
+    if lt.tag == TAG_VAR or lt.tag == TAG_ROWVAR then
+        return false  -- defer
+    end
+
+    local right = find(ctx, right_tid)
+    local fp = falsy_part(ctx, left)
+    local resolved
+    if fp == ctx.T_NEVER then
+        resolved = right
+    else
+        resolved = types_mod.make_union(ctx, { fp, right })
     end
     unify_mod.unify(ctx, result_tid, resolved)
     return true
@@ -4082,6 +4231,7 @@ local function get_handlers()
         [C_COMPARE]       = solve_compare,
         [C_BOUND]         = solve_bound,
         [C_OR]            = solve_or,
+        [C_AND]           = solve_and,
         [C_BIND_GENERICS] = solve_bind_generics,
         [C_CHECK_ARGS]    = solve_check_args,
         [C_OVERLAP]       = solve_overlap,

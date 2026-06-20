@@ -137,6 +137,11 @@ local C_BOUND         = 9   -- {C_BOUND,         fresh_tv_id, bound_type_id, lin
 local C_OR            = 10  -- {C_OR,            left_tid, right_tid, result_tid, line, col}
 -- Deferred `or` expression: defers while left_tid is a free TAG_VAR,
 -- then computes subtract(left, nil) | right and unifies with result_tid.
+local C_AND           = 18  -- {C_AND,           left_tid, right_tid, result_tid, line, col}
+-- Deferred `and` expression: defers while left_tid is a free TAG_VAR,
+-- then computes falsy_part(left) | right and unifies with result_tid.
+-- `a and b` evaluates to `a` when `a` is falsy (nil/false), else `b`; the
+-- result type is therefore `(left ∩ {false, nil}) | right`. Symmetric with C_OR.
 local C_BIND_GENERICS = 11  -- {C_BIND_GENERICS, callee_tid, arg_tids_list, ret_tid, line, col}
 -- Binds free type variables in the callee's param slots from call arguments.
 -- Runs before C_CHECK_ARGS. For <T>(x: T) -> T called with "hello", binds T=string.
@@ -197,6 +202,7 @@ M.C_RETURN        = C_RETURN
 M.C_COMPARE       = C_COMPARE
 M.C_BOUND         = C_BOUND
 M.C_OR            = C_OR
+M.C_AND           = C_AND
 M.C_BIND_GENERICS = C_BIND_GENERICS
 M.C_CHECK_ARGS    = C_CHECK_ARGS
 M.C_OVERLAP       = C_OVERLAP
@@ -249,6 +255,7 @@ local CONSTRAINT_TIER = {
     [C_INDEX]               = TIER_WANTED,
     [C_BOUND]               = TIER_GIVEN,
     [C_OR]                  = TIER_WANTED,
+    [C_AND]                 = TIER_WANTED,
     [C_BIND_GENERICS]       = TIER_WANTED,
     [C_CHECK_ARGS]          = TIER_WANTED,
     [C_OVERLAP]             = TIER_WANTED,
@@ -294,6 +301,7 @@ M.tag_tier = tag_tier
 --:: ConstraintIndex        = { integer, integer, integer, integer, integer, integer }
 --:: ConstraintBound        = { integer, integer, integer, integer, integer }
 --:: ConstraintOr           = { integer, integer, integer, integer, integer, integer }
+--:: ConstraintAnd          = { integer, integer, integer, integer, integer, integer }
 --:: ConstraintBindGenerics = { integer, integer, { [integer]: integer, ... }, integer, integer, integer }
 --:: ConstraintCheckArgs    = { integer, integer, { [integer]: integer, ... }, integer, integer, integer }
 --:: ConstraintOverlap      = { integer, integer, integer, integer, integer }
@@ -398,6 +406,17 @@ function M.or_result(c) return c[4] end
 function M.or_line(c) return c[5] end
 --: (ConstraintOr) -> integer
 function M.or_col(c) return c[6] end
+
+--: (ConstraintAnd) -> integer
+function M.and_left(c) return c[2] end
+--: (ConstraintAnd) -> integer
+function M.and_right(c) return c[3] end
+--: (ConstraintAnd) -> integer
+function M.and_result(c) return c[4] end
+--: (ConstraintAnd) -> integer
+function M.and_line(c) return c[5] end
+--: (ConstraintAnd) -> integer
+function M.and_col(c) return c[6] end
 
 --: (ConstraintBindGenerics) -> integer
 function M.bindgen_callee(c) return c[2] end
@@ -516,6 +535,11 @@ end
 --: (integer, integer, integer, integer, integer) -> ConstraintOr
 function M.make_or(left, right, result, line, col)
     return tag_tier({ C_OR, left, right, result, line, col })
+end
+
+--: (integer, integer, integer, integer, integer) -> ConstraintAnd
+function M.make_and(left, right, result, line, col)
+    return tag_tier({ C_AND, left, right, result, line, col })
 end
 
 --: (integer, { [integer]: integer, ... }, integer, integer, integer) -> ConstraintBindGenerics
@@ -1896,7 +1920,7 @@ ExprRule[NODE_BINARY_EXPR] = function(ctx, nid)
     local op = n.data[0]
 
     if op == OP_AND then
-        gen_expr(ctx, n.data[1])
+        local left_tid = gen_expr(ctx, n.data[1])
         -- Narrow the scope for the RHS: if LHS is truthy, any nil/false has been filtered.
         -- e.g. `x and x .. "!"` where x: string|nil — x is string when evaluating RHS.
         local narrow_mod = require("lib.type.static.narrow")
@@ -1905,9 +1929,14 @@ ExprRule[NODE_BINARY_EXPR] = function(ctx, nid)
         if next(narrowed) then
             ctx.scope = narrow_mod.apply_narrowed(ctx, narrowed)
         end
-        local right_r = types_mod.find(ctx, gen_expr(ctx, n.data[2]))
+        local right_tid = gen_expr(ctx, n.data[2])
         ctx.scope = saved_scope
-        return types_mod.make_union(ctx, { ctx.T_NIL, right_r })
+        -- `a and b` evaluates to `a` when `a` is falsy (its nil/false value), else `b`.
+        -- Result type = falsy_part(left) | right, where falsy_part(T) = T ∩ {false, nil}.
+        -- Deferred (symmetric with C_OR) so falsy_part is computed once `left` resolves.
+        local res = fresh_var(ctx)
+        emit(ctx, M.make_and(left_tid, right_tid, res, n.line, n.col))
+        return res
     end
 
     local left_tid  = gen_expr(ctx, n.data[1])
