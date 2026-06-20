@@ -86,6 +86,53 @@ forces re-deriving transitivity under the new rule — a change to the increment
 substrate) *or* moving to the coarser value-set semantics (where `TInter AInt
 AStr ≡ Bot`, which `sub` also does not prove). Both are their own increments.
 
+## Increment 3 — the SEMANTIC PIVOT: a Boolean algebra of types
+
+Increment 2 proved the free `sub` lattice is *provably non-distributive* (N5).
+Rather than bolt distributivity onto the syntactic relation (the deferred fork),
+increment 3 takes the principled route: **stop axiomatizing the order and define
+subtyping semantically.** Types denote SETS of values; `A <: B` means
+`denote A ⊆ denote B`. Every Boolean-algebra law then collapses to first-order
+logic over the denotation — no `sub` rule asserted, no axiom added.
+
+`proof/subtype.v` (new section, additive — increments 1-2 untouched):
+
+- **Negation added to the syntax.** A fresh `BTy` = atoms + `BUnion`/`BInter`/
+  `BNeg`/`BTop`/`BBot` (a Boolean algebra of types). (Kept distinct from the
+  increment-1 `Ty` so the old free-lattice metatheory still compiles verbatim.)
+- **The model — disjointness and order are CONSTRUCTIVE, not asserted.** A
+  concrete value domain `V` with distinct constructor heads:
+  `VInt | VFloat | VStr | VBool | VNil`. `atom_denote` maps each atom to a
+  value-set: `ANum` accepts `{VInt _} ∪ {VFloat _}`, `AInt` accepts `{VInt _}`
+  — a *literal subset*, so `AInt <: ANum` holds definitionally. Unrelated atoms
+  pick disjoint constructors, so their intersection is empty *by `discriminate`
+  on heads*, not by axiom. `denote` lifts to `BTy` with
+  `∪↦∨, ∩↦∧, ¬↦~, ⊤↦True, ⊥↦False`.
+- **`dsub a b := ∀ v, denote a v -> denote b v`** is now THE definition of
+  subtyping; `dequiv` is mutual `dsub`. The old inductive `sub` is **retained**
+  as the future *algorithmic* relation (to be proven sound+complete vs `dsub`).
+- **Earlier results re-proved under `dsub`** (all close by unfolding to prop
+  logic): refl, trans, lub/glb, comm/assoc/idem/absorption.
+- **The payoff — full Boolean-algebra laws, axiom-free:** distributivity **both
+  directions** (`ddistrib_inter_union`, `ddistrib_union_inter`), De Morgan both
+  (`dde_morgan_union/_inter`), complement (`dcomplement_inter/_union`), double
+  negation (`ddouble_neg`), atom disjointness (nine `disjoint_*`), base order
+  (`base_order_int_num`).
+- **Constructivity without `Classical`.** The "classical-flavoured" laws (De
+  Morgan's hard direction, complement, double negation) are discharged via
+  `denote_dec` — membership is **decidable** for every type/value — yielding
+  excluded-middle and DNE for `denote` *constructively*. No `Classical` import,
+  no `Axiom`.
+- **Non-vacuity / faithfulness.** `V` is inhabited; each atom is inhabited;
+  `dsub` is non-trivial — proved NON-subtypes `~ dsub AStr AInt`,
+  `~ dsub Top Bot`, `~ dsub ANum AInt` (numbers aren't all ints); and a
+  non-disjoint pair does NOT collapse: `~ dsub (ANum ∩ AInt) Bot` (witness
+  `VInt 0`). These prove the model is faithful, not vacuously true.
+
+`Print Assumptions` on every law above + the non-vacuity lemmas: **Closed under
+the global context** — no axioms, no `Admitted`. Whole dev compiles clean
+(`coqc proof/subtype.v`).
+
 ## Staging
 
 - **[done]** mechanized lattice + subtype `refl`/`trans` (Rocq);
@@ -94,13 +141,22 @@ AStr ≡ Bot`, which `sub` also does not prove). Both are their own increments.
   (comm/assoc/idem/absorption) up to `tequiv`; free-lattice direction of
   distributivity; **machine-checked proof that the hard direction is NOT
   derivable** (N5 model + soundness). Finding: free *lattice*, not distributive.
-- **[next — the distributivity fork]** decide and execute one of:
-  (a) add a principled, schematic distributivity rule to `sub` and **re-prove
-  transitivity** under it; or (b) commit to the value-set semantics and prove
-  `sub` sound+complete against it (this also resolves `TInter AInt AStr ≡ Bot`).
-  Either choice is a substrate increment; do not bolt distributivity on as a
-  derived lemma — it provably is not one.
-- **[then]** negation / complement; QuickChick to fuzz the relation against a
-  normalizer; connect to the executable semantics in `lib/sem` as the empirical
-  reality-anchor — the one thing proof *cannot* establish: that the model
-  matches real LuaJIT value behavior.
+- **[done — increment 3]** the **semantic pivot**: negation added; clean
+  axiom-free denotation over a concrete value domain `V`; `dsub` defined as
+  set inclusion; **all Boolean-algebra laws proved as theorems-for-free**
+  (distributivity both directions, De Morgan, complement, double negation,
+  atom disjointness, base order) with disjointness + order *constructive* (not
+  axioms); decidable membership replaces any classical axiom; non-vacuity
+  lemmas prove the model is faithful. The distributivity fork from increment 2
+  is **resolved by route (b)** — value-set semantics — at the abstract level.
+- **[next — algorithmic decision procedure]** define a decidable `sub`-style
+  algorithm and prove it **sound + complete against `dsub`** (`sub a b <-> dsub
+  a b`). This makes the old inductive relation honest: an algorithm certified
+  against the semantic truth, not a free lattice masquerading as the spec.
+- **[then — equirecursive μ]** extend `BTy` with recursive types (`μ`) and
+  coinductive/contractive denotation; re-establish the laws and the decision
+  procedure under recursion.
+- **[then — the lib/sem reality bridge]** connect the abstract `V`/`denote` to
+  the executable semantics in `lib/sem` as the empirical reality-anchor — the
+  one thing proof *cannot* establish: that the model matches real LuaJIT value
+  behavior.

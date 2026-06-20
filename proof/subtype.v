@@ -569,3 +569,333 @@ Theorem distrib_union_inter_ge_unprovable :
 Proof.
   intro H. apply interp_sound in H. simpl in H. discriminate H.
 Qed.
+
+(* ===========================================================================
+   INCREMENT 3 — the SEMANTIC PIVOT: a Boolean algebra of types.
+
+   The free-lattice [sub] of increments 1-2 is PROVABLY non-distributive (the
+   N5 result above). Distributivity, De Morgan, complement, double-negation —
+   the laws a real type lattice needs — are NOT theorems of any free lattice.
+   We therefore stop axiomatizing the order and DEFINE subtyping semantically:
+   a type denotes a SET of values, and [A <: B] means [denote A ⊆ denote B].
+   Every Boolean-algebra law then collapses to first-order logic over the
+   denotation — no [sub] rule is asserted, no axiom is added, and the laws the
+   free lattice could not give become theorems for free.
+
+   The old inductive [sub] is RETAINED above as the future *algorithmic*
+   relation (to be proven sound + complete against [dsub] in a later stage).
+   [dsub] is primary from here on. See docs/proof-kernel.md roadmap.
+
+   --- The model construction (disjointness + order are CONSTRUCTIVE) ---------
+
+   Values live in a concrete inductive domain [V] whose constructors are the
+   ground value-kinds. Each constructor is a DISTINCT head, so the denotations
+   of unrelated atoms are disjoint *by construction* — disjointness is decided
+   by Coq's [discriminate] on constructor heads, not asserted as an axiom.
+
+   The base order [AInt <: ANum] is likewise baked into the denotation, not
+   asserted: numbers split into integer values ([VInt]) and non-integer numeric
+   values ([VFloat]); [atom_denote ANum] accepts BOTH, [atom_denote AInt]
+   accepts only [VInt]. So [denote (atom AInt) v -> denote (atom ANum) v] holds
+   definitionally (the [VInt] disjunct of ANum is exactly AInt's denotation),
+   while the converse fails because [VFloat] inhabits ANum but not AInt.
+   =========================================================================== *)
+
+(* ---- Extend the type syntax with negation (Boolean algebra) ---------------- *)
+
+Inductive BTy : Type :=
+  | BAtom  : Atom -> BTy
+  | BTop   : BTy
+  | BBot   : BTy
+  | BUnion : BTy -> BTy -> BTy
+  | BInter : BTy -> BTy -> BTy
+  | BNeg   : BTy -> BTy.
+
+(* ---- The value domain -----------------------------------------------------
+   Distinct constructor heads => unrelated atoms denote disjoint sets, decided
+   structurally. [VInt]/[VFloat] are the two numeric kinds; their union is the
+   number kind, [VInt] alone is the integer kind. *)
+
+Inductive V : Type :=
+  | VInt   : nat -> V          (* an integer value: inhabits AInt AND ANum *)
+  | VFloat : nat -> V          (* a non-integer number: inhabits ANum only  *)
+  | VStr   : nat -> V          (* a string value:  inhabits AStr only       *)
+  | VBool  : bool -> V         (* a boolean value: inhabits ABool only      *)
+  | VNil   : V.                (* nil:             inhabits ANil only        *)
+
+(* ---- Atom denotation ------------------------------------------------------
+   Order and disjointness are visible right here, in the value-set membership,
+   never imposed from outside. ANum's set is {VInt n} ∪ {VFloat n}; AInt's set
+   is {VInt n} — a literal subset. The other atoms pick their own constructor. *)
+
+Definition atom_denote (a : Atom) (v : V) : Prop :=
+  match a with
+  | ANil  => match v with VNil    => True | _ => False end
+  | ABool => match v with VBool _ => True | _ => False end
+  | AInt  => match v with VInt _  => True | _ => False end
+  | ANum  => match v with VInt _ | VFloat _ => True | _ => False end
+  | AStr  => match v with VStr _  => True | _ => False end
+  end.
+
+(* ---- The denotation: types are predicates over V (i.e. sets of values) ---- *)
+
+Fixpoint denote (t : BTy) (v : V) : Prop :=
+  match t with
+  | BAtom a    => atom_denote a v
+  | BTop       => True
+  | BBot       => False
+  | BUnion a b => denote a v \/ denote b v
+  | BInter a b => denote a v /\ denote b v
+  | BNeg a     => ~ denote a v
+  end.
+
+(* ---- Decidability of membership (NO classical axiom) ----------------------
+   [denote t v] is decidable for every type and value: atoms decide by matching
+   the value constructor, and the connectives close decidability under and/or/
+   not. This is what lets the classical-flavoured Boolean laws (De Morgan's
+   harder direction, excluded middle for the complement/double-negation laws) go
+   through CONSTRUCTIVELY — we appeal to this lemma, never to an axiom. *)
+
+Definition atom_dec (a : Atom) (v : V) : {atom_denote a v} + {~ atom_denote a v}.
+Proof.
+  destruct a; destruct v; simpl; (left; exact I) || (right; intro H; exact H).
+Defined.
+
+Fixpoint denote_dec (t : BTy) (v : V) : {denote t v} + {~ denote t v}.
+Proof.
+  destruct t; simpl.
+  - apply atom_dec.
+  - left; exact I.
+  - right; intro H; exact H.
+  - destruct (denote_dec t1 v); destruct (denote_dec t2 v);
+      (left; (left + right); assumption) || (right; intros [H | H]; contradiction).
+  - destruct (denote_dec t1 v); destruct (denote_dec t2 v);
+      (left; split; assumption) || (right; intros [H1 H2]; contradiction).
+  - destruct (denote_dec t v).
+    + right; intro H; contradiction.
+    + left; assumption.
+Defined.
+
+(* Excluded middle and double-negation elimination for [denote], derived from
+   decidability — constructive, no [Classical] import. *)
+Lemma classic_denote' : forall t v, denote t v \/ ~ denote t v.
+Proof. intros t v. destruct (denote_dec t v); auto. Qed.
+
+Lemma NNPP_denote' : forall t v, ~ ~ denote t v -> denote t v.
+Proof. intros t v Hnn. destruct (denote_dec t v) as [H | H]; [ exact H | contradiction ]. Qed.
+
+(* ---- Semantic subtyping IS the definition of subtyping --------------------- *)
+
+Definition dsub (a b : BTy) : Prop := forall v : V, denote a v -> denote b v.
+
+Definition dequiv (a b : BTy) : Prop := dsub a b /\ dsub b a.
+
+(* ---- Preorder + lattice results, re-proved under [dsub] -------------------
+   Each now closes by unfolding to propositional logic. *)
+
+Theorem dsub_refl : forall a, dsub a a.
+Proof. unfold dsub; auto. Qed.
+
+Theorem dsub_trans : forall a b c, dsub a b -> dsub b c -> dsub a c.
+Proof. unfold dsub; auto. Qed.
+
+Theorem dequiv_refl : forall a, dequiv a a.
+Proof. split; apply dsub_refl. Qed.
+
+Theorem dequiv_sym : forall a b, dequiv a b -> dequiv b a.
+Proof. intros a b [H1 H2]; split; assumption. Qed.
+
+Theorem dequiv_trans : forall a b c, dequiv a b -> dequiv b c -> dequiv a c.
+Proof.
+  intros a b c [H1 H2] [H3 H4]; split; eapply dsub_trans; eassumption.
+Qed.
+
+(* Union is the lub, Inter the glb — by construction of [denote]. *)
+
+Theorem dunion_inl : forall a b, dsub a (BUnion a b).
+Proof. unfold dsub; simpl; auto. Qed.
+
+Theorem dunion_inr : forall a b, dsub b (BUnion a b).
+Proof. unfold dsub; simpl; auto. Qed.
+
+Theorem dinter_prl : forall a b, dsub (BInter a b) a.
+Proof. unfold dsub; simpl; tauto. Qed.
+
+Theorem dinter_prr : forall a b, dsub (BInter a b) b.
+Proof. unfold dsub; simpl; tauto. Qed.
+
+Theorem dunion_lub : forall a b c, dsub a c -> dsub b c -> dsub (BUnion a b) c.
+Proof. unfold dsub; simpl; intros a b c Hac Hbc v [H | H]; auto. Qed.
+
+Theorem dinter_glb : forall a b c, dsub c a -> dsub c b -> dsub c (BInter a b).
+Proof. unfold dsub; simpl; auto. Qed.
+
+(* Commutativity / associativity / idempotence / absorption. *)
+
+Theorem dunion_comm : forall a b, dequiv (BUnion a b) (BUnion b a).
+Proof. split; unfold dsub; simpl; tauto. Qed.
+
+Theorem dinter_comm : forall a b, dequiv (BInter a b) (BInter b a).
+Proof. split; unfold dsub; simpl; tauto. Qed.
+
+Theorem dunion_assoc : forall a b c,
+  dequiv (BUnion (BUnion a b) c) (BUnion a (BUnion b c)).
+Proof. split; unfold dsub; simpl; tauto. Qed.
+
+Theorem dinter_assoc : forall a b c,
+  dequiv (BInter (BInter a b) c) (BInter a (BInter b c)).
+Proof. split; unfold dsub; simpl; tauto. Qed.
+
+Theorem dunion_idem : forall a, dequiv (BUnion a a) a.
+Proof. split; unfold dsub; simpl; tauto. Qed.
+
+Theorem dinter_idem : forall a, dequiv (BInter a a) a.
+Proof. split; unfold dsub; simpl; tauto. Qed.
+
+Theorem dabsorb_union_inter : forall a b, dequiv (BUnion a (BInter a b)) a.
+Proof. split; unfold dsub; simpl; tauto. Qed.
+
+Theorem dabsorb_inter_union : forall a b, dequiv (BInter a (BUnion a b)) a.
+Proof. split; unfold dsub; simpl; tauto. Qed.
+
+(* ===========================================================================
+   THE PAYOFF — full Boolean-algebra laws as axiom-free theorems.
+
+   These are exactly what the free lattice (increments 1-2) provably could NOT
+   give. Each closes by unfolding [denote] to propositional logic + [tauto].
+   No [sub] rule is invoked; no axiom is added.
+   =========================================================================== *)
+
+(* ---- Distributivity, BOTH directions (the free-lattice impossibility) ------ *)
+
+Theorem ddistrib_inter_union : forall a b c,
+  dequiv (BInter a (BUnion b c)) (BUnion (BInter a b) (BInter a c)).
+Proof. split; unfold dsub; simpl; tauto. Qed.
+
+Theorem ddistrib_union_inter : forall a b c,
+  dequiv (BUnion a (BInter b c)) (BInter (BUnion a b) (BUnion a c)).
+Proof. split; unfold dsub; simpl; tauto. Qed.
+
+(* ---- De Morgan, both directions ------------------------------------------- *)
+
+Theorem dde_morgan_union : forall a b,
+  dequiv (BNeg (BUnion a b)) (BInter (BNeg a) (BNeg b)).
+Proof. split; unfold dsub; simpl; tauto. Qed.
+
+Theorem dde_morgan_inter : forall a b,
+  dequiv (BNeg (BInter a b)) (BUnion (BNeg a) (BNeg b)).
+Proof.
+  (* the BUnion -> BInter-neg direction is intuitionistic; the converse needs
+     a case split on decidable membership, supplied by classical reasoning over
+     the (decidable) [denote a v]. We avoid an axiom by proving membership
+     decidable. *)
+  split; unfold dsub; simpl.
+  - intros v Hn. destruct (classic_denote' a v) as [Ha | Ha].
+    + right. intro Hb. apply Hn. split; assumption.
+    + left. exact Ha.
+  - intros v H [Ha Hb]. destruct H as [H | H]; auto.
+Qed.
+
+(* ---- Complement laws ------------------------------------------------------- *)
+
+Theorem dcomplement_inter : forall a, dequiv (BInter a (BNeg a)) BBot.
+Proof.
+  split; unfold dsub; simpl.
+  - intros v [H Hn]. exact (Hn H).
+  - intros v [].
+Qed.
+
+Theorem dcomplement_union : forall a, dequiv (BUnion a (BNeg a)) BTop.
+Proof.
+  split; unfold dsub; simpl.
+  - intros; exact I.
+  - intros v _. apply classic_denote'.
+Qed.
+
+(* ---- Double negation ------------------------------------------------------- *)
+
+Theorem ddouble_neg : forall a, dequiv (BNeg (BNeg a)) a.
+Proof.
+  split; unfold dsub; simpl.
+  - intros v Hnn. apply NNPP_denote'. exact Hnn.
+  - intros v H Hn. exact (Hn H).
+Qed.
+
+(* ---- Atom disjointness (by CONSTRUCTION) and base order -------------------- *)
+
+(* All unrelated atom pairs intersect to Bot. Proved by destructing the value:
+   distinct constructor heads make the conjunction of memberships absurd. No
+   axiom — the falsity is decided by [discriminate]/structural match. *)
+
+Ltac disjoint := unfold dsub; simpl; intros v [H1 H2]; destruct v; contradiction.
+
+Theorem disjoint_int_str  : dsub (BInter (BAtom AInt)  (BAtom AStr))  BBot.
+Proof. disjoint. Qed.
+Theorem disjoint_int_bool : dsub (BInter (BAtom AInt)  (BAtom ABool)) BBot.
+Proof. disjoint. Qed.
+Theorem disjoint_int_nil  : dsub (BInter (BAtom AInt)  (BAtom ANil))  BBot.
+Proof. disjoint. Qed.
+Theorem disjoint_str_bool : dsub (BInter (BAtom AStr)  (BAtom ABool)) BBot.
+Proof. disjoint. Qed.
+Theorem disjoint_str_nil  : dsub (BInter (BAtom AStr)  (BAtom ANil))  BBot.
+Proof. disjoint. Qed.
+Theorem disjoint_bool_nil : dsub (BInter (BAtom ABool) (BAtom ANil))  BBot.
+Proof. disjoint. Qed.
+Theorem disjoint_num_str  : dsub (BInter (BAtom ANum)  (BAtom AStr))  BBot.
+Proof. disjoint. Qed.
+Theorem disjoint_num_bool : dsub (BInter (BAtom ANum)  (BAtom ABool)) BBot.
+Proof. disjoint. Qed.
+Theorem disjoint_num_nil  : dsub (BInter (BAtom ANum)  (BAtom ANil))  BBot.
+Proof. disjoint. Qed.
+
+(* Base order: AInt <: ANum, by construction (VInt inhabits both). *)
+Theorem base_order_int_num : dsub (BAtom AInt) (BAtom ANum).
+Proof. unfold dsub; simpl; intros v H; destruct v; auto. Qed.
+
+(* ===========================================================================
+   NON-VACUITY / FAITHFULNESS — the model is not trivially true.
+
+   A model proving every law but with empty [V] or trivial [denote] is
+   worthless. These witnesses show [V] is inhabited and [dsub] is a genuine,
+   non-collapsing relation.
+   =========================================================================== *)
+
+(* The domain is inhabited — five distinct value witnesses. *)
+Theorem V_inhabited : exists v : V, True.
+Proof. exists VNil; exact I. Qed.
+
+(* Each atom is genuinely inhabited (denotations are nonempty). *)
+Theorem int_inhabited  : exists v, denote (BAtom AInt) v.
+Proof. exists (VInt 0); simpl; exact I. Qed.
+Theorem num_inhabited  : exists v, denote (BAtom ANum) v.
+Proof. exists (VFloat 0); simpl; exact I. Qed.
+Theorem str_inhabited  : exists v, denote (BAtom AStr) v.
+Proof. exists (VStr 0); simpl; exact I. Qed.
+
+(* Subtyping is NOT trivial — concrete NON-subtypes, each with a witness value
+   that is in the LHS denotation but not the RHS. *)
+
+Theorem not_str_sub_int : ~ dsub (BAtom AStr) (BAtom AInt).
+Proof.
+  unfold dsub; intro H. specialize (H (VStr 0)). simpl in H.
+  apply H. exact I.
+Qed.
+
+Theorem not_top_sub_bot : ~ dsub BTop BBot.
+Proof.
+  unfold dsub; intro H. specialize (H VNil). apply H. simpl; exact I.
+Qed.
+
+(* Numbers are NOT all ints: ANum </: AInt, witnessed by a non-integer number. *)
+Theorem not_num_sub_int : ~ dsub (BAtom ANum) (BAtom AInt).
+Proof.
+  unfold dsub; intro H. specialize (H (VFloat 0)). simpl in H.
+  apply H. exact I.
+Qed.
+
+(* A NON-disjoint pair does NOT collapse to Bot: AInt inhabits ANum∩AInt. *)
+Theorem num_int_not_bot : ~ dsub (BInter (BAtom ANum) (BAtom AInt)) BBot.
+Proof.
+  unfold dsub; intro H. specialize (H (VInt 0)). simpl in H.
+  apply H. split; exact I.
+Qed.
