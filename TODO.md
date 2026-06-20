@@ -98,6 +98,8 @@ Op-sem parity must hold at every commit. After the handler deletion, the adversa
 
 ## Typechecker soundness methodology — open fork
 
+> **RESOLVED (2026-06-20).** Decided via design-it-twice (4 decorrelated candidates, 3 adversarial judges): ground soundness in an executable formal Lua semantics validated against reality (validated-semantics-first), version-parametric and cross-language, with mechanized proof staged behind phase 1. Full design + staging (S1–S5) in `docs/typechecker-formal-semantics.md`. Implementation TODOs in the next subsection ("Formal-semantics substrate — implementation"). The historical fork below is retained for context.
+
 > *Open threads from a previous session. Treat as starting context, not instructions — verify relevance before acting.*
 
 **Background:** the slice typechecker's soundness is established by adversarial testing (critic agents imagining attacks). The variance write-through unsoundness (fixed `cdc5b2a6` + re-verified `a4d85035`) survived 5 feature-audit rounds before a 6th adversarial pass caught it; an embedded-alias sub-hole only surfaced because someone happened to imagine that exact case. The methodology, not any single bug, may be the weak link — adversarial testing shows presence of bugs, never absence.
@@ -115,6 +117,16 @@ Op-sem parity must hold at every commit. After the handler deletion, the adversa
 **Open sub-questions (verify before acting):** prior Lua-formalization art may exist (believed: Soldevila et al.; a PLT Redex model), but targets reference Lua 5.3/5.4, not LuaJIT 5.1. The subset-scoping crescent uses might make it far smaller than a full formalization. Verify via research; don't trust session memory. Suggested treatment: (a) research prior art, (b) design-it-twice on the soundness-methodology decision.
 
 **Pointers:** `docs/typechecker-design-thesis.md` (§4b/claim 5 now FIXED; "fully sound is a HARD invariant" stance); `docs/agnostic-static-analysis-crescent-slice.md` §6.14 (variance closure design + soundness argument); `docs/artifacts/typechecker-run-2026-06-12/` (prior-art survey, 3 design-thesis critiques, gap-cascade-magnitude, per-property-metric, variance-fix-cost + design + reverify).
+
+## Formal-semantics substrate — implementation
+
+> *Implements the RESOLVED decision above. Design + rationale: `docs/typechecker-formal-semantics.md`. Each increment is independently useful; build substrate before consumers (S1 before the loops that need it).*
+
+- [ ] **S1 — primitive-decomposed Lua semantics for the core fragment (NEXT — scope this increment).** Executable small-step operational semantics in pure Lua over a small primitive set with faults-as-stuck-primitives; parametric value algebra from day one. Fragment = v1 subset (scalars, literals, structural tables [records/indexers, open/closed rows, optional/readonly fields], functions [multi-return + vararg], union/intersection, equirecursive μ); NO metatables/coroutines/FFI/full-stdlib. Plus the Loop-α harness vs the vendored LuaJIT only. Immediately a spec-oracle. Reuse `lib/test/{arb,prop,fuzz}`.
+- [ ] **S2 — versions + Profiles.** Wire PUC 5.1–5.4 via the flake; introduce Profiles `(desugar, value-algebra, enabled-rule-set, typing-delta)` and version deltas, starting with the 5.3 int/float split as the proving case for the parametric value algebra. Loop α across all versions.
+- [ ] **S3 — Loop-β soundness property.** `checker accepts ⟹ ¬fault` against the deterministic spec (NOT the real interpreters) with structure-aware alias-targeting generators. Acceptance: re-derive the known variance unsoundness as a shrunk counterexample.
+- [ ] **S4 — second language (cross-language bar).** λ-calculus with sum types + static arities as a Profile; must slot in without editing the core value-algebra/primitive mechanism (real falsification test).
+- [ ] **S5 (phase 2) — mechanized proof.** Choose the proof host (tentatively Lean 4) only once phase 1 has forced the real primitive set; prove per-primitive progress + preservation lemmas feature-by-feature.
 
 ## Slice typechecker — coverage and precision open threads
 
