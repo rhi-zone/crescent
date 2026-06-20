@@ -2719,6 +2719,51 @@ local function try_eager_intrinsic_return(ctx, inst_callee_tid, arg_tids, args_e
     return nil
 end
 
+-- Statically resolve an expression node's type without going through constraint
+-- variables, recursing through field-access chains (`a.b.c`). Handles:
+--   identifier        — scope lookup, with var_origin fallback (field-access
+--                       aliases) and require_exports fallback;
+--   field expression  — resolve the receiver's type recursively, then read the
+--                       named field via table_field.
+-- Returns the resolved (find'd) type id, or nil when not statically resolvable
+-- (e.g. the receiver is an unresolved TAG_VAR awaiting the solver). General over
+-- chain depth — `va.kind_of` and `env.va.kind_of` are both resolved.
+--: (Ctx, ASTNode) -> integer | nil
+local function resolve_expr_type_static(ctx, node)
+    if node.kind == NODE_IDENTIFIER then
+        local tid = env_mod.lookup(ctx.scope, node.data[0])
+        if not tid then
+            -- require()'d local whose type is still TAG_VAR awaiting $Require<T>.
+            if ctx.require_exports then
+                local exp = ctx.require_exports[node.data[0]]
+                if exp then return types_mod.find(ctx, exp) end
+            end
+            return nil
+        end
+        local rtid = types_mod.find(ctx, tid)
+        local t = ctx.types:get(rtid)
+        if t.tag == TAG_VAR then
+            -- Trace a field-access binding alias (`local x = obj.field`).
+            local origin = ctx.var_origin[rtid]
+            if origin then
+                local src_obj = types_mod.find(ctx, origin[1])
+                local fe = types_mod.table_field(ctx, src_obj, origin[2])
+                if fe then return types_mod.find(ctx, fe.type_id) end
+            end
+            return nil
+        end
+        return rtid
+    elseif node.kind == NODE_FIELD_EXPR then
+        local obj_n = ctx.nodes:get(node.data[0])
+        local obj_tid = resolve_expr_type_static(ctx, obj_n)
+        if obj_tid then
+            local fe = types_mod.table_field(ctx, obj_tid, node.data[1])
+            if fe then return types_mod.find(ctx, fe.type_id) end
+        end
+    end
+    return nil
+end
+
 -- Peek at the declared return type of a callee without going through constraint
 -- variables. Returns the concrete ret-slot type id, or nil if not resolvable.
 -- Used to detect union-of-tuples return types (e.g. string.find, io.open) so
@@ -2744,14 +2789,15 @@ local function peek_callee_ret_union(ctx, callee_n)
             end
         end
     elseif callee_n.kind == NODE_FIELD_EXPR then
+        -- Resolve the receiver's type generally (recursing through field-access
+        -- chains like `env.va`), then read the called field. This makes callees
+        -- reached through multi-hop field access (`env.va.kind_of`) peekable, not
+        -- just single-hop `va.kind_of`.
         local obj_n = ctx.nodes:get(callee_n.data[0])
-        if obj_n.kind == NODE_IDENTIFIER then
-            local obj_tid = env_mod.lookup(ctx.scope, obj_n.data[0])
-            if obj_tid then
-                obj_tid = types_mod.find(ctx, obj_tid)
-                local fe = types_mod.table_field(ctx, obj_tid, callee_n.data[1])
-                if fe then fn_tid = types_mod.find(ctx, fe.type_id) end
-            end
+        local obj_tid = resolve_expr_type_static(ctx, obj_n)
+        if obj_tid then
+            local fe = types_mod.table_field(ctx, obj_tid, callee_n.data[1])
+            if fe then fn_tid = types_mod.find(ctx, fe.type_id) end
         end
     elseif callee_n.kind == defs.NODE_METHOD_CALL then
         -- Method call recv:method(...): look up method in receiver's type eagerly.
@@ -2892,6 +2938,14 @@ ExprRule[NODE_CALL_EXPR] = function(ctx, nid)
     -- D2: if the last arg is a multi-return call with concrete tuple return,
     -- spread its slots into individual args. Lua spread-in-last semantics.
     arg_tids = spread_last_call_arg(ctx, arg_tids, n.data[1], n.data[2])
+
+    -- An override left in pending_multi_return_override by an argument call
+    -- (`f(g(...))` — g's override) belongs to g's binding site, not this call's.
+    -- spread_last_call_arg has already consumed any genuine multi-return spread;
+    -- whatever remains is stale w.r.t. THIS call and must not leak into the
+    -- override-setting logic below (which guards on `not override`). Clear it so
+    -- this call computes its own override cleanly.
+    ctx.pending_multi_return_override = nil
 
     -- require() side-effect tracking: record module name for require_sources and
     -- invoke cri_loader for type alias injection.  Type resolution is handled by

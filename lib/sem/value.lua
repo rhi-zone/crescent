@@ -46,7 +46,7 @@ local M = {}
 --::   string: (string) -> Value,
 --::   table_ref: (integer) -> Value,
 --::   closure: (integer) -> Value,
---::   kind_of: (Value) -> string,
+--::   kind_of: (Value) -> ValKind,
 --::   bool_value: (Value) -> boolean,
 --::   number_value: (Value) -> number,
 --::   string_value: (Value) -> string,
@@ -100,13 +100,11 @@ local function mk_table_ref(addr) return { tag = "table", addr = addr } --[[: Va
 --: (integer) -> Value
 local function mk_closure(addr) return { tag = "closure", addr = addr } --[[: Value]] end
 
--- kind_of returns the runtime tag string. NOTE (typechecker substrate gap,
--- recorded in TODO.md): a union of string literals is not assignable to itself
--- in *function-return* position (it widens to `string`); it works fine as a
--- record field value. So the declared return is `string`, not `ValKind`.
--- Callers compare against the literal kind strings ("number", "table", ...),
--- which is sound; only closed-set exhaustiveness checking is forfeited here.
---: (Value) -> string
+-- kind_of returns the runtime tag string, typed as the closed `ValKind` union so
+-- callers get exhaustiveness checking on kinds. (The literal-union return-position
+-- assignability gap that previously forced `string` here was fixed in the checker;
+-- see solve.lua `solve_return` fast path.)
+--: (Value) -> ValKind
 local function kind_of(v) return v.tag end
 
 -- Accessors are partial: callers must have established the kind via kind_of

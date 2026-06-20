@@ -2831,7 +2831,24 @@ local function solve_return(ctx, c)
             if e_len > 0 then
                 expected_tid = find(ctx, ctx.lists:get(e_start))
             end
-            local ok, err = unify_mod.unify(ctx, widened, expected_tid)
+            -- Fast path (mirrors argument position): when the expected slot is
+            -- concrete, check the UNWIDENED actual for direct assignability first.
+            -- Widening loses literal precision — `return "a"` against a `"a" | "b"`
+            -- return slot widens to `string`, which is not assignable to the literal
+            -- union and would spuriously fail. A literal is assignable to a literal
+            -- union without widening.
+            -- Fast path: when the expected slot is concrete, prefer the UNWIDENED
+            -- actual so literal precision is kept (`return "a"` against a `"a" | "b"`
+            -- slot widens to `string` otherwise, which is not assignable). Fall back
+            -- to the widened actual when the unwidened one is not directly assignable.
+            local et_slot = ctx.types:get(find(ctx, expected_tid))
+            local actual_tid = widened
+            if et_slot.tag ~= TAG_VAR and et_slot.tag ~= TAG_ROWVAR
+                and not contains_free_var(ctx, expected_tid)
+                and unify_mod.try_unify(ctx, val_tid, expected_tid) then
+                actual_tid = val_tid
+            end
+            local ok, err = unify_mod.unify(ctx, actual_tid, expected_tid)
             if not ok then
                 add_error(ctx, line, col,
                     "return type mismatch: cannot return `"
@@ -2906,6 +2923,20 @@ local function solve_return(ctx, c)
                 end
                 return true
             end
+        end
+        -- Fast path (mirrors argument position, line ~2256): when the expected
+        -- return type is concrete (no free vars, not a bare TAG_VAR), check the
+        -- UNWIDENED actual for direct assignability first. Widening loses literal
+        -- precision — e.g. `return "a"` against `"a" | "b"` widens to `string`,
+        -- which is not assignable to the literal union and would spuriously fail.
+        -- A literal is assignable to a literal union (or a literal field/param)
+        -- without widening; widening is only correct when the expected side is a
+        -- free var to be inferred (handled by the non-annotated branch below).
+        local et2 = ctx.types:get(find(ctx, expected_tid))
+        if et2.tag ~= TAG_VAR and et2.tag ~= TAG_ROWVAR
+          and not contains_free_var(ctx, expected_tid)
+          and unify_mod.try_unify(ctx, val_tid, expected_tid) then
+            return true
         end
         local ok, err = unify_mod.unify(ctx, widened, expected_tid)
         if not ok then

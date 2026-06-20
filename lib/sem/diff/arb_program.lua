@@ -193,10 +193,10 @@ end
 -- arb.lua's `unknown`-typed Arb slot), so the types stay precise and no force
 -- cast is needed at a runner boundary.
 -- The iterator yields the next-smaller program, or nil to stop. Its value slot is
--- typed `unknown` only because a union-of-records array is not reflexively
--- assignable in return position here (a typechecker gap recorded in TODO.md); the
--- runtime value is always an SS[] and the alpha test re-narrows it.
---:: ShrinkIter = () -> (unknown, nil)
+-- the precise `SS[]` (the return-position literal-union assignability gap that
+-- previously forced `unknown` here was fixed in the checker; see solve.lua
+-- `solve_return` fast path).
+--:: ShrinkIter = () -> (SS[] | nil, nil)
 --:: SemArb = { generate: (Rng, integer) -> (SS[], nil), shrink: (SS[], unknown) -> ShrinkIter }
 
 M.arb = {
