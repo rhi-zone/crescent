@@ -12,6 +12,7 @@ From Stdlib Require Import PeanoNat.
 From Stdlib Require Import Lia.
 From Stdlib Require Import List.
 From Stdlib Require Import Bool.
+From Stdlib Require Import String.
 Import ListNotations.
 
 (* ---- Base atoms with a declared sub-order ---------------------------------
@@ -612,7 +613,13 @@ Inductive BTy : Type :=
   | BBot   : BTy
   | BUnion : BTy -> BTy -> BTy
   | BInter : BTy -> BTy -> BTy
-  | BNeg   : BTy -> BTy.
+  | BNeg   : BTy -> BTy
+  (* INCREMENT 5 — record/table types. A finite assoc-list of string keys to
+     field types. Read OPEN / WIDTH (standard structural subtyping): a value is
+     in [BRec fields] iff it is a table that has, for every listed (k,T), some
+     value at key k inhabiting T — OTHER keys are allowed. Closed/exact records
+     and index signatures are DEFERRED. *)
+  | BRec   : list (string * BTy) -> BTy.
 
 (* ---- The value domain -----------------------------------------------------
    Distinct constructor heads => unrelated atoms denote disjoint sets, decided
@@ -624,12 +631,63 @@ Inductive V : Type :=
   | VFloat : nat -> V          (* a non-integer number: inhabits ANum only  *)
   | VStr   : nat -> V          (* a string value:  inhabits AStr only       *)
   | VBool  : bool -> V         (* a boolean value: inhabits ABool only      *)
-  | VNil   : V.                (* nil:             inhabits ANil only        *)
+  | VNil   : V                 (* nil:             inhabits ANil only        *)
+  (* INCREMENT 5 — table values. A FINITE assoc-list of string keys to
+     sub-values. V stays a (nested) INDUCTIVE: VTable carries a list whose
+     elements are structurally smaller, so it is well-founded. Cyclic /
+     self-referential tables are DEFERRED to the future equirecursive-μ
+     increment (they would force a coinductive V — a real fork we do not take
+     here). *)
+  | VTable : list (string * V) -> V.
+
+(* ---- Finite key lookup in a table ----------------------------------------- *)
+
+Fixpoint assoc_lookup (k : string) (ents : list (string * V)) : option V :=
+  match ents with
+  | [] => None
+  | (k', v) :: rest => if string_dec k k' then Some v else assoc_lookup k rest
+  end.
+
+(* ---- A usable induction principle for the nested-inductive V --------------
+   The auto-generated [V_ind] gives NO induction hypothesis for the sub-values
+   inside a [VTable] (Coq does not look through the nested [list]). We hand-roll
+   the mutual scheme: a property [P] on values together with a property [Pl] on
+   field-lists, with the IH available element-wise. This is the standard
+   nested-inductive idiom — not an axiom, a plain [Fixpoint]. *)
+Section V_ind_strong.
+  Variable P  : V -> Prop.
+  Variable Pl : list (string * V) -> Prop.
+  Hypothesis HInt   : forall n, P (VInt n).
+  Hypothesis HFloat : forall n, P (VFloat n).
+  Hypothesis HStr   : forall n, P (VStr n).
+  Hypothesis HBool  : forall b, P (VBool b).
+  Hypothesis HNil   : P VNil.
+  Hypothesis HTable : forall l, Pl l -> P (VTable l).
+  Hypothesis Hnil   : Pl [].
+  Hypothesis Hcons  : forall k v rest, P v -> Pl rest -> Pl ((k, v) :: rest).
+  Fixpoint V_rect_strong (v : V) : P v :=
+    match v with
+    | VInt n   => HInt n
+    | VFloat n => HFloat n
+    | VStr n   => HStr n
+    | VBool b  => HBool b
+    | VNil     => HNil
+    | VTable l =>
+        HTable l
+          ((fix go (l : list (string * V)) : Pl l :=
+              match l with
+              | [] => Hnil
+              | (k, vv) :: rest => Hcons k vv rest (V_rect_strong vv) (go rest)
+              end) l)
+    end.
+End V_ind_strong.
 
 (* ---- Atom denotation ------------------------------------------------------
    Order and disjointness are visible right here, in the value-set membership,
    never imposed from outside. ANum's set is {VInt n} ∪ {VFloat n}; AInt's set
-   is {VInt n} — a literal subset. The other atoms pick their own constructor. *)
+   is {VInt n} — a literal subset. The other atoms pick their own constructor.
+   Note [VTable] inhabits NO atom (every atom branch sends it to [False]) — a
+   table is structurally not a scalar. *)
 
 Definition atom_denote (a : Atom) (v : V) : Prop :=
   match a with
@@ -650,7 +708,61 @@ Fixpoint denote (t : BTy) (v : V) : Prop :=
   | BUnion a b => denote a v \/ denote b v
   | BInter a b => denote a v /\ denote b v
   | BNeg a     => ~ denote a v
+  (* OPEN / WIDTH record membership: v is some table [ents], and every LISTED
+     field (k,T) is present in [ents] with a value inhabiting T. Extra keys in
+     [ents] are allowed (open). The field-iteration is written as a STRUCTURAL
+     nested fixpoint over [fields] (not [forall ... In ...]) so the recursive
+     [denote T vv] call — at type T, a structural subterm of [BRec fields] — is
+     accepted by the guard checker. The [In]-quantified reading the brief states
+     is recovered exactly as [denote_rec_iff] below. *)
+  | BRec fields =>
+      exists ents, v = VTable ents /\
+        (fix all_fields (fs : list (string * BTy)) : Prop :=
+           match fs with
+           | [] => True
+           | (k, T) :: rest =>
+               (exists vv, assoc_lookup k ents = Some vv /\ denote T vv)
+               /\ all_fields rest
+           end) fields
   end.
+
+(* The brief's [In]-quantified reading, recovered as a characterization lemma.
+   [denote (BRec fields) v] iff v is a table and every listed field is present
+   with a value in its type. (The structural fold above and this [In] form are
+   provably equivalent — induction on [fields].) *)
+Lemma rec_fold_iff : forall (ents : list (string * V)) (fields : list (string * BTy)),
+  (fix all_fields (fs : list (string * BTy)) : Prop :=
+     match fs with
+     | [] => True
+     | (k, T) :: rest =>
+         (exists vv, assoc_lookup k ents = Some vv /\ denote T vv) /\ all_fields rest
+     end) fields
+  <-> (forall k T, In (k, T) fields ->
+         exists vv, assoc_lookup k ents = Some vv /\ denote T vv).
+Proof.
+  intros ents fields. induction fields as [ | [k T] rest IH ]; simpl.
+  - split; [ intros _ k T [] | intros _; exact I ].
+  - split.
+    + intros [Hhd Htl] k' T' [Heq | Hin].
+      * injection Heq as <- <-. exact Hhd.
+      * apply IH; assumption.
+    + intros H. split.
+      * apply (H k T). left; reflexivity.
+      * apply IH. intros k' T' Hin. apply H. right; assumption.
+Qed.
+
+Theorem denote_rec_iff : forall fields v,
+  denote (BRec fields) v
+  <-> exists ents, v = VTable ents /\
+        (forall k T, In (k, T) fields ->
+           exists vv, assoc_lookup k ents = Some vv /\ denote T vv).
+Proof.
+  intros fields v. simpl. split.
+  - intros [ents [Hv Hfold]]. exists ents. split; [ exact Hv | ].
+    apply rec_fold_iff. exact Hfold.
+  - intros [ents [Hv Hall]]. exists ents. split; [ exact Hv | ].
+    apply rec_fold_iff. exact Hall.
+Qed.
 
 (* ---- Decidability of membership (NO classical axiom) ----------------------
    [denote t v] is decidable for every type and value: atoms decide by matching
@@ -677,6 +789,41 @@ Proof.
   - destruct (denote_dec t v).
     + right; intro H; contradiction.
     + left; assumption.
+  - (* BRec: membership stays DECIDABLE and TOTAL. First decide whether v is a
+       table; if not, no membership. If [v = VTable ents], decide each listed
+       field by [string_dec]-driven lookup + recursive [denote_dec] on the
+       field type — finite over [fields]. Constructive, no Classical. *)
+    destruct v as [ | | | | | ents ];
+      try (right; intros [ents [Hbad _]]; discriminate Hbad).
+    (* v = VTable ents *)
+    assert (Hdec :
+      { (fix all_fields (fs : list (string * BTy)) : Prop :=
+           match fs with
+           | [] => True
+           | (k, T) :: rest =>
+               (exists vv, assoc_lookup k ents = Some vv /\ denote T vv)
+               /\ all_fields rest
+           end) l }
+      + { ~ (fix all_fields (fs : list (string * BTy)) : Prop :=
+           match fs with
+           | [] => True
+           | (k, T) :: rest =>
+               (exists vv, assoc_lookup k ents = Some vv /\ denote T vv)
+               /\ all_fields rest
+           end) l }).
+    { induction l as [ | [k T] rest IHrest ]; simpl.
+      - left; exact I.
+      - destruct (assoc_lookup k ents) as [vv | ] eqn:Elk.
+        + destruct (denote_dec T vv) as [Hd | Hnd].
+          * destruct IHrest as [Hrest | Hnrest].
+            -- left. split; [ exists vv; split; [ reflexivity | exact Hd ] | exact Hrest ].
+            -- right. intros [_ Hr]. exact (Hnrest Hr).
+          * right. intros [[vv' [Elk' Hd']] _].
+            injection Elk' as <-. exact (Hnd Hd').
+        + right. intros [[vv' [Elk' _]] _]. discriminate Elk'. }
+    destruct Hdec as [HY | HN].
+    + left. exists ents. split; [ reflexivity | exact HY ].
+    + right. intros [ents' [Heq Hf]]. injection Heq as <-. exact (HN Hf).
 Defined.
 
 (* Excluded middle and double-negation elimination for [denote], derived from
@@ -927,9 +1074,33 @@ Qed.
    atom Boolean algebra, not the final procedure.
    =========================================================================== *)
 
-(* ---- Head classes: five canonical representatives -------------------------
+(* ---- The ATOMIC fragment (no [BRec] anywhere) -----------------------------
+   INCREMENT 5 re-scoping. The head-enumeration decider rests on [denote] being
+   head-determined, which holds ONLY when no record former appears: a record
+   inspects the table's CONTENTS, not just its head. So we carve out the
+   [atomic] fragment — types with no [BRec] subterm — and restate the
+   increment-4 results (head-dependence, the decider's soundness+completeness)
+   as TRUE theorems scoped to it. [denote_dec] itself stays general and total
+   (above); only the head-enumeration decider is fragment-restricted. The
+   general decision procedure for records (emptiness-based / MLstruct-style) is
+   a future increment — see docs/proof-kernel.md. *)
+
+Fixpoint atomic (t : BTy) : Prop :=
+  match t with
+  | BAtom _    => True
+  | BTop       => True
+  | BBot       => True
+  | BUnion a b => atomic a /\ atomic b
+  | BInter a b => atomic a /\ atomic b
+  | BNeg a     => atomic a
+  | BRec _     => False
+  end.
+
+(* ---- Head classes: six canonical representatives --------------------------
    [head v] collapses a value to the canonical representative of its
-   constructor class (erasing the payload). [head_reps] enumerates the five. *)
+   constructor class (erasing the payload). [head_reps] enumerates the six
+   (five scalars + the table class — but see [head]'s note: the single table
+   representative is only sound for the [atomic] fragment). *)
 
 Definition head (v : V) : V :=
   match v with
@@ -938,9 +1109,17 @@ Definition head (v : V) : V :=
   | VStr _   => VStr 0
   | VBool _  => VBool false
   | VNil     => VNil
+  (* All tables collapse to the canonical empty table. This is SOUND ONLY for
+     the [atomic] fragment (no [BRec]): for atomic types, [denote] never inspects
+     table contents — every atom sends [VTable _] to the same answer regardless
+     of payload — so the table class needs just one representative. Records DO
+     inspect contents, which is exactly why the head-enumeration decider is
+     re-scoped to [atomic] below and the general procedure is deferred. *)
+  | VTable _ => VTable []
   end.
 
-Definition head_reps : list V := VInt 0 :: VFloat 0 :: VStr 0 :: VBool false :: VNil :: nil.
+Definition head_reps : list V :=
+  VInt 0 :: VFloat 0 :: VStr 0 :: VBool false :: VNil :: VTable [] :: nil.
 
 (* [head v] is always one of the five representatives. *)
 Lemma head_in_reps : forall v, In (head v) head_reps.
@@ -960,25 +1139,32 @@ Qed.
 Lemma atom_denote_head : forall a v, atom_denote a v <-> atom_denote a (head v).
 Proof. intros a v; destruct a; destruct v; simpl; tauto. Qed.
 
-(* The general head-dependence lemma, by induction on the type. *)
-Theorem denote_head : forall t v, denote t v <-> denote t (head v).
+(* The head-dependence lemma, by induction on the type — RE-SCOPED to the
+   [atomic] fragment (increment 5). For an atomic type [denote] never looks past
+   the value's head, so membership at v equals membership at [head v]. The
+   [BRec] case is discharged by the [atomic] hypothesis (it is [False] there) —
+   so this is a TRUE theorem about the atomic fragment, not a broken general
+   one. Records genuinely break head-determination (the contents matter), which
+   is why the restriction is real and not cosmetic. *)
+Theorem denote_head : forall t, atomic t -> forall v, denote t v <-> denote t (head v).
 Proof.
-  induction t; intro v; simpl.
+  induction t; intros Hat v; simpl in *.
   - apply atom_denote_head.
   - tauto.
   - tauto.
-  - rewrite (IHt1 v), (IHt2 v); tauto.
-  - rewrite (IHt1 v), (IHt2 v); tauto.
-  - rewrite (IHt v); tauto.
+  - destruct Hat as [Ha Hb]. rewrite (IHt1 Ha v), (IHt2 Hb v); tauto.
+  - destruct Hat as [Ha Hb]. rewrite (IHt1 Ha v), (IHt2 Hb v); tauto.
+  - rewrite (IHt Hat v); tauto.
+  - contradiction.        (* BRec: excluded by [atomic] *)
 Qed.
 
-(* Two values with the SAME head are indistinguishable by any type — the
-   formulation the brief states. Immediate from [denote_head]. *)
-Corollary denote_same_head : forall t v1 v2,
+(* Two values with the SAME head are indistinguishable by any ATOMIC type —
+   the formulation the brief states, re-scoped. Immediate from [denote_head]. *)
+Corollary denote_same_head : forall t, atomic t -> forall v1 v2,
   head v1 = head v2 -> (denote t v1 <-> denote t v2).
 Proof.
-  intros t v1 v2 Hh.
-  rewrite (denote_head t v1), (denote_head t v2), Hh. reflexivity.
+  intros t Hat v1 v2 Hh.
+  rewrite (denote_head t Hat v1), (denote_head t Hat v2), Hh. reflexivity.
 Qed.
 
 (* ---- Boolean membership from the decidable membership of increment 3 ------
@@ -1011,22 +1197,30 @@ Proof.
   intros f l H x Hin. rewrite forallb_forall in H. apply H, Hin.
 Qed.
 
+(* RE-SCOPED to the [atomic] fragment (increment 5). Completeness transports
+   membership through [denote_head], which holds only for atomic types; hence the
+   [atomic a /\ atomic b] hypothesis. This is a TRUE theorem about the atomic
+   fragment, explicitly scoped — increment 4's result preserved, not broken. The
+   GENERAL decision procedure (records included) is the deferred emptiness-based
+   procedure (see docs/proof-kernel.md). Soundness alone needs no atomicity, but
+   we state the clean iff under the shared hypothesis. *)
 Theorem decide_dsub_correct : forall a b,
-  decide_dsub a b = true <-> dsub a b.
+  atomic a -> atomic b ->
+  (decide_dsub a b = true <-> dsub a b).
 Proof.
-  intros a b. unfold decide_dsub, dsub. split.
+  intros a b Hata Hatb. unfold decide_dsub, dsub. split.
   - (* COMPLETENESS: decider true -> dsub. Any v has head [head v], which is one
-       of the five reps; the finite check covers it; head-dependence transports
-       membership from [head v] back to v. *)
+       of the six reps; the finite check covers it; head-dependence (ATOMIC)
+       transports membership from [head v] back to v. *)
     intros Hall v Hav.
     pose proof (forallb_forall_true _ _ Hall (head v) (head_in_reps v)) as Hh.
     cbv beta in Hh.
     (* a-member at head v *)
     assert (memb a (head v) = true) as Hma.
-    { apply memb_true_iff. apply (denote_head a v). exact Hav. }
+    { apply memb_true_iff. apply (denote_head a Hata v). exact Hav. }
     rewrite Hma in Hh. simpl in Hh.
     (* b-member at head v, transported back to v *)
-    apply (denote_head b v). apply memb_true_iff. exact Hh.
+    apply (denote_head b Hatb v). apply memb_true_iff. exact Hh.
   - (* SOUNDNESS: dsub -> decider true. Instantiate dsub at each representative
        (each is a concrete witness value of its head class). *)
     intro Hsub. apply forallb_forall. intros h _.
@@ -1034,12 +1228,13 @@ Proof.
     apply memb_true_iff. apply Hsub. apply memb_true_iff. exact Ea.
 Qed.
 
-(* The sumbool form: subtyping is decidable. *)
-Definition dsub_dec (a b : BTy) : {dsub a b} + {~ dsub a b}.
+(* The sumbool form: subtyping is decidable on the ATOMIC fragment. *)
+Definition dsub_dec (a b : BTy) (Hata : atomic a) (Hatb : atomic b)
+  : {dsub a b} + {~ dsub a b}.
 Proof.
   destruct (decide_dsub a b) eqn:E.
-  - left. apply decide_dsub_correct. exact E.
-  - right. intro H. apply decide_dsub_correct in H.
+  - left. apply (decide_dsub_correct a b Hata Hatb). exact E.
+  - right. intro H. apply (decide_dsub_correct a b Hata Hatb) in H.
     rewrite H in E. discriminate E.
 Defined.
 
@@ -1075,14 +1270,183 @@ Proof. reflexivity. Qed.
 (* AGREEMENT with the semantic [dsub]: each decided answer matches the truth.
    (true -> dsub; false -> ~dsub, via [decide_dsub_correct].) *)
 Example agree_int_num : dsub (BAtom AInt) (BAtom ANum).
-Proof. apply decide_dsub_correct. reflexivity. Qed.
+Proof. apply (decide_dsub_correct (BAtom AInt) (BAtom ANum) I I). reflexivity. Qed.
 Example agree_not_num_int : ~ dsub (BAtom ANum) (BAtom AInt).
 Proof.
-  intro H. apply decide_dsub_correct in H. discriminate H.
+  intro H. apply (decide_dsub_correct (BAtom ANum) (BAtom AInt) I I) in H. discriminate H.
 Qed.
 Example agree_int_str_bot : dsub (BInter (BAtom AInt) (BAtom AStr)) BBot.
-Proof. apply decide_dsub_correct. reflexivity. Qed.
+Proof.
+  apply (decide_dsub_correct (BInter (BAtom AInt) (BAtom AStr)) BBot (conj I I) I).
+  reflexivity.
+Qed.
 Example agree_not_str_int : ~ dsub (BAtom AStr) (BAtom AInt).
 Proof.
-  intro H. apply decide_dsub_correct in H. discriminate H.
+  intro H. apply (decide_dsub_correct (BAtom AStr) (BAtom AInt) I I) in H. discriminate H.
+Qed.
+
+(* ===========================================================================
+   INCREMENT 5 — RECORD/TABLE TYPES: structural subtyping as theorems-for-free.
+
+   With [BRec] in [BTy], [VTable] in [V], and the OPEN/WIDTH denotation
+   (denote_rec_iff), the standard structural subtyping laws — WIDTH (forgetting
+   fields), DEPTH/COVARIANCE (refining a field's type), and "records are tables"
+   — fall straight out of the semantic [dsub] (set inclusion over [denote]). No
+   new [dsub] rule, no axiom, no ad-hoc casing: every law is a direct consequence
+   of the denotation, exactly as the Boolean laws were.
+
+   The Boolean-algebra laws of increment 3 (distributivity both directions, De
+   Morgan, complement, double negation) were proved generically by unfolding
+   [denote] to propositional logic — they NEVER case-analyzed the [BTy]
+   constructors — so adding [BRec] leaves them untouched: they still compile
+   verbatim. (Confirmed: the whole dev compiles. No generic law needed a fix.)
+   =========================================================================== *)
+
+(* ---- WIDTH (general form: field-set inclusion) ----------------------------
+   If every field listed in [g] is also listed in [f], then [BRec f <: BRec g]:
+   a value satisfying ALL of f's field requirements a fortiori satisfies the
+   (fewer) requirements of g. WIDTH (drop the head field) and PERMUTATION
+   (reorder fields) are immediate corollaries. This is the open-reading payoff:
+   forgetting fields is supertyping, by construction. *)
+
+Theorem drec_width_incl : forall f g : list (string * BTy),
+  (forall k T, In (k, T) g -> In (k, T) f) ->
+  dsub (BRec f) (BRec g).
+Proof.
+  intros f g Hincl. unfold dsub. intros v Hf.
+  apply denote_rec_iff in Hf. apply denote_rec_iff.
+  destruct Hf as [ents [Hv Hall]].
+  exists ents. split; [ exact Hv | ].
+  intros k T Hin. apply Hall. apply Hincl. exact Hin.
+Qed.
+
+(* WIDTH proper: dropping the head field is supertyping. *)
+Theorem drec_width : forall k T rest,
+  dsub (BRec ((k, T) :: rest)) (BRec rest).
+Proof.
+  intros k T rest. apply drec_width_incl.
+  intros k' T' Hin. right. exact Hin.
+Qed.
+
+(* PERMUTATION (a fields-set reordering is subtype-equivalent), via inclusion
+   both ways — here the concrete two-field swap, the representative instance. *)
+Theorem drec_perm2 : forall k1 T1 k2 T2,
+  dequiv (BRec [(k1, T1); (k2, T2)]) (BRec [(k2, T2); (k1, T1)]).
+Proof.
+  intros k1 T1 k2 T2. split; apply drec_width_incl;
+    intros k T Hin; simpl in *; tauto.
+Qed.
+
+(* ---- DEPTH / COVARIANCE ---------------------------------------------------
+   Refining a field's type downward refines the record downward. Single field
+   first, then the general pointwise (list-wise) version. Covariance is the
+   honest law for the open reading; it follows because each field requirement
+   [denote T vv] is monotone in T under [dsub]. *)
+
+Theorem drec_depth1 : forall k A A',
+  dsub A A' -> dsub (BRec [(k, A)]) (BRec [(k, A')]).
+Proof.
+  intros k A A' HAA'. unfold dsub. intros v Hf.
+  apply denote_rec_iff in Hf. apply denote_rec_iff.
+  destruct Hf as [ents [Hv Hall]].
+  exists ents. split; [ exact Hv | ].
+  intros k0 T0 Hin. simpl in Hin. destruct Hin as [Heq | []].
+  injection Heq as <- <-.
+  destruct (Hall k A (or_introl eq_refl)) as [vv [Elk Hvv]].
+  exists vv. split; [ exact Elk | apply HAA'; exact Hvv ].
+Qed.
+
+(* General pointwise depth: if the two field-lists share keys position-by-
+   position and each field type widens, the record widens. We state it via a
+   pointwise [Forall2] over the (shared-key) field types. *)
+Theorem drec_depth : forall (fields : list (string * BTy)) (g : string -> BTy -> BTy),
+  (forall k T v, denote T v -> denote (g k T) v) ->
+  dsub (BRec fields) (BRec (map (fun kT => (fst kT, g (fst kT) (snd kT))) fields)).
+Proof.
+  intros fields g Hmono. unfold dsub. intros v Hf.
+  apply denote_rec_iff in Hf. apply denote_rec_iff.
+  destruct Hf as [ents [Hv Hall]]. exists ents. split; [ exact Hv | ].
+  intros k T Hin. rewrite in_map_iff in Hin.
+  destruct Hin as [[k0 T0] [Heq Hin0]]. simpl in Heq. injection Heq as <- <-.
+  destruct (Hall k0 T0 Hin0) as [vv [Elk Hvv]].
+  exists vv. split; [ exact Elk | apply Hmono; exact Hvv ].
+Qed.
+
+(* ---- RECORDS ARE TABLES ---------------------------------------------------
+   There is no dedicated "table atom" in [Atom] (the atoms are scalar kinds:
+   nil/bool/int/num/str). The faithful statement is that every record type is a
+   subtype of the EMPTY OPEN record [BRec []] — which denotes exactly the
+   table-shaped values (any [VTable ents]). So [BRec []] PLAYS the role of the
+   table top-type, and every record denotes a subset of "table-shaped" values,
+   disjoint from every scalar atom. (A first-class table atom is a future
+   refinement; noted in docs/proof-kernel.md.) *)
+
+Theorem drec_is_table : forall fields, dsub (BRec fields) (BRec []).
+Proof.
+  intro fields. apply drec_width_incl. intros k T [].
+Qed.
+
+(* [BRec []] denotes EXACTLY the tables — a value inhabits it iff it is a VTable. *)
+Theorem empty_rec_is_tables : forall v,
+  denote (BRec []) v <-> exists ents, v = VTable ents.
+Proof.
+  intro v. rewrite denote_rec_iff. split.
+  - intros [ents [Hv _]]. exists ents. exact Hv.
+  - intros [ents Hv]. exists ents. split; [ exact Hv | intros k T [] ].
+Qed.
+
+(* Records are disjoint from scalars: no table inhabits any atom, so a record
+   intersected with any atom is empty. (Representative: with AInt.) *)
+Theorem rec_disjoint_atom : forall fields a,
+  dsub (BInter (BRec fields) (BAtom a)) BBot.
+Proof.
+  intros fields a. unfold dsub. intros v [Hr Ha].
+  apply denote_rec_iff in Hr. destruct Hr as [ents [Hv _]]. subst v.
+  destruct a; simpl in Ha; exact Ha.
+Qed.
+
+(* ===========================================================================
+   NON-VACUITY for records — the record semantics is not trivially true.
+   =========================================================================== *)
+
+(* A record type is INHABITED: exhibit a concrete table witness. *)
+Theorem rec_inhabited :
+  denote (BRec [("f"%string, BAtom AInt)]) (VTable [("f"%string, VInt 0)]).
+Proof.
+  apply denote_rec_iff. exists [("f"%string, VInt 0)]. split; [ reflexivity | ].
+  intros k T Hin. simpl in Hin. destruct Hin as [Heq | []].
+  injection Heq as <- <-. exists (VInt 0). simpl. split; [ reflexivity | exact I ].
+Qed.
+
+(* DEPTH does NOT collapse: a record with an int field is NOT a subtype of the
+   same record with a string field. Witness: the table {f = 0} inhabits the
+   former (0 is an int) but not the latter (0 is not a string). *)
+Theorem not_rec_int_sub_str :
+  ~ dsub (BRec [("f"%string, BAtom AInt)]) (BRec [("f"%string, BAtom AStr)]).
+Proof.
+  unfold dsub. intro H.
+  specialize (H (VTable [("f"%string, VInt 0)])).
+  assert (Hpre : denote (BRec [("f"%string, BAtom AInt)]) (VTable [("f"%string, VInt 0)]))
+    by apply rec_inhabited.
+  specialize (H Hpre). apply denote_rec_iff in H.
+  destruct H as [ents [Hv Hall]]. injection Hv as <-.
+  destruct (Hall "f"%string (BAtom AStr) (or_introl eq_refl)) as [vv [Elk Hvv]].
+  simpl in Elk. injection Elk as <-. simpl in Hvv. exact Hvv.
+Qed.
+
+(* WIDTH is non-trivial in the other direction: the WIDER record (fewer fields)
+   is NOT a subtype of the NARROWER one — a table with only {f} does not satisfy
+   a {f,g} requirement. So width subtyping is a genuine, non-symmetric edge. *)
+Theorem not_rec_narrow_sub_wide :
+  ~ dsub (BRec [("f"%string, BAtom AInt)])
+         (BRec [("f"%string, BAtom AInt); ("g"%string, BAtom AInt)]).
+Proof.
+  unfold dsub. intro H.
+  specialize (H (VTable [("f"%string, VInt 0)])).
+  assert (Hpre : denote (BRec [("f"%string, BAtom AInt)]) (VTable [("f"%string, VInt 0)]))
+    by apply rec_inhabited.
+  specialize (H Hpre). apply denote_rec_iff in H.
+  destruct H as [ents [Hv Hall]]. injection Hv as <-.
+  destruct (Hall "g"%string (BAtom AInt) (or_intror (or_introl eq_refl))) as [vv [Elk _]].
+  simpl in Elk. discriminate Elk.
 Qed.

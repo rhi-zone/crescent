@@ -174,6 +174,15 @@ proven `= true <-> dsub`.
 under the global context** — no axioms, no `Admitted`, no `Classical`. Whole dev
 compiles (`coqc proof/subtype.v`).
 
+> **Increment-5 re-scoping (see below).** Adding the [BRec] record former made
+> `denote_head` and `decide_dsub_correct` FALSE in general (records inspect a
+> table's *contents*, not just its head). They were **restated and re-proved
+> under an `atomic` hypothesis** — `atomic : BTy -> Prop` holds iff no `BRec`
+> subterm occurs — so they remain TRUE theorems about the atomic fragment,
+> explicitly scoped, rather than broken general claims. `denote_dec` itself
+> stays **general and total** (it decides record membership too); only the
+> head-ENUMERATION decider is fragment-restricted.
+
 ### SCOPE LIMITATION — this is NOT the final decision procedure
 
 The decider is correct **only because the current atoms make `denote`
@@ -189,6 +198,67 @@ procedure (MLstruct-style)**: decide `dsub a b` by deciding emptiness of `a ∩
 ¬b`, with the Boolean algebra normalized to a form whose emptiness is decidable
 structurally. Do not mistake `decide_dsub` for that procedure; it is the correct
 decider for the *atom Boolean algebra* only.
+
+## Increment 5 — RECORD/TABLE types: structural subtyping, Boolean laws preserved
+
+The first **structural** type former — tables are the Lua-central aggregate.
+`proof/subtype.v` (new section, additive — increments 1-3 untouched; increment 4
+re-scoped, see above):
+
+- **Value-domain extension.** `V` gains `VTable : list (string * V) -> V` — a
+  table is a FINITE assoc-list of string keys to sub-values. `V` stays a (nested)
+  **inductive**; the elements are structurally smaller, so it is well-founded.
+  The auto-generated `V_ind` is too weak for the nested list, so we hand-roll a
+  mutual induction scheme `V_rect_strong` (a plain `Fixpoint`, no axiom).
+  **Cyclic / self-referential tables are DEFERRED** to the future
+  equirecursive-μ increment — they would force a *coinductive* `V`, a genuine
+  fork we do not take here.
+- **Record former.** `BTy` gains `BRec : list (string * BTy) -> BTy`. Reading is
+  **OPEN / WIDTH** (standard structural subtyping): `v ∈ BRec fields` iff `v` is
+  a table `VTable ents` and every LISTED `(k,T)` is present in `ents` with a
+  value inhabiting `T` — *other* keys allowed. **Closed/exact records and index
+  signatures are DEFERRED.** The denotation is written as a structural nested
+  fixpoint over `fields` (so the recursive `denote T vv` call is guard-accepted);
+  the brief's `∀ k T, In (k,T) fields -> …` reading is recovered exactly as
+  `denote_rec_iff`.
+- **`denote_dec` extended, stays general + total.** Deciding record membership
+  is still decidable & constructive: check `v` is a table, then each listed
+  field by `string_dec`-driven lookup + recursive `denote_dec` on the field type
+  (finite over `fields`). No `Classical`.
+- **Structural subtyping laws — theorems-for-free from the semantics:**
+  - **WIDTH** — `drec_width` (drop the head field is supertyping) and the
+    general field-set-inclusion form `drec_width_incl`; PERMUTATION
+    (`drec_perm2`) as a corollary.
+  - **DEPTH / COVARIANCE** — `drec_depth1` (`dsub A A' -> dsub (BRec [(k,A)])
+    (BRec [(k,A')])`) and the general pointwise `drec_depth`.
+  - **records are tables** — there is no dedicated table *atom*, so the faithful
+    statement is `drec_is_table : dsub (BRec fields) (BRec [])`, with `BRec []`
+    playing the table top-type: `empty_rec_is_tables` proves it denotes EXACTLY
+    the `VTable` values. `rec_disjoint_atom` proves records are disjoint from
+    every scalar atom. (A first-class table atom is a future refinement.)
+  All `Qed`, all derived from the semantic `dsub` (set inclusion) — no new `dsub`
+  rule, no axiom, no ad-hoc casing.
+- **Boolean-algebra laws STILL hold — confirmed, no fix needed.** The increment-3
+  laws (distributivity both directions, De Morgan, complement, double negation)
+  were proved generically by unfolding `denote` to propositional logic; they
+  never case-analyzed the `BTy` constructors, so adding `BRec` leaves them
+  untouched — they compile verbatim. (`Print Assumptions ddistrib_inter_union`,
+  `dde_morgan_inter`: Closed under the global context.)
+- **Increment 4 preserved, not broken.** `atomic : BTy -> Prop` (no `BRec`
+  subterm); `denote_head` and `decide_dsub_correct` restated under `atomic` and
+  re-proved — TRUE theorems about the atomic fragment. `head`/`head_reps` gain a
+  single table representative `VTable []`, sound only for `atomic` (where
+  `denote` ignores table contents). The **general decision procedure for records
+  is deferred** to the emptiness-based / MLstruct-style procedure.
+- **Non-vacuity.** `rec_inhabited` exhibits a concrete table witness;
+  `not_rec_int_sub_str` (with witness `{f=0}`) shows depth does NOT collapse;
+  `not_rec_narrow_sub_wide` shows width is a genuine non-symmetric edge. So the
+  record semantics is not vacuously true.
+
+`Print Assumptions` on the structural laws, the re-scoped `decide_dsub_correct`
+and `denote_head`, and the extended `denote_dec`: **Closed under the global
+context** — no axioms, no `Admitted`, no `Classical`. Whole dev compiles
+(`coqc proof/subtype.v`).
 
 ## Staging
 
@@ -213,12 +283,25 @@ decider for the *atom Boolean algebra* only.
   sanity + agreement lemmas. Closed under the global context. Limitation
   recorded above: head-enumeration only works while `denote` is head-determined;
   structural formers break it and need an emptiness-based procedure.
-- **[next — structural type formers: records/tables first]** extend `BTy` and
-  `denote` with **records/tables** (the Lua-central case: tables are the core
-  aggregate), then **arrows**. Denotation gains structure beyond the head, so
-  the head-enumeration decider no longer applies — design the **emptiness-based
-  decision procedure** (decide `dsub a b` via emptiness of `a ∩ ¬b`, MLstruct-
-  style) and prove it sound + complete under the extended denotation.
+- **[done — increment 5: records/tables]** the first **structural** former:
+  `V` gains `VTable` (finite assoc-list; nested-inductive, cyclic deferred to
+  μ), `BTy` gains `BRec` (OPEN/WIDTH reading; closed records + index signatures
+  deferred). `denote_dec` extended (general, total). Structural subtyping laws
+  proved for free: **WIDTH** (`drec_width`/`_incl`), **DEPTH/COVARIANCE**
+  (`drec_depth1`/`drec_depth`), records-are-tables (`drec_is_table`,
+  `empty_rec_is_tables`, `rec_disjoint_atom`). Boolean-algebra laws confirmed
+  still holding (generic over `denote`, no fix needed). Increment 4's
+  head-decider re-scoped to the `atomic` fragment (`denote_head`,
+  `decide_dsub_correct` under `atomic`) — TRUE theorems, not broken.
+  Non-vacuity proved. Closed under the global context.
+- **[next — structural type formers, continued]** candidates, substrate-first:
+  **(a)** the **emptiness-based / MLstruct-style decision procedure** (decide
+  `dsub a b` via emptiness of `a ∩ ¬b`) — the general decider records need, now
+  that `denote` is no longer head-determined; **(b)** **index signatures and
+  closed/exact records** (the deferred record refinements; closed records need a
+  "no other keys" denotation, index sigs a `∀ key`-quantified field); **(c)** a
+  first-class **table atom** (so records subtype an atom, not just `BRec []`);
+  **(d)** **arrows** with co/contra-variance.
 - **[then — equirecursive μ]** extend `BTy` with recursive types (`μ`) and
   coinductive/contractive denotation; re-establish the laws and the decision
   procedure under recursion.
