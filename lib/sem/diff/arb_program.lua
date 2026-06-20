@@ -34,7 +34,12 @@ local M = {}
 local function gen_scalar(rng)
 	local pick = rng:int(1, 4)
 	if pick == 1 then
-		local n = { x = "num", n = rng:int(-20, 20) } --[[: SX]]
+		-- integer OR explicit-float numeral. The float form (`5.0`) is a FLOAT in
+		-- 5.3/5.4 and a plain double in 5.1/LuaJIT — exercising the int/float split
+		-- in the random stream (the `float` flag is rendered "5.0" by print.lua and
+		-- lowered via `va.float` per-profile). Kept integral so the spec/real number
+		-- tokens are exactly comparable.
+		local n = { x = "num", n = rng:int(-20, 20), float = rng:bool() } --[[: SX]]
 		return n
 	end
 	if pick == 2 then
@@ -65,7 +70,13 @@ local function gen_name(rng, names)
 	return r
 end
 
-local ARITH = { "add", "sub", "mul" } --[[: { [integer]: string } ]]
+-- `div` and `mod` are included: `/` is accepted by ALL versions and yields a
+-- FLOAT in 5.3/5.4 (vs a double in 5.1/LuaJIT), so it exercises the int/float
+-- split in the shared random stream. `idiv` ("//") is DELIBERATELY EXCLUDED here:
+-- it is a syntax error in 5.1/5.2/LuaJIT, so a shared program containing `//`
+-- would fault on those versions but succeed on 5.3/5.4 — a version-gated op that
+-- belongs in the positive delta table, not the cross-version-shared stream.
+local ARITH = { "add", "sub", "mul", "div", "mod" } --[[: { [integer]: string } ]]
 local CMP = { "eq", "ne", "lt", "le", "gt", "ge" } --[[: { [integer]: string } ]]
 
 -- ── expression generator (depth-bounded, well-scoped) ────────────────────────
@@ -86,10 +97,17 @@ function M.gen_expr(rng, names, depth)
 	if choice == 3 then
 		-- arithmetic on numbers (operands forced numeric to avoid trivial faults;
 		-- the spec/real both fault on non-number arith — exercised separately by
-		-- mixing in scalars at choice 4).
-		local a = { x = "num", n = rng:int(-9, 9) } --[[: SX]]
-		local b = { x = "num", n = rng:int(-9, 9) } --[[: SX]]
+		-- mixing in scalars at choice 4). Operands are randomly integral or float
+		-- so the int/float promotion rules (5.3/5.4) are exercised.
 		local op = ARITH[rng:int(1, #ARITH)] or "add"
+		local a = { x = "num", n = rng:int(-9, 9), float = rng:bool() } --[[: SX]]
+		-- divisor: for `div`/`mod`, avoid 0 — integer `n % 0` is a hard ERROR in
+		-- 5.3/5.4 (but nan elsewhere), a version-gated fault that does not belong in
+		-- the cross-version-shared stream. A nonzero divisor keeps every version's
+		-- result well-defined and comparable.
+		local bn = rng:int(-9, 9)
+		if (op == "div" or op == "mod") and bn == 0 then bn = 1 end
+		local b = { x = "num", n = bn, float = rng:bool() } --[[: SX]]
 		local e = { x = "binop", op = op, a = a, b = b } --[[: SX]]
 		return e
 	end

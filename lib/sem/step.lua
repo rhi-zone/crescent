@@ -31,7 +31,7 @@ local prim = require("lib.sem.prim")
 
 local M = {}
 
---:: Profile = { name: string, va: ValueAlgebra }
+--:: Profile = { name: string, version: string, va: ValueAlgebra, arith_ops: { [string]: boolean } }
 
 -- ── Environment (activation record) ─────────────────────────────────────────
 --:: Env = { slots: Value[], varargs: Value[] }
@@ -75,7 +75,9 @@ local M = {}
 -- ── helpers ──────────────────────────────────────────────────────────────────
 
 --: (Profile, Store) -> PrimEnv
-local function penv(profile, store) return { va = profile.va, store = store } end
+local function penv(profile, store)
+	return { va = profile.va, store = store, arith_ops = profile.arith_ops }
+end
 
 -- push a kont frame (returns the same list mutated; the machine owns one stack)
 --: (Kont[], Kont) -> ()
@@ -99,7 +101,12 @@ end
 --: (Profile, Store, string, Value, Value) -> (Value | nil, Fault | nil)
 function M.apply_binop(profile, store, op, a, b)
 	local env = penv(profile, store)
-	if op == "add" or op == "sub" or op == "mul" or op == "div" or op == "mod" then
+	-- arithmetic ops route to prim_arith, which checks the profile's enabled
+	-- op-set (env.arith_ops) and delegates the numeric behaviour to the value
+	-- algebra. step lists the op NAMES it knows how to route; whether a given op
+	-- is ENABLED (e.g. `idiv` under 5.1/5.2) is decided by the rule-set data, not
+	-- here — so there is no version branch in this dispatch.
+	if env.arith_ops[op] ~= nil then
 		return prim.prim_arith(env, op, a, b)
 	end
 	if op == "eq" then return prim.prim_compare(env, "eq", a, b) end

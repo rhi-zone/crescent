@@ -17,7 +17,7 @@ local step_mod = require("lib.sem.step")
 
 local M = {}
 
---:: Profile = { name: string, va: ValueAlgebra }
+--:: Profile = { name: string, version: string, va: ValueAlgebra, arith_ops: { [string]: boolean } }
 
 -- The outcome of a run, before canonicalisation into an Observation.
 --::   ROk     = { kind: "ok", values: Value[], store: Store }

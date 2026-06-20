@@ -26,7 +26,13 @@ local config = require("lib.sem.config")
 
 local M = {}
 
---:: PrimEnv = { va: ValueAlgebra, store: Store }
+-- PrimEnv carries the value algebra, the store, AND the profile's enabled
+-- arithmetic op-set (a set of op-name → true). The op-set is DATA selected by
+-- the Profile: `idiv` ("//") is present only for profiles whose language accepts
+-- it (LuaJIT and 5.3/5.4); 5.1/5.2 omit it, so `//` is rejected as not-a-rule
+-- rather than via an `if version == "5.1"` branch. This is the no-special-casing
+-- discipline: version behaviour is a data parameter, never a branch here.
+--:: PrimEnv = { va: ValueAlgebra, store: Store, arith_ops: { [string]: boolean } }
 
 -- ── allocation (total) ──────────────────────────────────────────────────────
 
@@ -157,21 +163,29 @@ function M.prim_len(env, obj)
 end
 
 -- ── arithmetic (PARTIAL: non-number operands fault) ─────────────────────────
--- op in {add, sub, mul, div, mod}.
+-- op in {add, sub, mul, div, mod, idiv, pow}. The ACTUAL numeric behaviour
+-- (single-double vs integer/float promotion, `/`-always-float, `//` floor,
+-- integer wraparound) lives ENTIRELY in `va.arith` (the number model in
+-- value.lua). prim only: (1) checks both operands are numbers, (2) checks the op
+-- is enabled for this profile, (3) delegates. There is NO version branch and NO
+-- int/float knowledge here — that is the parametric-value-algebra factoring.
 --: (PrimEnv, string, Value, Value) -> (Value | nil, Fault | nil)
 function M.prim_arith(env, op, a, b)
 	local va = env.va
+	if not env.arith_ops[op] then
+		-- op not enabled by this profile's rule-set (e.g. `//` under 5.1/5.2):
+		-- STUCK — the relation has no rule for it under this profile.
+		return nil, config.fault(config.FAULT_ARITH, "arith op '" .. op .. "' not enabled for profile")
+	end
 	if va.kind_of(a) ~= "number" or va.kind_of(b) ~= "number" then
 		return nil, config.fault(config.FAULT_ARITH,
 			"arithmetic on " .. va.kind_of(a) .. " and " .. va.kind_of(b))
 	end
-	local x, y = va.number_value(a), va.number_value(b)
-	if op == "add" then return va.number(va.number_add(x, y)), nil end
-	if op == "sub" then return va.number(va.number_sub(x, y)), nil end
-	if op == "mul" then return va.number(va.number_mul(x, y)), nil end
-	if op == "div" then return va.number(va.number_div(x, y)), nil end
-	if op == "mod" then return va.number(va.number_mod(x, y)), nil end
-	return nil, config.fault(config.FAULT_ARITH, "unknown arith op " .. op)
+	local r = va.arith(op, a, b)
+	if r == nil then
+		return nil, config.fault(config.FAULT_ARITH, "no arith rule for op " .. op)
+	end
+	return r, nil
 end
 
 -- ── comparison (PARTIAL) ─────────────────────────────────────────────────────
@@ -183,9 +197,8 @@ function M.prim_compare(env, op, a, b)
 	if op == "eq" then return va.bool(va.equal(a, b)), nil end
 	local ka, kb = va.kind_of(a), va.kind_of(b)
 	if ka == "number" and kb == "number" then
-		local x, y = va.number_value(a), va.number_value(b)
-		if op == "lt" then return va.bool(va.number_lt(x, y)), nil end
-		if op == "le" then return va.bool(va.number_le(x, y)), nil end
+		if op == "lt" then return va.bool(va.number_lt(a, b)), nil end
+		if op == "le" then return va.bool(va.number_le(a, b)), nil end
 	elseif ka == "string" and kb == "string" then
 		local x, y = va.string_value(a), va.string_value(b)
 		if op == "lt" then return va.bool(x < y), nil end
@@ -203,7 +216,7 @@ function M.prim_concat(env, a, b)
 	local function as_str(v)
 		local k = va.kind_of(v)
 		if k == "string" then return va.string_value(v) end
-		if k == "number" then return va.number_tostring(va.number_value(v)) end
+		if k == "number" then return va.number_tostring(v) end
 		return nil
 	end
 	local sa, sb = as_str(a), as_str(b)

@@ -27,7 +27,7 @@ local va = value.luajit51
 -- helper: run a surface program and observe it.
 --: (SS[]) -> Observation
 local function obs_of(prog)
-	local control = lower.lower_program(prog) --: Stmt[]
+	local control = lower.lower_program(va, prog) --: Stmt[]
 	local res = run.run(profile.luajit51, control, 100000) --: RunResult
 	return observe.observe_spec(va, res)
 end
@@ -63,7 +63,7 @@ end)
 T.describe("sem primitives (partiality = faults-as-stuck)", function()
 	--: () -> PrimEnv
 	local function fresh_env()
-		return { va = va, store = config.new_store() }
+		return { va = va, store = config.new_store(), arith_ops = profile.luajit51.arith_ops }
 	end
 
 	T.it("arithmetic on non-numbers faults", function()

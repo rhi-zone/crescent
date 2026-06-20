@@ -180,9 +180,24 @@ Each increment is independently useful.
   Immediately a spec-oracle. This is the v1 subset of
   `docs/agnostic-static-analysis-crescent-slice.md`.
 
-- **S2 — versions + Profiles.** Wire PUC 5.1–5.4 via the flake; introduce
-  Profiles and version deltas, **starting with the 5.3 int/float split** as the
-  proving case for the parametric value algebra. Loop α across all versions.
+- **S2 — versions + Profiles. (DONE.)** PUC 5.1–5.4 wired via the flake
+  (`pucBin`, contributor/CI tooling only — never a runtime dep). Five Profiles
+  (`luajit51`, `lua51`, `lua52`, `lua53`, `lua54`); a Profile is
+  `{ name, version, va, arith_ops }`. The **5.3/5.4 int/float split is the
+  proving case and it factored CLEANLY**: arithmetic moved out of `prim` (which
+  computed on raw doubles) into the value algebra `va.arith(op, Value, Value)`,
+  so the NUMBER MODEL (`value.lua`: `single_double` vs `dual_intfloat`) owns the
+  entire split (distinct int/float subtypes, `math.type`, `/`-always-float, `//`
+  floor-div, integer/float promotion, integral-float `tostring`). The enabled-op
+  set (`arith_ops`) gates `//` as data (5.3/5.4 enable it; 5.1/5.2/LuaJIT omit
+  it, where `//` is a genuine syntax error). **Zero version branches and zero
+  int/float subtype knowledge in `step.lua`/`prim.lua`** (grep-verified) — the
+  no-special-casing discipline held. **Loop-α: 120/120 per version across all
+  five interpreters** (stable over 8 seeds in `nix develop`), plus a positive
+  cross-version delta table proving the parametricity is real. **Deferred
+  (recorded, not faked):** full 64-bit integer wraparound (model wraps at 2^53,
+  the host-double exactly-representable window — needs an int64 substrate) and
+  bitops (LuaJIT 32-bit `bit.*` ≠ 5.3/5.4 native 64-bit — same substrate need).
 
 - **S3 — Loop-β soundness property.** `checker accepts ⟹ ¬fault` against the
   spec, with **structure-aware alias-targeting generators**. Acceptance test:

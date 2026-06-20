@@ -31,13 +31,20 @@
 --:: require "lib.sem.value"
 --:: require "lib.sem.config"
 
-local value = require("lib.sem.value")
-
 local M = {}
+
+-- PROFILE-PARAMETRIC NUMBER LITERALS: the lowering is still dumb, but a numeric
+-- literal must become the number Value the TARGET MODEL assigns it — `5` is an
+-- integer under 5.3/5.4 and a double under 5.1, `5.0` is always a float. The
+-- lowering does NOT decide int-vs-float itself (that is the model's rule); it
+-- asks the injected value algebra `va` to construct the literal: `va.number(n)`
+-- for a bare numeral (model maps integral→int / float as appropriate),
+-- `va.float(n)` for an explicit float numeral (`5.0`). So the int/float split is
+-- carried by the va parameter, not by a version branch in the lowering.
 
 -- ── Surface AST (independent, minimal) ───────────────────────────────────────
 -- Expressions:
---::   SXNum   = { x: "num", n: number }
+--::   SXNum   = { x: "num", n: number, float?: boolean }
 --::   SXStr   = { x: "str", s: string }
 --::   SXBool  = { x: "bool", b: boolean }
 --::   SXNil   = { x: "nil" }
@@ -64,11 +71,14 @@ local M = {}
 -- number of slots allocated in THIS function so far (used as a nested function's
 -- base). Names introduced by `local`/params get the next slot; lookups walk the
 -- chain (an outer name keeps its outer slot index, matching the capture model).
---:: Scope = { names: { [string]: integer }, count: integer, parent: Scope | nil, base: integer }
+-- The scope threads the target value algebra `va` so number literals lower to
+-- the model-appropriate Value. (`va` is identical at every nesting level; it is
+-- carried on the scope only to avoid widening every lowering signature.)
+--:: Scope = { names: { [string]: integer }, count: integer, parent: Scope | nil, base: integer, va: ValueAlgebra }
 
---: (Scope | nil, integer) -> Scope
-local function new_scope(parent, base)
-	return { names = {}, count = base, parent = parent, base = base }
+--: (Scope | nil, integer, ValueAlgebra) -> Scope
+local function new_scope(parent, base, va)
+	return { names = {}, count = base, parent = parent, base = base, va = va }
 end
 
 -- resolve a name to a slot index, walking outward. Returns nil if unbound (a
@@ -105,8 +115,10 @@ end
 
 --: (Scope, SX) -> Term
 function M.lower_expr(scope, sx)
-	local va = value.luajit51
-	if sx.x == "num" then local v = va.number(sx.n) --: Value
+	local va = scope.va
+	if sx.x == "num" then
+		-- explicit float numeral (`5.0`) → float; bare numeral → model default.
+		local v = sx.float and va.float(sx.n) or va.number(sx.n) --: Value
 		return lit(v) end
 	if sx.x == "str" then local v = va.string(sx.s) --: Value
 		return lit(v) end
@@ -148,7 +160,7 @@ function M.lower_expr(scope, sx)
 	if sx.x == "func" then
 		-- a nested function: base = parent's current slot count (the captured
 		-- array length at runtime). Params and locals start above the base.
-		local fscope = new_scope(scope, scope.count)
+		local fscope = new_scope(scope, scope.count, scope.va)
 		for i = 1, #sx.params do
 			local p = sx.params[i]
 			if p ~= nil then declare(fscope, p) end
@@ -251,10 +263,13 @@ function M.lower_block(scope, body)
 end
 
 -- lower a whole program (a statement list) to control statements. The top scope
--- is a function scope with base 0.
---: (SS[]) -> Stmt[]
-function M.lower_program(prog)
-	local scope = new_scope(nil, 0)
+-- is a function scope with base 0. `va` is the TARGET PROFILE's value algebra:
+-- it determines how numeric literals are constructed (int/float under 5.3/5.4,
+-- single double under 5.1/LuaJIT). Passing the va makes the lowering
+-- profile-parametric without any version branch.
+--: (ValueAlgebra, SS[]) -> Stmt[]
+function M.lower_program(va, prog)
+	local scope = new_scope(nil, 0, va)
 	return M.lower_block(scope, prog)
 end
 

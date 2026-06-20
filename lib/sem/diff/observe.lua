@@ -28,19 +28,19 @@ local M = {}
 --:: Observation = { tag: string, shape: string }
 
 -- canonical render of one of our Values to a shape token.
+--
+-- NUMBERS render via the value algebra's OWN `number_tostring`, so the token
+-- carries exactly the version's observable number identity: under the
+-- single-double model "n:3" for the double 3 / 3.0; under the dual int/float
+-- model "n:3" for the integer 3 but "n:3.0" for the float 3.0. The real side
+-- (alpha_test's wrapper) renders with that version's `tostring` + `math.type`,
+-- so the two agree iff the spec's number model matches the real version. This is
+-- where the int/float split becomes OBSERVABLE in Loop-α.
 --: (ValueAlgebra, Value) -> string
 local function render_value(va, v)
 	local k = va.kind_of(v)
 	if k == "number" then
-		local n = va.number_value(v)
-		-- canonical number form matching the real side's tostring.
-		if n ~= n then return "n:nan" end
-		if n == math.huge then return "n:inf" end
-		if n == -math.huge then return "n:-inf" end
-		if n == math.floor(n) and math.abs(n) < 1e15 then
-			return "n:" .. string.format("%d", n)
-		end
-		return "n:" .. string.format("%.14g", n)
+		return "n:" .. va.number_tostring(v)
 	end
 	if k == "string" then return "s:" .. va.string_value(v) end
 	if k == "boolean" then return va.bool_value(v) and "b:true" or "b:false" end

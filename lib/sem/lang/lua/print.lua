@@ -17,12 +17,18 @@
 local M = {}
 
 -- format a number the way Lua source would accept and LuaJIT would reproduce.
---: (number) -> string
-local function num_lit(n)
+-- Print a numeral. `is_float` forces a float numeral form (`5.0`) even for an
+-- integral value, so the SAME surface AST prints as a float literal across all
+-- versions: under 5.3/5.4 the real interpreter reads `5.0` as a float (matching
+-- our model's `va.float`), and under 5.1 it is the same double. A bare integral
+-- numeral prints as `5`, which 5.3/5.4 read as an integer (matching `va.number`).
+--: (number, boolean) -> string
+local function num_lit(n, is_float)
 	if n ~= n then return "(0/0)" end          -- NaN
 	if n == math.huge then return "(1/0)" end
 	if n == -math.huge then return "(-1/0)" end
 	if n == math.floor(n) and math.abs(n) < 1e15 then
+		if is_float then return string.format("%d", n) .. ".0" end
 		return string.format("%d", n)
 	end
 	return string.format("%.17g", n)
@@ -36,7 +42,7 @@ end
 
 --: (SX) -> string
 function M.print_expr(sx)
-	if sx.x == "num" then return num_lit(sx.n) end
+	if sx.x == "num" then return num_lit(sx.n, sx.float == true) end
 	if sx.x == "str" then return str_lit(sx.s) end
 	if sx.x == "bool" then return sx.b and "true" or "false" end
 	if sx.x == "nil" then return "nil" end
@@ -45,6 +51,7 @@ function M.print_expr(sx)
 	if sx.x == "binop" then
 		local ops = {
 			add = "+", sub = "-", mul = "*", div = "/", mod = "%",
+			idiv = "//", pow = "^",
 			eq = "==", ne = "~=", lt = "<", le = "<=", gt = ">", ge = ">=",
 			concat = "..",
 		} --[[: { [string]: string } ]]
