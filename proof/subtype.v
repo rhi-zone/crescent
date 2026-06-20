@@ -276,3 +276,296 @@ Corollary sub_trans' : forall x b z, sub x b -> sub b z -> sub x z.
 Proof.
   intros x b z. apply (sub_trans (tsize b)). apply Nat.le_refl.
 Qed.
+
+(* ===========================================================================
+   INCREMENT 2 — the type algebra is a distributive lattice up to subtype
+   equivalence.
+
+   Nothing below changes the [sub] rules of increment 1: every law is derived
+   from the existing constructors + refl/trans. The lub/glb are the union/inter
+   connectives; the laws are stated up to [tequiv] (mutual subtyping), never up
+   to syntactic [=], because e.g. [TUnion a b] and [TUnion b a] are NOT equal
+   terms — they are only subtype-equivalent.
+   =========================================================================== *)
+
+(* ---- Type equivalence: mutual subtyping ----------------------------------- *)
+
+Definition tequiv (a b : Ty) : Prop := sub a b /\ sub b a.
+
+(* An equivalence relation, reusing sub_refl / sub_trans'. *)
+
+Theorem tequiv_refl : forall a, tequiv a a.
+Proof. intro a. split; apply sub_refl. Qed.
+
+Theorem tequiv_sym : forall a b, tequiv a b -> tequiv b a.
+Proof. intros a b [Hab Hba]. split; assumption. Qed.
+
+Theorem tequiv_trans : forall a b c, tequiv a b -> tequiv b c -> tequiv a c.
+Proof.
+  intros a b c [Hab Hba] [Hbc Hcb].
+  split; eapply sub_trans'; eassumption.
+Qed.
+
+(* ---- Union is the least upper bound, Inter the greatest lower bound -------- *)
+
+(* Upper/lower bound parts: the injections/projections (already derived above). *)
+(*   sub_union_inl : sub a (TUnion a b)
+     sub_union_inr : sub b (TUnion a b)
+     sub_inter_prl : sub (TInter a b) a
+     sub_inter_prr : sub (TInter a b) b *)
+
+(* Least: any common upper bound dominates the union. *)
+Theorem union_lub : forall a b c, sub a c -> sub b c -> sub (TUnion a b) c.
+Proof. intros a b c Hac Hbc. apply SUnionE; assumption. Qed.
+
+(* Greatest: any common lower bound is dominated by the intersection. *)
+Theorem inter_glb : forall a b c, sub c a -> sub c b -> sub c (TInter a b).
+Proof. intros a b c Hca Hcb. apply SInterI; assumption. Qed.
+
+(* ---- Helpers: congruence of the connectives under sub --------------------- *)
+(* If components are pointwise ordered, so are the connectives. These follow
+   from lub/glb + the injections, and make the law proofs one-liners. *)
+
+Lemma union_mono : forall a a' b b',
+  sub a a' -> sub b b' -> sub (TUnion a b) (TUnion a' b').
+Proof.
+  intros a a' b b' Ha Hb.
+  apply union_lub.
+  - eapply sub_trans'; [ exact Ha | apply sub_union_inl ].
+  - eapply sub_trans'; [ exact Hb | apply sub_union_inr ].
+Qed.
+
+Lemma inter_mono : forall a a' b b',
+  sub a a' -> sub b b' -> sub (TInter a b) (TInter a' b').
+Proof.
+  intros a a' b b' Ha Hb.
+  apply inter_glb.
+  - eapply sub_trans'; [ apply sub_inter_prl | exact Ha ].
+  - eapply sub_trans'; [ apply sub_inter_prr | exact Hb ].
+Qed.
+
+(* ---- Commutativity -------------------------------------------------------- *)
+
+Theorem union_comm : forall a b, tequiv (TUnion a b) (TUnion b a).
+Proof.
+  intros a b. split; apply union_lub;
+    (apply sub_union_inl || apply sub_union_inr).
+Qed.
+
+Theorem inter_comm : forall a b, tequiv (TInter a b) (TInter b a).
+Proof.
+  intros a b. split; apply inter_glb;
+    (apply sub_inter_prl || apply sub_inter_prr).
+Qed.
+
+(* ---- Associativity -------------------------------------------------------- *)
+
+Theorem union_assoc : forall a b c,
+  tequiv (TUnion (TUnion a b) c) (TUnion a (TUnion b c)).
+Proof.
+  intros a b c. split.
+  - apply union_lub; [ apply union_lub | ].
+    + apply sub_union_inl.
+    + apply sub_trans' with (b := TUnion b c);
+        [ apply sub_union_inl | apply sub_union_inr ].
+    + apply sub_trans' with (b := TUnion b c);
+        [ apply sub_union_inr | apply sub_union_inr ].
+  - apply union_lub; [ | apply union_lub ].
+    + apply sub_trans' with (b := TUnion a b);
+        [ apply sub_union_inl | apply sub_union_inl ].
+    + apply sub_trans' with (b := TUnion a b);
+        [ apply sub_union_inr | apply sub_union_inl ].
+    + apply sub_union_inr.
+Qed.
+
+Theorem inter_assoc : forall a b c,
+  tequiv (TInter (TInter a b) c) (TInter a (TInter b c)).
+Proof.
+  intros a b c. split.
+  - apply inter_glb; [ | apply inter_glb ].
+    + eapply sub_trans'; [ apply sub_inter_prl | apply sub_inter_prl ].
+    + eapply sub_trans'; [ apply sub_inter_prl | apply sub_inter_prr ].
+    + apply sub_inter_prr.
+  - apply inter_glb; [ apply inter_glb | ].
+    + apply sub_inter_prl.
+    + eapply sub_trans'; [ apply sub_inter_prr | apply sub_inter_prl ].
+    + eapply sub_trans'; [ apply sub_inter_prr | apply sub_inter_prr ].
+Qed.
+
+(* ---- Idempotence ---------------------------------------------------------- *)
+
+Theorem union_idem : forall a, tequiv (TUnion a a) a.
+Proof.
+  intro a. split.
+  - apply union_lub; apply sub_refl.
+  - apply sub_union_inl.
+Qed.
+
+Theorem inter_idem : forall a, tequiv (TInter a a) a.
+Proof.
+  intro a. split.
+  - apply sub_inter_prl.
+  - apply inter_glb; apply sub_refl.
+Qed.
+
+(* ---- Absorption ----------------------------------------------------------- *)
+
+Theorem absorb_union_inter : forall a b, tequiv (TUnion a (TInter a b)) a.
+Proof.
+  intros a b. split.
+  - apply union_lub; [ apply sub_refl | apply sub_inter_prl ].
+  - apply sub_union_inl.
+Qed.
+
+Theorem absorb_inter_union : forall a b, tequiv (TInter a (TUnion a b)) a.
+Proof.
+  intros a b. split.
+  - apply sub_inter_prl.
+  - apply inter_glb; [ apply sub_refl | apply sub_union_inl ].
+Qed.
+
+(* ---- Distributivity — and a machine-checked NEGATIVE result ---------------
+
+   DESIGN LESSON #3 (the real finding of this increment).
+
+   For BOTH distributive laws, ONE direction holds in every lattice and is
+   proved below to Qed:
+
+       (a∩b) ∪ (a∩c)  ≤  a ∩ (b∪c)            [union of meets below the meet]
+       a ∪ (b∩c)      ≤  (a∪b) ∩ (a∪c)         [the join below the meet of joins]
+
+   The OTHER direction — the inequality whose two directions TOGETHER would make
+   the lattice distributive — is *NOT derivable* from the increment-1 [sub]
+   rules. This is not a proof-search failure on our part: the rules of [sub]
+   generate exactly the *free LATTICE* preorder over the atom poset, and the
+   free lattice on three incomparable generators is the non-distributive lattice
+   — distributivity is precisely the law a free lattice lacks.
+
+   We do not paper over this with [Admitted]. We PROVE the unprovability, by
+   exhibiting a sound model in which the law fails: the pentagon N5, the minimal
+   non-distributive lattice. [interp] maps every [Ty] into N5; [interp_sound]
+   shows every [sub] edge maps to a true N5 order-fact (so anything derivable in
+   [sub] holds in N5); and the specific distributive instance maps to the false
+   N5 fact [n5le NB NA = false]. Hence that instance is underivable — a positive
+   theorem ([distrib_hard_unprovable]), Qed, closed under the global context.
+
+   PRINCIPLED RESOLUTION (deferred, by design — a genuine fork, not a fudge):
+   making the lattice distributive requires *either* adding a general
+   distributivity rule to [sub] (which forces re-deriving transitivity under the
+   new rule — a substrate change to increment 1, out of scope here), *or* moving
+   to the value-set semantics (coarser still: there [TInter AInt AStr] ≡ Bot,
+   which [sub] also does not prove). Both are their own increments. The honest
+   state recorded here: the algebra is a (proved) LATTICE up to [tequiv]; it is
+   provably NOT a distributive lattice under the current rules. See
+   docs/proof-kernel.md. *)
+
+(* The free-lattice direction of each law (holds unconditionally). *)
+
+Theorem distrib_inter_union_ge : forall a b c,
+  sub (TUnion (TInter a b) (TInter a c)) (TInter a (TUnion b c)).
+Proof.
+  intros a b c.
+  apply union_lub; apply inter_mono;
+    (apply sub_refl || apply sub_union_inl || apply sub_union_inr).
+Qed.
+
+Theorem distrib_union_inter_le : forall a b c,
+  sub (TUnion a (TInter b c)) (TInter (TUnion a b) (TUnion a c)).
+Proof.
+  intros a b c.
+  apply inter_glb; apply union_mono;
+    (apply sub_refl || apply sub_inter_prl || apply sub_inter_prr).
+Qed.
+
+(* ---- N5 pentagon model: sound for [sub], non-distributive ------------------
+   Elements: B0 < NA < NB < T1 ; B0 < NC < T1 ; {NA,NB} incomparable to NC.
+   Order and ops are given as total functions and verified by exhaustive
+   case analysis (5 elements). *)
+
+Inductive N5 := B0 | NA | NB | NC | T1.
+
+Definition n5le (x y : N5) : bool :=
+  match x, y with
+  | B0, _ => true | _, T1 => true
+  | NA, NA => true | NA, NB => true | NB, NB => true | NC, NC => true
+  | _, _ => false end.
+
+Definition n5meet (x y : N5) : N5 :=
+  match x, y with
+  | B0, _ | _, B0 => B0 | T1, z | z, T1 => z
+  | NA, NA => NA | NB, NB => NB | NC, NC => NC
+  | NA, NB | NB, NA => NA | NA, NC | NC, NA => B0 | NB, NC | NC, NB => B0 end.
+
+Definition n5join (x y : N5) : N5 :=
+  match x, y with
+  | T1, _ | _, T1 => T1 | B0, z | z, B0 => z
+  | NA, NA => NA | NB, NB => NB | NC, NC => NC
+  | NA, NB | NB, NA => NB | NA, NC | NC, NA => T1 | NB, NC | NC, NB => T1 end.
+
+(* Atom interpretation: AInt↦NA, ANum↦NB, AStr↦NC (so the sole atom edge
+   AInt<:ANum maps to NA ≤ NB), the rest to bottom. *)
+Definition iatom (a : Atom) : N5 :=
+  match a with AInt => NA | ANum => NB | AStr => NC | _ => B0 end.
+
+Fixpoint interp (t : Ty) : N5 :=
+  match t with
+  | TAtom a => iatom a | TTop => T1 | TBot => B0
+  | TUnion a b => n5join (interp a) (interp b)
+  | TInter a b => n5meet (interp a) (interp b) end.
+
+Lemma n5le_refl : forall x, n5le x x = true. Proof. destruct x; reflexivity. Qed.
+Lemma n5le_top  : forall x, n5le x T1 = true. Proof. destruct x; reflexivity. Qed.
+Lemma n5join_l : forall x y z, n5le x y = true -> n5le x (n5join y z) = true.
+Proof. intros x y z; destruct x,y,z; simpl; auto. Qed.
+Lemma n5join_r : forall x y z, n5le x z = true -> n5le x (n5join y z) = true.
+Proof. intros x y z; destruct x,y,z; simpl; auto. Qed.
+Lemma n5join_e : forall x y z, n5le x z = true -> n5le y z = true -> n5le (n5join x y) z = true.
+Proof. intros x y z; destruct x,y,z; simpl; auto. Qed.
+Lemma n5meet_l : forall x y z, n5le x z = true -> n5le (n5meet x y) z = true.
+Proof. intros x y z; destruct x,y,z; simpl; auto. Qed.
+Lemma n5meet_r : forall x y z, n5le y z = true -> n5le (n5meet x y) z = true.
+Proof. intros x y z; destruct x,y,z; simpl; auto. Qed.
+Lemma n5meet_i : forall x y z, n5le x y = true -> n5le x z = true -> n5le x (n5meet y z) = true.
+Proof. intros x y z; destruct x,y,z; simpl; auto. Qed.
+
+(* Soundness: every [sub] edge is a true order-fact in N5. *)
+Theorem interp_sound : forall a b, sub a b -> n5le (interp a) (interp b) = true.
+Proof.
+  intros a b H. induction H; simpl.
+  - apply n5le_refl.
+  - destruct H; reflexivity.        (* SAtom: only AInt<:ANum, i.e. NA ≤ NB *)
+  - apply n5le_top.
+  - reflexivity.                    (* SBot: B0 ≤ everything *)
+  - apply n5join_l; assumption.
+  - apply n5join_r; assumption.
+  - apply n5join_e; assumption.
+  - apply n5meet_l; assumption.
+  - apply n5meet_r; assumption.
+  - apply n5meet_i; assumption.
+Qed.
+
+(* The hard direction of inter-over-union distributivity is UNDERIVABLE.
+   Instance: a:=ANum(NB), b:=AInt(NA), c:=AStr(NC).
+     interp LHS = NB ∧ (NA ∨ NC) = NB ∧ T1 = NB
+     interp RHS = (NB∧NA) ∨ (NB∧NC) = NA ∨ B0 = NA
+     n5le NB NA = false  ⇒  no [sub] derivation exists. *)
+Theorem distrib_inter_union_le_unprovable :
+  ~ sub (TInter (TAtom ANum) (TUnion (TAtom AInt) (TAtom AStr)))
+        (TUnion (TInter (TAtom ANum) (TAtom AInt))
+                (TInter (TAtom ANum) (TAtom AStr))).
+Proof.
+  intro H. apply interp_sound in H. simpl in H. discriminate H.
+Qed.
+
+(* Dually, the hard direction of union-over-inter is also UNDERIVABLE.
+   Instance: a:=AInt(NA), b:=AStr(NC), c:=ANum(NB).
+     interp LHS = (NA∨NC) ∧ (NA∨NB) = T1 ∧ NB = NB
+     interp RHS = NA ∨ (NC∧NB) = NA ∨ B0 = NA
+     n5le NB NA = false. *)
+Theorem distrib_union_inter_ge_unprovable :
+  ~ sub (TInter (TUnion (TAtom AInt) (TAtom AStr))
+                (TUnion (TAtom AInt) (TAtom ANum)))
+        (TUnion (TAtom AInt) (TInter (TAtom AStr) (TAtom ANum))).
+Proof.
+  intro H. apply interp_sound in H. simpl in H. discriminate H.
+Qed.
