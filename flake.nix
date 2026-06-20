@@ -45,6 +45,14 @@
             # PUC Lua 5.1–5.4 for the lib/sem Loop-α differential harness ONLY
             # (contributor/CI tooling; NOT a runtime dependency — see pucBin above).
             pucBin
+            # Coq/Rocq proof assistant for the mechanized type-system kernel in
+            # proof/ (correct-by-construction subtype metatheory). QuickChick is
+            # certified property-based testing for the same kernel. These are
+            # STRICTLY build-time / CI proof tooling — the shipped checker
+            # (`bin/cr`) and `bin/cr test` have NO dependency on them and run on a
+            # bare clone with only the vendored LuaJIT. See docs/proof-kernel.md.
+            coq
+            coqPackages.QuickChick
           ] ++ extraInputs;
           LD_LIBRARY_PATH = "${pkgs.lib.makeLibraryPath buildInputs}:$LD_LIBRARY_PATH";
           shellHook = ''

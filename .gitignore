@@ -2,6 +2,15 @@
 /result
 .direnv/
 
+# Coq/Rocq proof tooling build artifacts (proof/ — contributor/CI only)
+*.vo
+*.vok
+*.vos
+*.glob
+.*.aux
+.lia.cache
+.nia.cache
+
 # Node (docs)
 node_modules/
 docs/.vitepress/cache/
