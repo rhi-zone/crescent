@@ -67,9 +67,6 @@ local M = {}
 --::   KWhileRecond = { t: "whileRecond", cond: Term, body: Stmt[], code: Stmt[], pc: integer, env: Env }
 --::   KRet     = { t: "ret", env: Env }
 --::   KDiscard = { t: "discard", code: Stmt[], pc: integer, env: Env }
--- Each pushed frame literal is cast `--[[: Kont]]` so the typechecker selects the
--- matching union member (a bare literal is otherwise matched against the FIRST
--- member only — gap recorded in TODO.md). Consumption narrows with `--[[: KFoo]]`.
 --:: Kont = KBinopR | KBinopOp | KIndexK | KIndexDo | KSetObj | KSetKey | KSetVal | KTable | KCallFn | KArgs | KCall | KAdjust1 | KExecAfter | KLocal | KAssign | KIf | KWhile | KWhileRecond | KRet | KDiscard
 
 -- ── Machine state (the control component of a Config) ────────────────────────
@@ -146,11 +143,11 @@ local function step_eval(profile, store, m, focus)
 		return { focus = vals_focus(out), env = env, kont = m.kont, fault = nil, final = nil }
 	end
 	if term.k == "binop" then
-		push(m.kont, { t = "binopR", op = term.op, rhs = term.b, env = env } --[[: Kont]])
+		push(m.kont, { t = "binopR", op = term.op, rhs = term.b, env = env })
 		return { focus = eval_focus(term.a), env = env, kont = m.kont, fault = nil, final = nil }
 	end
 	if term.k == "index" then
-		push(m.kont, { t = "indexK", key = term.key, env = env } --[[: Kont]])
+		push(m.kont, { t = "indexK", key = term.key, env = env })
 		return { focus = eval_focus(term.obj), env = env, kont = m.kont, fault = nil, final = nil }
 	end
 	if term.k == "table" then
@@ -158,7 +155,7 @@ local function step_eval(profile, store, m, focus)
 		if #term.items == 0 then
 			return { focus = vals_focus({ ref }), env = env, kont = m.kont, fault = nil, final = nil }
 		end
-		push(m.kont, { t = "table", ref = ref, items = term.items, idx = 1, env = env } --[[: Kont]])
+		push(m.kont, { t = "table", ref = ref, items = term.items, idx = 1, env = env })
 		return { focus = eval_focus(term.items[1] --[[: Term]]), env = env, kont = m.kont, fault = nil, final = nil }
 	end
 	if term.k == "closure" then
@@ -166,7 +163,7 @@ local function step_eval(profile, store, m, focus)
 		return { focus = vals_focus({ ref }), env = env, kont = m.kont, fault = nil, final = nil }
 	end
 	if term.k == "call" then
-		push(m.kont, { t = "callFn", args = term.args, env = env } --[[: Kont]])
+		push(m.kont, { t = "callFn", args = term.args, env = env })
 		return { focus = eval_focus(term.fn), env = env, kont = m.kont, fault = nil, final = nil }
 	end
 	return stuck(m, config.fault("unknown-term", "no rule for this term kind"))
@@ -187,32 +184,32 @@ local function step_exec(profile, store, m, focus)
 	end
 
 	if stmt.k == "local" then
-		push(m.kont, { t = "local", slots = stmt.slots, code = code, pc = pc + 1, env = env } --[[: Kont]])
+		push(m.kont, { t = "local", slots = stmt.slots, code = code, pc = pc + 1, env = env })
 		return M.focus_exprlist(env, stmt.exprs, m.kont)
 	end
 	if stmt.k == "assign" then
-		push(m.kont, { t = "assign", slot = stmt.slot, code = code, pc = pc + 1, env = env } --[[: Kont]])
+		push(m.kont, { t = "assign", slot = stmt.slot, code = code, pc = pc + 1, env = env })
 		return { focus = eval_focus(stmt.expr), env = env, kont = m.kont, fault = nil, final = nil }
 	end
 	if stmt.k == "setindex" then
-		push(m.kont, { t = "execAfter", code = code, pc = pc + 1, env = env } --[[: Kont]])
-		push(m.kont, { t = "setObj", key = stmt.key, val = stmt.val, env = env } --[[: Kont]])
+		push(m.kont, { t = "execAfter", code = code, pc = pc + 1, env = env })
+		push(m.kont, { t = "setObj", key = stmt.key, val = stmt.val, env = env })
 		return { focus = eval_focus(stmt.obj), env = env, kont = m.kont, fault = nil, final = nil }
 	end
 	if stmt.k == "exprstmt" then
-		push(m.kont, { t = "discard", code = code, pc = pc + 1, env = env } --[[: Kont]])
+		push(m.kont, { t = "discard", code = code, pc = pc + 1, env = env })
 		return { focus = eval_focus(stmt.expr), env = env, kont = m.kont, fault = nil, final = nil }
 	end
 	if stmt.k == "if" then
-		push(m.kont, { t = "if", then_body = stmt.then_body, else_body = stmt.else_body, code = code, pc = pc + 1, env = env } --[[: Kont]])
+		push(m.kont, { t = "if", then_body = stmt.then_body, else_body = stmt.else_body, code = code, pc = pc + 1, env = env })
 		return { focus = eval_focus(stmt.cond), env = env, kont = m.kont, fault = nil, final = nil }
 	end
 	if stmt.k == "while" then
-		push(m.kont, { t = "while", cond = stmt.cond, body = stmt.body, code = code, pc = pc + 1, env = env } --[[: Kont]])
+		push(m.kont, { t = "while", cond = stmt.cond, body = stmt.body, code = code, pc = pc + 1, env = env })
 		return { focus = eval_focus(stmt.cond), env = env, kont = m.kont, fault = nil, final = nil }
 	end
 	if stmt.k == "return" then
-		push(m.kont, { t = "ret", env = env } --[[: Kont]])
+		push(m.kont, { t = "ret", env = env })
 		return M.focus_exprlist(env, stmt.exprs, m.kont)
 	end
 	return stuck(m, config.fault("unknown-stmt", "no rule for this statement kind"))
@@ -226,7 +223,7 @@ function M.focus_exprlist(env, exprs, kont)
 	if #exprs == 0 then
 		return { focus = vals_focus({}), env = env, kont = kont, fault = nil, final = nil }
 	end
-	push(kont, { t = "args", fnv = nil, args = exprs, idx = 0, acc = {}, env = env, spread = true } --[[: Kont]])
+	push(kont, { t = "args", fnv = nil, args = exprs, idx = 0, acc = {}, env = env, spread = true })
 	-- the args frame at idx=0 will, on first resume, consume nothing and kick
 	-- evaluation of element 1; but to start we resume with an empty tuple.
 	return { focus = vals_focus({}), env = env, kont = kont, fault = nil, final = nil }
@@ -255,7 +252,7 @@ local function step_vals(profile, store, m, focus)
 	end
 	if top.t == "binopR" then
 		local f = top
-		push(kont, { t = "binopOp", op = f.op, lhs = first1(), env = f.env } --[[: Kont]])
+		push(kont, { t = "binopOp", op = f.op, lhs = first1(), env = f.env })
 		return { focus = eval_focus(f.rhs), env = f.env, kont = kont, fault = nil, final = nil }
 	end
 	if top.t == "binopOp" then
@@ -266,7 +263,7 @@ local function step_vals(profile, store, m, focus)
 	end
 	if top.t == "indexK" then
 		local f = top
-		push(kont, { t = "indexDo", obj = first1(), env = f.env } --[[: Kont]])
+		push(kont, { t = "indexDo", obj = first1(), env = f.env })
 		return { focus = eval_focus(f.key), env = f.env, kont = kont, fault = nil, final = nil }
 	end
 	if top.t == "indexDo" then
@@ -277,12 +274,12 @@ local function step_vals(profile, store, m, focus)
 	end
 	if top.t == "setObj" then
 		local f = top
-		push(kont, { t = "setKey", obj = first1(), val = f.val, env = f.env } --[[: Kont]])
+		push(kont, { t = "setKey", obj = first1(), val = f.val, env = f.env })
 		return { focus = eval_focus(f.key), env = f.env, kont = kont, fault = nil, final = nil }
 	end
 	if top.t == "setKey" then
 		local f = top
-		push(kont, { t = "setVal", obj = f.obj, key = first1(), env = f.env } --[[: Kont]])
+		push(kont, { t = "setVal", obj = f.obj, key = first1(), env = f.env })
 		return { focus = eval_focus(f.val), env = f.env, kont = kont, fault = nil, final = nil }
 	end
 	if top.t == "setVal" then
@@ -299,7 +296,7 @@ local function step_vals(profile, store, m, focus)
 		if f.idx >= #f.items then
 			return { focus = vals_focus({ f.ref }), env = f.env, kont = kont, fault = nil, final = nil }
 		end
-		push(kont, { t = "table", ref = f.ref, items = f.items, idx = f.idx + 1, env = f.env } --[[: Kont]])
+		push(kont, { t = "table", ref = f.ref, items = f.items, idx = f.idx + 1, env = f.env })
 		return { focus = eval_focus(f.items[f.idx + 1] --[[: Term]]), env = f.env, kont = kont, fault = nil, final = nil }
 	end
 	if top.t == "callFn" then
@@ -308,7 +305,7 @@ local function step_vals(profile, store, m, focus)
 		if #f.args == 0 then
 			return M.enter_call(profile, store, m, fnv, {}, f.env)
 		end
-		push(kont, { t = "args", fnv = fnv, args = f.args, idx = 0, acc = {}, env = f.env, spread = false } --[[: Kont]])
+		push(kont, { t = "args", fnv = fnv, args = f.args, idx = 0, acc = {}, env = f.env, spread = false })
 		-- kick element-1 evaluation by resuming the args frame with empty vals.
 		return { focus = vals_focus({}), env = f.env, kont = kont, fault = nil, final = nil }
 	end
@@ -353,7 +350,7 @@ local function step_vals(profile, store, m, focus)
 		local f = top
 		local body = va.truthy(first1()) and f.then_body or f.else_body
 		-- run the branch body, then continue with the rest of the outer block.
-		push(kont, { t = "execAfter", code = f.code, pc = f.pc, env = f.env } --[[: Kont]])
+		push(kont, { t = "execAfter", code = f.code, pc = f.pc, env = f.env })
 		return { focus = { f = "exec", code = body, pc = 1 }, env = f.env, kont = kont, fault = nil, final = nil }
 	end
 	if top.t == "while" then
@@ -365,13 +362,13 @@ local function step_vals(profile, store, m, focus)
 		end
 		-- condition true: run the body, then re-evaluate the condition. The recond
 		-- frame, on body completion, re-focuses cond and re-pushes the while frame.
-		push(kont, { t = "whileRecond", cond = f.cond, body = f.body, code = f.code, pc = f.pc, env = f.env } --[[: Kont]])
+		push(kont, { t = "whileRecond", cond = f.cond, body = f.body, code = f.code, pc = f.pc, env = f.env })
 		return { focus = { f = "exec", code = f.body, pc = 1 }, env = f.env, kont = kont, fault = nil, final = nil }
 	end
 	if top.t == "whileRecond" then
 		local f = top
 		-- body finished; re-establish the while frame and re-evaluate the cond.
-		push(kont, { t = "while", cond = f.cond, body = f.body, code = f.code, pc = f.pc, env = f.env } --[[: Kont]])
+		push(kont, { t = "while", cond = f.cond, body = f.body, code = f.code, pc = f.pc, env = f.env })
 		return { focus = eval_focus(f.cond), env = f.env, kont = kont, fault = nil, final = nil }
 	end
 	if top.t == "ret" then
@@ -424,7 +421,7 @@ function M.resume_args(profile, store, m, f, produced)
 	end
 	-- focus the next element.
 	local nextidx = f.idx + 1
-	push(kont, { t = "args", fnv = f.fnv, args = f.args, idx = nextidx, acc = f.acc, env = f.env, spread = f.spread } --[[: Kont]])
+	push(kont, { t = "args", fnv = f.fnv, args = f.args, idx = nextidx, acc = f.acc, env = f.env, spread = f.spread })
 	return { focus = eval_focus(f.args[nextidx] --[[: Term]]), env = f.env, kont = kont, fault = nil, final = nil }
 end
 
@@ -455,7 +452,7 @@ function M.enter_call(profile, store, m, fnv, args, caller_env)
 		end
 	end
 	local callee_env = { slots = slots, varargs = varargs }
-	push(m.kont, { t = "call", fnv = fnv, env = caller_env } --[[: Kont]])
+	push(m.kont, { t = "call", fnv = fnv, env = caller_env })
 	return { focus = { f = "exec", code = desc.body, pc = 1 }, env = callee_env, kont = m.kont, fault = nil, final = nil }
 end
 
