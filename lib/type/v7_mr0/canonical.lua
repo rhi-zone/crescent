@@ -54,11 +54,7 @@ end
 
 --: (number) -> boolean
 local function is_negative_zero(n)
-	-- TODO(typechecker): write this as `return n == 0 and 1 / n < 0` once
-	-- `and` over boolean comparisons is inferred as boolean instead of
-	-- `nil | boolean`.
-	if n ~= 0 then return false end
-	return 1 / n < 0
+	return n == 0 and 1 / n < 0
 end
 
 --: ({ [integer]: string, ... }, unknown) -> (boolean | nil, string | nil)
