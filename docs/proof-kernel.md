@@ -133,6 +133,63 @@ logic over the denotation — no `sub` rule asserted, no axiom added.
 the global context** — no axioms, no `Admitted`. Whole dev compiles clean
 (`coqc proof/subtype.v`).
 
+## Increment 4 — DECIDABLE subtyping: an executable decider, sound + complete
+
+Increment 3 made `dsub a b := forall v:V, denote a v -> denote b v` the
+*definition* of subtyping — correct, but **not computable**: it quantifies over
+the infinite domain `V` (`VInt n` for every `nat n`, etc.). Increment 4 makes it
+**decidable by construction** — an executable `decide_dsub : BTy -> BTy -> bool`
+proven `= true <-> dsub`.
+
+`proof/subtype.v` (new section, additive — increments 1-3 untouched):
+
+- **The head-class reduction (the lemma the decider rests on).** For the current
+  atoms, `denote t v` depends only on `v`'s *constructor head*
+  (`VInt`/`VFloat`/`VStr`/`VBool`/`VNil` — five classes), never on the payload
+  (the `nat`/`bool` inside). `atom_denote` matches only the head; the connectives
+  (`Union`/`Inter`/`Neg`/`Top`/`Bot`) preserve head-dependence. Formalized as
+  `head : V -> V` (collapse a value to the canonical representative of its
+  class), `head_reps` (the five representatives), and **`denote_head : forall t
+  v, denote t v <-> denote t (head v)`** (`Qed`, by induction on `t`), with
+  corollary `denote_same_head` (same head ⇒ indistinguishable by any type). This
+  is what collapses the universal quantifier over infinite `V` to a finite check.
+- **The executable decider.** `decide_dsub a b := forallb (fun h => implb (memb a
+  h) (memb b h)) head_reps`, where `memb t v` projects increment 3's decidable
+  membership `denote_dec` (`{denote t v}+{~denote t v}`) to a `bool`. It is a
+  genuine `bool`-returning function: `Compute (decide_dsub ...)` reduces.
+- **Soundness AND completeness:** `decide_dsub_correct : decide_dsub a b = true
+  <-> dsub a b` (`Qed`). Completeness (decider → `dsub`): any `v` has head `head
+  v`, one of the five reps; the finite check covers it; `denote_head` transports
+  membership back to `v`. Soundness (`dsub` → decider): instantiate `dsub` at
+  each representative (a concrete witness of its class). Also `dsub_dec : {dsub a
+  b}+{~dsub a b}` — the sumbool form, `Defined` (computable).
+- **Sanity / agreement.** `Compute` confirms the right answers:
+  `decide_dsub AInt ANum = true`, `ANum AInt = false`, `(AInt ∩ AStr) Bot =
+  true`, `AStr AInt = false`, `AInt (¬AStr) = true`, `Top (AInt ∪ ¬AInt) = true`
+  (excluded middle). And the decider is shown to decide *exactly* `dsub`, not
+  some other relation: `agree_*` lemmas prove `dsub ...` for the true cases and
+  `~ dsub ...` for the false ones, all routed through `decide_dsub_correct`.
+
+`Print Assumptions decide_dsub_correct`, `denote_head`, `dsub_dec`: **Closed
+under the global context** — no axioms, no `Admitted`, no `Classical`. Whole dev
+compiles (`coqc proof/subtype.v`).
+
+### SCOPE LIMITATION — this is NOT the final decision procedure
+
+The decider is correct **only because the current atoms make `denote`
+head-determined** — membership depends solely on the value's constructor head,
+so five representatives suffice to witness the entire infinite domain. This is a
+genuine property of the present type system, not a trick, but it does **not**
+survive the addition of structural type formers. Once **records/tables** and
+**arrows** are added, `denote` will depend on more than the head — the *contents*
+of a table, the *behaviour* of a function — and a finite enumeration of head
+classes can no longer cover the value space. The five-point decider will then be
+**unsound/incomplete** and must be replaced by an **emptiness-based decision
+procedure (MLstruct-style)**: decide `dsub a b` by deciding emptiness of `a ∩
+¬b`, with the Boolean algebra normalized to a form whose emptiness is decidable
+structurally. Do not mistake `decide_dsub` for that procedure; it is the correct
+decider for the *atom Boolean algebra* only.
+
 ## Staging
 
 - **[done]** mechanized lattice + subtype `refl`/`trans` (Rocq);
@@ -149,10 +206,19 @@ the global context** — no axioms, no `Admitted`. Whole dev compiles clean
   axioms); decidable membership replaces any classical axiom; non-vacuity
   lemmas prove the model is faithful. The distributivity fork from increment 2
   is **resolved by route (b)** — value-set semantics — at the abstract level.
-- **[next — algorithmic decision procedure]** define a decidable `sub`-style
-  algorithm and prove it **sound + complete against `dsub`** (`sub a b <-> dsub
-  a b`). This makes the old inductive relation honest: an algorithm certified
-  against the semantic truth, not a free lattice masquerading as the spec.
+- **[done — increment 4]** **decidable subtyping** for the atom Boolean algebra:
+  the head-class reduction (`denote` is head-determined; `denote_head`), an
+  executable `decide_dsub : BTy -> BTy -> bool` (and `dsub_dec` sumbool), proven
+  **sound + complete against `dsub`** (`decide_dsub_correct`), with `Compute`
+  sanity + agreement lemmas. Closed under the global context. Limitation
+  recorded above: head-enumeration only works while `denote` is head-determined;
+  structural formers break it and need an emptiness-based procedure.
+- **[next — structural type formers: records/tables first]** extend `BTy` and
+  `denote` with **records/tables** (the Lua-central case: tables are the core
+  aggregate), then **arrows**. Denotation gains structure beyond the head, so
+  the head-enumeration decider no longer applies — design the **emptiness-based
+  decision procedure** (decide `dsub a b` via emptiness of `a ∩ ¬b`, MLstruct-
+  style) and prove it sound + complete under the extended denotation.
 - **[then — equirecursive μ]** extend `BTy` with recursive types (`μ`) and
   coinductive/contractive denotation; re-establish the laws and the decision
   procedure under recursion.

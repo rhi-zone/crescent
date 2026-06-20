@@ -10,6 +10,9 @@
 
 From Stdlib Require Import PeanoNat.
 From Stdlib Require Import Lia.
+From Stdlib Require Import List.
+From Stdlib Require Import Bool.
+Import ListNotations.
 
 (* ---- Base atoms with a declared sub-order ---------------------------------
    A tiny but real atom lattice: ANil, ABool, AInt, ANum, AStr, with the only
@@ -898,4 +901,188 @@ Theorem num_int_not_bot : ~ dsub (BInter (BAtom ANum) (BAtom AInt)) BBot.
 Proof.
   unfold dsub; intro H. specialize (H (VInt 0)). simpl in H.
   apply H. split; exact I.
+Qed.
+
+(* ===========================================================================
+   INCREMENT 4 — DECIDABLE SUBTYPING: an executable decider, sound + complete.
+
+   [dsub a b := forall v:V, denote a v -> denote b v] is the correct definition
+   but is NOT computable: it quantifies over the infinite domain [V] (VInt n for
+   every nat n, etc.). This increment makes subtyping DECIDABLE BY CONSTRUCTION
+   — an executable [decide_dsub : BTy -> BTy -> bool] proven [= true <-> dsub].
+
+   THE KEY OBSERVATION the decider exploits: for the CURRENT atoms, [denote t v]
+   depends only on v's CONSTRUCTOR HEAD (VInt / VFloat / VStr / VBool / VNil —
+   five classes), never on the payload (the nat / bool inside). [atom_denote]
+   matches only the head; the connectives preserve head-dependence. So the
+   universal quantifier over infinite [V] collapses to a finite check over five
+   head-representatives.
+
+   SCOPE / HONESTY (recorded in docs/proof-kernel.md): this works ONLY because
+   the current atoms make [denote] head-determined. Once STRUCTURAL type formers
+   are added — records/tables, arrows — [denote] will depend on more than the
+   head (the contents of a table, the behaviour of a function), and this simple
+   five-point decider will NOT suffice. A later increment needs an emptiness-
+   based decision procedure (MLstruct-style). This decider is correct for the
+   atom Boolean algebra, not the final procedure.
+   =========================================================================== *)
+
+(* ---- Head classes: five canonical representatives -------------------------
+   [head v] collapses a value to the canonical representative of its
+   constructor class (erasing the payload). [head_reps] enumerates the five. *)
+
+Definition head (v : V) : V :=
+  match v with
+  | VInt _   => VInt 0
+  | VFloat _ => VFloat 0
+  | VStr _   => VStr 0
+  | VBool _  => VBool false
+  | VNil     => VNil
+  end.
+
+Definition head_reps : list V := VInt 0 :: VFloat 0 :: VStr 0 :: VBool false :: VNil :: nil.
+
+(* [head v] is always one of the five representatives. *)
+Lemma head_in_reps : forall v, In (head v) head_reps.
+Proof.
+  intro v; destruct v; simpl;
+    repeat first [ left; reflexivity | right ].
+Qed.
+
+(* ---- HEAD-DEPENDENCE LEMMA ------------------------------------------------
+   [denote t] cannot distinguish two values with the same head. The atom case
+   is the crux: [atom_denote a] matches only the constructor, so erasing the
+   payload (replacing v by [head v]) leaves membership unchanged. The
+   connectives propagate this by the IH. Stated as: membership at v equals
+   membership at [head v]. *)
+
+(* Atom step: [atom_denote a v] iff [atom_denote a (head v)]. *)
+Lemma atom_denote_head : forall a v, atom_denote a v <-> atom_denote a (head v).
+Proof. intros a v; destruct a; destruct v; simpl; tauto. Qed.
+
+(* The general head-dependence lemma, by induction on the type. *)
+Theorem denote_head : forall t v, denote t v <-> denote t (head v).
+Proof.
+  induction t; intro v; simpl.
+  - apply atom_denote_head.
+  - tauto.
+  - tauto.
+  - rewrite (IHt1 v), (IHt2 v); tauto.
+  - rewrite (IHt1 v), (IHt2 v); tauto.
+  - rewrite (IHt v); tauto.
+Qed.
+
+(* Two values with the SAME head are indistinguishable by any type — the
+   formulation the brief states. Immediate from [denote_head]. *)
+Corollary denote_same_head : forall t v1 v2,
+  head v1 = head v2 -> (denote t v1 <-> denote t v2).
+Proof.
+  intros t v1 v2 Hh.
+  rewrite (denote_head t v1), (denote_head t v2), Hh. reflexivity.
+Qed.
+
+(* ---- Boolean membership from the decidable membership of increment 3 ------
+   [denote_dec] gives [{denote t v}+{~denote t v}]; project it to a [bool]. *)
+
+Definition memb (t : BTy) (v : V) : bool :=
+  if denote_dec t v then true else false.
+
+Lemma memb_true_iff : forall t v, memb t v = true <-> denote t v.
+Proof.
+  intros t v. unfold memb. destruct (denote_dec t v) as [H | H]; split;
+    intro; first [ assumption | discriminate | contradiction | reflexivity ].
+Qed.
+
+(* ---- THE EXECUTABLE DECIDER -----------------------------------------------
+   For each head-representative h, check that membership in [a] implies
+   membership in [b] (i.e. NOT (a-member AND NOT b-member)). [forallb] over the
+   five reps. Genuinely computable: [Compute (decide_dsub ...)] reduces. *)
+
+Definition decide_dsub (a b : BTy) : bool :=
+  forallb (fun h => implb (memb a h) (memb b h)) head_reps.
+
+(* ---- SOUNDNESS + COMPLETENESS ---------------------------------------------
+   decide_dsub a b = true  <->  dsub a b. *)
+
+(* Helper: forallb true means the predicate holds at every list element. *)
+Lemma forallb_forall_true : forall (f : V -> bool) (l : list V),
+  forallb f l = true -> forall x, In x l -> f x = true.
+Proof.
+  intros f l H x Hin. rewrite forallb_forall in H. apply H, Hin.
+Qed.
+
+Theorem decide_dsub_correct : forall a b,
+  decide_dsub a b = true <-> dsub a b.
+Proof.
+  intros a b. unfold decide_dsub, dsub. split.
+  - (* COMPLETENESS: decider true -> dsub. Any v has head [head v], which is one
+       of the five reps; the finite check covers it; head-dependence transports
+       membership from [head v] back to v. *)
+    intros Hall v Hav.
+    pose proof (forallb_forall_true _ _ Hall (head v) (head_in_reps v)) as Hh.
+    cbv beta in Hh.
+    (* a-member at head v *)
+    assert (memb a (head v) = true) as Hma.
+    { apply memb_true_iff. apply (denote_head a v). exact Hav. }
+    rewrite Hma in Hh. simpl in Hh.
+    (* b-member at head v, transported back to v *)
+    apply (denote_head b v). apply memb_true_iff. exact Hh.
+  - (* SOUNDNESS: dsub -> decider true. Instantiate dsub at each representative
+       (each is a concrete witness value of its head class). *)
+    intro Hsub. apply forallb_forall. intros h _.
+    destruct (memb a h) eqn:Ea; simpl; [ | reflexivity ].
+    apply memb_true_iff. apply Hsub. apply memb_true_iff. exact Ea.
+Qed.
+
+(* The sumbool form: subtyping is decidable. *)
+Definition dsub_dec (a b : BTy) : {dsub a b} + {~ dsub a b}.
+Proof.
+  destruct (decide_dsub a b) eqn:E.
+  - left. apply decide_dsub_correct. exact E.
+  - right. intro H. apply decide_dsub_correct in H.
+    rewrite H in E. discriminate E.
+Defined.
+
+(* ---- SANITY / NON-TRIVIALITY ----------------------------------------------
+   Concrete answers, each computed by reduction, and confirmed to AGREE with
+   the semantic [dsub] (true cases proved [dsub ...], false cases proved
+   [~ dsub ...]) — so the decider decides exactly [dsub], not some other
+   relation. *)
+
+(* AInt <: ANum is TRUE — integers are numbers. *)
+Example dec_int_num   : decide_dsub (BAtom AInt) (BAtom ANum) = true.
+Proof. reflexivity. Qed.
+(* ANum <: AInt is FALSE — not all numbers are integers. *)
+Example dec_num_int   : decide_dsub (BAtom ANum) (BAtom AInt) = false.
+Proof. reflexivity. Qed.
+(* AInt ∩ AStr <: Bot is TRUE — disjoint atoms intersect empty. *)
+Example dec_int_str_bot : decide_dsub (BInter (BAtom AInt) (BAtom AStr)) BBot = true.
+Proof. reflexivity. Qed.
+(* AStr <: AInt is FALSE. *)
+Example dec_str_int   : decide_dsub (BAtom AStr) (BAtom AInt) = false.
+Proof. reflexivity. Qed.
+(* Neg case: AInt <: ¬AStr is TRUE (an int is never a string). *)
+Example dec_int_negstr : decide_dsub (BAtom AInt) (BNeg (BAtom AStr)) = true.
+Proof. reflexivity. Qed.
+(* Union case: AInt <: AInt ∪ AStr is TRUE. *)
+Example dec_int_union : decide_dsub (BAtom AInt) (BUnion (BAtom AInt) (BAtom AStr)) = true.
+Proof. reflexivity. Qed.
+(* Complement: AInt ∪ ¬AInt <: Top, and Top <: AInt ∪ ¬AInt — both TRUE. *)
+Example dec_excluded_middle :
+  decide_dsub BTop (BUnion (BAtom AInt) (BNeg (BAtom AInt))) = true.
+Proof. reflexivity. Qed.
+
+(* AGREEMENT with the semantic [dsub]: each decided answer matches the truth.
+   (true -> dsub; false -> ~dsub, via [decide_dsub_correct].) *)
+Example agree_int_num : dsub (BAtom AInt) (BAtom ANum).
+Proof. apply decide_dsub_correct. reflexivity. Qed.
+Example agree_not_num_int : ~ dsub (BAtom ANum) (BAtom AInt).
+Proof.
+  intro H. apply decide_dsub_correct in H. discriminate H.
+Qed.
+Example agree_int_str_bot : dsub (BInter (BAtom AInt) (BAtom AStr)) BBot.
+Proof. apply decide_dsub_correct. reflexivity. Qed.
+Example agree_not_str_int : ~ dsub (BAtom AStr) (BAtom AInt).
+Proof.
+  intro H. apply decide_dsub_correct in H. discriminate H.
 Qed.
