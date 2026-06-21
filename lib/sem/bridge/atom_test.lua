@@ -71,6 +71,19 @@ local function oracle()
 		{ atom = "ANil",  mk = function() return bridge.vstr("x") end,    coq = false, desc = "ANil VStr" },
 		{ atom = "ANil",  mk = function() return bridge.vbool(false) end, coq = false, desc = "ANil VBool" },
 		{ atom = "ANil",  mk = function() return bridge.vfloat(3.0) end,  coq = false, desc = "ANil VFloat" },
+		-- ANum (number atom under REFINE) — verbatim from bridge_num_oracle.v
+		{ atom = "ANum",  mk = function() return bridge.vint(3) end,      coq = true,  desc = "ANum VInt 3" },
+		{ atom = "ANum",  mk = function() return bridge.vfloat(3.0) end,  coq = true,  desc = "ANum VFloat 3" },
+		{ atom = "ANum",  mk = function() return bridge.vint(0) end,      coq = true,  desc = "ANum VInt 0" },
+		{ atom = "ANum",  mk = function() return bridge.vstr("x") end,    coq = false, desc = "ANum VStr" },
+		{ atom = "ANum",  mk = function() return bridge.vbool(true) end,  coq = false, desc = "ANum VBool" },
+		{ atom = "ANum",  mk = function() return bridge.vnil() end,       coq = false, desc = "ANum VNil" },
+		-- AInt (refinement) — VFloat 3 is FALSE in the model (the central fork)
+		{ atom = "AInt",  mk = function() return bridge.vint(3) end,      coq = true,  desc = "AInt VInt 3" },
+		{ atom = "AInt",  mk = function() return bridge.vint(0) end,      coq = true,  desc = "AInt VInt 0" },
+		{ atom = "AInt",  mk = function() return bridge.vfloat(3.0) end,  coq = false, desc = "AInt VFloat 3 (model: NOT int)" },
+		{ atom = "AInt",  mk = function() return bridge.vstr("x") end,    coq = false, desc = "AInt VStr" },
+		{ atom = "AInt",  mk = function() return bridge.vbool(false) end, coq = false, desc = "AInt VBool" },
 	}
 	return rows
 end
@@ -139,14 +152,20 @@ T.describe("sem reality-bridge: model atom-denotation vs real LuaJIT (unambiguou
 		print("  [bridge] Coq-oracle: " .. #rows .. "/" .. #rows .. " port verdicts match the proven model")
 	end)
 
-	-- ── leg (1b): the Coq-validated oracle rows agree with real LuaJIT ────────
-	T.it("Coq-oracle rows agree with real LuaJIT classification", function()
+	-- ── leg (1b): the Coq-validated oracle rows vs real LuaJIT ────────────────
+	-- Most rows AGREE. The number atoms surface the value-domain fork: the row
+	-- `AInt VFloat 3` is a KNOWN disagreement — the MODEL says VFloat 3 ∉ AInt,
+	-- but its real-Lua image is the double `3.0`, which satisfies the integral
+	-- predicate. We classify each row and assert the disagreement set is EXACTLY
+	-- the integer-valued-VFloat-vs-AInt case (the surfaced fork), nothing else.
+	T.it("Coq-oracle rows vs real LuaJIT (number atoms surface the value-domain fork)", function()
 		if not probe(caps, LUAJIT) then
 			T.skip("vendored LuaJIT not probeable; real-side leg skipped (bare-clone safe)")
 			return
 		end
 		local rows = oracle()
 		local agreed = 0
+		local known_disagree = {} --: string[]
 		for i = 1, #rows do
 			local r = rows[i]
 			local v = r.mk()
@@ -154,17 +173,67 @@ T.describe("sem reality-bridge: model atom-denotation vs real LuaJIT (unambiguou
 			local pred = bridge.atom_real_predicate(r.atom)
 			local rv = real_verdict(caps, LUAJIT, expr, pred)
 			T.neq(rv, nil, "real interpreter produced a verdict for " .. r.desc)
-			-- The port (== the proven model) must match real LuaJIT.
 			local model = bridge.model_denote_atom(r.atom, v)
-			T.eq(rv, model, "model vs real LuaJIT: " .. r.desc)
-			if rv == model then agreed = agreed + 1 end
+			if rv == model then
+				agreed = agreed + 1
+			else
+				-- The only admissible disagreement: model says a VFloat with an
+				-- integer value is NOT an int, but its real double IS integral.
+				T.eq(r.atom, "AInt", "unexpected disagreement on " .. r.desc)
+				T.eq(v.head, "VFloat", "unexpected disagreement on " .. r.desc)
+				T.eq(model, false, "fork witness: model says VFloat ∉ AInt")
+				T.eq(rv, true, "fork witness: real double IS integral")
+				known_disagree[#known_disagree + 1] = r.desc
+			end
 		end
-		print("  [bridge] oracle vs real LuaJIT: " .. agreed .. "/" .. #rows .. " agree")
-		T.eq(agreed, #rows, "all oracle rows agree with real LuaJIT")
+		print("  [bridge] oracle vs real LuaJIT: " .. agreed .. "/" .. #rows
+			.. " agree; " .. #known_disagree .. " known value-domain-fork disagreement(s)")
+		for i = 1, #known_disagree do
+			print("    [fork] " .. known_disagree[i]
+				.. " — VInt/VFloat-vs-5.1: distinct model values, one real double")
+		end
+		T.eq(#known_disagree, 1, "exactly one surfaced disagreement (AInt VFloat 3)")
+		T.eq(agreed, #rows - 1, "all other oracle rows agree with real LuaJIT")
+	end)
+
+	-- ── leg (1c): explicit witness — VInt 3 and VFloat 3 are the SAME real value
+	-- The central faithfulness question, pinned concretely: distinct model values
+	-- VInt 3 / VFloat 3 both map to the real double 3, which is `==` and renders
+	-- identically. So the model's VInt/VFloat distinction is UNOBSERVABLE on 5.1.
+	T.it("witness: VInt 3 and VFloat 3 are indistinguishable in real LuaJIT 5.1", function()
+		if not probe(caps, LUAJIT) then
+			T.skip("vendored LuaJIT not probeable; witness leg skipped (bare-clone safe)")
+			return
+		end
+		local int_expr   = bridge.value_to_lua_expr(bridge.vint(3))   --[[: string]]
+		local float_expr = bridge.value_to_lua_expr(bridge.vfloat(3)) --[[: string]]
+		-- Equality, type, and tostring of the two images, evaluated for real.
+		local src = "local a = " .. int_expr .. "\n"
+			.. "local b = " .. float_expr .. "\n"
+			.. "io.write((a == b) and 'EQ' or 'NE', '|', type(a), '|', type(b),"
+			.. " '|', tostring(a), '|', tostring(b))\n"
+		local path = caps.tmpname() .. ".bridge-witness.lua"
+		local fh = caps.open(path, "w")
+		if fh == nil then error("bridge: cannot open temp file " .. path) end
+		fh:write(src); fh:close()
+		local out = exec.run(LUAJIT, { path }, { popen = caps.popen, stderr = "discard" })
+		caps.remove(path)
+		T.neq(out, nil, "witness interpreter produced output")
+		print("  [bridge] witness VInt 3 vs VFloat 3 in real LuaJIT: " .. tostring(out))
+		-- distinct model values, ONE real value: equal, both "number", same tostring.
+		T.ok((out or ""):find("EQ", 1, true) ~= nil,
+			"VInt 3 == VFloat 3 in real LuaJIT 5.1 (one double)")
+		T.ok((out or ""):find("number|number", 1, true) ~= nil,
+			"both classify as type=='number' (no runtime int/float tag)")
 	end)
 
 	-- ── leg (2): generated differential, model port vs real LuaJIT ────────────
-	T.it("generated values: model port agrees with real LuaJIT for AStr/ABool/ANil", function()
+	-- Over all 5 bridged atoms (AStr/ABool/ANil/ANum/AInt). The generator emits
+	-- non-integer floats (offset .5) for the VFloat head, so model and real
+	-- predicate agree on every generated value — the integer-valued-VFloat fork
+	-- case is exercised separately by the oracle/witness legs (1b/1c) and is NOT
+	-- reachable here. Any disagreement here would be a genuine, unexpected bug.
+	T.it("generated values: model port agrees with real LuaJIT for all 5 bridged atoms", function()
 		if not probe(caps, LUAJIT) then
 			T.skip("vendored LuaJIT not probeable; differential leg skipped (bare-clone safe)")
 			return
@@ -216,5 +285,74 @@ T.describe("sem reality-bridge: model atom-denotation vs real LuaJIT (unambiguou
 		end
 		T.eq(agreed, checked,
 			"all " .. checked .. " (atom,value) classifications agree (got " .. agreed .. ")")
+	end)
+
+	-- ── leg (3): REAL-value REFINE differential for ANum/AInt ─────────────────
+	-- Generate REAL Lua numbers (integer-valued, non-integer, and edge cases
+	-- inf/nan/-0.0/large) and assert the host-side REFINE classifier
+	-- (`real_refine_class`) agrees with the SHELLED real predicate
+	-- (`atom_real_predicate`). This validates the REFINE predicate itself against
+	-- the real interpreter on edge cases the model-value generator can't express.
+	T.it("real-value REFINE differential: ANum/AInt classification on edge cases", function()
+		if not probe(caps, LUAJIT) then
+			T.skip("vendored LuaJIT not probeable; real-value leg skipped (bare-clone safe)")
+			return
+		end
+		-- (expr, host-value) pairs. Host value mirrors what the real expr yields,
+		-- so we can compute `real_refine_class` host-side and check it shells the
+		-- same way. inf/nan/-0.0 are written as expressions (no Lua literal).
+		--:: NumCase = { expr: string, host: number }
+		local cases = {
+			{ expr = "0",        host = 0 },
+			{ expr = "3",        host = 3 },
+			{ expr = "-7",       host = -7 },
+			{ expr = "1.5",      host = 1.5 },
+			{ expr = "2.25",     host = 2.25 },
+			{ expr = "-0.0",     host = -0.0 },
+			{ expr = "3.0",      host = 3.0 },     -- integer-valued FLOAT literal
+			{ expr = "1/0",      host = 1 / 0 },   -- +inf
+			{ expr = "-1/0",     host = -1 / 0 },  -- -inf
+			{ expr = "0/0",      host = 0 / 0 },   -- nan
+			{ expr = "2^53",     host = 2 ^ 53 },  -- large integer-valued
+			{ expr = "2^53+0.5", host = 2 ^ 53 + 0.5 },
+		} --[[: NumCase[] ]]
+		-- Expected REFINE classification (independent of host helper, for clarity).
+		--:: Expect = { ANum: boolean, AInt: boolean }
+		local num_atoms = { "ANum", "AInt" } --[[: ("ANum" | "AInt")[] ]]
+		local checked = 0
+		local agreed = 0
+		local first_fail --: string | nil
+		for i = 1, #cases do
+			local c = cases[i]
+			for ai = 1, #num_atoms do
+				local atom = num_atoms[ai]
+				local host = bridge.real_refine_class(atom, c.host)
+				local pred = bridge.atom_real_predicate(atom)
+				local rv = real_verdict(caps, LUAJIT, c.expr, pred)
+				checked = checked + 1
+				if rv == nil then
+					if first_fail == nil then
+						first_fail = "no verdict for atom=" .. atom .. " expr=" .. c.expr
+					end
+				elseif rv == host then
+					agreed = agreed + 1
+				elseif first_fail == nil then
+					first_fail = "REFINE host vs real mismatch: atom=" .. atom
+						.. " expr=" .. c.expr .. " host=" .. tostring(host)
+						.. " real=" .. tostring(rv)
+				end
+			end
+		end
+		print("  [bridge] real-value REFINE: " .. agreed .. "/" .. checked
+			.. " agree (" .. #cases .. " numbers x 2 atoms)")
+		-- Spot-check the intended classifications explicitly (documents REFINE).
+		T.eq(bridge.real_refine_class("AInt", 3.0), true,  "3.0 is integer-valued ⇒ AInt")
+		T.eq(bridge.real_refine_class("AInt", 1.5), false, "1.5 ⇒ not AInt")
+		T.eq(bridge.real_refine_class("AInt", 1 / 0), false, "+inf ⇒ not AInt")
+		T.eq(bridge.real_refine_class("AInt", 0 / 0), false, "nan ⇒ not AInt")
+		T.eq(bridge.real_refine_class("ANum", 0 / 0), true,  "nan IS a number ⇒ ANum")
+		T.eq(bridge.real_refine_class("AInt", -0.0), true, "-0.0 is integer-valued ⇒ AInt")
+		if first_fail ~= nil then T.ok(false, first_fail) end
+		T.eq(agreed, checked, "all real-value REFINE classifications agree")
 	end)
 end)
