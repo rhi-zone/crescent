@@ -70,18 +70,25 @@ local function oracle()
 		{ atom = "ANil",  mk = function() return bridge.vnil() end,       coq = true,  desc = "ANil VNil" },
 		{ atom = "ANil",  mk = function() return bridge.vstr("x") end,    coq = false, desc = "ANil VStr" },
 		{ atom = "ANil",  mk = function() return bridge.vbool(false) end, coq = false, desc = "ANil VBool" },
-		{ atom = "ANil",  mk = function() return bridge.vfloat(3.0) end,  coq = false, desc = "ANil VFloat" },
-		-- ANum (number atom under REFINE) — verbatim from bridge_num_oracle.v
+		{ atom = "ANil",  mk = function() return bridge.vfloat(3) end,    coq = false, desc = "ANil VFloat" },
+		-- ANum (number atom, 5.1 single-double) — verbatim from bridge_num_oracle.v
 		{ atom = "ANum",  mk = function() return bridge.vint(3) end,      coq = true,  desc = "ANum VInt 3" },
-		{ atom = "ANum",  mk = function() return bridge.vfloat(3.0) end,  coq = true,  desc = "ANum VFloat 3" },
+		{ atom = "ANum",  mk = function() return bridge.vfloat(3) end,    coq = true,  desc = "ANum VFloat 3" },
 		{ atom = "ANum",  mk = function() return bridge.vint(0) end,      coq = true,  desc = "ANum VInt 0" },
 		{ atom = "ANum",  mk = function() return bridge.vstr("x") end,    coq = false, desc = "ANum VStr" },
 		{ atom = "ANum",  mk = function() return bridge.vbool(true) end,  coq = false, desc = "ANum VBool" },
 		{ atom = "ANum",  mk = function() return bridge.vnil() end,       coq = false, desc = "ANum VNil" },
-		-- AInt (refinement) — VFloat 3 is FALSE in the model (the central fork)
+		-- AFloat (= number type on 5.1; AInt <: AFloat). Accepts ALL numbers.
+		{ atom = "AFloat", mk = function() return bridge.vint(3) end,     coq = true,  desc = "AFloat VInt 3 (int IS a float)" },
+		{ atom = "AFloat", mk = function() return bridge.vfloat(3) end,   coq = true,  desc = "AFloat VFloat 3" },
+		{ atom = "AFloat", mk = function() return bridge.vint(0) end,     coq = true,  desc = "AFloat VInt 0" },
+		{ atom = "AFloat", mk = function() return bridge.vstr("x") end,   coq = false, desc = "AFloat VStr" },
+		{ atom = "AFloat", mk = function() return bridge.vnil() end,      coq = false, desc = "AFloat VNil" },
+		-- AInt (integer-valued refinement) — VFloat n is a GENUINELY non-integer
+		-- double, so FALSE in BOTH model and reality (no disagreement anymore).
 		{ atom = "AInt",  mk = function() return bridge.vint(3) end,      coq = true,  desc = "AInt VInt 3" },
 		{ atom = "AInt",  mk = function() return bridge.vint(0) end,      coq = true,  desc = "AInt VInt 0" },
-		{ atom = "AInt",  mk = function() return bridge.vfloat(3.0) end,  coq = false, desc = "AInt VFloat 3 (model: NOT int)" },
+		{ atom = "AInt",  mk = function() return bridge.vfloat(3) end,    coq = false, desc = "AInt VFloat 3 (non-integer double, model AND real)" },
 		{ atom = "AInt",  mk = function() return bridge.vstr("x") end,    coq = false, desc = "AInt VStr" },
 		{ atom = "AInt",  mk = function() return bridge.vbool(false) end, coq = false, desc = "AInt VBool" },
 	}
@@ -125,8 +132,9 @@ local function gen_model_value(rng, sz)
 	elseif which == 4 then
 		return bridge.vint(rng:int(-1000, 1000))
 	elseif which == 5 then
-		-- a genuinely non-integer float (offset by a fraction).
-		return bridge.vfloat(rng:int(-1000, 1000) + 0.5)
+		-- the non-integer (NRfrac) number class; the renderer forces a fractional
+		-- part, so pass a plain integer payload (the class, not the value, matters).
+		return bridge.vfloat(rng:int(-1000, 1000))
 	elseif which == 6 then
 		return bridge.vtable()
 	else
@@ -153,19 +161,20 @@ T.describe("sem reality-bridge: model atom-denotation vs real LuaJIT (unambiguou
 	end)
 
 	-- ── leg (1b): the Coq-validated oracle rows vs real LuaJIT ────────────────
-	-- Most rows AGREE. The number atoms surface the value-domain fork: the row
-	-- `AInt VFloat 3` is a KNOWN disagreement — the MODEL says VFloat 3 ∉ AInt,
-	-- but its real-Lua image is the double `3.0`, which satisfies the integral
-	-- predicate. We classify each row and assert the disagreement set is EXACTLY
-	-- the integer-valued-VFloat-vs-AInt case (the surfaced fork), nothing else.
-	T.it("Coq-oracle rows vs real LuaJIT (number atoms surface the value-domain fork)", function()
+	-- LuaJIT 5.1 model (fork A′ RESOLVED): the value domain is collapsed to ONE
+	-- double, so EVERY oracle row now agrees with real LuaJIT — the old
+	-- `AInt VFloat 3` disagreement is GONE. `VFloat n` is a genuinely non-integer
+	-- double (renders to a fractional real), so model and reality both say it is
+	-- NOT an int; `VInt n` is integer-valued, in both AInt and AFloat (`int <:
+	-- float`). We assert FULL agreement — zero disagreements.
+	T.it("Coq-oracle rows vs real LuaJIT (5.1 single-double model — full agreement)", function()
 		if not probe(caps, LUAJIT) then
 			T.skip("vendored LuaJIT not probeable; real-side leg skipped (bare-clone safe)")
 			return
 		end
 		local rows = oracle()
 		local agreed = 0
-		local known_disagree = {} --: string[]
+		local disagree = {} --: string[]
 		for i = 1, #rows do
 			local r = rows[i]
 			local v = r.mk()
@@ -177,41 +186,37 @@ T.describe("sem reality-bridge: model atom-denotation vs real LuaJIT (unambiguou
 			if rv == model then
 				agreed = agreed + 1
 			else
-				-- The only admissible disagreement: model says a VFloat with an
-				-- integer value is NOT an int, but its real double IS integral.
-				T.eq(r.atom, "AInt", "unexpected disagreement on " .. r.desc)
-				T.eq(v.head, "VFloat", "unexpected disagreement on " .. r.desc)
-				T.eq(model, false, "fork witness: model says VFloat ∉ AInt")
-				T.eq(rv, true, "fork witness: real double IS integral")
-				known_disagree[#known_disagree + 1] = r.desc
+				disagree[#disagree + 1] = r.desc
+					.. " (model=" .. tostring(model) .. " real=" .. tostring(rv) .. ")"
 			end
 		end
 		print("  [bridge] oracle vs real LuaJIT: " .. agreed .. "/" .. #rows
-			.. " agree; " .. #known_disagree .. " known value-domain-fork disagreement(s)")
-		for i = 1, #known_disagree do
-			print("    [fork] " .. known_disagree[i]
-				.. " — VInt/VFloat-vs-5.1: distinct model values, one real double")
-		end
-		T.eq(#known_disagree, 1, "exactly one surfaced disagreement (AInt VFloat 3)")
-		T.eq(agreed, #rows - 1, "all other oracle rows agree with real LuaJIT")
+			.. " agree; " .. #disagree .. " disagreement(s)")
+		for i = 1, #disagree do print("    [DISAGREE] " .. disagree[i]) end
+		T.eq(#disagree, 0, "no model-vs-reality disagreements on the 5.1 single-double model")
+		T.eq(agreed, #rows, "every oracle row agrees with real LuaJIT")
 	end)
 
-	-- ── leg (1c): explicit witness — VInt 3 and VFloat 3 are the SAME real value
-	-- The central faithfulness question, pinned concretely: distinct model values
-	-- VInt 3 / VFloat 3 both map to the real double 3, which is `==` and renders
-	-- identically. So the model's VInt/VFloat distinction is UNOBSERVABLE on 5.1.
-	T.it("witness: VInt 3 and VFloat 3 are indistinguishable in real LuaJIT 5.1", function()
+	-- ── leg (1c): explicit witness — 3 and 3.0 are ONE integer-valued number ──
+	-- The value-domain collapse, pinned concretely. On LuaJIT 5.1 the integer
+	-- literal `3` and the float literal `3.0` are the SAME double (`==`, both
+	-- `type=="number"`, both `tostring`→"3"), and BOTH are integer-valued. So the
+	-- model represents this single value as `VInt 3` (= VNum (NRint 3)) — there is
+	-- one number value per double, and an integer-valued number IS a float. There
+	-- is no model value whose real image is `3.0` yet is a non-integer.
+	T.it("witness: 3 and 3.0 are one integer-valued double in real LuaJIT 5.1", function()
 		if not probe(caps, LUAJIT) then
 			T.skip("vendored LuaJIT not probeable; witness leg skipped (bare-clone safe)")
 			return
 		end
-		local int_expr   = bridge.value_to_lua_expr(bridge.vint(3))   --[[: string]]
-		local float_expr = bridge.value_to_lua_expr(bridge.vfloat(3)) --[[: string]]
-		-- Equality, type, and tostring of the two images, evaluated for real.
+		-- `a` is the int-literal image; `b` is an explicit float literal 3.0 — both
+		-- correspond to the SINGLE model value VInt 3 (integer-valued double).
+		local int_expr = bridge.value_to_lua_expr(bridge.vint(3)) --[[: string]]
 		local src = "local a = " .. int_expr .. "\n"
-			.. "local b = " .. float_expr .. "\n"
+			.. "local b = 3.0\n"
 			.. "io.write((a == b) and 'EQ' or 'NE', '|', type(a), '|', type(b),"
-			.. " '|', tostring(a), '|', tostring(b))\n"
+			.. " '|', tostring(a), '|', tostring(b),"
+			.. " '|', (b == math.floor(b)) and 'INT' or 'FRAC')\n"
 		local path = caps.tmpname() .. ".bridge-witness.lua"
 		local fh = caps.open(path, "w")
 		if fh == nil then error("bridge: cannot open temp file " .. path) end
@@ -219,21 +224,23 @@ T.describe("sem reality-bridge: model atom-denotation vs real LuaJIT (unambiguou
 		local out = exec.run(LUAJIT, { path }, { popen = caps.popen, stderr = "discard" })
 		caps.remove(path)
 		T.neq(out, nil, "witness interpreter produced output")
-		print("  [bridge] witness VInt 3 vs VFloat 3 in real LuaJIT: " .. tostring(out))
-		-- distinct model values, ONE real value: equal, both "number", same tostring.
+		print("  [bridge] witness 3 vs 3.0 in real LuaJIT: " .. tostring(out))
+		-- one real value: equal, both "number"; and 3.0 IS integer-valued (int <: float).
 		T.ok((out or ""):find("EQ", 1, true) ~= nil,
-			"VInt 3 == VFloat 3 in real LuaJIT 5.1 (one double)")
+			"3 == 3.0 in real LuaJIT 5.1 (one double)")
 		T.ok((out or ""):find("number|number", 1, true) ~= nil,
-			"both classify as type=='number' (no runtime int/float tag)")
+			"both classify as type=='number' (one number kind)")
+		T.ok((out or ""):find("INT", 1, true) ~= nil,
+			"3.0 is integer-valued — an int IS a float on 5.1 (AInt <: AFloat)")
 	end)
 
 	-- ── leg (2): generated differential, model port vs real LuaJIT ────────────
-	-- Over all 5 bridged atoms (AStr/ABool/ANil/ANum/AInt). The generator emits
-	-- non-integer floats (offset .5) for the VFloat head, so model and real
-	-- predicate agree on every generated value — the integer-valued-VFloat fork
-	-- case is exercised separately by the oracle/witness legs (1b/1c) and is NOT
-	-- reachable here. Any disagreement here would be a genuine, unexpected bug.
-	T.it("generated values: model port agrees with real LuaJIT for all 5 bridged atoms", function()
+	-- Over all 6 bridged atoms (AStr/ABool/ANil/ANum/AInt/AFloat). The renderer
+	-- forces non-integer reals for the VFloat (NRfrac) head, so model and real
+	-- predicate agree on every generated value. On the 5.1 single-double model
+	-- there is NO fork case left to exercise — full agreement is expected; any
+	-- disagreement here would be a genuine, unexpected bug.
+	T.it("generated values: model port agrees with real LuaJIT for all 6 bridged atoms", function()
 		if not probe(caps, LUAJIT) then
 			T.skip("vendored LuaJIT not probeable; differential leg skipped (bare-clone safe)")
 			return

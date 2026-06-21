@@ -16,22 +16,43 @@ From Stdlib Require Import String.
 Import ListNotations.
 
 (* ---- Base atoms with a declared sub-order ---------------------------------
-   A tiny but real atom lattice: ANil, ABool, AInt, ANum, AStr, with the only
-   non-trivial atom edge being AInt <: ANum (integers are a value-subset of
-   numbers). Everything else is incomparable at the atom level. *)
+   A tiny but real atom lattice: ANil, ABool, AInt, ANum, AFloat, AStr.
+
+   NUMBER ATOMS — LuaJIT 5.1 model (corrected). On LuaJIT 5.1 every number is a
+   single IEEE double: [3 == 3.0], an integer-valued number IS a float, and
+   [type()] returns ["number"] for both. So there is ONE number type, and
+   "integer-valued" is a genuine refinement SUBSET of it:
+
+     - [ANum]  = all numbers (the number type).
+     - [AFloat]= the number/double type on 5.1 — float IS number, so [AFloat]
+       denotes ALL numbers, exactly like [ANum] (a synonym kept because the
+       slice/surface names "float"; see docs/reality-bridge.md fork A′).
+     - [AInt]  = the integer-valued numbers — a NON-trivial subset of the
+       doubles ([x == floor x], finite). So [AInt <: AFloat] and [AInt <: ANum]
+       both hold, and they are PROVED below ([AInt_sub_AFloat], [AInt_sub_ANum]).
+
+   This is the 5.1 picture: no disjoint int/float values. (PUC 5.3/5.4, which tag
+   integers as a distinct value, would be version-parametric distinct siblings —
+   DEFERRED; see docs/reality-bridge.md.)
+
+   The only non-trivial atom edges are AInt <: ANum and AInt <: AFloat;
+   everything else is incomparable at the atom level. *)
 
 Inductive Atom : Type :=
   | ANil
   | ABool
   | AInt
   | ANum
+  | AFloat
   | AStr.
 
 (* Declared atom sub-order as a proper (non-reflexive) relation; SRefl in [sub]
    is the sole source of reflexivity so the atom order stays the genuine
-   strict-edge data of the lattice. *)
+   strict-edge data of the lattice. AInt is below BOTH ANum and AFloat (which
+   are themselves equivalent on 5.1 — see the dsub-level [AFloat_equiv_ANum]). *)
 Inductive atom_le : Atom -> Atom -> Prop :=
-  | ALInt : atom_le AInt ANum.
+  | ALInt   : atom_le AInt ANum
+  | ALIntF  : atom_le AInt AFloat.
 
 (* ---- Types: atoms + lattice connectives ----------------------------------- *)
 
@@ -112,8 +133,9 @@ Proof. intros a b. apply SInterPR, SRefl. Qed.
    The SAtom case of full transitivity has no induction hypothesis of its own
    (SAtom carries no sub-derivation), yet [sub (TAtom b) z] may inject into a
    union whose premise needs composing with the atom edge. We discharge that by
-   induction on the SECOND derivation here, where the IH lines up. (The only
-   atom edge is AInt<:ANum, so the SAtom-on-the-right subcase is vacuous.) *)
+   induction on the SECOND derivation here, where the IH lines up. (The atom
+   edges all have AInt on the left and a number atom on the right; no number
+   atom is a left endpoint, so the SAtom-on-the-right subcase is vacuous.) *)
 Lemma sub_atom_trans : forall a b z,
   atom_le a b -> sub (TAtom b) z -> sub (TAtom a) z.
 Proof.
@@ -123,8 +145,8 @@ Proof.
   induction Hbz; intros a' b' Hab Etb; try discriminate Etb.
   - (* SRefl: t = TAtom b' *)
     rewrite Etb. apply SAtom; assumption.
-  - (* SAtom a b: compose edges; vacuous given the single edge *)
-    injection Etb as <-. inversion Hab; subst. inversion H.
+  - (* SAtom a b: compose edges; vacuous — no number atom is a left endpoint *)
+    injection Etb as <-. inversion Hab; subst; inversion H.
   - (* STop *) apply STop.
   - (* SUnionInL *) apply SUnionInL. apply IHHbz with (b := b'); assumption.
   - (* SUnionInR *) apply SUnionInR. apply IHHbz with (b := b'); assumption.
@@ -506,10 +528,11 @@ Definition n5join (x y : N5) : N5 :=
   | NA, NA => NA | NB, NB => NB | NC, NC => NC
   | NA, NB | NB, NA => NB | NA, NC | NC, NA => T1 | NB, NC | NC, NB => T1 end.
 
-(* Atom interpretation: AInt↦NA, ANum↦NB, AStr↦NC (so the sole atom edge
-   AInt<:ANum maps to NA ≤ NB), the rest to bottom. *)
+(* Atom interpretation: AInt↦NA, ANum↦NB, AFloat↦NB (float ≡ number on 5.1, so
+   both number atoms map to the same N5 point), AStr↦NC. So the atom edges
+   AInt<:ANum and AInt<:AFloat both map to NA ≤ NB; the rest to bottom. *)
 Definition iatom (a : Atom) : N5 :=
-  match a with AInt => NA | ANum => NB | AStr => NC | _ => B0 end.
+  match a with AInt => NA | ANum => NB | AFloat => NB | AStr => NC | _ => B0 end.
 
 Fixpoint interp (t : Ty) : N5 :=
   match t with
@@ -537,7 +560,7 @@ Theorem interp_sound : forall a b, sub a b -> n5le (interp a) (interp b) = true.
 Proof.
   intros a b H. induction H; simpl.
   - apply n5le_refl.
-  - destruct H; reflexivity.        (* SAtom: only AInt<:ANum, i.e. NA ≤ NB *)
+  - destruct H; reflexivity.        (* SAtom: AInt<:ANum and AInt<:AFloat, both NA ≤ NB *)
   - apply n5le_top.
   - reflexivity.                    (* SBot: B0 ≤ everything *)
   - apply n5join_l; assumption.
@@ -597,12 +620,24 @@ Qed.
    of unrelated atoms are disjoint *by construction* — disjointness is decided
    by Coq's [discriminate] on constructor heads, not asserted as an axiom.
 
-   The base order [AInt <: ANum] is likewise baked into the denotation, not
-   asserted: numbers split into integer values ([VInt]) and non-integer numeric
-   values ([VFloat]); [atom_denote ANum] accepts BOTH, [atom_denote AInt]
-   accepts only [VInt]. So [denote (atom AInt) v -> denote (atom ANum) v] holds
-   definitionally (the [VInt] disjunct of ANum is exactly AInt's denotation),
-   while the converse fails because [VFloat] inhabits ANum but not AInt.
+   The base order [AInt <: ANum] (and [AInt <: AFloat]) is likewise baked into
+   the denotation, not asserted. LuaJIT 5.1 has ONE number value (a double), so
+   there is a SINGLE number constructor [VNum : NumRep -> V]; the representation
+   [NumRep] records whether the double is integer-valued ([NRint z], e.g. [3.0])
+   or genuinely non-integer ([NRfrac z], e.g. [1.5]). "Integer-valued" is thus
+   DECIDABLE on the value. [atom_denote ANum]/[atom_denote AFloat] accept EVERY
+   [VNum _] (all numbers); [atom_denote AInt] accepts only [VNum (NRint _)]. So
+   [denote (atom AInt) v -> denote (atom ANum) v] and the same for [AFloat] hold
+   definitionally (NRint-numbers are a literal subset of all numbers), while the
+   converse fails because [VNum (NRfrac _)] inhabits ANum/AFloat but not AInt.
+
+   [VInt n]/[VFloat n] are kept as NOTATIONS for [VNum (NRint n)]/[VNum (NRfrac
+   n)] — so [VInt 3] and [VFloat 3] are NO LONGER distinct values; they denote
+   different doubles only when [n] differs and the rep differs. The collapse is
+   genuine: there is exactly one [V] value per double, and [VInt 3] is literally
+   [VNum (NRint 3)], an integer-valued number that IS a float. (PUC 5.3/5.4's
+   tagged-integer values, where [3] and [3.0] are distinct siblings, are the
+   version-parametric DEFERRED design — see docs/reality-bridge.md.)
    =========================================================================== *)
 
 (* ---- Extend the type syntax with negation (Boolean algebra) ---------------- *)
@@ -626,14 +661,26 @@ Inductive BTy : Type :=
      Multi-arg / vararg / multi-return are DEFERRED. *)
   | BArrow : BTy -> BTy -> BTy.
 
+(* ---- The number representation (LuaJIT 5.1: one double per number) ---------
+   A number value is a single double. [NumRep] is the value-level witness of
+   whether that double is integer-valued. [NRint z] = an integer-valued double
+   (e.g. [3.0]); [NRfrac z] = a genuinely non-integer double (e.g. [1.5]). This
+   makes "integer-valued" DECIDABLE structurally (it is the [NRint] head) while
+   keeping non-integer numbers representable — so [AInt] is a proper, non-trivial
+   subset of the number type, NOT everything. The [z : nat] payload distinguishes
+   distinct doubles within each class; classification is head-determined. *)
+
+Inductive NumRep : Type :=
+  | NRint  : nat -> NumRep     (* an integer-valued double, e.g. 3.0 *)
+  | NRfrac : nat -> NumRep.    (* a genuinely non-integer double, e.g. 1.5 *)
+
 (* ---- The value domain -----------------------------------------------------
    Distinct constructor heads => unrelated atoms denote disjoint sets, decided
-   structurally. [VInt]/[VFloat] are the two numeric kinds; their union is the
-   number kind, [VInt] alone is the integer kind. *)
+   structurally. [VNum] is the SINGLE number kind (one double per value, 5.1);
+   integer-valued-ness is the [NRint]/[NRfrac] split INSIDE that one head. *)
 
 Inductive V : Type :=
-  | VInt   : nat -> V          (* an integer value: inhabits AInt AND ANum *)
-  | VFloat : nat -> V          (* a non-integer number: inhabits ANum only  *)
+  | VNum   : NumRep -> V       (* the one number value (a double); see NumRep *)
   | VStr   : nat -> V          (* a string value:  inhabits AStr only       *)
   | VBool  : bool -> V         (* a boolean value: inhabits ABool only      *)
   | VNil   : V                 (* nil:             inhabits ANil only        *)
@@ -653,6 +700,16 @@ Inductive V : Type :=
      fine because [V] occurs positively. Multi-arg / vararg / multi-return are
      DEFERRED (single input, single output per pair). *)
   | VFun : list (V * V) -> V.
+
+(* ---- VInt / VFloat as NOTATIONS over the single number value --------------
+   [VInt n] is literally [VNum (NRint n)] (an integer-valued double) and
+   [VFloat n] is [VNum (NRfrac n)] (a non-integer double). These are NOTATIONS,
+   not constructors: there is one number value per double. [VInt 3] is an
+   integer-valued number that IS a float — exactly the 5.1 picture. The old
+   distinct-value reading is gone; these names survive only as readable spellings
+   of the two NumRep classes. *)
+Notation VInt n := (VNum (NRint n)).
+Notation VFloat n := (VNum (NRfrac n)).
 
 (* ---- Finite key lookup in a table ----------------------------------------- *)
 
@@ -686,8 +743,8 @@ Section V_ind_strong.
   Hypothesis Hgcons : forall i o rest, P i -> P o -> Pg rest -> Pg ((i, o) :: rest).
   Fixpoint V_rect_strong (v : V) : P v :=
     match v with
-    | VInt n   => HInt n
-    | VFloat n => HFloat n
+    | VNum (NRint n)  => HInt n
+    | VNum (NRfrac n) => HFloat n
     | VStr n   => HStr n
     | VBool b  => HBool b
     | VNil     => HNil
@@ -710,18 +767,22 @@ End V_ind_strong.
 
 (* ---- Atom denotation ------------------------------------------------------
    Order and disjointness are visible right here, in the value-set membership,
-   never imposed from outside. ANum's set is {VInt n} ∪ {VFloat n}; AInt's set
-   is {VInt n} — a literal subset. The other atoms pick their own constructor.
+   never imposed from outside. On LuaJIT 5.1 every number is one double, so
+   ANum's set and AFloat's set are BOTH {VNum _} (all numbers — float ≡ number);
+   AInt's set is {VNum (NRint _)} — the integer-valued doubles, a literal SUBSET.
+   So AInt <: AFloat and AInt <: ANum hold by construction (proved below), with
+   no disjoint int/float values. The other atoms pick their own constructor.
    Note [VTable] inhabits NO atom (every atom branch sends it to [False]) — a
    table is structurally not a scalar. *)
 
 Definition atom_denote (a : Atom) (v : V) : Prop :=
   match a with
-  | ANil  => match v with VNil    => True | _ => False end
-  | ABool => match v with VBool _ => True | _ => False end
-  | AInt  => match v with VInt _  => True | _ => False end
-  | ANum  => match v with VInt _ | VFloat _ => True | _ => False end
-  | AStr  => match v with VStr _  => True | _ => False end
+  | ANil   => match v with VNil    => True | _ => False end
+  | ABool  => match v with VBool _ => True | _ => False end
+  | AInt   => match v with VNum (NRint _) => True | _ => False end
+  | ANum   => match v with VNum _ => True | _ => False end
+  | AFloat => match v with VNum _ => True | _ => False end
+  | AStr   => match v with VStr _  => True | _ => False end
   end.
 
 (* ---- The denotation: types are predicates over V (i.e. sets of values) ---- *)
@@ -836,7 +897,7 @@ Theorem denote_arrow_iff : forall A B v,
   <-> exists g, v = VFun g /\ (forall i o, In (i, o) g -> denote A i -> denote B o).
 Proof.
   intros A B v. simpl. split.
-  - destruct v as [ | | | | | ents | g ]; try contradiction.
+  - destruct v as [ | | | | ents | g ]; try contradiction.
     intros Hfold. exists g. split; [ reflexivity | ]. apply arrow_fold_iff. exact Hfold.
   - intros [g [Hv Hall]]. subst v. apply arrow_fold_iff. exact Hall.
 Qed.
@@ -850,7 +911,8 @@ Qed.
 
 Definition atom_dec (a : Atom) (v : V) : {atom_denote a v} + {~ atom_denote a v}.
 Proof.
-  destruct a; destruct v; simpl; (left; exact I) || (right; intro H; exact H).
+  destruct a; destruct v as [ r | | | | | ]; try destruct r;
+    simpl; (left; exact I) || (right; intro H; exact H).
 Defined.
 
 Fixpoint denote_dec (t : BTy) (v : V) : {denote t v} + {~ denote t v}.
@@ -870,7 +932,7 @@ Proof.
        table; if not, no membership. If [v = VTable ents], decide each listed
        field by [string_dec]-driven lookup + recursive [denote_dec] on the
        field type — finite over [fields]. Constructive, no Classical. *)
-    destruct v as [ | | | | | ents | g ];
+    destruct v as [ | | | | ents | g ];
       try (right; intros [ents [Hbad _]]; discriminate Hbad).
     (* v = VTable ents *)
     assert (Hdec :
@@ -905,7 +967,7 @@ Proof.
        for each (i,o) the implication [denote t1 i -> denote t2 o] is decidable
        (decide the antecedent; if it holds, decide the consequent). Constructive,
        no Classical. *)
-    destruct v as [ | | | | | ents | g ];
+    destruct v as [ | | | | ents | g ];
       try (right; intro H; exact H).
     (* v = VFun g *)
     assert (Hdec :
@@ -1107,9 +1169,39 @@ Proof. disjoint. Qed.
 Theorem disjoint_num_nil  : dsub (BInter (BAtom ANum)  (BAtom ANil))  BBot.
 Proof. disjoint. Qed.
 
-(* Base order: AInt <: ANum, by construction (VInt inhabits both). *)
+(* Base order: AInt <: ANum, by construction ([VNum (NRint _)] inhabits both). *)
 Theorem base_order_int_num : dsub (BAtom AInt) (BAtom ANum).
-Proof. unfold dsub; simpl; intros v H; destruct v; auto. Qed.
+Proof. unfold dsub; simpl; intros v H; destruct v as [ r | | | | | ]; try destruct r; auto. Qed.
+
+(* ---- LuaJIT 5.1 number atoms: int <: float, the genuine value-domain edge ---
+   The user's explicit point. On 5.1 an integer-valued number IS a float (one
+   double per number), so AInt is a non-trivial SUBSET of the number/float type.
+   Both edges are PROVED here directly from the denotation (set inclusion): every
+   value in [AInt] (an [NRint] double) is a [VNum _], hence in both [AFloat] and
+   [ANum]. No int/float disjointness exists in this model. *)
+
+(* int <: float — the headline 5.1 fact. *)
+Theorem AInt_sub_AFloat : dsub (BAtom AInt) (BAtom AFloat).
+Proof. unfold dsub; simpl; intros v H; destruct v as [ r | | | | | ]; try destruct r; auto. Qed.
+
+(* int <: num — same subset relationship against the number type. *)
+Theorem AInt_sub_ANum : dsub (BAtom AInt) (BAtom ANum).
+Proof. exact base_order_int_num. Qed.
+
+(* float ≡ num on 5.1 — "float" and "number" denote the SAME set (every number is
+   a double). So AFloat is a synonym of ANum, not a distinct sibling type. *)
+Theorem AFloat_equiv_ANum : dequiv (BAtom AFloat) (BAtom ANum).
+Proof.
+  split; unfold dsub; simpl; intros v H; destruct v as [ r | | | | | ];
+    try destruct r; auto.
+Qed.
+
+(* AFloat is NOT all-integers either: a non-integer number inhabits AFloat but
+   not AInt — so AInt is a PROPER subtype of AFloat (the edge is non-trivial). *)
+Theorem not_float_sub_int : ~ dsub (BAtom AFloat) (BAtom AInt).
+Proof.
+  unfold dsub; intro H. specialize (H (VFloat 0)). simpl in H. apply H. exact I.
+Qed.
 
 (* ===========================================================================
    NON-VACUITY / FAITHFULNESS — the model is not trivially true.
@@ -1206,11 +1298,17 @@ Fixpoint atomic (t : BTy) : Prop :=
   | BArrow _ _ => False
   end.
 
-(* ---- Head classes: six canonical representatives --------------------------
+(* ---- Head classes: canonical representatives ------------------------------
    [head v] collapses a value to the canonical representative of its
-   constructor class (erasing the payload). [head_reps] enumerates the six
-   (five scalars + the table class — but see [head]'s note: the single table
-   representative is only sound for the [atomic] fragment). *)
+   classification class (erasing the payload). NOTE the number value [VNum]
+   needs TWO representatives — [VInt 0 = VNum (NRint 0)] and [VFloat 0 = VNum
+   (NRfrac 0)] — because [atom_denote AInt] distinguishes [NRint] from [NRfrac]
+   (integer-valued vs non-integer). So although there is a SINGLE number VALUE
+   constructor (5.1: one double), classification is determined by the
+   [NRint]/[NRfrac] CLASS, and [head] preserves that class. [head_reps]
+   enumerates the seven classes (two number reps + str/bool/nil + table + fun;
+   the single table/fun representative is only sound for the [atomic] fragment —
+   see [head]'s note). *)
 
 Definition head (v : V) : V :=
   match v with
@@ -1237,10 +1335,10 @@ Definition head (v : V) : V :=
 Definition head_reps : list V :=
   VInt 0 :: VFloat 0 :: VStr 0 :: VBool false :: VNil :: VTable [] :: VFun [] :: nil.
 
-(* [head v] is always one of the five representatives. *)
+(* [head v] is always one of the seven representatives. *)
 Lemma head_in_reps : forall v, In (head v) head_reps.
 Proof.
-  intro v; destruct v; simpl;
+  intro v; destruct v as [ r | | | | | ]; try destruct r; simpl;
     repeat first [ left; reflexivity | right ].
 Qed.
 
@@ -1253,7 +1351,7 @@ Qed.
 
 (* Atom step: [atom_denote a v] iff [atom_denote a (head v)]. *)
 Lemma atom_denote_head : forall a v, atom_denote a v <-> atom_denote a (head v).
-Proof. intros a v; destruct a; destruct v; simpl; tauto. Qed.
+Proof. intros a v; destruct a; destruct v as [ r | | | | | ]; try destruct r; simpl; tauto. Qed.
 
 (* The head-dependence lemma, by induction on the type — RE-SCOPED to the
    [atomic] fragment (increment 5). For an atomic type [denote] never looks past
@@ -1383,11 +1481,27 @@ Proof. reflexivity. Qed.
 Example dec_excluded_middle :
   decide_dsub BTop (BUnion (BAtom AInt) (BNeg (BAtom AInt))) = true.
 Proof. reflexivity. Qed.
+(* 5.1 number atoms by the decider: AInt <: AFloat TRUE; AFloat <: AInt FALSE;
+   AFloat <: ANum and ANum <: AFloat BOTH TRUE (float ≡ number on 5.1). *)
+Example dec_int_float   : decide_dsub (BAtom AInt) (BAtom AFloat) = true.
+Proof. reflexivity. Qed.
+Example dec_float_int   : decide_dsub (BAtom AFloat) (BAtom AInt) = false.
+Proof. reflexivity. Qed.
+Example dec_float_num   : decide_dsub (BAtom AFloat) (BAtom ANum) = true.
+Proof. reflexivity. Qed.
+Example dec_num_float   : decide_dsub (BAtom ANum) (BAtom AFloat) = true.
+Proof. reflexivity. Qed.
 
 (* AGREEMENT with the semantic [dsub]: each decided answer matches the truth.
    (true -> dsub; false -> ~dsub, via [decide_dsub_correct].) *)
 Example agree_int_num : dsub (BAtom AInt) (BAtom ANum).
 Proof. apply (decide_dsub_correct (BAtom AInt) (BAtom ANum) I I). reflexivity. Qed.
+Example agree_int_float : dsub (BAtom AInt) (BAtom AFloat).
+Proof. apply (decide_dsub_correct (BAtom AInt) (BAtom AFloat) I I). reflexivity. Qed.
+Example agree_not_float_int : ~ dsub (BAtom AFloat) (BAtom AInt).
+Proof.
+  intro H. apply (decide_dsub_correct (BAtom AFloat) (BAtom AInt) I I) in H. discriminate H.
+Qed.
 Example agree_not_num_int : ~ dsub (BAtom ANum) (BAtom AInt).
 Proof.
   intro H. apply (decide_dsub_correct (BAtom ANum) (BAtom AInt) I I) in H. discriminate H.
@@ -1999,12 +2113,12 @@ Lemma lit_denote_head : forall l v, lit_scalar l = true ->
   denote_lit l v -> denote_lit l (head v).
 Proof.
   intros l v Hsc H. destruct l; simpl in *; try discriminate Hsc.
-  - destruct a; destruct v; simpl in *; tauto.
-  - destruct a; destruct v; simpl in *; tauto.
+  - destruct a; destruct v as [ r | | | | | ]; try destruct r; simpl in *; tauto.
+  - destruct a; destruct v as [ r | | | | | ]; try destruct r; simpl in *; tauto.
   - (* LNegRec: ~denote (BRec l) v -> ~denote (BRec l) (head v).
        head v is either a scalar / function (not a table => not in BRec) or
        VTable [] (which is in BRec l only if l = []; but then v was in BRec [] too). *)
-    intro Hc. apply H. destruct v; simpl in Hc.
+    intro Hc. apply H. destruct v as [ r | | | | | ]; [ destruct r | | | | | ]; simpl in Hc.
     + destruct Hc as [ents [Hbad _]]; discriminate.
     + destruct Hc as [ents [Hbad _]]; discriminate.
     + destruct Hc as [ents [Hbad _]]; discriminate.
@@ -3892,3 +4006,10 @@ Print Assumptions arrow_disjoint_rec.
 Print Assumptions darrow_inter_cod.
 Print Assumptions denote_dec.
 Print Assumptions ddistrib_inter_union.
+(* LuaJIT 5.1 number-atom correction: int <: float (and <: num), the collapsed
+   value domain — all closed under the global context. *)
+Print Assumptions AInt_sub_AFloat.
+Print Assumptions AInt_sub_ANum.
+Print Assumptions AFloat_equiv_ANum.
+Print Assumptions base_order_int_num.
+Print Assumptions decide_dsub_correct.

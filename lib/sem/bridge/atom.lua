@@ -1,6 +1,6 @@
 -- lib/sem/bridge/atom.lua
--- REALITY BRIDGE — the model↔real-LuaJIT correspondence for the UNAMBIGUOUS
--- atoms (AStr, ABool, ANil). See docs/reality-bridge.md.
+-- REALITY BRIDGE — the model↔real-LuaJIT correspondence for the atoms. See
+-- docs/reality-bridge.md.
 --
 -- The Coq proof (proof/subtype.v) establishes everything ABOUT the model:
 -- subtyping is a Boolean algebra, the decider is sound, etc. The one thing a
@@ -11,36 +11,38 @@
 -- source, so a differential harness can check the port against BOTH the proven
 -- Coq model (via `Compute`, done in the test) and real LuaJIT (`type(x)`).
 --
--- SCOPE: the unambiguous atoms AStr/ABool/ANil, PLUS the number atoms ANum and
--- AInt under the decided REFINE policy (see docs/reality-bridge.md fork (A),
--- RESOLVED). The model tracks `AInt <: ANum` as a REFINED type distinction even
--- though LuaJIT 5.1's `type()` returns "number" for both — so on 5.1 `AInt`
--- membership is a DERIVED value-shape predicate (integer-valued + finite), not a
--- runtime tag. AFloat is SCOPED OUT: the model's `VFloat` is a distinct *value*,
--- but on LuaJIT 5.1 `3.0` and `3` are the SAME double — `VFloat 3` is
--- unobservable as a non-integer, so `AFloat` membership cannot be faithfully
--- tested on 5.1 (see the value-domain sub-fork in the doc). BRec, BArrow remain
--- deferred. The model value heads NOT members of a given atom (VTable/VFun, etc.)
--- ARE represented here so the harness exercises REJECTION too.
+-- SCOPE: the unambiguous atoms AStr/ABool/ANil, PLUS the number atoms ANum,
+-- AInt, AND AFloat — under the LuaJIT 5.1 model (fork A′ RESOLVED, see the doc).
+-- On 5.1 every number is ONE double: `3 == 3.0`, an integer-valued number IS a
+-- float, `type()` returns "number" for both. The proof now has a SINGLE number
+-- value `VNum (NumRep)` with `NRint` (integer-valued double, e.g. 3.0) and
+-- `NRfrac` (genuinely non-integer double, e.g. 1.5). So:
+--   * ANum   = all numbers (`type=="number"`).
+--   * AFloat = all numbers too (float ≡ number on 5.1) — `AInt <: AFloat` is a
+--              theorem (proof/subtype.v `AInt_sub_AFloat`); AFloat is no longer
+--              scoped out, it is fully bridgeable and equals ANum observably.
+--   * AInt   = the integer-valued numbers (`x == floor(x)`, finite) — a genuine
+--              refinement SUBSET. `VFloat n` (an `NRfrac` non-integer double) is
+--              NOT in AInt, and its real image is a genuine non-integer, so the
+--              old `AInt VFloat 3` model-vs-reality disagreement is GONE.
+-- BRec, BArrow remain deferred. Model value heads NOT members of a given atom
+-- (VTable/VFun, etc.) ARE represented here so the harness exercises REJECTION.
 
 local M = {}
 
 -- ── the bridged atoms ────────────────────────────────────────────────────────
 -- AStr/ABool/ANil: unambiguous (head-determined, fork-independent).
--- ANum/AInt: number atoms under REFINE — ANum is a clean `type=="number"` test;
--- AInt is the integral-value refinement predicate. AFloat is NOT here (scoped
--- out — unobservable on 5.1; see `unobservable_atoms`).
---:: BridgeAtom = "AStr" | "ABool" | "ANil" | "ANum" | "AInt"
+-- ANum/AInt/AFloat: number atoms on the 5.1 single-double model — ANum and
+-- AFloat are both a clean `type=="number"` test (float ≡ number); AInt is the
+-- integral-value refinement predicate.
+--:: BridgeAtom = "AStr" | "ABool" | "ANil" | "ANum" | "AInt" | "AFloat"
 
-M.atoms = { "AStr", "ABool", "ANil", "ANum", "AInt" } --[[: BridgeAtom[] ]]
+M.atoms = { "AStr", "ABool", "ANil", "ANum", "AInt", "AFloat" } --[[: BridgeAtom[] ]]
 
--- Atoms the model defines but whose membership is NOT faithfully observable on
--- LuaJIT 5.1, with the reason. AFloat ↔ `VFloat _` in the model, but a model
--- `VFloat 3` maps to the real double `3.0`, indistinguishable from `VInt 3`'s
--- `3` — so "is a non-integer number" is the only testable reading, and it
--- DISAGREES with the model for integer-valued floats. Bridged only if/when the
--- value-domain sub-fork is decided toward a single-double number value.
-M.unobservable_atoms = { AFloat = "VFloat is a distinct value in the model; on LuaJIT 5.1 it shares the double representation with the integer-valued VInt, so VFloat-membership is unobservable." }
+-- No atoms are unobservable on LuaJIT 5.1 any longer: with the value domain
+-- collapsed to one double (`VNum`), AFloat denotes the number type (= ANum) and
+-- is fully observable. (Was: AFloat scoped out under the two-number-value model.)
+M.unobservable_atoms = {} --[[: { [string]: string } ]]
 
 -- ── model values (a faithful port of the proof's `V`) ────────────────────────
 -- Each model `V` constructor is rendered as a tagged table. We include the
@@ -72,21 +74,22 @@ function M.vtable() return { head = "VTable" } end
 function M.vfun() return { head = "VFun" } end
 
 -- ── the model atom-denotation port (mirrors proof/subtype.v `atom_denote`) ───
--- `atom_denote` in the proof:
---   AStr  ↔ match v with VStr  _  => True | _ => False
---   ABool ↔ match v with VBool _  => True | _ => False
---   ANil  ↔ match v with VNil     => True | _ => False
---   AInt  ↔ match v with VInt  _  => True | _ => False
---   ANum  ↔ match v with VInt _ | VFloat _ => True | _ => False
--- This port matches ONLY on the value HEAD, exactly as the model does (the
--- model's denotation is head-determined — see `denote_head` in the proof). Note
--- the CENTRAL FAITHFULNESS POINT: per the MODEL, `VFloat _` is NOT in `AInt`
--- (only `VInt _` is) — so `model_denote_atom("AInt", vfloat(3.0))` is `false`,
--- even though the real double `3.0` satisfies the integral-value predicate. The
--- port faithfully reports the MODEL's verdict; the disagreement with reality is
--- surfaced by `real_int_predicate_holds` and the differential test, not hidden
--- here. Validated case-for-case against the Coq `Compute` of `denote_dec` in
--- atom_test.lua, so it is a trustworthy proxy for the proven model.
+-- `atom_denote` in the proof (LuaJIT 5.1 model, one number value `VNum`):
+--   AStr   ↔ match v with VStr  _  => True | _ => False
+--   ABool  ↔ match v with VBool _  => True | _ => False
+--   ANil   ↔ match v with VNil     => True | _ => False
+--   AInt   ↔ match v with VNum (NRint _) => True | _ => False
+--   ANum   ↔ match v with VNum _ => True | _ => False
+--   AFloat ↔ match v with VNum _ => True | _ => False     (float ≡ number on 5.1)
+-- This port matches ONLY on the value HEAD/class, exactly as the model does (the
+-- denotation is head-determined — see `denote_head`). The model port's `VInt`
+-- head is the `NRint` (integer-valued) class; `VFloat` is the `NRfrac`
+-- (non-integer) class. CENTRAL FAITHFULNESS POINT (now CONSISTENT with reality):
+-- per the MODEL, `VFloat _` is NOT in `AInt` — and its real image is a genuine
+-- NON-integer double, so reality agrees (`false`). `VInt _` IS in `AInt` AND in
+-- `AFloat` (`AInt <: AFloat`), matching real 5.1 where `3` is integer-valued and
+-- is a float. Validated case-for-case against the Coq `Compute` of `denote_dec`
+-- in atom_test.lua, so it is a trustworthy proxy for the proven model.
 --: (BridgeAtom, ModelValue) -> boolean
 function M.model_denote_atom(atom, v)
 	if atom == "AStr" then return v.head == "VStr" end
@@ -94,14 +97,22 @@ function M.model_denote_atom(atom, v)
 	if atom == "ANil" then return v.head == "VNil" end
 	if atom == "AInt" then return v.head == "VInt" end
 	if atom == "ANum" then return v.head == "VInt" or v.head == "VFloat" end
+	if atom == "AFloat" then return v.head == "VInt" or v.head == "VFloat" end
 	error("bridge: not a bridged atom: " .. tostring(atom))
 end
 
 -- ── model value → real-Lua source expression ────────────────────────────────
 -- Produce a Lua expression that, when evaluated by a REAL interpreter, yields
 -- the real value corresponding to this model value. This is the value half of
--- the correspondence: VStr s ↦ a Lua string literal, VBool b ↦ true/false,
--- VNil ↦ nil, VInt/VFloat ↦ a number literal, VTable ↦ {}, VFun ↦ a function.
+-- the correspondence. On the LuaJIT 5.1 model the number value is ONE double:
+--   VInt n   (= NRint n, an integer-valued double) ↦ an integer-valued literal.
+--   VFloat n (= NRfrac n, a GENUINELY non-integer double) ↦ a number with a
+--             forced fractional part, so its real image is never integral — the
+--             faithful image of the `NRfrac` class. (This is the value-domain
+--             collapse made concrete: there is no model value whose real image
+--             is `3.0` yet is a non-integer; `3.0`'s model value is the
+--             integer-valued `VInt 3`. So the old `AInt VFloat 3` disagreement
+--             cannot arise.)
 --: (ModelValue) -> string
 function M.value_to_lua_expr(v)
 	if v.head == "VStr" then
@@ -112,10 +123,9 @@ function M.value_to_lua_expr(v)
 	if v.head == "VNil" then return "nil" end
 	if v.head == "VInt" then return ("%d"):format(v.n) end
 	if v.head == "VFloat" then
-		-- a non-integer-valued number literal (the model's VFloat is the
-		-- non-integer numeric kind; render with a fractional part so real Lua
-		-- sees a number that is not == math.floor of itself).
-		return ("%.4f"):format(v.n)
+		-- NRfrac: a genuinely non-integer double. Force a fractional part so the
+		-- real value is never == math.floor of itself, regardless of v.n.
+		return ("%.4f"):format(v.n + 0.5)
 	end
 	if v.head == "VTable" then return "{}" end
 	if v.head == "VFun" then return "(function() end)" end
@@ -131,7 +141,9 @@ end
 --   ANil  ↔ x == nil   (NB: type(nil) == "nil", but `x == nil` is the canonical
 --           test and is robust to x being absent)
 --   ANum  ↔ type(x) == "number"   (clean — int/float collapse to one runtime kind)
---   AInt  ↔ REFINE derived predicate: a number, integer-valued, finite (excludes
+--   AFloat↔ type(x) == "number"   (float ≡ number on 5.1 — same test as ANum;
+--           `AInt <: AFloat` holds because every integral number is a number)
+--   AInt  ↔ derived predicate: a number, integer-valued, finite (excludes
 --           ±inf and nan). On LuaJIT 5.1 this is NOT a runtime tag.
 --: (BridgeAtom) -> string
 function M.atom_real_predicate(atom)
@@ -139,6 +151,7 @@ function M.atom_real_predicate(atom)
 	if atom == "ABool" then return 'type(x) == "boolean"' end
 	if atom == "ANil" then return "x == nil" end
 	if atom == "ANum" then return 'type(x) == "number"' end
+	if atom == "AFloat" then return 'type(x) == "number"' end
 	if atom == "AInt" then
 		-- integer-valued + finite: number, equal to its own floor, equal to
 		-- itself (excludes nan), and not ±inf.

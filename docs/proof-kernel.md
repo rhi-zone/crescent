@@ -26,10 +26,11 @@ language tooling. Verified in this environment: `coqc` is The Rocq Prover 9.0.1
 ## This increment
 
 `proof/subtype.v`: a small but genuinely structured value-set lattice —
-atoms with a declared sub-order (`AInt <: ANum`), `Union`, `Inter`, `Top`,
-`Bot`; an inductive `sub` relation; **`sub_refl` and `sub_trans` proved to
-`Qed`** with no `Admitted` and no added axioms (`Print Assumptions`: closed
-under the global context).
+atoms with a declared sub-order (`AInt <: ANum`, and — added with the LuaJIT 5.1
+number correction — `AInt <: AFloat`, since an integer-valued number IS a float),
+`Union`, `Inter`, `Top`, `Bot`; an inductive `sub` relation; **`sub_refl` and
+`sub_trans` proved to `Qed`** with no `Admitted` and no added axioms
+(`Print Assumptions`: closed under the global context).
 
 ### Design lessons (the reason this note exists — so they don't evaporate)
 
@@ -101,13 +102,23 @@ logic over the denotation — no `sub` rule asserted, no axiom added.
   `BNeg`/`BTop`/`BBot` (a Boolean algebra of types). (Kept distinct from the
   increment-1 `Ty` so the old free-lattice metatheory still compiles verbatim.)
 - **The model — disjointness and order are CONSTRUCTIVE, not asserted.** A
-  concrete value domain `V` with distinct constructor heads:
-  `VInt | VFloat | VStr | VBool | VNil`. `atom_denote` maps each atom to a
-  value-set: `ANum` accepts `{VInt _} ∪ {VFloat _}`, `AInt` accepts `{VInt _}`
-  — a *literal subset*, so `AInt <: ANum` holds definitionally. Unrelated atoms
-  pick disjoint constructors, so their intersection is empty *by `discriminate`
-  on heads*, not by axiom. `denote` lifts to `BTy` with
-  `∪↦∨, ∩↦∧, ¬↦~, ⊤↦True, ⊥↦False`.
+  concrete value domain `V` with distinct constructor heads. **LuaJIT 5.1 number
+  correction (fork A′):** numbers are ONE value — every 5.1 number is a single
+  IEEE double (`3 == 3.0`, an integer-valued number IS a float). So `V` has a
+  single number constructor `VNum : NumRep -> V`, where `NumRep := NRint nat |
+  NRfrac nat` records (decidably) whether the double is integer-valued (`NRint`,
+  e.g. `3.0`) or genuinely non-integer (`NRfrac`, e.g. `1.5`). The full domain is
+  `VNum | VStr | VBool | VNil | VTable | VFun`. `VInt n`/`VFloat n` are NOTATIONS
+  for `VNum (NRint n)`/`VNum (NRfrac n)` — there is exactly ONE number value per
+  double, so `VInt 3` and `VFloat 3` are no longer distinct (the old two-number
+  design tagged integers like PUC 5.3/5.4 — deferred, version-parametric).
+  `atom_denote` maps each atom to a value-set: `ANum` and `AFloat` BOTH accept
+  every `VNum _` (float ≡ number on 5.1), `AInt` accepts `{VNum (NRint _)}` — a
+  *literal subset*, so **`AInt <: AFloat` and `AInt <: ANum` hold definitionally**
+  (proved as `AInt_sub_AFloat`, `AInt_sub_ANum`, with `AFloat_equiv_ANum`). No
+  int/float disjointness. Unrelated atoms pick disjoint constructors, so their
+  intersection is empty *by `discriminate` on heads*, not by axiom. `denote`
+  lifts to `BTy` with `∪↦∨, ∩↦∧, ¬↦~, ⊤↦True, ⊥↦False`.
 - **`dsub a b := ∀ v, denote a v -> denote b v`** is now THE definition of
   subtyping; `dequiv` is mutual `dsub`. The old inductive `sub` is **retained**
   as the future *algorithmic* relation (to be proven sound+complete vs `dsub`).
@@ -144,12 +155,14 @@ proven `= true <-> dsub`.
 `proof/subtype.v` (new section, additive — increments 1-3 untouched):
 
 - **The head-class reduction (the lemma the decider rests on).** For the current
-  atoms, `denote t v` depends only on `v`'s *constructor head*
-  (`VInt`/`VFloat`/`VStr`/`VBool`/`VNil` — five classes), never on the payload
-  (the `nat`/`bool` inside). `atom_denote` matches only the head; the connectives
+  atoms, `denote t v` depends only on `v`'s *classification class* — the number
+  class (`NRint` vs `NRfrac` inside the single `VNum`) plus the other heads
+  (`VStr`/`VBool`/`VNil`), never on the `nat` payload. (The two number classes
+  exist because `atom_denote AInt` distinguishes integer-valued `NRint` from
+  non-integer `NRfrac`.) `atom_denote` matches only this class; the connectives
   (`Union`/`Inter`/`Neg`/`Top`/`Bot`) preserve head-dependence. Formalized as
   `head : V -> V` (collapse a value to the canonical representative of its
-  class), `head_reps` (the five representatives), and **`denote_head : forall t
+  class), `head_reps` (the representatives), and **`denote_head : forall t
   v, denote t v <-> denote t (head v)`** (`Qed`, by induction on `t`), with
   corollary `denote_same_head` (same head ⇒ indistinguishable by any type). This
   is what collapses the universal quantifier over infinite `V` to a finite check.
