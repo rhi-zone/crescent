@@ -175,6 +175,20 @@ Fixpoint synth (G : list BTy) (e : tm) {struct e} : option BTy :=
       | Some (BRec fs) => flook k fs
       | _ => None
       end
+  (* INCREMENT 11 — conditionals. Synthesize the condition (must check against
+     Bool via the mode switch), synthesize both branches, and return the UNION of
+     the branch types (the join — exactly the declarative [TIf] result). *)
+  | tif c e1 e2 =>
+      match synth G c with
+      | Some Sc =>
+          if decide_ssub Sc (BAtom ABool) then
+            match synth G e1, synth G e2 with
+            | Some U1, Some U2 => Some (BUnion U1 U2)
+            | _, _ => None
+            end
+          else None
+      | None => None
+      end
   end.
 
 Definition check (G : list BTy) (e : tm) (T : BTy) : bool :=
@@ -239,6 +253,15 @@ Proof.
     eapply TProj.
     + apply IHe. exact He.
     + apply flook_In. exact H.
+  - (* tif *) simpl in H.
+    destruct (synth G e1) as [ Sc | ] eqn:Hc; [ | discriminate ].
+    destruct (decide_ssub Sc (BAtom ABool)) eqn:Hdb; [ | discriminate ].
+    destruct (synth G e2) as [ U1 | ] eqn:H1; [ | discriminate ].
+    destruct (synth G e3) as [ U2 | ] eqn:H2; [ | discriminate ].
+    injection H as <-. apply TIf.
+    + eapply TSub; [ apply IHe1; exact Hc | apply decide_ssub_sound; exact Hdb ].
+    + apply IHe2; exact H1.
+    + apply IHe3; exact H2.
   - (* Pl [] *) simpl in H. injection H as <-. apply HFnil.
   - (* Pl cons *) simpl in H.
     destruct (synth G e) as [ Te | ] eqn:He; [ | discriminate ].
@@ -327,6 +350,11 @@ Proof.
   - eapply TRec; [ eapply (IHhas_type G1 _ G2 A'); [ reflexivity | eassumption ] | eassumption ].
   - eapply TProj; [ eapply (IHhas_type G1 _ G2 A'); [ reflexivity | eassumption ] | eassumption ].
   - eapply TSub; [ eapply (IHhas_type G1 _ G2 A'); [ reflexivity | eassumption ] | eassumption ].
+  - (* TIf *) eapply TIf;
+      [ eapply (IHhas_type1 G1 _ G2 A')
+      | eapply (IHhas_type2 G1 _ G2 A')
+      | eapply (IHhas_type3 G1 _ G2 A') ];
+      (reflexivity || eassumption).
   - apply HFnil.
   - apply HFcons;
       [ eapply (IHhas_type G1 _ G2 A') | eapply (IHhas_type0 G1 _ G2 A') ];
@@ -377,6 +405,7 @@ Fixpoint proj_free (e : tm) : Prop :=
                   | (_, e0) :: rest => proj_free e0 /\ pl rest
                   end) fs
   | tproj _ _ => False
+  | tif c e1 e2 => proj_free c /\ proj_free e1 /\ proj_free e2
   end.
 
 (* SYNTHESIS IS PRINCIPAL (projection-free fragment) — the tractable completeness
@@ -429,6 +458,19 @@ Proof.
     eapply SsTrans; [ | exact Hsub ].
     apply SsRec. apply (IHe H G Ts0 Ts Hfields Hf).
   - (* tproj *) simpl in H. contradiction.
+  - (* tif *) simpl in H1. simpl in H. destruct H as [Hpc [Hp1 Hp2]].
+    destruct (synth G e1) as [ Sc | ] eqn:Hc; [ | discriminate ].
+    destruct (decide_ssub Sc (BAtom ABool)) eqn:Hdb; [ | discriminate ].
+    destruct (synth G e2) as [ Sc1 | ] eqn:H1e; [ | discriminate ].
+    destruct (synth G e3) as [ Sc2 | ] eqn:H2e; [ | discriminate ].
+    injection H1 as <-.
+    apply inv_if in H0. destruct H0 as [V1 [V2 [_ [HV1 [HV2 Hsub]]]]].
+    (* principality of each branch: synth's branch type is ≤ the declarative one *)
+    pose proof (IHe2 G V1 Sc1 Hp1 HV1 H1e) as Hb1.
+    pose proof (IHe3 G V2 Sc2 Hp2 HV2 H2e) as Hb2.
+    (* BUnion Sc1 Sc2 ≤ BUnion V1 V2 ≤ T (union is monotone; then Hsub). *)
+    eapply SsTrans; [ | exact Hsub ].
+    apply SsUnionE; [ apply SsUnionInL; exact Hb1 | apply SsUnionInR; exact Hb2 ].
   - (* Pl nil *) simpl in H1. injection H1 as <-.
     inversion H0; subst. apply SrNil.
   - (* Pl cons *) simpl in H. destruct H as [Hpe Hprest]. simpl in H1.
@@ -493,6 +535,29 @@ Proof. reflexivity. Qed.
 (* the bare lambda synthesizes an arrow *)
 Example compute_lam :
   synth [] (tlam (BAtom AInt) (tvar 0)) = Some (BArrow (BAtom AInt) (BAtom AInt)).
+Proof. reflexivity. Qed.
+
+(* INCREMENT 11 — CONDITIONAL synthesis. [if true then 3 else "s"] synthesizes the
+   UNION of the branch types [Int ∪ Str] — a genuinely union-typed term. *)
+Example compute_if_union :
+  synth [] (tif (tlit (LBool true)) (tlit (LInt 3)) (tlit (LStr 0)))
+  = Some (BUnion (BAtom AInt) (BAtom AStr)).
+Proof. reflexivity. Qed.
+
+(* it is well typed at the union, and CHECKS against any supertype (e.g. Top). *)
+Example compute_if_checks_top :
+  check [] (tif (tlit (LBool true)) (tlit (LInt 3)) (tlit (LStr 0))) BTop = true.
+Proof. reflexivity. Qed.
+
+(* and it is sound: has_type at the union (via check_sound). *)
+Example compute_if_sound :
+  has_type [] (tif (tlit (LBool true)) (tlit (LInt 3)) (tlit (LStr 0)))
+              (BUnion (BAtom AInt) (BAtom AStr)).
+Proof. apply check_sound. reflexivity. Qed.
+
+(* ILL-TYPED: a non-Bool condition ⇒ None (3 is not a boolean). *)
+Example compute_if_badcond_None :
+  synth [] (tif (tlit (LInt 0)) (tlit (LInt 3)) (tlit (LStr 0))) = None.
 Proof. reflexivity. Qed.
 
 (* ILL-TYPED: projecting a field off a literal ⇒ None (not a record) *)

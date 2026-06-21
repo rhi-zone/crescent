@@ -311,14 +311,44 @@ Assumptions` on `progress`, `preservation`, `ssub_arrow_inv`, `ssub_sound`,
   / `arrow_inv_dom`, with the inhabitation side-conditions made explicit) is also
   proved, documenting the model's true edge cases.
 
+- [x] **Conditionals + union types** (increment 11, `proof/typing.v` +
+  `proof/ssub.v` + `proof/check.v`, on unmodified `subtype.v`). `tm` gains `tif`
+  (op-sem literal-selectors + condition congruence, lazy branches); declarative
+  `TIf` types it at `BUnion T1 T2` (the JOIN). `ssub`/`decide_ssub` gain UNION
+  rules (composable intro `SsUnionInL/InR` + elim `SsUnionE`), proven SOUND vs
+  `dsub` (`ssub_sound`) and DECIDED (union-left `&&` / union-right `||`; same
+  `bsize a + bsize b` fuel measure, strictly decreasing — `decide_ssub_correct`
+  re-proven sound + complete + total). SOUNDNESS FINDING: explicit `SsTrans` +
+  union intro makes a transitivity MIDDLE possibly a union, breaking naive
+  derivation-induction inversion (old `ssub_top_src`/`ssub_connective_super`
+  become FALSE); fixed via STRUCTURAL above/below predicates
+  (`arrow_above`/`rec_above`/`atom_above`/`top_above`/`interneg_above`/
+  `union_below`) proven closed under `ssub` by derivation induction → union-robust
+  inversions (`ssub_arrow_inv`, `ssub_rec_inv`, `ssub_union_src_l/r`,
+  `ssub_union_tgt_inv`). `progress` + `preservation` re-proven (the `tif` cases
+  subsume the selected branch into the union via the injections — operationally
+  sound, no arrow-Top collapse; `canon_bool` added). `synth`/`check` handle `tif`
+  (synth ⇒ `BUnion` of branches); `synth_sound`/`check_sound`/`synth_principal`
+  re-proven. Non-vacuity: `if true then 3 else "s"` synths `Int∪Str`, steps to
+  `3`. `Print Assumptions` closed under the global context.
+
 Still open (DEFERRED — recorded honestly, minimal core only):
-- [ ] **Statements / control flow** (if/while/blocks) as terms.
+- [ ] **Flow NARROWING** (the actual flow-typing payoff, enabled by increment 11's
+  union substrate): narrow a variable's type inside a `tif` branch by the
+  condition (e.g. `if type(x)=="number" then …` narrows `x` to the number atom in
+  the then-branch). Where the `and`/`or`-bug class lives. Needs the typing
+  judgment to thread a per-branch refinement environment.
+- [ ] **INTERSECTION + NEGATION as `ssub` rules and TERM forms** (DEFERRED from
+  increment 11 — unions only). The type ALGEBRA has them via `BTy`; `ssub` still
+  has NO structural rule for `BInter`/`BNeg` (decided reflexively, via
+  `ssub_interneg_leaf`). Semantic connective subtyping stays `dsub`/`gdecide`'s job.
+- [ ] **Statements / control flow** (while/blocks; `tif` done in increment 11) as terms.
 - [ ] **Mutation / references** (assignable cells; the value domain `V` is pure).
 - [ ] **Multi-arg / vararg / multi-return** functions (currently single→single).
 - [ ] **Recursion** (`tfix` / μ; the term language has no fixpoint former).
 - [ ] **Metatables.**
-- [ ] **Union / negation / arrow types as TERM introduction forms** (the type
-  ALGEBRA has them via `BTy`; the term language's intro forms are the min core).
+- [ ] **Arrow types as TERM introduction forms** (the type ALGEBRA has arrows via
+  `BTy` and `tlam` introduces them; broader arrow-term ergonomics are min-core).
 - [ ] **Duplicate-key record literals** (currently `TRec` requires `NoDup` keys,
   Lua-faithful; last-wins literal semantics is a separate concern).
 - [x] **`ssub` preorder + total decision procedure + `dsub`/`ssub` gap**

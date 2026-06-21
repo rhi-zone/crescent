@@ -721,6 +721,102 @@ limitation); and everything already deferred at the typing layer (statements,
 mutation, multi-arg/return, recursion, metatables, union/neg/arrow as term
 intro forms).
 
+## Increment 11 — CONDITIONALS + UNION TYPES (union-`ssub` decided, soundness preserved)
+
+The gateway to flow typing: the term core gains a **conditional** (`tif`), and
+`ssub` / `decide_ssub` gain **union** rules — proven sound vs `dsub` and
+operationally safe (progress + preservation still hold). **INTERSECTION,
+NEGATION, and flow NARROWING are DEFERRED** (next increments); this increment is
+honestly scoped to *unions only*. Modifies `proof/typing.v`, `proof/ssub.v`,
+`proof/check.v`; `proof/subtype.v` is **unmodified**. Build order unchanged.
+
+- **Term language.** `tm` gains `tif : tm -> tm -> tm -> tm` (boolean condition,
+  then-branch, else-branch). Op-sem: `tif (lit true) e1 e2 ↦ e1`,
+  `tif (lit false) e1 e2 ↦ e2` (lazy branches), and a congruence `SIf1` reducing
+  the condition. Values unchanged.
+- **Typing (declarative).** `TIf : has_type G c Bool -> has_type G e1 T1 ->
+  has_type G e2 T2 -> has_type G (tif c e1 e2) (BUnion T1 T2)` — the JOIN of the
+  branch types; subsumption (`TSub`) widens further.
+- **UNION rules added to `ssub`** (composable form, mirroring subtype.v's `sub`):
+  `SsUnionInL : ssub A B -> ssub A (B∪C)`, `SsUnionInR : ssub A C -> ssub A (B∪C)`
+  (intro), `SsUnionE : ssub A C -> ssub B C -> ssub (A∪B) C` (elim). The brief's
+  plain injections are derived at `SsRefl` (`ssub_union_inl/inr`). **Proven SOUND
+  vs `dsub`** (`ssub_sound` extended: union is the join in the Boolean algebra).
+- **`decide_ssub` decides union subtyping, TOTAL + terminating.** New clauses,
+  ordered: **union-on-LEFT first** (`A∪B <: C` iff `decide A C && decide B C` —
+  `SsUnionE`, converse by intro+trans), then **union-on-RIGHT** for a non-union
+  `a` (`a <: B∪C` iff `decide a B || decide a C` — `SsUnionInL/InR`). **Termination
+  measure unchanged:** structural fuel on `bsize a + bsize b`; each union step
+  strips one connective constructor off `a` or `b`, so the sum strictly decreases
+  at every recursive call. Re-proven **sound + complete** vs the extended `ssub`
+  (`decide_ssub_correct`), still **total** over all of `BTy`.
+
+### The soundness subtlety this increment surfaces (and the principled fix)
+
+`ssub` has **explicit transitivity** (`SsTrans` is a constructor — deliberate, so
+the typing-layer `inv_*` lemmas thread arbitrary subsumption chains). The union
+INTRO rules let a transitivity MIDDLE be a union (e.g.
+`A1→B1 <: (A2→B2 ∪ A1→B1) <: A2→B2`), and a naive "induction on the derivation"
+supertype-inversion **STALLS at the union middle** — no IH for the
+union-decomposed components (they are fresh trans-built derivations). The old
+shape lemmas (`ssub_top_src`, `ssub_connective_super`, …) became **outright
+FALSE** under unions (`BTop <: BTop∪X`; a `BUnion` is genuinely below/above other
+types via elim/intro).
+
+**The fix (no cut-elimination, no size juggling):** characterize "what lies
+above/below" by a STRUCTURAL predicate over the type syntax — `arrow_above`,
+`rec_above`, `atom_above`, `top_above`, `interneg_above`, and the dual
+`union_below` — and prove each **closed under `ssub`** (`*_above_mono` /
+`union_below_mono`) **by induction on the `ssub` derivation**. Every case — incl.
+`SsTrans` and the three union cases — composes through the structural predicate
+with its IHs as proper sub-derivations (the union analogue of subtype.v's
+"composable rules make inversion routine", here against explicit transitivity).
+This yields the union-robust inversions the decider's completeness needs:
+`ssub_arrow_inv`, `ssub_rec_inv`, `ssub_union_src_l/r` (elim),
+`ssub_union_tgt_inv` (intro), the atom leaf `ssub_atom_atom`, and the
+cross-kind not-`ssub` facts. `BInter`/`BNeg` stay the **DEFERRED** connectives:
+no structural rule, decided reflexively, leaf completeness via
+`ssub_interneg_leaf`.
+
+### Operational safety — preservation holds with unions
+
+The union rules do **not** reintroduce an arrow-Top-style unsoundness. In
+`preservation`, the `tif` selector cases (`SIfTrue`/`SIfFalse`) subsume the chosen
+branch into the union via `ssub_union_inl`/`_inr` then `SsTrans` through the
+ascribed type — the branch value is *genuinely* in the union, so subsumption is
+sound. `progress` adds the `tif` case via a new canonical-forms-for-Bool lemma
+(`canon_bool`: a closed `Bool` value is a boolean literal). Both `Qed`.
+
+### `synth`/`check` for `tif` + re-proved soundness
+
+`synth (tif c e1 e2)`: synthesize `c` and check it against `Bool` (the mode
+switch / `decide_ssub`), synthesize both branches, return `BUnion` of the branch
+types. `synth_sound`/`check_sound` re-proved (`Qed`); `synth_principal` extended
+(union monotonicity: `SsUnionE` + the injections). The check switch routes union
+subtyping through the extended `decide_ssub`.
+
+### Non-vacuity + assumption audit
+
+`if true then 3 else "s"` synthesizes `Int ∪ Str` (`compute_if_union`), checks
+against `Top`, is `has_type` at the union, and **steps to `3`** (`ex_if_*`);
+`decide_ssub Int (Int∪Str) = true`, `decide_ssub (Int∪Int) Int = true` (elim),
+`decide_ssub (Int∪Str) Num = false` (Str ⊄ Num), `decide_ssub Bool (Int∪Str) =
+false` — union subtyping decides correctly (the `sanity_union_*` examples route
+definite answers back to real `ssub`/`~ssub` facts). A non-Bool condition gives
+`synth = None`.
+
+`Print Assumptions` on `progress`, `preservation`, `ssub_sound`,
+`decide_ssub_correct`, `synth_sound`, `check_sound` (and 31 audited results
+across the chain): **Closed under the global context** — no axioms, no
+`Admitted`, no `Classical`. `subtype.v` is unmodified; the whole chain compiles
+(`coqc subtype.v && coqc typing.v && coqc ssub.v && coqc check.v`).
+
+**DEFERRED (recorded honestly — unions only this increment):** intersection /
+negation as `ssub` rules and as term-introduction forms; flow NARROWING (the
+actual flow-typing payoff — narrowing a variable's type inside a `tif` branch by
+the condition); semantic connective subtyping in `ssub` (still `dsub`/`gdecide`'s
+job); and everything already deferred at the typing layer.
+
 ## Staging
 
 - **[done]** mechanized lattice + subtype `refl`/`trans` (Rocq);
@@ -865,6 +961,32 @@ intro forms).
   degenerate positions), `tproj` principality under `NoDup` records, and full
   connective subtyping in checking (inherits `ssub`'s structural-only limit).
   `Compute` sanity: well-typed ⇒ `Some`/right type, ill-typed ⇒ `None`.
+- **[done — increment 11: conditionals + union types]** the gateway to flow
+  typing, in `proof/typing.v` + `proof/ssub.v` + `proof/check.v` (on unmodified
+  `subtype.v`). `tm` gains `tif` (op-sem: literal-selectors + condition
+  congruence; lazy branches); declarative `TIf` types it at `BUnion T1 T2` (the
+  JOIN). `ssub`/`decide_ssub` gain **UNION** rules (composable intro `SsUnionInL/InR`
+  + elim `SsUnionE`), **sound vs `dsub`** (`ssub_sound` extended) and **decided**
+  (union-left `&&` / union-right `||`; same `bsize a + bsize b` fuel measure,
+  strictly decreasing). **`decide_ssub_correct` re-proven sound + complete + total.**
+  KEY SOUNDNESS FINDING: explicit `SsTrans` + union intro lets a transitivity
+  MIDDLE be a union, breaking naive derivation-induction inversion (the old
+  `ssub_top_src` / `ssub_connective_super` shape lemmas become FALSE). Fixed by
+  STRUCTURAL "above/below" predicates (`arrow_above`/`rec_above`/`atom_above`/
+  `top_above`/`interneg_above`/`union_below`) proven CLOSED UNDER `ssub` by
+  derivation induction — union-robust inversions (`ssub_arrow_inv`, `ssub_rec_inv`,
+  `ssub_union_src_l/r`, `ssub_union_tgt_inv`). **`progress` + `preservation` still
+  hold** (the `tif` cases subsume the selected branch into the union via the
+  injection rules — operationally sound, no arrow-Top collapse). `synth`/`check`
+  handle `tif` (synth ⇒ `BUnion` of branch synths); `synth_sound`/`check_sound`/
+  `synth_principal` re-proven. Non-vacuity: `if true then 3 else "s"` synths
+  `Int∪Str`, steps to `3`; `decide_ssub Int (Int∪Str)=true`, `(Int∪Int) Int=true`,
+  `(Int∪Str) Num=false`. **DEFERRED: intersection, negation, flow NARROWING.**
+  `Print Assumptions` closed under the global context; `subtype.v` unmodified.
+- **[then — flow narrowing + intersection/negation]** the actual flow-typing
+  payoff: narrow a variable's type inside a `tif` branch by the condition; add
+  intersection/negation as `ssub` rules and term forms — where the `and`/`or`-bug
+  class lives. (Union substrate is now in place.)
 - **[then — arrow decision procedure + multi-return]** make arrow subtyping
   DEFINITE (lift the `has_arrow`-defer), and generalise to multi-arg / multi-
   return / vararg function types.
