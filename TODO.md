@@ -219,11 +219,24 @@ Op-sem parity must hold at every commit. After the handler deletion, the adversa
 
 ### Bridge (model ↔ real LuaJIT faithfulness)
 
-- [ ] **[BLOCKING] Functions bridge (in progress / next increment).** Bridge
-  `VFun` (finite known I/O graph) to a real Lua function via an operational I/O
-  check `f(i)==o`. Re-characterized as bridgeable (only opaque external closures,
-  which the model never yields, are unbridgeable). `reality-bridge.md` §4(B) +
-  Status "Re-characterized".
+- [x] **Functions bridge (fork B RESOLVED).** Bridged `VFun` (finite known I/O
+  graph) to a real Lua function via the operational I/O check. `lib/sem/bridge/
+  fun.lua` builds a real `function(x)` dispatching the graph; `fun_test.lua` runs
+  two legs — operational (`real_f(real(i))==real(o)` per pair) and membership
+  (model `denote_dec (BArrow A B) (VFun g)` port vs real `∀(i,o). real(i)∈A →
+  real(o)∈B`) — both AGREE (oracle 9/9 + 8/8 0-disagree; random graphs/types all
+  agree). Model side validated against `proof/bridge_arrow_oracle.v` `Compute`,
+  member + non-member (8/8). SCALAR graphs only. `reality-bridge.md` §4(B) RESOLVED
+  + Status "Done (increment 4)".
+- [ ] **[nice-to-have] Higher-order graphs in the function bridge.** A function
+  value appearing as a graph INPUT or OUTPUT (`VFun` nested in a `VFun` graph
+  pair). Deferred from the scalar function bridge (fork B); needs a recursive
+  real-image + equality story for function-valued graph entries. `reality-bridge.md`
+  §4(B) "Deferred".
+- [ ] **[nice-to-have] Table-valued graph entries in the function bridge.** A
+  `VTable` value as a graph input or output. Deferred from the scalar function
+  bridge; depends on the table bridge (fork C) for the real-image + membership of
+  compound values. `reality-bridge.md` §4(B) "Deferred".
 - [ ] **[nice-to-have] Table richness bridge.** Any-key, array part, metatables,
   `nil`-hole semantics, iteration-order non-determinism — bridging beyond
   string-keyed records. `reality-bridge.md` §4(C) "Scoped".

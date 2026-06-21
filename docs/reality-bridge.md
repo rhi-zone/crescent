@@ -257,7 +257,7 @@ just not in 5.1's `type()`. **Version-parametric distinct-integer-siblings
 giving 5.3/5.4 a genuinely distinct integer value alongside the float. The 5.1
 target is now faithful with the single-double collapse.
 
-### (B) Functions / closures — BRIDGEABLE via operational I/O check  *(re-characterized)*
+### (B) Functions / closures — RESOLVED = bridged via operational I/O check
 
 The model's `VFun` is an **extensional finite I/O graph** (`list (V*V)`). A real
 Lua closure cannot be introspected for its graph — but it does **not** need to be.
@@ -271,9 +271,52 @@ is an **operational I/O check**, fully bridgeable, NOT an unbridgeable limit.
 The *only* thing not bridgeable is membership of an **arbitrary externally-given
 opaque closure** (whose graph is unknown) — but the model never produces such a
 value; `VFun` is always an explicit graph. Sampling-can-only-refute applies to
-opaque closures, which are outside the model's value domain. Deferred as the next
-increment (function-value reality bridge), no longer flagged as possibly
-unbridgeable.
+opaque closures, which are outside the model's value domain.
+
+**This increment RESOLVES fork (B): functions ARE bridged via the operational
+I/O check.** Harness: `lib/sem/bridge/fun.lua` (graph→real-function construction +
+the model-side ports), test `lib/sem/bridge/fun_test.lua`. Coq oracle for arrow
+membership reproduced via `proof/bridge_arrow_oracle.v` (a scratch `.v`, not part
+of the build).
+
+**The graph → real-Lua-function construction.** `fun.graph_to_lua_function_expr`
+emits the source of a real `function(x) … end` that dispatches `x` against each
+graph input's real image (an if/elif chain comparing with `==`, the scalar value
+equality), returning the matching output's real image; an argument outside the
+listed inputs `error`s (the model graph is the full extension, the operational leg
+never probes outside it).
+
+**The two legs (`fun_test.lua`):**
+
+1. **(operational) application = graph lookup.** For each `(i,o) ∈ g`, the built
+   real function is applied to `i`'s real image and the result compared `==` to
+   `o`'s real image, *in real LuaJIT*. This validates that real Lua's
+   function-call semantics matches the model's graph-lookup denotation — the core
+   "input→output is enough" check. Measured: oracle graphs 9/9; random graphs
+   120/120 (counts vary with the seed).
+
+2. **(membership) arrow type verdict.** The model says `VFun g ∈ (A→B)` iff
+   `∀(i,o)∈g, i∈A → o∈B`. `fun.model_arrow_verdict` ports `denote_dec (BArrow A B)
+   (VFun g)` on the finite graph (per-pair decidable implication, folded with
+   conjunction). The REAL verdict evaluates, per pair, `real(i)∈A → real(o)∈B`
+   using the atom bridge's real atom predicates (`atom.atom_real_predicate`,
+   textually rebound to the input/output names). The two are asserted to AGREE.
+   Measured: oracle rows 8/8 (0 disagreements); random graphs × random scalar
+   arrow types 60/60.
+
+**Coq validation of the model side.** `proof/bridge_arrow_oracle.v` `Compute`s
+`memb (BArrow A B) (VFun g)` for 8 concrete cases — **member** (empty graph
+vacuous; `Int→Int [(1,2),(3,4)]`; `Int→Int` with a non-int input that is
+vacuously satisfied; `Str→Bool`; `Num→Num` with `AInt <: ANum`) and **non-member**
+(`Int→Int [(1,"s")]` — int input → str output; `Int→Int` int → non-integer;
+`Str→Bool` str → int output). The Lua `model_arrow_verdict` is asserted equal to
+every Coq verdict (8/8), so the bridge faithfully reflects the proven model.
+
+**Deferred (recorded in `TODO.md` proof-dev backlog):** SCALAR graphs only this
+increment. **Higher-order graphs** (a function value appearing as a graph input or
+output) and **table-valued graph entries** are deferred — they need the table
+bridge (fork C) and a recursive real-image/equality story for compound values.
+`reality-bridge.md` Status below.
 
 ### (C) Tables — open/closed, key types, finite-assoc vs real semantics
 
@@ -314,12 +357,22 @@ open/closed/index-signature reading first.
   green: Coq-oracle 28/28, oracle vs real LuaJIT **28/28 (0 disagreements)**,
   generated 600/600, real-value REFINE 24/24. The whole Coq dev compiles, all
   `Qed`, `Print Assumptions` closed under the global context.
+- **Done (increment 4, this one): fork (B) RESOLVED = functions bridged.**
+  `lib/sem/bridge/fun.lua` constructs a real Lua function from a model `VFun`
+  graph; `fun_test.lua` runs the two legs — **operational** (`real_f(real(i)) ==
+  real(o)` for each `(i,o)∈g`) and **membership** (model `denote_dec (BArrow A B)
+  (VFun g)` port vs the real-computed `∀(i,o)∈g. real(i)∈A → real(o)∈B`). Both
+  agree (oracle: operational 9/9, membership 8/8 with 0 disagreements; random:
+  operational + membership all-agree). The model side is validated against
+  `proof/bridge_arrow_oracle.v` `Compute` for 8 concrete (arrow, graph) cases —
+  member AND non-member (incl. the headline `Int→Int [(1,"s")]` = false). SCALAR
+  graphs only; higher-order + table-in-graph deferred.
 - **Resolved:** fork (A) = **REFINE** (type-level `AInt <: ANum`); fork (A′) =
-  **collapse to one double** (`int <: float`).
+  **collapse to one double** (`int <: float`); fork (B) = **functions bridged via
+  the operational I/O check** (scalar graphs).
 - **Deferred:** version-parametric 5.3/5.4 distinct-integer-sibling values (a
   future version-parameterized `V`); FFI cdata integers (`type()=="cdata"`) — a
-  separate runtime-representation axis.
-- **Re-characterized:** fork (B) functions — **bridgeable** via the operational
-  I/O check on the model's finite known graph (next increment); only opaque
-  external closures are unbridgeable, and the model never yields those.
+  separate runtime-representation axis. **Higher-order graphs** (functions inside a
+  `VFun` graph) and **table-valued graph entries** — the function bridge's scalar
+  restriction (TODO.md proof-dev backlog).
 - **Scoped:** fork (C) tables — string-keyed records, richer behaviors tracked.
