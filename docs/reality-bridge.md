@@ -1,5 +1,10 @@
 # Reality bridge — model ↔ real LuaJIT
 
+> **Deferred / scoped-out / future items** from this bridge (and the proof dev)
+> are consolidated into ONE authoritative backlog: `TODO.md` §"Proof-dev /
+> type-system backlog (deferred items)". The forks and per-increment notes here
+> stay, but that section is the single source of truth.
+
 The Coq development (`proof/subtype.v`) proves everything *about* the type model:
 subtyping is a Boolean algebra, the decider is sound, records/arrows have the
 expected variance, etc. The one thing a proof **cannot** establish is

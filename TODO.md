@@ -136,6 +136,127 @@ Op-sem parity must hold at every commit. After the handler deletion, the adversa
 - [x] **Reality bridge — increment 1 (unambiguous atoms).** Connect the Coq proof model's `denote`/`atom_denote` (`proof/subtype.v`) to REAL LuaJIT 5.1 — the one thing the proofs cannot establish (faithfulness of the model to real Lua). Spec: `docs/reality-bridge.md` (V↔Lua value map, atom↔real-membership-predicate map, the int/float-is-not-a-runtime-tag finding). Harness: `lib/sem/bridge/atom.lua` (faithful Lua port of `atom_denote` for AStr/ABool/ANil + value→real-Lua-expr renderer + real predicates) and `atom_test.lua` (3 legs: Coq-`Compute` oracle validates the port 12/12; oracle vs real LuaJIT 12/12; generated differential 100 values × 3 atoms = **300/300 agree**). Caps-first (popen-injected vendored LuaJIT, skips on bare clone). **No faithfulness disagreement found.**
   - **Deferred — genuine design forks, NEED USER STEER (enumerated in `docs/reality-bridge.md` §4, not resolved):** (A) *primary* — number atoms int/float: REFINE (`AInt <: ANum`, integer-valued number as subtype, matching the slice's `integer <: number`) vs COLLAPSE `VInt`/`VFloat` to one number kind to match LuaJIT 5.1 runtime `type()` (which has NO int/float tag — `AInt` is a refined value-shape predicate, not a tag). (B) *the hard one* — functions/closures: model `VFun` is an extensional finite I/O graph; a real closure can't be introspected for its graph, so arrow membership may only be a behavioral/sampling test (refute-only), not a membership check — possibly category-different from the model. (C) tables: string-keys-only (Lua keys are any value), open/closed reading, finite-assoc vs real-table semantics.
 
+## Proof-dev / type-system backlog (deferred items)
+
+> **THE single source of truth** for everything deferred / scoped-out / future
+> across the Coq subtype metatheory (`proof/subtype.v`, narrated in
+> `docs/proof-kernel.md`) and the reality bridge (`lib/sem/bridge/`, narrated in
+> `docs/reality-bridge.md`). Those two docs keep their per-increment notes; this
+> is the consolidated list they both point to. Items tagged **[BLOCKING]** stand
+> between the current dev (a sound-but-often-`DUnknown` subtyping algebra) and a
+> *usable static checker*; **[nice-to-have]** are precision / faithfulness
+> refinements. Pointers are `file:increment` or `file:line` at time of writing.
+
+### Decision-procedure completeness (the emptiness-based `gdecide`)
+
+- [ ] **[BLOCKING] Coupled multi-negated-records per clause.** ≥2 negated records
+  sharing keys in one DNF conjunct (arises from a *union of records on the right*
+  of a subtyping query). Currently → `DUnknown` (the `Deferred` clause in
+  `clause_wit3`, `proof/subtype.v:3243`). Scope predicate to lift: `dnf_ok`
+  ("≤1 negated record per record-clause"). Principled fix: per-negated-record
+  witnessing-key *assignment search* with per-key intersected `¬`-requirements.
+  Deferred at `proof-kernel.md` increment 6 / staging "(a)". Demonstrated trap if
+  done unsoundly: `gdecide {h:Int} ({f:Int}∪{g:Int})` must stay `DUnknown`.
+- [ ] **[BLOCKING] Nested records.** Record field types that are themselves
+  records; lifts the `flat` predicate ("every record's field types are
+  record-free"). The `find_wit_fuel`/`rdepth` recursion already supports it
+  structurally — the obligation is threading field-completeness through deeper
+  `rdepth`, not new substrate. Deferred at `proof-kernel.md` staging "(b)".
+- [ ] **[BLOCKING] Arrow subtyping decision.** Arrow subtyping is currently
+  `DUnknown` — any clause with an arrow literal hits the `has_arrow` guard and
+  defers (`clause_wit3`, `proof/subtype.v:3235`). Needs the Castagna-style
+  arrow-aware emptiness / decomposition algorithm. Deferred at `proof-kernel.md`
+  increment 7 ("[then — arrow decision procedure + multi-return]").
+
+### Type formers
+
+- [ ] **[nice-to-have] Closed / exact records.** Current `BRec` reads OPEN/WIDTH
+  (extra keys allowed); a closed record needs a "no other keys" denotation.
+  Deferred at `proof-kernel.md` increment 5 (and `reality-bridge.md` §4(C)).
+- [ ] **[nice-to-have] Index signatures `{[K]:V}`.** A `∀ key`-quantified field
+  reading. Deferred alongside closed records, `proof-kernel.md` increment 5 /
+  staging "(c)".
+- [ ] **[nice-to-have] First-class table atom.** Records currently subtype only
+  `BRec []` (the table top-type), not a dedicated atom. `proof-kernel.md`
+  increment 5 / staging "(d)".
+- [ ] **[BLOCKING] Equirecursive μ + cyclic tables/values (the coinductive-V
+  fork).** Recursive types `μ`; cyclic / self-referential tables would force a
+  *coinductive* `V` (a genuine fork the current positive-inductive `V` avoids).
+  Re-establish all laws + the decision procedure under recursion. Deferred at
+  `proof-kernel.md` increment 5 ("cyclic deferred to μ") + staging
+  "[then — equirecursive μ]". `proof/subtype.v:690`.
+
+### Lua semantics (model faithfulness)
+
+- [ ] **[BLOCKING] Multi-return / vararg.** Arrows are single-arg / single-return
+  (`BArrow A B`). Generalise to multi-arg / multi-return / vararg function types.
+  Deferred at `proof-kernel.md` increment 7, `proof/subtype.v:661`.
+- [ ] **[BLOCKING] Metatables / metamethods.** No metatable model in `V` /
+  `denote`. `reality-bridge.md` §4(C) tracks it as an unobserved table axis.
+- [ ] **[nice-to-have] Non-string table keys.** Model `VTable` uses string keys;
+  real Lua keys are any non-nil value. `reality-bridge.md` §4(C).
+- [ ] **[nice-to-have] Full stdlib.** No stdlib modelled in the proof value
+  domain.
+- [ ] **[nice-to-have] `cdata` / `userdata` / `thread`, incl. LuaJIT FFI
+  fixed-width integer types.** A separate runtime-representation axis (FFI cdata
+  integers `int64_t`/`uint64_t`, `type()=="cdata"`). Deferred at
+  `reality-bridge.md` §4(A) ("separate deferred axis") + Status "Deferred".
+- [ ] **[nice-to-have] General `for-in` iterators.** Out of the modelled
+  fragment.
+
+### Number model
+
+- [ ] **[nice-to-have] Version-parametric numbers (5.3/5.4 distinct int/float
+  sibling values).** The proof collapses to ONE double for LuaJIT 5.1 (fork A′
+  RESOLVED). A future version-parameterized `V` gives 5.3/5.4 a genuinely
+  distinct integer value alongside the float (where `3` and `3.0` are distinct
+  siblings). Deferred at `reality-bridge.md` §4(A′) + `proof/subtype.v:640`.
+- [ ] **[nice-to-have] The `AFloat` reading nuance.** On 5.1 `AFloat ≡ ANum`
+  (every number is a double); the option-(ii) reading (`AFloat` = non-integer
+  numbers, partitioning `ANum`) was NOT taken and is only meaningful under the
+  version-parametric model above. Recorded so the decision isn't silently
+  re-litigated. `reality-bridge.md` §4(A′).
+
+### Bridge (model ↔ real LuaJIT faithfulness)
+
+- [ ] **[BLOCKING] Functions bridge (in progress / next increment).** Bridge
+  `VFun` (finite known I/O graph) to a real Lua function via an operational I/O
+  check `f(i)==o`. Re-characterized as bridgeable (only opaque external closures,
+  which the model never yields, are unbridgeable). `reality-bridge.md` §4(B) +
+  Status "Re-characterized".
+- [ ] **[nice-to-have] Table richness bridge.** Any-key, array part, metatables,
+  `nil`-hole semantics, iteration-order non-determinism — bridging beyond
+  string-keyed records. `reality-bridge.md` §4(C) "Scoped".
+
+### Arrows (laws beyond the closed one)
+
+- [ ] **[nice-to-have] Higher arrow decomposition / emptiness laws.** Beyond the
+  proved `(A→B)∩(A→C) ≡ A→(B∩C)` (`darrow_inter_cod`): `(A→C)∩(A'→C) <: (A∪A')→C`
+  and the arrow-emptiness laws. Need either an arrow-aware decision procedure or
+  further model lemmas. Deferred at `proof-kernel.md` increment 7 "DECOMPOSITION
+  LAW" + `proof/subtype.v:1970`.
+
+### Metatheory bridge
+
+- [ ] **[nice-to-have] Reconcile the old syntactic free-lattice `sub` with the
+  semantic `dsub`.** The increment-1/2 inductive `sub` is RETAINED as the future
+  *algorithmic* relation; prove it sound + complete against `dsub`, OR formally
+  retire `sub`. Deferred at `proof/subtype.v:612` + `proof-kernel.md` increment 3
+  ("`sub` retained as the future algorithmic relation").
+
+### Typing layer (does not exist yet — the dev so far is the subtyping algebra only)
+
+- [ ] **[BLOCKING] Typing judgment.** Expressions → types. No typing relation
+  exists in `proof/subtype.v`; the dev is the subtyping lattice / decision
+  procedure only.
+- [ ] **[BLOCKING] Operational semantics in the proof.** A small-step / big-step
+  relation over the value domain `V` inside the Coq dev (distinct from the
+  executable `lib/sem` semantics; the two are joined via the reality bridge).
+- [ ] **[BLOCKING] Progress + preservation (the soundness theorem).** The actual
+  type-safety result. None of the typing layer exists yet — this is the largest
+  outstanding block. Cross-refs the mechanized-proof line in the formal-semantics
+  substrate (TODO "S5", `docs/typechecker-formal-semantics.md`).
+
 ## Slice typechecker — coverage and precision open threads
 
 > *Open threads from a previous session. Treat as starting context, not instructions — verify relevance before acting.*

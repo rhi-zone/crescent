@@ -1,5 +1,11 @@
 # Proof Kernel — mechanized subtype metatheory
 
+> **Deferred / scoped-out / future items** from every increment below are
+> consolidated into ONE authoritative backlog: `TODO.md` §"Proof-dev /
+> type-system backlog (deferred items)". The per-increment notes here keep their
+> in-context deferral callouts, but that section is the single source of truth —
+> add new deferrals there too.
+
 ## Decision
 
 Crescent's type system is the project's durability spine, and its repeated
