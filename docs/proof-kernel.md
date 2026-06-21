@@ -482,6 +482,85 @@ is threaded but stays unconditionally sound):
 global context** — no axioms, no `Admitted`, no `Classical`. Whole dev compiles
 (`coqc proof/subtype.v`).
 
+## Increment 8 — TYPING LAYER: minimal syntactic type soundness (progress + preservation)
+
+The first **typing** increment, atop the subtyping algebra. A NEW file
+`proof/typing.v` (builds on `proof/subtype.v`, which is **unmodified**) defines a
+small term language, a typing judgment using the subtyping algebra, a CBV
+small-step operational semantics, and proves **progress + preservation** — the
+de-risk skeleton for a sound typechecker. Build: `coqc proof/subtype.v` then
+`coqc proof/typing.v` (typing.v `Require Import subtype`s the `.vo` next to it).
+
+- **Term language — de Bruijn.** `tm` = literals (`tlit` over `lit` = int/str/
+  bool/nil) · `tvar n` · `tlam T body` (single typed arg) · `tapp` · `tlet` ·
+  `trec` (record) · `tproj` (field projection). De Bruijn indices make
+  capture-avoidance structural and alpha-equivalence syntactic (respecting the
+  carry-forward findings: source names ≠ binder identity).
+- **Typing judgment.** `has_type : list BTy -> tm -> BTy -> Prop` over a de
+  Bruijn context, mutual with `has_fields` for records (so the generated
+  induction principle carries a per-field IH). Rules: lit↦its base atom, var↦
+  context lookup, lam↦`BArrow`, app, let, rec↦`BRec` (with **`NoDup` keys** —
+  Lua-faithful, makes first-match `field_lookup` agree with the key's type),
+  proj, and **SUBSUMPTION (`TSub`)**.
+- **Operational semantics.** CBV substitution-based `step : tm -> tm -> Prop`
+  over de Bruijn (lift/subst defined): beta, let-bind, projection lookup, the CBV
+  congruence/eval-context rules, and left-to-right record-field reduction.
+  `value` = literals / lambdas / all-value records.
+- **The two soundness theorems, both `Qed`.** `progress : has_type [] e T ->
+  value e \/ exists e', step e e'` and `preservation : has_type [] e T -> step e
+  e' -> has_type [] e' T`. Supporting metatheory all `Qed`: canonical forms
+  (`canon_arrow`/`canon_rec`), general weakening + a closed-term lift-invariance
+  lemma, the **substitution lemma** (closed substituend at the cut), subsumption-
+  transparent typing-inversion lemmas, and the subtyping-inversion lemmas.
+
+### The central FINDING — semantic `dsub` is too coarse; subsume via syntactic `ssub`
+
+Driving subsumption with the raw semantic `dsub` of subtype.v makes
+**preservation FALSE**, and this is machine-checked, not asserted. In the
+value-set model an arrow with a `Top` (or otherwise unconstrained) codomain
+COLLAPSES: `denote (BArrow A BTop) v` ⟺ `v` is any function value, so
+
+  `dsub (BArrow (BRec [("f",Int)]) Int) (BArrow Int BTop)`   — **provable**
+  (`arrow_top_collapse`)
+
+holds, letting a record-domained function be subsumed to `Int -> Top`, applied to
+an `Int`, and beta-reduced to a term that projects a field off an `Int`: STUCK and
+untypeable at any type (`preservation_dsub_counterexample`). The principled fix —
+and the reason a syntactic *algorithmic* relation has been on the roadmap since
+increment 3 — is to subsume along a syntactic subtyping **`ssub`** whose arrow
+rule has variance inversion BUILT IN (contravariant domain / covariant codomain
+as a premise). `ssub` is proved **sound** w.r.t. `dsub` (`ssub_sound : ssub a b
+-> dsub a b`), so the proven semantic Boolean algebra still grounds every
+subtyping step; what `ssub` adds is the invertibility (`ssub_arrow_inv`,
+`ssub_rec_inv`) the term structure needs. This realizes the increment-3 deferral
+"retain `sub` as the future algorithmic relation, prove it sound vs `dsub`" for
+the arrow+record fragment.
+
+The guarded **`dsub` arrow inversion** is ALSO proved, documenting the model's
+true edge cases: `arrow_inv_cod` needs `A1 ∩ A2` inhabited (else `BArrow BBot B1`
+is vacuously huge and `B1` is unconstrained); `arrow_inv_dom` needs `¬B2`
+inhabited (`B2 ≠ Top`, the collapse above). These are the "harder arrow laws"
+backlog item, surfaced precisely rather than faked.
+
+### Non-vacuity + assumption audit
+
+`(λx:Int. x) 3` is well typed at `Int` and steps to `3` (`ex_id_app_*`); a record
+projection `{a=7,b=true}.a` is well typed at `Int` and steps to `7`
+(`ex_proj_*`); two ill-typed terms are proved **rejected at every type**
+(`ex_bad_untyped`: project a field off an int; `ex_bad2_untyped`: apply a
+non-function). So the judgment is not vacuous.
+
+`Print Assumptions` on `progress`, `preservation`, `ssub_arrow_inv`,
+`ssub_sound`, `arrow_top_collapse`: **Closed under the global context** — no
+axioms, no `Admitted`, no `Classical`. `subtype.v` is unmodified; the whole dev
+compiles (`coqc proof/subtype.v && coqc proof/typing.v`).
+
+**DEFERRED (honest minimal core).** Statements / control flow, mutation /
+references, multi-arg / vararg / multi-return, recursion (`tfix`/μ), metatables,
+union/negation/arrow types as TERM introduction forms, duplicate-key record
+literals, `ssub` completeness vs `dsub`, and the reality bridge to `lib/sem`.
+All recorded in `TODO.md` §"Typing layer".
+
 ## Staging
 
 - **[done]** mechanized lattice + subtype `refl`/`trans` (Rocq);
@@ -575,6 +654,21 @@ global context** — no axioms, no `Admitted`, no `Classical`. Whole dev compile
   Closed under the global context. **DEFERRED:** multi-return / vararg; the
   arrow-aware *decision procedure* (arrow subtyping is currently `DUnknown`); the
   harder decomposition laws (`(A→C)∩(A'→C) <: (A∪A')→C`, arrow-emptiness).
+- **[done — increment 8: typing layer]** minimal syntactic type soundness in a
+  NEW file `proof/typing.v` (on unmodified `subtype.v`): de Bruijn term language
+  (lit/var/lam/app/let/rec/proj), `has_type` judgment with **subsumption**, CBV
+  substitution-based small-step semantics, and **progress + preservation both
+  `Qed`** (canonical forms, weakening, substitution lemma, arrow + record
+  inversion). FINDING: raw `dsub` subsumption makes preservation FALSE (the
+  `A→Top` arrow collapse, `arrow_top_collapse` + `preservation_dsub_counterexample`);
+  TSub therefore subsumes along a syntactic `ssub` proved sound vs `dsub`
+  (`ssub_sound`) with built-in arrow-variance inversion — realizing the
+  increment-3 "algorithmic relation, sound vs `dsub`" deferral for the
+  arrow+record fragment. Guarded `dsub` arrow inversion proved with explicit
+  inhabitation side-conditions. Non-vacuity (terms that step; ill-typed rejected)
+  + `Print Assumptions` closed under the global context. DEFERRED: statements,
+  mutation, multi-arg/return, recursion (μ), metatables, term-level
+  union/neg/arrow intro, dup-key records, `ssub` completeness, the reality bridge.
 - **[then — arrow decision procedure + multi-return]** make arrow subtyping
   DEFINITE (lift the `has_arrow`-defer), and generalise to multi-arg / multi-
   return / vararg function types.

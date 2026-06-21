@@ -281,18 +281,51 @@ Op-sem parity must hold at every commit. After the handler deletion, the adversa
   retire `sub`. Deferred at `proof/subtype.v:612` + `proof-kernel.md` increment 3
   ("`sub` retained as the future algorithmic relation").
 
-### Typing layer (does not exist yet — the dev so far is the subtyping algebra only)
+### Typing layer (MINIMAL CORE DONE — `proof/typing.v`, increment 8)
 
-- [ ] **[BLOCKING] Typing judgment.** Expressions → types. No typing relation
-  exists in `proof/subtype.v`; the dev is the subtyping lattice / decision
-  procedure only.
-- [ ] **[BLOCKING] Operational semantics in the proof.** A small-step / big-step
-  relation over the value domain `V` inside the Coq dev (distinct from the
-  executable `lib/sem` semantics; the two are joined via the reality bridge).
-- [ ] **[BLOCKING] Progress + preservation (the soundness theorem).** The actual
-  type-safety result. None of the typing layer exists yet — this is the largest
-  outstanding block. Cross-refs the mechanized-proof line in the formal-semantics
-  substrate (TODO "S5", `docs/typechecker-formal-semantics.md`).
+The de-risk skeleton is built and machine-checked (`proof/typing.v`, builds on
+`proof/subtype.v` unmodified). Progress + preservation both `Qed`; `Print
+Assumptions` on `progress`, `preservation`, `ssub_arrow_inv`, `ssub_sound`,
+`arrow_top_collapse` all report *Closed under the global context*.
+
+- [x] **Typing judgment.** `has_type : list BTy -> tm -> BTy -> Prop` over a de
+  Bruijn context, with a `has_fields` mutual for records. Rules: lit / var / lam
+  (BArrow) / app / let / rec (`BRec`, NoDup keys) / proj / **subsumption (TSub)**.
+- [x] **Operational semantics in the proof.** CBV substitution-based small-step
+  `step : tm -> tm -> Prop` over de Bruijn terms (lift/subst defined): beta, let,
+  projection lookup, plus congruence/eval-context + record left-to-right field
+  reduction. `value` = literals / lambdas / all-value records.
+- [x] **Progress + preservation.** `progress : has_type [] e T -> value e \/
+  exists e', step e e'` and `preservation : has_type [] e T -> step e e' ->
+  has_type [] e' T`, both `Qed`. Supporting: canonical forms, weakening,
+  substitution lemma, arrow inversion, record inversion.
+- [x] **Subtyping plugged in via `ssub` (sound vs `dsub`).** KEY FINDING: raw
+  semantic `dsub` is too coarse for syntactic preservation — an `A->Top` arrow
+  collapses to "any function" (`arrow_top_collapse`, machine-checked), breaking
+  preservation (`preservation_dsub_counterexample`: a well-typed redex steps to a
+  stuck untypeable term). TSub subsumes along a syntactic `ssub` whose arrow rule
+  bakes in variance inversion; `ssub_sound : ssub a b -> dsub a b` keeps the
+  proven semantic algebra as ground truth. This realizes the increment-3 roadmap
+  item "retain `sub` as the future algorithmic relation, prove it sound vs `dsub`"
+  for the arrow+record fragment. Guarded `dsub` arrow inversion (`arrow_inv_cod`
+  / `arrow_inv_dom`, with the inhabitation side-conditions made explicit) is also
+  proved, documenting the model's true edge cases.
+
+Still open (DEFERRED — recorded honestly, minimal core only):
+- [ ] **Statements / control flow** (if/while/blocks) as terms.
+- [ ] **Mutation / references** (assignable cells; the value domain `V` is pure).
+- [ ] **Multi-arg / vararg / multi-return** functions (currently single→single).
+- [ ] **Recursion** (`tfix` / μ; the term language has no fixpoint former).
+- [ ] **Metatables.**
+- [ ] **Union / negation / arrow types as TERM introduction forms** (the type
+  ALGEBRA has them via `BTy`; the term language's intro forms are the min core).
+- [ ] **Duplicate-key record literals** (currently `TRec` requires `NoDup` keys,
+  Lua-faithful; last-wins literal semantics is a separate concern).
+- [ ] **`ssub` completeness vs `dsub`** (only soundness `ssub_sound` is proved;
+  the reverse direction / a decision procedure for `ssub` is future work, tied to
+  the increment-6 emptiness-based decider).
+- [ ] **Reality bridge** to the executable `lib/sem` semantics (the empirical
+  anchor proof cannot establish — that `V`/`step` match real LuaJIT behaviour).
 
 ## Slice typechecker — coverage and precision open threads
 
