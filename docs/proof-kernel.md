@@ -653,6 +653,74 @@ context** — no axioms, no `Admitted`, no `Classical`. `subtype.v` AND `typing.
 are unmodified; the whole dev compiles
 (`coqc proof/subtype.v && coqc proof/typing.v && coqc proof/ssub.v`).
 
+## Increment 10 — BIDIRECTIONAL ALGORITHMIC CHECKER, proven SOUND vs declarative typing
+
+A NEW file `proof/check.v` (builds on **unmodified** `proof/subtype.v`,
+`proof/typing.v`, `proof/ssub.v`) turns the declarative `has_type` of increment 8
+into a RUNNABLE, proven-sound typechecker. Build order:
+`coqc proof/subtype.v` → `coqc proof/typing.v` → `coqc proof/ssub.v` →
+`coqc proof/check.v`.
+
+The declarative judgment is NOT syntax-directed: the subsumption rule `TSub`
+fires at any term, so it is not an algorithm. The fix is BIDIRECTIONAL typing —
+a syntax-directed `synth` (infer) mode and a `check` (check-against) mode that
+switches to `synth` and discharges the one subsumption obligation via the TOTAL,
+proven `decide_ssub` (increment 9). `check` is the ONLY place subtyping is
+consulted, exactly at the application argument position.
+
+- **The algorithm (executable, total, structural on `tm`).**
+  `synth : list BTy -> tm -> option BTy`: lit ⇒ base atom; var ⇒ context lookup;
+  `tlam T b` ⇒ `synth (T::G) b = Some Tb` then `BArrow T Tb`; `tapp f a` ⇒ head
+  synths to `BArrow A B`, arg synths to `Sa`, `decide_ssub Sa A` gates `Some B`;
+  `tlet e1 e2` ⇒ synth `e1 = S`, synth `(S::G) e2`; `trec fs` ⇒ `keys_nodup`
+  gate (rejects duplicate keys, the `NoDup` invariant), then `synth_fields`
+  assembles `BRec`; `tproj e k` ⇒ subject synths to `BRec fs`, `flook k fs`.
+  `check G e T := match synth G e with Some S => decide_ssub S T | None => false end`.
+  `Compute` reduces every case to a definite `Some _`/`None`/`true`/`false`
+  (witnessed: `synth [] ((λx:Int.x) 3) = Some Int`; `{a=7,b=true}.a = Some Int`;
+  ill-typed `(3).f`, `3 1`, duplicate-key literal ⇒ `None`).
+
+- **SOUNDNESS vs declarative — the load-bearing direction, both `Qed`.**
+  `synth_sound : synth G e = Some T -> has_type G e T` and
+  `check_sound : check G e T = true -> has_type G e T`, proved mutually by `tm`
+  induction (the `tm_rect_strong` `Pl` carries the record-field IH), using
+  `decide_ssub_sound` at the `check` mode-switch + `TSub`. **`Print Assumptions`
+  on both: Closed under the global context.** This makes the runnable checker
+  sound against the proven declarative semantics.
+
+- **COMPLETENESS — the tractable fragment, proved (`Qed`), the rest DEFERRED
+  precisely (not faked).** Full bidirectional completeness over the WHOLE
+  declarative judgment is NOT provable in this minimal core: `TSub` is
+  non-syntax-directed (can appear anywhere), and there are two genuine
+  degeneracies — a function/record SUBJECT may declaratively type at `BBot`
+  (uninhabited) where `synth` only produces an arrow/record head; and projection
+  over a non-`NoDup` record assigns multiple types, so a LEAST type need not
+  exist. What IS proved, generally and axiom-free, is **principality**:
+  `synth_principal : proj_free e -> has_type G e T -> synth G e = Some S ->
+  ssub S T` — whenever `synth` produces a type, it is the LEAST type the
+  declarative judgment assigns. Together with `synth_sound` this characterizes
+  `synth` exactly (its output is a declarative type, and the minimal one). The
+  `tlet` case needs context **narrowing** (`narrowing` — replacing a context
+  entry by an `ssub`-subtype preserves typing — proved generally here). `tproj`
+  principality is fenced to the `proj_free` fragment: it requires `NoDup` keys to
+  match `flook`'s first match to the subtyping supplier (typing.v itself only
+  proves projection principality under `NoDup`). **`Print Assumptions` on
+  `synth_principal` and `narrowing`: Closed under the global context.**
+
+- **CONNECTIVE NOTE (honest scope).** `check` routes subtyping through
+  `decide_ssub`, which is COARSE on the Boolean connectives (increment 9:
+  structural/reflexive only). So connective subtyping IN CHECKING inherits that
+  limitation — full connective checking needs the `dsub`/`gdecide` route,
+  DEFERRED (see TODO.md).
+
+DEFERRED from this increment (recorded honestly, minimal core only): algorithmic
+adequacy / non-degeneracy (`synth` succeeds on every well-typed term — blocked by
+the `BBot`/narrowing degenerate positions); `tproj` principality under `NoDup`
+records; full connective subtyping in checking (inherits `ssub`'s structural-only
+limitation); and everything already deferred at the typing layer (statements,
+mutation, multi-arg/return, recursion, metatables, union/neg/arrow as term
+intro forms).
+
 ## Staging
 
 - **[done]** mechanized lattice + subtype `refl`/`trans` (Rocq);
@@ -781,6 +849,22 @@ are unmodified; the whole dev compiles
   operationally-sound subtypings is the DEEP open question, DEFERRED. Subtyping
   side WIRED into the typing layer (`subsumption_decidable`). `Compute` sanity
   (esp. `decide_ssub (Rec→Int)(Int→Top) = false`). Closed under the global context.
+- **[done — increment 10: bidirectional algorithmic checker]** a NEW file
+  `proof/check.v` (on unmodified `subtype.v` + `typing.v` + `ssub.v`) turns the
+  declarative `has_type` into a RUNNABLE checker, proven SOUND. `synth`/`check`
+  (infer + check-against) are executable, total, structural on `tm`; `check`
+  switches to `synth` and discharges the lone subsumption obligation via the
+  total `decide_ssub`. **SOUNDNESS** (`synth_sound`/`check_sound`, both `Qed`,
+  `Print Assumptions` Closed) makes the runnable checker sound vs the proven
+  declarative semantics. **COMPLETENESS** is the tractable **principality** half:
+  `synth_principal` (`proj_free e -> has_type G e T -> synth G e = Some S ->
+  ssub S T`) — synth's output is the LEAST declarative type — proved generally
+  (incl. a generally-proved context **`narrowing`** lemma for the `let` case),
+  `Print Assumptions` Closed. DEFERRED precisely (not faked): algorithmic
+  adequacy (synth succeeds on every well-typed term — blocked by `BBot`/narrowing
+  degenerate positions), `tproj` principality under `NoDup` records, and full
+  connective subtyping in checking (inherits `ssub`'s structural-only limit).
+  `Compute` sanity: well-typed ⇒ `Some`/right type, ill-typed ⇒ `None`.
 - **[then — arrow decision procedure + multi-return]** make arrow subtyping
   DEFINITE (lift the `has_arrow`-defer), and generalise to multi-arg / multi-
   return / vararg function types.

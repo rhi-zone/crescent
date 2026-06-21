@@ -352,6 +352,43 @@ Still open (DEFERRED — recorded honestly, minimal core only):
   open. (The `AFloat`≡`ANum` gap suggests a candidate refinement: add the missing
   `atom_le` edges that the value model justifies — but that is a `subtype.v`
   change, out of scope for the unmodified-substrate increment.)
+- [x] **Bidirectional algorithmic checker, proven SOUND vs declarative typing**
+  (increment 10, `proof/check.v`, on unmodified `subtype.v` + `typing.v` +
+  `ssub.v`; build order `subtype → typing → ssub → check`). Turns the
+  non-syntax-directed declarative `has_type` into a RUNNABLE checker.
+  `synth : list BTy -> tm -> option BTy` (infer) + `check : list BTy -> tm -> BTy
+  -> bool` (`check G e T := match synth G e with Some S => decide_ssub S T |
+  None => false`) — executable, total, structural on `tm`; `synth` reduces under
+  `Compute` (well-typed ⇒ `Some`/right type, ill-typed `(3).f` / `3 1` /
+  duplicate-key literal ⇒ `None`). **SOUNDNESS (the point), both `Qed`:**
+  `synth_sound : synth G e = Some T -> has_type G e T`,
+  `check_sound : check G e T = true -> has_type G e T` (mutual `tm` induction,
+  `decide_ssub_sound` at the check switch). **COMPLETENESS = principality
+  (tractable, proved):** `synth_principal : proj_free e -> has_type G e T ->
+  synth G e = Some S -> ssub S T` (synth's output is the LEAST declarative type);
+  supporting general context `narrowing` lemma. `Print Assumptions` on
+  `synth_sound`, `check_sound`, `synth_principal`, `narrowing` all **Closed under
+  the global context** (no Admitted/Axiom/Classical).
+- [ ] **Algorithmic adequacy / non-degeneracy of `synth`** (DEFERRED from
+  increment 10). The completeness proved is principality (IF synth answers, that
+  answer is least); NOT that synth ALWAYS answers on a well-typed term. Two
+  degenerate positions block it: (a) a function/record SUBJECT declaratively typed
+  at `BBot` (uninhabited) where `synth` only produces an arrow/record head; (b)
+  the `let` body context narrowing. Closing it needs a canonicalization / a
+  not-stuck argument over the BBot-free fragment — out of scope for the minimal
+  core. Precise deferred statement: `has_type G e T -> exists S, synth G e =
+  Some S /\ ssub S T` (the existence half synth_principal does not assert).
+- [ ] **`tproj` principality under `NoDup` records** (DEFERRED from increment 10).
+  `synth_principal` is fenced to the `proj_free` fragment because declarative
+  `TProj` over a non-`NoDup` record assigns multiple types (no least type), and
+  `synth`'s first-match `flook` only matches the subtyping supplier under `NoDup`
+  (typing.v itself proves projection principality only under `NoDup`). Extend
+  principality to projections over `NoDup`-keyed records.
+- [ ] **Connective subtyping IN CHECKING** (DEFERRED from increment 10). `check`
+  routes subtyping through `decide_ssub`, which is structural-only on the Boolean
+  connectives (increment 9 coarseness). So connective subtyping in checking
+  inherits that limitation; full connective checking needs the `dsub`/`gdecide`
+  route — same substrate need as the connective-`ssub` item above.
 - [ ] **Reality bridge** to the executable `lib/sem` semantics (the empirical
   anchor proof cannot establish — that `V`/`step` match real LuaJIT behaviour).
 
