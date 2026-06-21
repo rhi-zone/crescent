@@ -1601,3 +1601,81 @@ axioms, no `Admitted`, no `Classical`. Whole dev compiles (`coqc subtype.v`).
   store-based mutation soundness). The reality bridge (`lib/sem/bridge/`) does NOT
   generate ref values (locations have no observable content type), so its non-ref
   differential tests still pass unchanged — no gating needed.
+
+## Increment 18 — REFERENCE SUBTYPING: invariant `BRef` + any-ref widening (split-step 2 of the reference unification)
+
+Split-step 2 upgrades reference handling from the reflexive-only leaves of
+increment 17 to the **real** subtyping rules: INVARIANT `BRef`, ANY-REF
+WIDENING, and the one-way ASYMMETRY. `proof/ssub.v` ONLY — `subtype.v`,
+`typing.v`, `check.v`, `imp.v` are **byte-unmodified**; the whole chain
+(`subtype → typing → ssub → check → imp`) recompiles clean.
+
+- **Why a new relation `rsub`, not new `ssub` constructors.** The rules belong on
+  `ssub`, but `ssub` is an inductive in `typing.v`, and the split-step constraint
+  freezes `typing.v` (adding an `ssub` constructor is a substrate change to a
+  lower layer, out of scope here). Framing the gap as substrate rather than
+  hardcoding a result: the reference-aware extension is defined in `ssub.v` as a
+  new inductive `rsub` that EMBEDS all of `ssub` (`RsSsub`) and ADDS exactly the
+  two reference rules. Split-step 3 will promote these into `ssub`'s inductive and
+  `rsub` collapses back into `ssub`.
+
+- **The two rules (`rsub`).**
+  `RsRefInv : rsub S T -> rsub T S -> rsub (BRef S) (BRef T)` — INVARIANT (a
+  mutable cell is read AND written, so `BRef` is invariant, NOT covariant).
+  `RsAnyRef : rsub (BRef U) BAnyRef` — a specific reference IS an any-reference
+  (WIDENING). Plus `RsSsub` (embed `ssub`) and `RsTrans`. The ASYMMETRY — **no**
+  `rsub BAnyRef (BRef U)` — is the point: an any-ref can't be deref'd/assigned at
+  a specific content type, so widening a reference to `BAnyRef` is sound while the
+  reverse is not.
+
+- **PREORDER + SOUNDNESS vs `dsub`.** `rsub_refl`/`rsub_trans`.
+  `rsub_sound : rsub a b -> dsub a b` — the reference rules collapse to
+  EQUAL-denotation inclusions (`denote (BRef _) = denote BAnyRef = {VRef _}`,
+  content-blind from increment 17). So `rsub ⊊ dsub` in the safe direction.
+
+- **DECISION PROCEDURE `decide_rsub` (TOTAL + TERMINATING).** Intercepts the four
+  reference pairs and delegates everything else to `decide_ssub`:
+  `(BRef S, BRef T)` → `bty_eqb S T` short-circuit else
+  `decide_rsub S T && decide_rsub T S` (invariant, BOTH directions);
+  `(BRef _, BAnyRef)` → `true`; `(BAnyRef, BAnyRef)` → `true`;
+  `(BAnyRef, BRef _)` → `false`; else → `decide_ssub`. **Termination:** the only
+  recursion is the invariant case, onto strictly-smaller content
+  (`bsize S < bsize (BRef S)`); bounded by the combined-`bsize` fuel.
+
+- **SOUNDNESS (FULL) + COMPLETENESS (reference fragment).** `decide_rsub_sound`
+  (full). Completeness for each reference pair: `decide_rsub_anyref_complete`,
+  `decide_rsub_anyref_refl`, `decide_rsub_invariant_complete` (relative to
+  `ssub`-witnessed content equivalence on the inter-free content fragment). The
+  ASYMMETRY is decided (`decide_rsub_anyref_not_ref`) AND a sound non-subtyping
+  (`rsub_anyref_not_ref : ~ rsub BAnyRef (BRef U)`, via the monotone-under-`rsub`
+  inversion predicates `rsub_ref_above`/`rsub_anyref_above`, closed under
+  `RsTrans` by `rsub_above_mono`). **Deferred frontier (honest, mirrors
+  `decide_ssub_complete`'s own inter-free restriction):** a reference SOURCE into a
+  UNION/INTERSECTION target whose disjuncts are content-equivalent-but-not-
+  syntactically-equal references is decided SOUNDLY but not completely — the
+  delegated `decide_ssub` cannot observe ref-invariance through a connective.
+  Closing it needs `decide_rsub` to grow its own connective-target clauses
+  (substrate, split-step 3).
+
+- **`Compute`/proof SANITY (all `Qed`/`reflexivity`).**
+  `decide_rsub (BRef Int)(BRef Int) = true`;
+  `decide_rsub (BRef Int)(BRef Str) = false`;
+  **`decide_rsub (BRef Int)(BRef Num) = false`** even though
+  `decide_ssub Int Num = true` — invariance is NOT covariance, the soundness
+  point (`sanity_ref_not_covariant`); `decide_rsub (BRef Int) BAnyRef = true`;
+  `decide_rsub BAnyRef (BRef Int) = false`; `decide_rsub BAnyRef BAnyRef = true`;
+  nested `BRef (BRef Int)` reflexive; `~ rsub BAnyRef (BRef Int)`.
+
+- **Assumption audit — Closed under the global context.** `rsub_refl`,
+  `rsub_trans`, `rsub_sound`, `decide_rsub_sound`,
+  `decide_rsub_invariant_complete`, `decide_rsub_anyref_complete`,
+  `decide_rsub_anyref_not_ref`, `rsub_anyref_not_ref`, `sanity_ref_not_covariant`,
+  `sanity_anyref_not_ref` — all **Closed under the global context** (no axioms, no
+  `Admitted`, no `Classical`).
+
+- **NEXT (split-step 3, DEFERRED).** Thread store + references into the typing
+  layer: promote `RsRefInv`/`RsAnyRef` into `ssub`'s inductive in `typing.v`
+  (collapsing `rsub` back into `ssub`), give `decide_rsub` its own
+  connective-target clauses to close the union/inter-of-refs completeness frontier,
+  and add store-based mutation soundness (deref/assign typing, preservation over a
+  typed store).

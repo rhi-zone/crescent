@@ -202,15 +202,37 @@ Op-sem parity must hold at every commit. After the handler deletion, the adversa
   `Qed` (Print Assumptions: closed under the global context). Non-vacuity:
   `ref_int_inhabited`, `anyref_inhabited`, `nonref_not_ref`/`_anyref`,
   `anyref_equiv_ref`, `ref_equiv_ref`, `ref_disjoint_atom`/`_rec`/`_arrow`.
-  **NEXT (split-step 2, DEFERRED):** the syntactic invariance + any-ref widening
-  distinction is currently `dsub`-collapsed (content-blind); it must be decided in
-  the typing layer via `ssub` (`ssub ⊊ dsub` in the safe direction) — references
-  unified into `typing.v`/`ssub.v`/`check.v` as INVARIANT `BRef` + the `BAnyRef`
-  narrowing supertype, with store-based mutation soundness. (Note: `ssub.v`'s
-  `decide_ssub` already treats `BRef`/`BAnyRef` as **reflexive-only leaves** —
-  `ref_above` + `ssub_ref_super`/`ssub_anyref_super` — i.e. invariant/non-widening
-  for now; real invariant+widening ref subtyping is the split-step-2 work.)
   Recorded at `proof-kernel.md` increment 17 (reference TYPE substrate).
+- [x] **Reference SUBTYPING — invariant `BRef` + any-ref widening (split-step 2
+  of the reference unification, DONE).** `proof/ssub.v` ONLY (`subtype.v`/
+  `typing.v`/`check.v`/`imp.v` byte-unmodified; whole chain recompiles clean).
+  Because `ssub` is an inductive in the frozen `typing.v`, the rules are added as
+  a new inductive `rsub` in `ssub.v` that EMBEDS `ssub` (`RsSsub`) + `RsTrans` and
+  ADDS the two reference rules: `RsRefInv` (INVARIANT — `rsub (BRef S)(BRef T)`
+  iff `S ≡ T`, read+write so NOT covariant) and `RsAnyRef` (`rsub (BRef U)
+  BAnyRef`, WIDENING). The ASYMMETRY — no `rsub BAnyRef (BRef U)` — lets a truthy
+  location narrow to `BAnyRef` without breaking invariance. PREORDER
+  (`rsub_refl`/`rsub_trans`), SOUNDNESS vs `dsub` (`rsub_sound`; refs collapse to
+  equal-denotation inclusions, `rsub ⊊ dsub` safe), and a TOTAL+TERMINATING
+  decider `decide_rsub` (invariant case recurses on strictly-smaller content;
+  delegates non-ref pairs to `decide_ssub`). FULL soundness; completeness on the
+  reference fragment (`decide_rsub_anyref_complete`, `decide_rsub_invariant_complete`,
+  the asymmetry decided + sound `rsub_anyref_not_ref`). Sanity (`reflexivity`):
+  `(BRef Int)(BRef Int)=true`, `(BRef Int)(BRef Str)=false`,
+  **`(BRef Int)(BRef Num)=false`** (invariance ≠ covariance, the soundness point),
+  `(BRef Int) BAnyRef=true`, `BAnyRef (BRef Int)=false`. Print Assumptions on all
+  new facts: closed under the global context. **DEFERRED FRONTIER:** a reference
+  SOURCE into a UNION/INTERSECTION whose disjuncts are content-equivalent-but-not-
+  syntactically-equal references is decided SOUNDLY but not completely (delegated
+  `decide_ssub` can't see ref-invariance through a connective) — same inter-free
+  boundary `decide_ssub_complete` already carries. Recorded at `proof-kernel.md`
+  increment 18 (reference subtyping).
+  **NEXT (split-step 3, DEFERRED):** thread store + references into the typing
+  layer — promote `RsRefInv`/`RsAnyRef` into `ssub`'s inductive in `typing.v`
+  (collapsing `rsub` back into `ssub`), give `decide_rsub` its own
+  connective-target clauses to close the union/inter-of-refs completeness frontier,
+  and add store-based mutation soundness (deref/assign typing + preservation over a
+  typed store).
 
 ### Lua semantics (model faithfulness)
 

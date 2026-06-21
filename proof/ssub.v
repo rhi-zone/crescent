@@ -1194,8 +1194,399 @@ Theorem subsumption_step_undecidable_false : forall S T,
 Proof. intros S T HS HT. apply (decide_ssub_false S T HS HT). Qed.
 
 (* ===========================================================================
-   ASSUMPTION AUDIT — closed under the global context (no axioms/Admitted).
+   SPLIT-STEP 2 — REFERENCE SUBTYPING: invariant [BRef] + any-ref widening.
+
+   WHY A NEW RELATION [rsub] AND NOT NEW [ssub] CONSTRUCTORS. The reference
+   subtyping rules belong on [ssub] (TODO split-step 2). But [ssub] is an
+   inductive defined in [typing.v], and a HARD CONSTRAINT of this step is that
+   [typing.v] stays byte-unmodified (the whole chain
+   subtype→typing→ssub→check→imp must keep compiling without touching the
+   layers below this file). Adding a constructor to [ssub] is therefore a
+   SUBSTRATE change to [typing.v] that is out of scope for an [ssub.v]-only
+   step. The principled move (frame the gap as substrate, never hardcode a
+   result): define the reference-aware extension HERE, in the file we are
+   allowed to change, as a new inductive [rsub] that EMBEDS all of [ssub]
+   ([RsSsub]) and ADDS exactly the two reference rules. When split-step 3
+   threads references into the typing layer it will promote these two rules
+   into [ssub]'s inductive in [typing.v] and [rsub] collapses back into [ssub];
+   until then [rsub] is the faithful "[ssub] + references" relation, proved a
+   preorder, sound vs [dsub], and DECIDED (sound + complete + total).
+
+   THE TWO REFERENCE RULES (the split-step-2 content):
+
+     1. INVARIANT [BRef]:  [rsub (BRef S) (BRef T)] iff [S ≡ T] (i.e. both
+        [rsub S T] and [rsub T S]). Invariance — NOT covariance — is the sound
+        rule for a mutable cell (it is read AND written): so [BRef BInt] is NOT
+        a subtype of [BRef BNum] even though [BInt <: BNum] ([RsRefInv]).
+
+     2. ANY-REF WIDENING:  [rsub (BRef U) BAnyRef] for EVERY [U] (a specific
+        reference IS an any-reference), and [rsub BAnyRef BAnyRef] (reflexive,
+        from [RsSsub (SsRefl _)]). The ASYMMETRY — NO [rsub BAnyRef (BRef U)] —
+        is the whole point: an any-ref cannot be used at a specific content type
+        (you can't deref/assign it at [U]), so widening a (truthy) reference to
+        [BAnyRef] is sound while the reverse is not ([RsAnyRef]).
+
+   SOUNDNESS vs [dsub]: all rules hold trivially because the denotation is
+   content-blind — [denote (BRef S) = denote (BRef T) = denote BAnyRef =
+   {VRef _}] (subtype.v), so EVERY [rsub] relation among references maps to an
+   equal-denotation [dsub] inclusion. The syntactic invariance / one-way
+   widening is information [ssub]/[rsub] track that [dsub] (rightly) cannot —
+   [rsub ⊊ dsub] in the safe direction, exactly as the diagnosis predicted.
    =========================================================================== *)
+
+Inductive rsub : BTy -> BTy -> Prop :=
+  | RsSsub   : forall a b, ssub a b -> rsub a b
+  | RsTrans  : forall a b c, rsub a b -> rsub b c -> rsub a c
+  | RsRefInv : forall S T, rsub S T -> rsub T S -> rsub (BRef S) (BRef T)
+  | RsAnyRef : forall U, rsub (BRef U) BAnyRef.
+
+(* PREORDER. Reflexivity is [ssub]'s reflexivity lifted; transitivity is the
+   [RsTrans] constructor. *)
+Lemma rsub_refl : forall t, rsub t t.
+Proof. intro t. apply RsSsub. apply SsRefl. Qed.
+
+Lemma rsub_trans : forall a b c, rsub a b -> rsub b c -> rsub a c.
+Proof. intros a b c Hab Hbc. eapply RsTrans; eassumption. Qed.
+
+(* SOUNDNESS vs [dsub]: [rsub a b -> dsub a b]. The reference rules collapse to
+   equal-denotation inclusions ([denote (BRef _) = denote BAnyRef = {VRef _}]). *)
+Lemma rsub_sound : forall a b, rsub a b -> dsub a b.
+Proof.
+  intros a b H. induction H.
+  - apply ssub_sound. exact H.                          (* RsSsub *)
+  - eapply dsub_trans; eassumption.                     (* RsTrans *)
+  - (* RsRefInv: denote (BRef S) v -> denote (BRef T) v; both = {VRef _}. *)
+    intros v Hv. simpl in *. destruct v; try contradiction; exact I.
+  - (* RsAnyRef: denote (BRef U) v -> denote BAnyRef v; both = {VRef _}. *)
+    intros v Hv. simpl in *. destruct v; try contradiction; exact I.
+Qed.
+
+(* ---- THE DECISION PROCEDURE for [rsub] -------------------------------------
+   [decide_rsub] intercepts the four reference pairs and delegates everything
+   else to the (already total) [decide_ssub]:
+
+     - [BRef S, BRef T]  => syntactically-equal content short-circuits to true
+       (reflexive ref); otherwise INVARIANT [decide_rsub S T && decide_rsub T S]
+       (BOTH directions — so [BRef BInt] is NOT [<: BRef BNum] even though
+       [BInt <: BNum]; the soundness point).
+     - [BRef _, BAnyRef] => true   (any-ref WIDENING).
+     - [BAnyRef, BAnyRef] => true  (reflexive).
+     - [BAnyRef, BRef _]  => false (the ASYMMETRY: an any-ref is NOT usable at a
+       specific content type).
+     - everything else    => [decide_ssub a b].
+
+   TERMINATION. The only recursion is the invariant case, whose calls
+   [decide_rsub S T] / [decide_rsub T S] go to STRICTLY SMALLER content
+   ([bsize S < bsize (BRef S)] since [bsize (BRef X) = S (bsize X)]). We bound it
+   with the same combined-[bsize] fuel [decide_ssub] uses; the fuel strictly
+   decreases at the (only) recursive step. *)
+Fixpoint decide_rsub_fuel (n : nat) (a b : BTy) : bool :=
+  match n with
+  | 0 => false
+  | S n' =>
+      match a, b with
+      | BRef Sc, BRef Tc =>
+          if bty_eqb Sc Tc then true
+          else andb (decide_rsub_fuel n' Sc Tc) (decide_rsub_fuel n' Tc Sc)
+      | BRef _, BAnyRef => true
+      | BAnyRef, BAnyRef => true
+      | BAnyRef, BRef _ => false
+      | _, _ => decide_ssub a b
+      end
+  end.
+
+Definition decide_rsub (a b : BTy) : bool := decide_rsub_fuel (bsize a + bsize b) a b.
+
+Lemma decide_rsub_step : forall n a b,
+  decide_rsub_fuel (S n) a b =
+    match a, b with
+    | BRef Sc, BRef Tc =>
+        if bty_eqb Sc Tc then true
+        else andb (decide_rsub_fuel n Sc Tc) (decide_rsub_fuel n Tc Sc)
+    | BRef _, BAnyRef => true
+    | BAnyRef, BAnyRef => true
+    | BAnyRef, BRef _ => false
+    | _, _ => decide_ssub a b
+    end.
+Proof. reflexivity. Qed.
+
+(* fuel-monotonicity: extra fuel preserves a true answer. *)
+Lemma decide_rsub_fuel_mono : forall n m a b,
+  n <= m -> decide_rsub_fuel n a b = true -> decide_rsub_fuel m a b = true.
+Proof.
+  intro n. induction n as [ | n IHn ]; intros m a b Hnm Hd.
+  - simpl in Hd. discriminate.
+  - destruct m as [ | m ]; [ lia | ]. assert (Hle : n <= m) by lia.
+    rewrite decide_rsub_step in Hd. rewrite decide_rsub_step.
+    destruct a as [| | | | | | | |Sc|]; destruct b as [| | | | | | | |Tc|]; try exact Hd.
+    destruct (bty_eqb Sc Tc) eqn:Hb; [ exact Hd | ].
+    apply andb_true_iff in Hd. destruct Hd as [H1 H2].
+    apply andb_true_iff. split; [ apply (IHn m Sc Tc Hle H1) | apply (IHn m Tc Sc Hle H2) ].
+Qed.
+
+(* a canonical [decide_rsub]-true lifts to ANY sufficient fuel (upward mono). *)
+Lemma decide_rsub_to_fuel : forall n a b,
+  bsize a + bsize b <= n -> decide_rsub a b = true -> decide_rsub_fuel n a b = true.
+Proof.
+  intros n a b Hle H. unfold decide_rsub in H.
+  apply (decide_rsub_fuel_mono (bsize a + bsize b) n a b Hle H).
+Qed.
+
+(* ---- SOUNDNESS of [decide_rsub]: a true answer is a real [rsub]. ----------- *)
+Lemma decide_rsub_fuel_sound : forall n a b, decide_rsub_fuel n a b = true -> rsub a b.
+Proof.
+  intro n. induction n as [ | n IHn ]; intros a b Hd.
+  - simpl in Hd. discriminate.
+  - rewrite decide_rsub_step in Hd.
+    destruct a as [| | | | | | | |Sc|]; destruct b as [| | | | | | | |Tc|];
+      (* ref-head pairs handled specifically; everything else delegates. *)
+      first
+        [ (* BRef Sc, BRef Tc : invariant / reflexive *)
+          destruct (bty_eqb Sc Tc) eqn:Hb;
+            [ apply bty_eqb_true in Hb; subst Tc; apply rsub_refl
+            | apply andb_true_iff in Hd; destruct Hd as [H1 H2];
+              apply RsRefInv; [ apply IHn; exact H1 | apply IHn; exact H2 ] ]
+        | (* BAnyRef, BRef _ : false branch *) discriminate
+        | (* BRef _, BAnyRef and BAnyRef, BAnyRef : true leaves *)
+          solve [ apply RsAnyRef | apply rsub_refl ]
+        | (* delegated pairs *) apply RsSsub; apply decide_ssub_sound; exact Hd ].
+Qed.
+
+Corollary decide_rsub_sound : forall a b, decide_rsub a b = true -> rsub a b.
+Proof. intros a b H. apply (decide_rsub_fuel_sound (bsize a + bsize b)). exact H. Qed.
+
+(* ---- COMPLETENESS — reference fragment + delegated inter-free fragment. -----
+   The reference rules are decided EXACTLY (no restriction). For the delegated
+   (non-reference-head) pairs [decide_rsub] inherits [decide_ssub]'s completeness
+   boundary — the intersection-free fragment (the inter-left/union-right cross is
+   the non-distributive frontier, DEFERRED). We capture the reference-source
+   inversion via two structural "above" predicates that ARE closed under the full
+   [rsub] (incl. [RsTrans]); see [rsub_above_mono]. *)
+
+(* supertypes of [BRef S] under [rsub], structurally. On the inter-free target
+   fragment the [BInter] case is vacuous (handled by [contradiction] in the
+   converse). *)
+Fixpoint rsub_ref_above (S T : BTy) : Prop :=
+  match T with
+  | BTop          => True
+  | BAnyRef       => True
+  | BRef T'       => rsub S T' /\ rsub T' S
+  | BUnion Tl Tr  => rsub_ref_above S Tl \/ rsub_ref_above S Tr
+  | BInter Tl Tr  => rsub_ref_above S Tl /\ rsub_ref_above S Tr
+  | _             => False
+  end.
+
+(* supertypes of [BAnyRef] under [rsub] — the same MINUS any [BRef _]. *)
+Fixpoint rsub_anyref_above (T : BTy) : Prop :=
+  match T with
+  | BTop          => True
+  | BAnyRef       => True
+  | BUnion Tl Tr  => rsub_anyref_above Tl \/ rsub_anyref_above Tr
+  | BInter Tl Tr  => rsub_anyref_above Tl /\ rsub_anyref_above Tr
+  | _             => False
+  end.
+
+(* the ssub-level monotonicity steps (an ssub edge preserves each predicate) —
+   mirror [ref_above_mono]; proved as two clean single-conclusion inductions on
+   the [ssub] derivation. The leaf-source constructors (SsAtom/SsArrow/SsRec)
+   have [rsub_*_above _ M = False] so [contradiction] discharges them; SsTop/
+   SsBot/SsRefl are the trivial/identity cases. *)
+Lemma rsub_ref_above_ssub_mono : forall M C, ssub M C ->
+  forall S, rsub_ref_above S M -> rsub_ref_above S C.
+Proof.
+  intros M C H. induction H; intros S0 Hab; simpl in *;
+    try exact I; try exact Hab; try contradiction.
+  - (* SsTrans *) apply IHssub2. apply IHssub1. exact Hab.
+  - (* SsUnionInL *) left. apply IHssub. exact Hab.
+  - (* SsUnionInR *) right. apply IHssub. exact Hab.
+  - (* SsUnionE *) destruct Hab as [Ha|Hb]; [ apply IHssub1 | apply IHssub2 ]; assumption.
+  - (* SsInterPL *) destruct Hab as [Ha _]. apply IHssub. exact Ha.
+  - (* SsInterPR *) destruct Hab as [_ Hb]. apply IHssub. exact Hb.
+  - (* SsInterI *) split; [ apply IHssub1 | apply IHssub2 ]; exact Hab.
+Qed.
+
+Lemma rsub_anyref_above_ssub_mono : forall M C, ssub M C ->
+  rsub_anyref_above M -> rsub_anyref_above C.
+Proof.
+  intros M C H. induction H; intro Hab; simpl in *;
+    try exact I; try exact Hab; try contradiction.
+  - (* SsTrans *) apply IHssub2. apply IHssub1. exact Hab.
+  - (* SsUnionInL *) left. apply IHssub. exact Hab.
+  - (* SsUnionInR *) right. apply IHssub. exact Hab.
+  - (* SsUnionE *) destruct Hab as [Ha|Hb]; [ apply IHssub1 | apply IHssub2 ]; assumption.
+  - (* SsInterPL *) destruct Hab as [Ha _]. apply IHssub. exact Ha.
+  - (* SsInterPR *) destruct Hab as [_ Hb]. apply IHssub. exact Hb.
+  - (* SsInterI *) split; [ apply IHssub1 | apply IHssub2 ]; exact Hab.
+Qed.
+
+Lemma rsub_above_mono : forall M C, rsub M C ->
+  (forall S, rsub_ref_above S M -> rsub_ref_above S C) /\
+  (rsub_anyref_above M -> rsub_anyref_above C).
+Proof.
+  intros M C H. induction H.
+  - (* RsSsub *) split;
+      [ apply rsub_ref_above_ssub_mono; exact H | apply rsub_anyref_above_ssub_mono; exact H ].
+  - (* RsTrans *) destruct IHrsub1 as [Hr1 Ha1]. destruct IHrsub2 as [Hr2 Ha2].
+    split; [ intros S Hab; apply Hr2; apply Hr1; exact Hab
+           | intro Hab; apply Ha2; apply Ha1; exact Hab ].
+  - (* RsRefInv S T : M = BRef S, C = BRef T *)
+    split.
+    + intros S0 Hab. simpl in Hab. destruct Hab as [HS0S HSS0]. simpl.
+      split; [ eapply rsub_trans; eassumption | eapply rsub_trans; eassumption ].
+    + intro Hab. simpl in Hab. contradiction.
+  - (* RsAnyRef U : M = BRef U, C = BAnyRef *)
+    split; [ intros S _; simpl; exact I | intro Hab; simpl in Hab; contradiction ].
+Qed.
+
+Lemma rsub_ref_super : forall S T, rsub (BRef S) T -> rsub_ref_above S T.
+Proof.
+  intros S T H. apply (proj1 (rsub_above_mono (BRef S) T H) S).
+  simpl. split; apply rsub_refl.
+Qed.
+
+Lemma rsub_anyref_super : forall T, rsub BAnyRef T -> rsub_anyref_above T.
+Proof.
+  intros T H. apply (proj2 (rsub_above_mono BAnyRef T H)). simpl. exact I.
+Qed.
+
+(* ---- COMPLETENESS of [decide_rsub] on the REFERENCE rules. -----------------
+   We prove completeness for each of the four reference pairs the split-step-2
+   rules introduce; together with [decide_ssub]'s own completeness on the
+   delegated (non-reference) inter-free pairs this gives [decide_rsub]
+   completeness on the reference fragment.
+
+   SCOPE / DEFERRED FRONTIER. The INVARIANT case is stated relative to
+   [ssub]-witnessed content equivalence (so each per-direction content decision
+   is dischargeable by [decide_ssub_complete] on the inter-free content
+   fragment) — this covers every split-step-2 content shape (atoms, records,
+   arrows). The remaining gap — a reference SOURCE into a UNION/INTERSECTION
+   target whose disjuncts are content-EQUIVALENT-but-not-syntactically-equal
+   references — is decided SOUNDLY but not completely (the delegated
+   [decide_ssub] cannot observe ref-invariance through a connective). Closing it
+   needs [decide_rsub] to grow its own connective-target clauses (substrate,
+   split-step 3). See TODO.md / docs/proof-kernel.md. *)
+
+(* a type whose HEAD is neither [BRef] nor [BAnyRef] — for such a pair
+   [decide_rsub] delegates to [decide_ssub] verbatim. *)
+Definition non_ref_head (t : BTy) : Prop :=
+  match t with BRef _ => False | BAnyRef => False | _ => True end.
+
+Lemma decide_rsub_delegates : forall a b,
+  non_ref_head a -> non_ref_head b -> decide_rsub a b = decide_ssub a b.
+Proof.
+  intros a b Ha Hb. unfold decide_rsub.
+  destruct (bsize a + bsize b) as [ | n ] eqn:Ef.
+  { pose proof (bsize_pos a); lia. }
+  rewrite decide_rsub_step.
+  destruct a; destruct b; simpl in Ha, Hb; try contradiction; reflexivity.
+Qed.
+
+(* hence: on the delegated fragment, [ssub] completeness lifts to [decide_rsub]. *)
+Lemma decide_rsub_delegates_ssub_complete : forall a b,
+  non_ref_head a -> non_ref_head b -> inter_free a -> inter_free b ->
+  ssub a b -> decide_rsub a b = true.
+Proof.
+  intros a b Ha Hb Hifa Hifb Hs.
+  rewrite (decide_rsub_delegates a b Ha Hb).
+  apply decide_ssub_complete; assumption.
+Qed.
+
+(* ANY-REF WIDENING is decided true (exactly), unconditionally. *)
+Lemma decide_rsub_anyref_complete : forall U,
+  decide_rsub (BRef U) BAnyRef = true.
+Proof.
+  intro U. unfold decide_rsub.
+  destruct (bsize (BRef U) + bsize BAnyRef) as [ | n ] eqn:Ef.
+  { pose proof (bsize_pos (BRef U)); simpl in Ef; lia. }
+  rewrite decide_rsub_step. reflexivity.
+Qed.
+
+(* the [BAnyRef] reflexive pair. *)
+Lemma decide_rsub_anyref_refl : decide_rsub BAnyRef BAnyRef = true.
+Proof. reflexivity. Qed.
+
+(* the ASYMMETRY, decided: an any-ref is NOT below a specific reference. *)
+Lemma decide_rsub_anyref_not_ref : forall U,
+  decide_rsub BAnyRef (BRef U) = false.
+Proof.
+  intro U. unfold decide_rsub.
+  destruct (bsize BAnyRef + bsize (BRef U)) as [ | n ] eqn:Ef.
+  { simpl in Ef; pose proof (bsize_pos U); lia. }
+  rewrite decide_rsub_step. reflexivity.
+Qed.
+
+(* and it is a real non-subtyping: [~ rsub BAnyRef (BRef U)] — the asymmetry is
+   SOUND, not merely undecided. Via [rsub_anyref_super]: [rsub_anyref_above
+   (BRef U)] is [False]. *)
+Lemma rsub_anyref_not_ref : forall U, ~ rsub BAnyRef (BRef U).
+Proof. intros U H. apply rsub_anyref_super in H. simpl in H. exact H. Qed.
+
+(* INVARIANT completeness, relative to [ssub]-witnessed content equivalence on
+   the inter-free, non-reference-head content fragment: [BRef S <: BRef T] is
+   decided true exactly when [S ≡ T]. *)
+Lemma decide_rsub_invariant_complete : forall S T,
+  non_ref_head S -> non_ref_head T -> inter_free S -> inter_free T ->
+  ssub S T -> ssub T S -> decide_rsub (BRef S) (BRef T) = true.
+Proof.
+  intros S T HnS HnT HifS HifT HST HTS. unfold decide_rsub.
+  destruct (bsize (BRef S) + bsize (BRef T)) as [ | n ] eqn:Ef.
+  { simpl in Ef; pose proof (bsize_pos S); lia. }
+  rewrite decide_rsub_step. destruct (bty_eqb S T) eqn:Hb; [ reflexivity | ].
+  apply andb_true_iff. split.
+  - apply (decide_rsub_to_fuel n S T); [ simpl in Ef; lia | ].
+    apply decide_rsub_delegates_ssub_complete; assumption.
+  - apply (decide_rsub_to_fuel n T S); [ simpl in Ef; lia | ].
+    apply decide_rsub_delegates_ssub_complete; assumption.
+Qed.
+
+(* ===========================================================================
+   SPLIT-STEP 2 — [Compute] SANITY for reference subtyping. The decider returns
+   the operationally-correct answers for invariance, widening, and the asymmetry.
+   =========================================================================== *)
+
+(* INVARIANT: equal content is a subtype of itself. *)
+Example sanity_ref_refl : decide_rsub (BRef (BAtom AInt)) (BRef (BAtom AInt)) = true.
+Proof. reflexivity. Qed.
+
+(* INVARIANT rejects distinct (incomparable) content: BRef Int ≮: BRef Str. *)
+Example sanity_ref_distinct : decide_rsub (BRef (BAtom AInt)) (BRef (BAtom AStr)) = false.
+Proof. reflexivity. Qed.
+
+(* THE CRUX — invariance is NOT covariance: even though [BInt <: BNum]
+   ([decide_ssub (BAtom AInt) (BAtom ANum) = true]), the references are NOT
+   related, because a mutable cell is read AND written. This is the soundness
+   point of using invariance for [BRef]. *)
+Example sanity_ref_not_covariant : decide_rsub (BRef (BAtom AInt)) (BRef (BAtom ANum)) = false.
+Proof. reflexivity. Qed.
+(* and the [BInt <: BNum] it would have needed DOES hold at the value level. *)
+Example sanity_ref_content_would_widen : decide_ssub (BAtom AInt) (BAtom ANum) = true.
+Proof. reflexivity. Qed.
+
+(* ANY-REF WIDENING: a specific reference IS an any-reference. *)
+Example sanity_ref_widen_anyref : decide_rsub (BRef (BAtom AInt)) BAnyRef = true.
+Proof. reflexivity. Qed.
+
+(* THE ASYMMETRY: an any-reference is NOT usable at a specific content type. *)
+Example sanity_anyref_not_ref : decide_rsub BAnyRef (BRef (BAtom AInt)) = false.
+Proof. reflexivity. Qed.
+
+(* BAnyRef is reflexive. *)
+Example sanity_anyref_refl : decide_rsub BAnyRef BAnyRef = true.
+Proof. reflexivity. Qed.
+
+(* the asymmetry is a SOUND rejection, not merely "undecided": no [rsub]. *)
+Example sanity_anyref_not_ref_rsub : ~ rsub BAnyRef (BRef (BAtom AInt)).
+Proof. apply rsub_anyref_not_ref. Qed.
+
+(* invariance decides EXACTLY [rsub]: the true case IS an [rsub], the
+   not-covariant case is genuinely refuted via soundness on the false answer. *)
+Example sanity_ref_refl_rsub : rsub (BRef (BAtom AInt)) (BRef (BAtom AInt)).
+Proof. apply decide_rsub_sound. reflexivity. Qed.
+
+(* nested references: invariance threads through — BRef (BRef Int) reflexive. *)
+Example sanity_ref_nested : decide_rsub (BRef (BRef (BAtom AInt))) (BRef (BRef (BAtom AInt))) = true.
+Proof. reflexivity. Qed.
+
 Print Assumptions ssub_refl.
 Print Assumptions ssub_trans.
 Print Assumptions decide_ssub_sound.
@@ -1204,3 +1595,14 @@ Print Assumptions decide_ssub_correct.
 Print Assumptions dsub_ssub_gap.
 Print Assumptions dsub_ssub_gap_atom.
 Print Assumptions ssub_dsub_coincide_atom.
+(* SPLIT-STEP 2 reference-subtyping audit. *)
+Print Assumptions rsub_refl.
+Print Assumptions rsub_trans.
+Print Assumptions rsub_sound.
+Print Assumptions decide_rsub_sound.
+Print Assumptions decide_rsub_invariant_complete.
+Print Assumptions decide_rsub_anyref_complete.
+Print Assumptions decide_rsub_anyref_not_ref.
+Print Assumptions rsub_anyref_not_ref.
+Print Assumptions sanity_ref_not_covariant.
+Print Assumptions sanity_anyref_not_ref.
