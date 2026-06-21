@@ -497,12 +497,18 @@ Proof. exact synth_principal. Qed.
 (* and the [check] consequence: a projection-free, well-typed term whose
    synthesis succeeds and whose declarative type is [decide_ssub]-above the
    synthesized type passes [check]. (The synthesized type IS the least, by
-   principality, so this fires whenever the answer exists.) *)
+   principality, so this fires whenever the answer exists.) INCREMENT 12: the
+   [decide_ssub] completeness step now requires the synthesized type [S] and the
+   target [T] to be INTERSECTION-FREE ([inter_free]) — the decider is complete
+   only off the non-distributive intersection-left frontier (ssub.v). For the
+   intersection-free term fragment (no narrowing / no connective term-formers)
+   this always holds; connective checking is DEFERRED (TODO.md). *)
 Corollary check_complete_nondegenerate : forall e G T S,
+  inter_free S -> inter_free T ->
   has_type G e T -> synth G e = Some S -> ssub S T -> check G e T = true.
 Proof.
-  intros e G T S Hty Hsy Hsub. unfold check. rewrite Hsy.
-  apply decide_ssub_complete. exact Hsub.
+  intros e G T S HifS HifT Hty Hsy Hsub. unfold check. rewrite Hsy.
+  apply decide_ssub_complete; assumption.
 Qed.
 
 (* ===========================================================================

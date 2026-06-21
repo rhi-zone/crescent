@@ -817,6 +817,117 @@ actual flow-typing payoff — narrowing a variable's type inside a `tif` branch 
 the condition); semantic connective subtyping in `ssub` (still `dsub`/`gdecide`'s
 job); and everything already deferred at the typing layer.
 
+## Increment 12 — INTERSECTION + NEGATION in `ssub`; flow narrowing DEFERRED (with proof)
+
+Adds the **intersection GLB rules** (and the negation discipline) to `ssub` — the
+substrate flow narrowing was meant to consume — proven SOUND vs `dsub` with
+**preservation re-proved** (`Qed`). Modifies `proof/typing.v`, `proof/ssub.v`,
+`proof/check.v`; **`proof/subtype.v` unmodified**. Build order unchanged.
+
+### Intersection `ssub` rules (composable GLB, dual to the union rules)
+
+- `SsInterPL : ssub A C -> ssub (A∩B) C`, `SsInterPR : ssub B C -> ssub (A∩B) C`
+  (composable PROJECTIONS); `SsInterI : ssub C A -> ssub C B -> ssub C (A∩B)`
+  (INTRODUCTION / GLB). Brief's plain projections derived at `SsRefl`
+  (`ssub_inter_prl/prr`); target decomposition `ssub_inter_tgt_l/r`.
+- **Proven SOUND vs `dsub`** — `ssub_sound` extended: intersection is the meet
+  (`dinter_prl`/`dinter_prr`/`dinter_glb` of the proven Boolean algebra). All
+  three new cases close by unfolding `denote` to propositional logic.
+- **NEGATION stays reflexive-only in `ssub`** (no structural `BNeg` rule). The
+  COMPLEMENT disjointness `A ∩ ¬A <: Bot` that narrowing relies on is kept a
+  **semantic (`dsub`) fact** (`dcomplement_inter`, subtype.v), used operationally
+  — NOT an `ssub` rule. Adding it as a rule would force `ssub` to decide
+  empty-intersection reachability (an emptiness problem — `dsub`'s job), breaking
+  the clean decision procedure. Honest, deliberate scoping.
+
+### The inversion machinery, re-architected for intersection
+
+The supertype-side predicates (`arrow_above`, `rec_above`, `atom_above`,
+`top_above`, `interneg_above`) each gain a `BInter Tl Tr => P Tl /\ P Tr` case
+(an arrow/atom/… lies above an intersection iff above BOTH); their `*_mono`
+lemmas are extended for the three new `ssub` cases. **The old leftward predicate
+`union_below` is RETIRED** — it becomes provably non-monotone once intersection
+rules exist (the inter-LEFT vs union-RIGHT cross is the non-distributive
+frontier; no structural `BInter` form satisfies `SsInterPL`/`SsInterPR`/`SsInterI`
+simultaneously — shown by three pairwise-incompatible attempts). Replaced by the
+SOUNDNESS CONVERSES of the `_above` predicates (`atom_above_sound`,
+`arrow_above_sound`, `rec_above_sound`, `top_above_sound`, `interneg_above_sound`
+— `K_above S T -> ssub S T`, by induction on `T`), which yield connective-target
+inversion for a LEAF source uniformly across union AND intersection targets
+(`ssub_union_tgt_inv`, `ssub_inter_tgt_inv`).
+
+### `decide_ssub` — TOTAL + SOUND everywhere; COMPLETE on the inter-free fragment
+
+New clauses, ordered: union-on-LEFT, **inter-on-RIGHT (GLB)**, union-on-RIGHT,
+**inter-on-LEFT (projection)**, leaves. Termination measure unchanged
+(`bsize a + bsize b`, strictly decreasing). The correctness statement is **split**:
+
+- **`decide_ssub_sound` — UNCONDITIONAL** (the load-bearing direction): every
+  accepted pair — *including all intersection/negation pairs* — is a genuine
+  `ssub`. The decider never claims a non-subtyping.
+- **`decide_ssub_complete` — on the INTERSECTION-FREE fragment**
+  (`inter_free a -> inter_free b -> ssub a b -> decide_ssub a b = true`). There
+  the `BInter` clauses never fire and the decision coincides with the (complete)
+  increment-11 atom/arrow/record/union decider.
+
+**Why completeness is fragment-scoped — a REAL finding, not a skill gap.** Once
+intersection PROJECTIONS (`SsInterPL`) enter, a full `<->` `decide_ssub_correct`
+is **impossible**: the inter-LEFT vs union-RIGHT / inter-RIGHT cross is exactly
+the **distributivity frontier** — `ssub (A∩B) C` need not reduce to a single
+projection, and no clause order is complete for it (inter-left-vs-union-right
+wants inter-left first; inter-left-vs-inter-right wants inter-right first —
+contradictory). This mirrors subtype.v's machine-checked **N5 non-distributivity**
+of the free lattice. Deciding the cross is the emptiness/distributivity route
+(`dsub`/`gdecide`), DEFERRED. A **concrete sound-incompleteness witness** is
+recorded: `decide_ssub ((Int∪Str)∩Bool) (Int∪Str) = false`
+(`sanity_inter_union_cross_incomplete`) while the subtyping genuinely HOLDS
+(`sanity_inter_union_cross_holds`, via `SsInterPL`+`SsRefl`) — incompleteness, not
+unsoundness; the left type is not `inter_free`, so it is off the complete fragment
+(no false claim). Inter-on-the-RIGHT (GLB) is decided *completely* (it is a full
+iff via `SsInterI`); only inter-on-the-LEFT is the deferred frontier.
+
+### Preservation re-proved; `synth`/`check` re-proved
+
+`progress` + `preservation` **re-proved `Qed`** (the new `ssub` rules touch only
+the inversion lemmas they consume, whose interfaces are unchanged). `synth_sound`,
+`check_sound`, `synth_principal`, `narrowing` re-proved. `check_complete_nondegenerate`
+now carries `inter_free` hypotheses on the synthesized/target types (connective
+checking inherits the decider's fragment).
+
+### PART B — flow NARROWING (truthiness occurrence typing): DEFERRED, with proof
+
+Narrowing was ATTEMPTED and **deferred precisely** — it hits TWO genuine forks,
+not budget/skill limits:
+
+1. **Operational soundness fork (the occurrence-typing subtlety).** Progress /
+   preservation are stated for CLOSED terms (`has_type [] e T`). A narrowing rule
+   on `tif (tvar n) e1 e2` is only meaningful under a binder; when that binder
+   substitutes (beta/let), the substitution lemma provides a value typed at the
+   variable's DECLARED type `U`, **not** at the narrowed `U ∩ ¬falsy`. For a falsy
+   value this is unsatisfiable — narrowing is sound only *conditioned on branch
+   selection*, which happens AFTER substitution. This is proved concretely:
+   `false : Bool` is NOT in `Bool ∩ ¬(nil∪bool)` (the narrowed type a naive
+   context-narrowing substitution lemma would demand) — a checked refutation via
+   `ssub_inter_tgt_r` + `ssub_sound` + the `VBool false` witness. Closing it needs
+   the operational semantics restructured so narrowing is tied to value-conditioned
+   branch steps (not pure context narrowing) — a substrate change, out of scope.
+2. **Checker-payoff fork (the distributivity frontier).** The narrowed obligation
+   `T ∩ ¬falsy <: T` has intersection on the LEFT — exactly OFF `decide_ssub`'s
+   completeness fragment (the non-distributive cross above). So even a sound
+   declarative narrowing could not be *algorithmically* verified completely by
+   `check` without the emptiness/`gdecide` route.
+
+The `ssub` substrate Part B needs (intersection GLB, complement-as-`dsub`-fact) is
+**landed and sound**; the narrowing itself is the deferred increment.
+
+### Assumption audit
+
+`Print Assumptions` on `progress`, `preservation`, `ssub_sound`,
+`decide_ssub_sound`, `decide_ssub_complete`, `synth_sound`, `check_sound` (31
+audited results across the chain): **Closed under the global context** — no
+axioms, no `Admitted`, no `Classical`. `subtype.v` unmodified; whole chain
+compiles (`coqc subtype.v && coqc typing.v && coqc ssub.v && coqc check.v`).
+
 ## Staging
 
 - **[done]** mechanized lattice + subtype `refl`/`trans` (Rocq);

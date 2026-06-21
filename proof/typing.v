@@ -158,6 +158,26 @@ Inductive ssub : BTy -> BTy -> Prop :=
   | SsUnionInL : forall A B C, ssub A B -> ssub A (BUnion B C)
   | SsUnionInR : forall A B C, ssub A C -> ssub A (BUnion B C)
   | SsUnionE   : forall A B C, ssub A C -> ssub B C -> ssub (BUnion A B) C
+  (* INCREMENT 12 — INTERSECTION rules (composable GLB form, dual to UNION,
+     mirroring subtype.v's [sub]). PROJECTIONS carry a recursive premise
+     ([ssub A C -> ssub (BInter A B) C]) so inversion threads through explicit
+     transitivity; the brief's plain projections [ssub (BInter A B) A] /
+     [ssub (BInter A B) B] are DERIVED as [ssub_inter_prl] / [ssub_inter_prr]
+     (= the composable rule at [SsRefl]). INTRO is the greatest-lower-bound rule.
+     All three are SOUND vs [dsub] (the Boolean algebra: intersection is the
+     meet — [dinter_prl]/[dinter_prr]/[dinter_glb]), proved in [ssub_sound]. *)
+  | SsInterPL : forall A B C, ssub A C -> ssub (BInter A B) C
+  | SsInterPR : forall A B C, ssub B C -> ssub (BInter A B) C
+  | SsInterI  : forall A B C, ssub C A -> ssub C B -> ssub C (BInter A B)
+  (* INCREMENT 12 — NEGATION stays REFLEXIVE-ONLY in [ssub] (no structural rule
+     for [BNeg]). The COMPLEMENT disjointness [A ∩ ¬A <: Bot] that flow NARROWING
+     relies on is a SEMANTIC ([dsub]) fact ([dcomplement_inter], subtype.v), used
+     operationally in preservation — NOT an [ssub] rule. Adding it as an [ssub]
+     rule would force [ssub] to decide empty-intersection reachability (an
+     emptiness problem — [dsub]'s job), breaking the clean total decision
+     procedure. So narrowing's soundness goes through [ssub_sound]+[denote], and
+     [BNeg] keeps its reflexive-only decider treatment. (See [ssub_interneg_leaf]:
+     now restricted to the [BNeg] head; [BInter] is decided structurally below.) *)
 (* [srec f g]: the demanded record [g] is met by [f] — width + depth. We thread
    it as "g is built field-by-field, each demanded field present in f with a
    sub-field type", using [field_get] to locate the supplier in f. *)
@@ -240,6 +260,12 @@ Proof.
     unfold dsub in *. intros v Hv. simpl. right. auto.
   - (* SsUnionE: A ⊆ C and B ⊆ C ⇒ A∪B ⊆ C (least upper bound). *)
     unfold dsub in *. intros v Hv. simpl in Hv. destruct Hv as [Ha | Hb]; auto.
+  - (* SsInterPL: A ⊆ C ⇒ A∩B ⊆ C (left projection / meet below). *)
+    unfold dsub in *. intros v Hv. simpl in Hv. destruct Hv as [Ha _]; auto.
+  - (* SsInterPR: B ⊆ C ⇒ A∩B ⊆ C (right projection). *)
+    unfold dsub in *. intros v Hv. simpl in Hv. destruct Hv as [_ Hb]; auto.
+  - (* SsInterI: C ⊆ A and C ⊆ B ⇒ C ⊆ A∩B (greatest lower bound). *)
+    unfold dsub in *. intros v Hv. simpl. split; auto.
   - (* SrNil *) intros ents Hf k Tg Hin. simpl in Hin; contradiction.
   - (* SrCons *) intros ents Hf k0 Tg0 Hin. simpl in Hin. destruct Hin as [Heq | Hin].
     + injection Heq as <- <-.
@@ -266,6 +292,24 @@ Proof. intros A B C H. eapply SsTrans; [ apply ssub_union_inl | exact H ]. Qed.
 
 Lemma ssub_union_src_r : forall A B C, ssub (BUnion A B) C -> ssub B C.
 Proof. intros A B C H. eapply SsTrans; [ apply ssub_union_inr | exact H ]. Qed.
+
+(* INCREMENT 12 — INTERSECTION helpers, dual to the union ones. The brief's plain
+   projections, recovered from the composable forms at [SsRefl]; plus the
+   intersection-TARGET DECOMPOSITION ([ssub C (A∩B) ⇒ ssub C A ∧ ssub C B]) —
+   immediate from the projections + transitivity, NO induction — used by the
+   decider's intersection-on-right completeness. *)
+
+Lemma ssub_inter_prl : forall A B, ssub (BInter A B) A.
+Proof. intros A B. apply SsInterPL, SsRefl. Qed.
+
+Lemma ssub_inter_prr : forall A B, ssub (BInter A B) B.
+Proof. intros A B. apply SsInterPR, SsRefl. Qed.
+
+Lemma ssub_inter_tgt_l : forall C A B, ssub C (BInter A B) -> ssub C A.
+Proof. intros C A B H. eapply SsTrans; [ exact H | apply ssub_inter_prl ]. Qed.
+
+Lemma ssub_inter_tgt_r : forall C A B, ssub C (BInter A B) -> ssub C B.
+Proof. intros C A B H. eapply SsTrans; [ exact H | apply ssub_inter_prr ]. Qed.
 
 Inductive has_type : list BTy -> tm -> BTy -> Prop :=
   | TLit  : forall G l,
@@ -681,6 +725,8 @@ Fixpoint arrow_above (A1 B1 T : BTy) : Prop :=
   | BTop          => True
   | BArrow A2 B2  => ssub A2 A1 /\ ssub B1 B2
   | BUnion Tl Tr  => arrow_above A1 B1 Tl \/ arrow_above A1 B1 Tr
+  (* INCREMENT 12 — an arrow lies above [Tl∩Tr] iff above BOTH (meet-on-right). *)
+  | BInter Tl Tr  => arrow_above A1 B1 Tl /\ arrow_above A1 B1 Tr
   | _             => False
   end.
 
@@ -689,6 +735,7 @@ Fixpoint rec_above (f : list (string * BTy)) (T : BTy) : Prop :=
   | BTop          => True
   | BRec g        => srec f g
   | BUnion Tl Tr  => rec_above f Tl \/ rec_above f Tr
+  | BInter Tl Tr  => rec_above f Tl /\ rec_above f Tr
   | _             => False
   end.
 
@@ -719,6 +766,18 @@ Proof.
                         |- arrow_above ?Ax ?Bx ?c ] => apply (IH Ax Bx); exact Ha end
     | match goal with [ IH : forall _ _, arrow_above _ _ ?m -> arrow_above _ _ ?c
                         |- arrow_above ?Ax ?Bx ?c ] => apply (IH Ax Bx); exact Hb end ].
+  - (* SsInterPL: Hab : arrow_above Ax Bx A /\ arrow_above Ax Bx B; use the LEFT. *)
+    destruct Hab as [Ha _].
+    match goal with [ IH : forall _ _, arrow_above _ _ ?m -> _ |- _ ] => apply (IH Ax Bx); exact Ha end.
+  - (* SsInterPR: use the RIGHT conjunct. *)
+    destruct Hab as [_ Hb].
+    match goal with [ IH : forall _ _, arrow_above _ _ ?m -> _ |- _ ] => apply (IH Ax Bx); exact Hb end.
+  - (* SsInterI: goal arrow_above Ax Bx (A∩B) = both; each via its IH on Hab. *)
+    split;
+      [ match goal with [ IH : forall _ _, arrow_above _ _ ?m -> arrow_above _ _ ?a
+                          |- arrow_above ?Ax ?Bx ?a ] => apply (IH Ax Bx); exact Hab end
+      | match goal with [ IH : forall _ _, arrow_above _ _ ?m -> arrow_above _ _ ?b
+                          |- arrow_above ?Ax ?Bx ?b ] => apply (IH Ax Bx); exact Hab end ].
 Qed.
 
 Lemma rec_above_mono : forall M C, ssub M C ->
@@ -744,6 +803,15 @@ Proof.
         apply (IH f0); exact Ha end
     | match goal with [ IH : forall _, rec_above _ ?m -> rec_above _ ?c |- rec_above ?f0 ?c ] =>
         apply (IH f0); exact Hb end ].
+  - (* SsInterPL *) destruct Hab as [Ha _].
+    match goal with [ IH : forall _, rec_above _ ?m -> _ |- _ ] => apply (IH f0); exact Ha end.
+  - (* SsInterPR *) destruct Hab as [_ Hb].
+    match goal with [ IH : forall _, rec_above _ ?m -> _ |- _ ] => apply (IH f0); exact Hb end.
+  - (* SsInterI *) split;
+      [ match goal with [ IH : forall _, rec_above _ ?m -> rec_above _ ?a |- rec_above ?f0 ?a ] =>
+          apply (IH f0); exact Hab end
+      | match goal with [ IH : forall _, rec_above _ ?m -> rec_above _ ?b |- rec_above ?f0 ?b ] =>
+          apply (IH f0); exact Hab end ].
 Qed.
 
 (* The supertype-inversion lemmas, now union-robust: an arrow [ssub]-below T
@@ -781,123 +849,25 @@ Proof.
   eapply srec_lookup; eassumption.
 Qed.
 
-(* ---- UNION-TARGET inversion — the dual mechanism, for the DECIDER's union
-   completeness. We characterize "what lies BELOW a union [B ∪ C]" by a
-   STRUCTURAL predicate [union_below B C X] over the SUBTYPE syntax, and prove it
-   CLOSED UNDER [ssub] ON THE LEFT ([union_below_mono] — push leftward through
-   [ssub Y X]). This is the exact DUAL of [arrow_above_mono] (which pushed an
-   arrow-supertype predicate RIGHTWARD); it dissolves the same explicit-trans /
-   union-middle obstruction. The leaf reading is the brief's spec: a NON-union,
-   NON-Bot [X] below [B ∪ C] is below [B] or below [C]. *)
 
-Fixpoint union_below (B C X : BTy) : Prop :=
-  match X with
-  | BBot          => True
-  | BUnion X1 X2  => union_below B C X1 /\ union_below B C X2
-  | _             => ssub X B \/ ssub X C
-  end.
-
-(* If [X ≤ B0] then [X] is below [B0 ∪ _] structurally — by induction on X, the
-   union case decomposing via [ssub_union_src_*]. (Dual for the right.) *)
-Lemma union_below_of_le_l : forall X B0 C0, ssub X B0 -> union_below B0 C0 X.
-Proof.
-  induction X; intros B0 C0 H; simpl; try (left; exact H).
-  - exact I.                                   (* BBot *)
-  - split; [ apply IHX1; eapply ssub_union_src_l; exact H
-           | apply IHX2; eapply ssub_union_src_r; exact H ].
-Qed.
-
-Lemma union_below_of_le_r : forall X B0 C0, ssub X C0 -> union_below B0 C0 X.
-Proof.
-  induction X; intros B0 C0 H; simpl; try (right; exact H).
-  - exact I.                                   (* BBot *)
-  - split; [ apply IHX1; eapply ssub_union_src_l; exact H
-           | apply IHX2; eapply ssub_union_src_r; exact H ].
-Qed.
-
-Lemma union_below_mono : forall Y X, ssub Y X ->
-  forall B C, union_below B C X -> union_below B C Y.
-Proof.
-  intros Y X H. induction H; intros B0 C0 Hbel; simpl in *.
-  - (* SsRefl *) exact Hbel.
-  - (* SsTrans Y→B→C: push through both, right-to-left. *)
-    match goal with
-    | [ IHl : forall _ _, union_below _ _ ?m -> union_below _ _ ?y,
-        IHr : forall _ _, union_below _ _ ?x -> union_below _ _ ?m
-        |- union_below ?B0 ?C0 ?y ] =>
-      apply (IHl B0 C0); apply (IHr B0 C0); exact Hbel
-    end.
-  - (* SsTop: X = BTop, hyp [ssub BTop B0 \/ ssub BTop C0]; goal [union_below B0 C0 src].
-       src ≤ BTop (SsTop). If BTop ≤ B0 then src ≤ B0; src may be a union — destruct. *)
-    (* src ≤ BTop ≤ (B0 or C0); transport that downward, splitting if src is a union.
-       [union_below_le] (below) packages exactly this: [ssub X D -> union_below D _ X]
-       and its right form. *)
-    destruct Hbel as [Htb | Htc].
-    + apply union_below_of_le_l. eapply SsTrans; [ apply SsTop | exact Htb ].
-    + apply union_below_of_le_r. eapply SsTrans; [ apply SsTop | exact Htc ].
-  - (* SsBot: src = BBot. union_below _ _ BBot = True. *) exact I.
-  - (* SsAtom: compose the atom edge with the hyp via SsTrans. *)
-    destruct Hbel as [Hb | Hc];
-      [ left | right ]; (eapply SsTrans; [ apply SsAtom; eassumption | first [ exact Hb | exact Hc ] ]).
-  - (* SsArrow: compose the arrow subtyping with the hyp. *)
-    destruct Hbel as [Hb | Hc];
-      [ left | right ]; (eapply SsTrans; [ apply SsArrow; eassumption | first [ exact Hb | exact Hc ] ]).
-  - (* SsRec: compose the record subtyping with the hyp. *)
-    destruct Hbel as [Hb | Hc];
-      [ left | right ]; (eapply SsTrans; [ apply SsRec; eassumption | first [ exact Hb | exact Hc ] ]).
-  - (* SsUnionInL: Y arbitrary, X = BUnion B C, derived from [ssub Y B]. hyp
-       union_below B0 C0 (B∪C) = union_below..B /\ union_below..C; IH on [ssub Y B]
-       transports the LEFT conjunct. *)
-    match goal with [ IH : forall _ _, union_below _ _ ?b -> union_below _ _ ?y |- _ ] =>
-      apply (IH B0 C0); destruct Hbel as [HbB _]; exact HbB end.
-  - (* SsUnionInR: transport the RIGHT conjunct. *)
-    match goal with [ IH : forall _ _, union_below _ _ ?c -> union_below _ _ ?y |- _ ] =>
-      apply (IH B0 C0); destruct Hbel as [_ HbC]; exact HbC end.
-  - (* SsUnionE: Y = BUnion A B, X = C. goal union_below B0 C0 (A∪B) =
-       union_below..A /\ union_below..B; each via its IH on [ssub A C]/[ssub B C]. *)
-    split;
-      [ match goal with [ IH : forall _ _, union_below _ _ ?x -> union_below _ _ ?a,
-                          Hx : union_below ?B0 ?C0 ?x |- union_below ?B0 ?C0 ?a ] =>
-          apply (IH B0 C0); exact Hx end
-      | match goal with [ IH : forall _ _, union_below _ _ ?x -> union_below _ _ ?b,
-                          Hx : union_below ?B0 ?C0 ?x |- union_below ?B0 ?C0 ?b ] =>
-          apply (IH B0 C0); exact Hx end ].
-Qed.
-
-(* The leaf inversion the decider uses: a NON-union, NON-Bot [X] below [B ∪ C] is
-   below [B] or below [C]. (Union-X decomposes by [ssub_union_src_*]; Bot-X is
-   vacuous — both handled by the decider's own union-on-left / Bot short-circuit.) *)
-Lemma ssub_union_tgt_inv : forall X B C,
-  ssub X (BUnion B C) ->
-  match X with
-  | BBot => True
-  | BUnion _ _ => True
-  | _ => ssub X B \/ ssub X C
-  end.
-Proof.
-  intros X B C H.
-  assert (Hbel : union_below B C X).
-  { apply (union_below_mono X (BUnion B C) H). simpl. split.
-    - apply union_below_of_le_l. apply SsRefl.
-    - apply union_below_of_le_r. apply SsRefl. }
-  destruct X; simpl in Hbel; try exact Hbel; exact I.
-Qed.
-
-(* ---- INTERSECTION / NEGATION are the DEFERRED connectives: [ssub] has NO
-   structural rule for [BInter]/[BNeg], so (as in the pre-union increment) they
-   are related ONLY reflexively / via Top / via Bot / via union intro+elim. We
-   characterize their supertypes with the SAME union-robust [_above] mechanism so
-   the decider's leaf cases stay complete WITHOUT an intersection/negation
-   decision (which remains future work). [is_inter_neg] is the inter/neg head. *)
+(* ---- NEGATION is the sole remaining DEFERRED connective: [ssub] has NO
+   structural rule for [BNeg] (INCREMENT 12 added structural intersection rules,
+   so [BInter] is now decided structurally — only [BNeg] stays reflexive-only).
+   We characterize [BNeg]'s supertypes with the SAME union/inter-robust [_above]
+   mechanism so the decider's [BNeg]-leaf cases stay complete WITHOUT a negation
+   decision (which remains future work). [is_inter_neg] is now the [BNeg] head
+   ONLY (the name kept for continuity; it picks the reflexive-only connective). *)
 
 Definition is_inter_neg (t : BTy) : Prop :=
-  match t with BInter _ _ | BNeg _ => True | _ => False end.
+  match t with BNeg _ => True | _ => False end.
 
-(* supertypes of an inter/neg type [S]: BTop, [S] itself, or a union of such. *)
+(* supertypes of a [BNeg] type [S]: BTop, [S] itself, a union of such (one
+   disjunct), or an intersection of such (BOTH conjuncts — meet-on-right). *)
 Fixpoint interneg_above (S T : BTy) : Prop :=
   match T with
   | BTop          => True
   | BUnion Tl Tr  => interneg_above S Tl \/ interneg_above S Tr
+  | BInter Tl Tr  => interneg_above S Tl /\ interneg_above S Tr
   | _             => T = S
   end.
 
@@ -934,6 +904,20 @@ Proof.
                           |- interneg_above ?S ?c ] => apply (IH S Hin); exact Ha end
       | match goal with [ IH : forall _, _ -> interneg_above _ ?b -> interneg_above _ ?c
                           |- interneg_above ?S ?c ] => apply (IH S Hin); exact Hb end ].
+  - (* SsInterPL: Hab : interneg_above S A /\ interneg_above S B; LEFT. *)
+    destruct Hab as [Ha _].
+    match goal with [ IH : forall _, _ -> interneg_above _ ?m -> _ |- _ ] =>
+      apply (IH S Hin); exact Ha end.
+  - (* SsInterPR: RIGHT. *)
+    destruct Hab as [_ Hb].
+    match goal with [ IH : forall _, _ -> interneg_above _ ?m -> _ |- _ ] =>
+      apply (IH S Hin); exact Hb end.
+  - (* SsInterI: goal interneg_above S (A∩B) = both; each via its IH on Hab. *)
+    split;
+      [ match goal with [ IH : forall _, _ -> interneg_above _ ?m -> interneg_above _ ?a
+                          |- interneg_above ?S ?a ] => apply (IH S Hin); exact Hab end
+      | match goal with [ IH : forall _, _ -> interneg_above _ ?m -> interneg_above _ ?b
+                          |- interneg_above ?S ?b ] => apply (IH S Hin); exact Hab end ].
 Qed.
 
 Lemma ssub_interneg_super : forall S T,
@@ -950,6 +934,7 @@ Lemma ssub_interneg_leaf : forall S T,
   match T with
   | BTop => True
   | BUnion _ _ => True
+  | BInter _ _ => True
   | _ => T = S
   end.
 Proof.
@@ -963,6 +948,7 @@ Fixpoint atom_above (x : Atom) (T : BTy) : Prop :=
   | BTop          => True
   | BAtom y       => atom_le x y \/ x = y
   | BUnion Tl Tr  => atom_above x Tl \/ atom_above x Tr
+  | BInter Tl Tr  => atom_above x Tl /\ atom_above x Tr
   | _             => False
   end.
 
@@ -995,6 +981,15 @@ Proof.
         apply (IH x0); exact Ha end
     | match goal with [ IH : forall _, atom_above _ ?b -> atom_above _ ?c |- atom_above ?x0 ?c ] =>
         apply (IH x0); exact Hb end ].
+  - (* SsInterPL *) destruct Hab as [Ha _].
+    match goal with [ IH : forall _, atom_above _ ?m -> _ |- _ ] => apply (IH x0); exact Ha end.
+  - (* SsInterPR *) destruct Hab as [_ Hb].
+    match goal with [ IH : forall _, atom_above _ ?m -> _ |- _ ] => apply (IH x0); exact Hb end.
+  - (* SsInterI *) split;
+      [ match goal with [ IH : forall _, atom_above _ ?m -> atom_above _ ?a |- atom_above ?x0 ?a ] =>
+          apply (IH x0); exact Hab end
+      | match goal with [ IH : forall _, atom_above _ ?m -> atom_above _ ?b |- atom_above ?x0 ?b ] =>
+          apply (IH x0); exact Hab end ].
 Qed.
 
 Lemma ssub_atom_super : forall x T, ssub (BAtom x) T -> atom_above x T.
@@ -1012,6 +1007,7 @@ Fixpoint top_above (T : BTy) : Prop :=
   match T with
   | BTop          => True
   | BUnion Tl Tr  => top_above Tl \/ top_above Tr
+  | BInter Tl Tr  => top_above Tl /\ top_above Tr
   | _             => False
   end.
 
@@ -1031,6 +1027,13 @@ Proof.
   - (* SsUnionE *) destruct Hab as [Ha | Hb];
     [ match goal with [ IH : top_above ?a -> top_above ?c |- top_above ?c ] => apply IH; exact Ha end
     | match goal with [ IH : top_above ?b -> top_above ?c |- top_above ?c ] => apply IH; exact Hb end ].
+  - (* SsInterPL *) destruct Hab as [Ha _].
+    match goal with [ IH : top_above ?m -> _ |- _ ] => apply IH; exact Ha end.
+  - (* SsInterPR *) destruct Hab as [_ Hb].
+    match goal with [ IH : top_above ?m -> _ |- _ ] => apply IH; exact Hb end.
+  - (* SsInterI *) split;
+      [ match goal with [ IH : top_above ?m -> top_above ?a |- top_above ?a ] => apply IH; exact Hab end
+      | match goal with [ IH : top_above ?m -> top_above ?b |- top_above ?b ] => apply IH; exact Hab end ].
 Qed.
 
 Lemma ssub_top_super : forall T, ssub BTop T -> top_above T.
@@ -1039,6 +1042,129 @@ Proof. intros T H. apply (top_above_mono BTop T H). simpl. exact I. Qed.
 Lemma ssub_atom_atom : forall x y, ssub (BAtom x) (BAtom y) -> atom_le x y \/ x = y.
 Proof.
   intros x y H. apply ssub_atom_super in H. simpl in H. exact H.
+Qed.
+
+(* ---- CONNECTIVE-TARGET inversion — the DECIDER's union/intersection-target
+   completeness, via the SUPERTYPE [_above] predicates' SOUNDNESS converses.
+
+   INCREMENT 12 — the OLD [union_below] (a leftward subtype-side predicate)
+   becomes UNPROVABLE-monotone once intersection [ssub] rules exist: the
+   intersection-on-the-LEFT vs union-on-the-RIGHT cross is exactly the
+   NON-DISTRIBUTIVE frontier (mirroring subtype.v's N5: the free lattice is
+   provably non-distributive). E.g. [(B∪C)∩X <: B∪C] holds (via [SsInterPL] from
+   refl) yet is NOT below [B] nor below [C] alone — so the leaf disjunction
+   [ssub X B \/ ssub X C] is NOT preserved by [SsInterPL], and [union_below_mono]
+   genuinely fails (no structural [BInter] form satisfies all of
+   [SsInterPL]/[SsInterPR]/[SsInterI] simultaneously — proven by the three
+   pairwise-incompatible attempts).
+
+   The CLEAN replacement: invert a connective TARGET against a LEAF source using
+   the RIGHTWARD [_above] predicates (already extended with the [BInter] [/\]
+   case, monotone-closed under [ssub]) plus their SOUNDNESS converses
+   ([K_above S T -> ssub S T], by induction on T). The decider strips
+   union/inter SOURCES first (union-on-left elim, inter-on-left projection), so
+   target inversion is only ever needed for a LEAF source — exactly where the
+   [_above] route is robust, handling union AND intersection targets uniformly. *)
+
+(* SOUNDNESS converses of the [_above] predicates: the predicate IMPLIES the
+   subtyping. Each by induction on the supertype [T]; the union case picks the
+   holding disjunct ([SsUnionInL]/[InR]), the intersection case meets both
+   ([SsInterI]), Top is [SsTop], the leaf rebuilds the kind's [ssub]. *)
+Lemma atom_above_sound : forall x T, atom_above x T -> ssub (BAtom x) T.
+Proof.
+  intros x T. induction T; simpl; intro Hab; try contradiction.
+  - destruct Hab as [Hle | Heq]; [ apply SsAtom; exact Hle | subst; apply SsRefl ].
+  - apply SsTop.
+  - destruct Hab as [Hl | Hr]; [ apply SsUnionInL; apply IHT1; exact Hl
+                               | apply SsUnionInR; apply IHT2; exact Hr ].
+  - destruct Hab as [Hl Hr]; apply SsInterI; [ apply IHT1; exact Hl | apply IHT2; exact Hr ].
+Qed.
+
+Lemma top_above_sound : forall T, top_above T -> ssub BTop T.
+Proof.
+  intro T. induction T; simpl; intro Hab; try contradiction.
+  - apply SsTop.
+  - destruct Hab as [Hl | Hr]; [ apply SsUnionInL; apply IHT1; exact Hl
+                               | apply SsUnionInR; apply IHT2; exact Hr ].
+  - destruct Hab as [Hl Hr]; apply SsInterI; [ apply IHT1; exact Hl | apply IHT2; exact Hr ].
+Qed.
+
+Lemma arrow_above_sound : forall A1 B1 T, arrow_above A1 B1 T -> ssub (BArrow A1 B1) T.
+Proof.
+  intros A1 B1 T. induction T; simpl; intro Hab; try contradiction.
+  - apply SsTop.
+  - destruct Hab as [Hl | Hr]; [ apply SsUnionInL; apply IHT1; exact Hl
+                               | apply SsUnionInR; apply IHT2; exact Hr ].
+  - destruct Hab as [Hl Hr]; apply SsInterI; [ apply IHT1; exact Hl | apply IHT2; exact Hr ].
+  - destruct Hab as [Hd Hc]; apply SsArrow; assumption.
+Qed.
+
+Lemma rec_above_sound : forall f T, rec_above f T -> ssub (BRec f) T.
+Proof.
+  intros f T. induction T; simpl; intro Hab; try contradiction.
+  - apply SsTop.
+  - destruct Hab as [Hl | Hr]; [ apply SsUnionInL; apply IHT1; exact Hl
+                               | apply SsUnionInR; apply IHT2; exact Hr ].
+  - destruct Hab as [Hl Hr]; apply SsInterI; [ apply IHT1; exact Hl | apply IHT2; exact Hr ].
+  - apply SsRec; exact Hab.
+Qed.
+
+Lemma interneg_above_sound : forall S T, is_inter_neg S -> interneg_above S T -> ssub S T.
+Proof.
+  intros S T Hin. induction T; simpl; intro Hab;
+    try (rewrite <- Hab; apply SsRefl).
+  - apply SsTop.
+  - destruct Hab as [Hl | Hr]; [ apply SsUnionInL; apply IHT1; exact Hl
+                               | apply SsUnionInR; apply IHT2; exact Hr ].
+  - destruct Hab as [Hl Hr]; apply SsInterI; [ apply IHT1; exact Hl | apply IHT2; exact Hr ].
+Qed.
+
+(* UNION-TARGET leaf inversion: a LEAF [X] (atom/arrow/rec/neg) below [B ∪ C] is
+   below [B] or below [C]. Read off the kind's [_above] predicate at [B ∪ C]
+   (a disjunction by the [BUnion] case), then [_above_sound] rebuilds the [ssub].
+   Bot/Top/Union/Inter sources are handled by the decider's own prior clauses, so
+   here they return [True]. *)
+Lemma ssub_union_tgt_inv : forall X B C,
+  ssub X (BUnion B C) ->
+  match X with
+  | BAtom _ | BArrow _ _ | BRec _ | BNeg _ => ssub X B \/ ssub X C
+  | _ => True
+  end.
+Proof.
+  intros X B C H. destruct X; try exact I.
+  - (* BAtom *) apply ssub_atom_super in H. simpl in H.
+    destruct H as [Hl | Hr]; [ left; apply atom_above_sound; exact Hl
+                             | right; apply atom_above_sound; exact Hr ].
+  - (* BNeg *) apply (ssub_interneg_super (BNeg X) (BUnion B C) I) in H. simpl in H.
+    destruct H as [Hl | Hr]; [ left; apply (interneg_above_sound (BNeg X) B I); exact Hl
+                             | right; apply (interneg_above_sound (BNeg X) C I); exact Hr ].
+  - (* BRec *) apply ssub_rec_super in H. simpl in H.
+    destruct H as [Hl | Hr]; [ left; apply rec_above_sound; exact Hl
+                             | right; apply rec_above_sound; exact Hr ].
+  - (* BArrow *) apply ssub_arrow_super in H. simpl in H.
+    destruct H as [Hl | Hr]; [ left; apply arrow_above_sound; exact Hl
+                             | right; apply arrow_above_sound; exact Hr ].
+Qed.
+
+(* INTERSECTION-TARGET leaf inversion: a LEAF [X] below [B ∩ C] is below BOTH
+   (read off the [/\] [BInter] case of the kind's [_above]). Used by the decider's
+   intersection-on-right completeness for leaf sources. *)
+Lemma ssub_inter_tgt_inv : forall X B C,
+  ssub X (BInter B C) ->
+  match X with
+  | BAtom _ | BArrow _ _ | BRec _ | BNeg _ => ssub X B /\ ssub X C
+  | _ => True
+  end.
+Proof.
+  intros X B C H. destruct X; try exact I.
+  - apply ssub_atom_super in H. simpl in H.
+    destruct H as [Hl Hr]; split; apply atom_above_sound; assumption.
+  - apply (ssub_interneg_super (BNeg X) (BInter B C) I) in H. simpl in H.
+    destruct H as [Hl Hr]; split; apply (interneg_above_sound (BNeg X) _ I); assumption.
+  - apply ssub_rec_super in H. simpl in H.
+    destruct H as [Hl Hr]; split; apply rec_above_sound; assumption.
+  - apply ssub_arrow_super in H. simpl in H.
+    destruct H as [Hl Hr]; split; apply arrow_above_sound; assumption.
 Qed.
 
 (* ---- Cross-kind NON-subtypings — the contradiction-consumers ---------------

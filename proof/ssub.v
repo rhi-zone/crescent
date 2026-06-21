@@ -298,12 +298,32 @@ Fixpoint decide_ssub_fuel (n : nat) (a b : BTy) : bool :=
                  fuel measure [bsize a + bsize b] still strictly decreases. *)
               | BUnion a1 a2, _ =>
                   andb (decide_ssub_fuel n' a1 b) (decide_ssub_fuel n' a2 b)
+              (* INCREMENT 12 — INTERSECTION-ON-RIGHT (GLB introduction), checked
+                 BEFORE union-on-right and inter-on-left so the [SsInterI] /
+                 [SsInterPL]+[SsInterPR] interplay is decided completely: [a <: B∩C]
+                 iff [a <: B] AND [a <: C] — a FULL iff ([ssub_inter_tgt_l]/[_r]
+                 forward, [SsInterI] back), sound AND complete with NO fragment
+                 restriction. [bsize a + bsize b1 < bsize a + bsize (B∩C)]. *)
+              | _, BInter b1 b2 =>
+                  andb (decide_ssub_fuel n' a b1) (decide_ssub_fuel n' a b2)
               (* UNION-ON-RIGHT (introduction), for a NON-union [a] (union-a is
                  caught above): [a <: B∪C] iff [a <: B] OR [a <: C] (matches
                  [SsUnionInL]/[SsUnionInR]; completeness via [ssub_union_tgt_inv]).
                  [bsize a + bsize b1 < bsize a + bsize (B∪C)]. *)
               | _, BUnion b1 b2 =>
                   orb (decide_ssub_fuel n' a b1) (decide_ssub_fuel n' a b2)
+              (* INCREMENT 12 — INTERSECTION-ON-LEFT (projection), for a [b] that is
+                 NOT a connective (union/inter caught above): [A∩B <: b] iff
+                 [A <: b] OR [B <: b] (matches [SsInterPL]/[SsInterPR]). SOUND
+                 unconditionally; COMPLETE only on the intersection-free-LEFT
+                 fragment ([inter_free a]) — the inter-left / union-right /
+                 inter-right CROSS is the NON-DISTRIBUTIVE frontier (subtype.v's
+                 N5), where [ssub (A∩B) b] need NOT reduce to a single projection.
+                 So [decide_ssub] is TOTAL + SOUND everywhere, COMPLETE on
+                 [inter_free a]; the rest is DEFERRED (the emptiness/distributivity
+                 problem is [dsub]/[gdecide]'s job). See [decide_ssub_complete]. *)
+              | BInter a1 a2, _ =>
+                  orb (decide_ssub_fuel n' a1 b) (decide_ssub_fuel n' a2 b)
               | BAtom x, BAtom y => orb (atom_le_b x y) (bty_eqb a b)
               | BArrow A1 B1, BArrow A2 B2 =>
                   andb (decide_ssub_fuel n' A2 A1) (decide_ssub_fuel n' B1 B2)
@@ -462,252 +482,300 @@ Proof.
   intros k Tg Hin. apply (ssub_rec_inv f g k Tg Hs Hin).
 Qed.
 
-(* ---- The main equivalence, by strong induction on fuel. INCREMENT 11: the
-   decider now branches UNION-ON-LEFT then UNION-ON-RIGHT before the head leaves;
-   the proof mirrors that, discharging the union cases via the union-robust
-   inversions from typing.v ([ssub_union_src_l/r] for elim, [ssub_union_tgt_inv]
-   for intro), and the leaf cases via the [_above] inversions. Termination
-   measure unchanged: [bsize a + bsize b], strictly decreasing at every call
-   (each union step strips one connective constructor off [a] or [b]). ---- *)
+(* ---- The decider's correctness, INCREMENT 12. The decider branches
+   UNION-ON-LEFT, INTER-ON-RIGHT, UNION-ON-RIGHT, INTER-ON-LEFT, then the head
+   leaves. SOUNDNESS is UNCONDITIONAL (every clause maps to an [ssub] rule, so the
+   decider NEVER claims a non-subtyping). COMPLETENESS is proved on the
+   INTERSECTION-FREE fragment [inter_free a /\ inter_free b] — there the new
+   [BInter] clauses never fire and the decision coincides with the (complete)
+   increment-11 atom/arrow/record/union decider. Intersection subtyping is decided
+   SOUNDLY everywhere; the COMPLETE decision of intersection-on-the-LEFT
+   (projection) is the NON-DISTRIBUTIVE frontier (subtype.v's N5 — the free
+   lattice is provably non-distributive: [ssub (A∩B) C] need NOT reduce to a
+   single projection), DEFERRED to the emptiness/distributivity decision
+   ([dsub]/[gdecide]); see TODO.md / docs/proof-kernel.md. Termination measure
+   unchanged: [bsize a + bsize b], strictly decreasing at every recursive call. *)
 
-(* a small helper: for the LEAF clause (a,b both non-Bot/Top/union) the decider's
-   per-head match. We isolate the leaf correctness so the union recursion is clean. *)
+(* [inter_free t]: no [BInter] occurs anywhere in [t]. On this fragment the
+   decider is complete (the [BInter] clauses never fire). *)
+Fixpoint inter_free (t : BTy) : Prop :=
+  match t with
+  | BAtom _ => True
+  | BTop => True
+  | BBot => True
+  | BUnion a b => inter_free a /\ inter_free b
+  | BInter _ _ => False
+  | BNeg a => inter_free a
+  | BArrow a b => inter_free a /\ inter_free b
+  | BRec fs => (fix il (xs : list (string * BTy)) : Prop :=
+                  match xs with [] => True | (_, T) :: r => inter_free T /\ il r end) fs
+  end.
 
-Lemma decide_ssub_fuel_correct : forall n a b,
-  bsize a + bsize b <= n ->
-  (decide_ssub_fuel n a b = true <-> ssub a b).
+(* One-step computation of [decide_ssub_fuel] when neither short-circuit fires. *)
+Lemma decide_ssub_step : forall n a b,
+  b <> BTop -> a <> BBot ->
+  decide_ssub_fuel (S n) a b =
+    match a, b with
+    | BUnion a1 a2, _ => andb (decide_ssub_fuel n a1 b) (decide_ssub_fuel n a2 b)
+    | _, BInter b1 b2 => andb (decide_ssub_fuel n a b1) (decide_ssub_fuel n a b2)
+    | _, BUnion b1 b2 => orb (decide_ssub_fuel n a b1) (decide_ssub_fuel n a b2)
+    | BInter a1 a2, _ => orb (decide_ssub_fuel n a1 b) (decide_ssub_fuel n a2 b)
+    | BAtom x, BAtom y => orb (atom_le_b x y) (bty_eqb a b)
+    | BArrow A1 B1, BArrow A2 B2 => andb (decide_ssub_fuel n A2 A1) (decide_ssub_fuel n B1 B2)
+    | BRec f, BRec g => decide_srec (decide_ssub_fuel n) f g
+    | _, _ => bty_eqb a b
+    end.
 Proof.
-  intro n. induction n as [ | n IHn ]; intros a b Hn.
-  - pose proof (bsize_pos a); pose proof (bsize_pos b); lia.
-  - (* fuel = S n. *)
-    (* First: b = BTop short-circuit. *)
-    destruct (bty_eq_dec b BTop) as [HbTop | HbTop].
-    { subst b. split; [ intro; apply SsTop | intros _; simpl; reflexivity ]. }
-    (* Next: a = BBot short-circuit (b ≠ BTop). *)
+  intros n a b HbTop HaBot. simpl.
+  destruct b; try reflexivity; try (exfalso; apply HbTop; reflexivity);
+    destruct a; try reflexivity; try (exfalso; apply HaBot; reflexivity).
+Qed.
+
+(* Helper tactics applied per (a-head, b-head). The [b] order after excluding
+   BTop is: Atom, Bot, Union, Inter, Neg, Rec, Arrow. *)
+
+(* ============================ SOUNDNESS (unconditional) ===================== *)
+Lemma decide_ssub_fuel_sound : forall n a b,
+  decide_ssub_fuel n a b = true -> ssub a b.
+Proof.
+  intro n. induction n as [ | n IHn ]; intros a b Hd.
+  - simpl in Hd. discriminate.
+  - destruct (bty_eq_dec b BTop) as [HbTop | HbTop].
+    { subst b. apply SsTop. }
     destruct (bty_eq_dec a BBot) as [HaBot | HaBot].
-    { subst a. split; [ intro; apply SsBot | intros _ ].
-      simpl. destruct b; try reflexivity; exfalso; apply HbTop; reflexivity. }
-    (* Now neither shortcut: compute one [decide_ssub_fuel] step. *)
-    assert (Hstep : decide_ssub_fuel (S n) a b =
-              match a, b with
-              | BUnion a1 a2, _ => andb (decide_ssub_fuel n a1 b) (decide_ssub_fuel n a2 b)
-              | _, BUnion b1 b2 => orb (decide_ssub_fuel n a b1) (decide_ssub_fuel n a b2)
-              | BAtom x, BAtom y => orb (atom_le_b x y) (bty_eqb a b)
-              | BArrow A1 B1, BArrow A2 B2 => andb (decide_ssub_fuel n A2 A1) (decide_ssub_fuel n B1 B2)
-              | BRec f, BRec g => decide_srec (decide_ssub_fuel n) f g
-              | _, _ => bty_eqb a b
-              end).
-    { simpl. destruct b; try reflexivity;
-        try (exfalso; apply HbTop; reflexivity);
-        destruct a; try reflexivity; try (exfalso; apply HaBot; reflexivity). }
-    rewrite Hstep. clear Hstep.
-    (* UNION-ON-LEFT: a = BUnion a1 a2. *)
+    { subst a. apply SsBot. }
+    rewrite (decide_ssub_step n a b HbTop HaBot) in Hd.
+    (* shorthand discharges for the connective-target clauses on a leaf [a]. *)
     destruct a as [ax| | |a1 a2|a1 a2|a1|af|A1 B1];
       try (exfalso; apply HaBot; reflexivity).
-    + (* a = BAtom ax : fall through to the right-union / atom leaf below. *)
+    + (* a = BAtom : b ∈ {Atom,Bot,Union,Inter,Neg,Rec,Arrow} *)
       destruct b as [bx| | |b1 b2|b1 b2|b1|bg|A2 B2];
         try (exfalso; apply HbTop; reflexivity).
-      * (* b = BAtom bx: atom leaf *)
-        split.
-        -- intro Hd. apply orb_true_iff in Hd. destruct Hd as [Hle | Heq].
-           ++ apply SsAtom. apply atom_le_b_true. exact Hle.
-           ++ apply bty_eqb_true in Heq. injection Heq as <-. apply SsRefl.
-        -- intro Hs. apply ssub_atom_atom in Hs. destruct Hs as [Hle | Heq].
-           ++ apply orb_true_iff. left. apply atom_le_b_true. exact Hle.
-           ++ subst bx. apply orb_true_iff. right. apply bty_eqb_true. reflexivity.
-      * (* b = BBot: ssub (BAtom) BBot impossible (atom_above ax BBot = False) *)
-        split; [ intro Hd; apply bty_eqb_true in Hd; discriminate | ].
-        intro Hs. exfalso. apply ssub_atom_super in Hs. simpl in Hs. exact Hs.
-      * (* b = BUnion b1 b2: union-on-right intro *)
-        simpl in Hn. split.
-        -- intro Hd. apply orb_true_iff in Hd. destruct Hd as [H1 | H2].
-           ++ apply SsUnionInL. apply (IHn (BAtom ax) b1); [ simpl; lia | exact H1 ].
-           ++ apply SsUnionInR. apply (IHn (BAtom ax) b2); [ simpl; lia | exact H2 ].
-        -- intro Hs. pose proof (ssub_union_tgt_inv _ _ _ Hs) as Hinv. simpl in Hinv.
-           apply orb_true_iff. destruct Hinv as [Hl | Hr];
-             [ left; apply (IHn (BAtom ax) b1); [ simpl; lia | exact Hl ]
-             | right; apply (IHn (BAtom ax) b2); [ simpl; lia | exact Hr ] ].
-      * (* b = BInter: leaf bty_eqb (atom ≠ inter); ssub atom inter impossible *)
-        split; [ intro Hd; apply bty_eqb_true in Hd; discriminate | ].
-        intro Hs. exfalso. apply ssub_atom_super in Hs. simpl in Hs. exact Hs.
-      * (* b = BNeg *)
-        split; [ intro Hd; apply bty_eqb_true in Hd; discriminate | ].
-        intro Hs. exfalso. apply ssub_atom_super in Hs. simpl in Hs. exact Hs.
-      * (* b = BRec: ssub atom rec impossible *)
-        split; [ intro Hd; apply bty_eqb_true in Hd; discriminate | ].
-        intro Hs. exfalso. eapply ssub_atom_not_rec; exact Hs.
-      * (* b = BArrow: ssub atom arrow impossible *)
-        split; [ intro Hd; apply bty_eqb_true in Hd; discriminate | ].
-        intro Hs. exfalso. eapply ssub_atom_not_arrow; exact Hs.
-    + (* a = BTop, but b ≠ BTop. [ssub BTop b] is SYNTACTICALLY only possible for
-         [b] a union reaching Top ([ssub_top_super]: [top_above b]); for a non-union
-         leaf [b] it is impossible. *)
+      * apply orb_true_iff in Hd. destruct Hd as [Hle | Heq].
+        -- apply SsAtom. apply atom_le_b_true. exact Hle.
+        -- apply bty_eqb_true in Heq. rewrite Heq. apply SsRefl.
+      * apply bty_eqb_true in Hd. discriminate.       (* Bot *)
+      * apply orb_true_iff in Hd. destruct Hd as [H1 | H2];   (* Union *)
+          [ apply SsUnionInL; apply IHn; exact H1 | apply SsUnionInR; apply IHn; exact H2 ].
+      * apply andb_true_iff in Hd. destruct Hd as [H1 H2];   (* Inter *)
+          apply SsInterI; [ apply IHn; exact H1 | apply IHn; exact H2 ].
+      * apply bty_eqb_true in Hd. discriminate.       (* Neg *)
+      * apply bty_eqb_true in Hd. discriminate.       (* Rec *)
+      * apply bty_eqb_true in Hd. discriminate.       (* Arrow *)
+    + (* a = BTop *)
       destruct b as [bx| | |b1 b2|b1 b2|b1|bg|A2 B2];
         try (exfalso; apply HbTop; reflexivity);
-        try (split;
-          [ intro Hd; apply bty_eqb_true in Hd; discriminate
-          | intro Hs; exfalso; apply ssub_top_super in Hs; simpl in Hs; exact Hs ]).
-      (* b = BUnion: union-on-right *)
-      simpl in Hn. split.
-      -- intro Hd. apply orb_true_iff in Hd. destruct Hd as [H1 | H2].
-         ++ apply SsUnionInL. apply (IHn BTop b1); [ simpl; lia | exact H1 ].
-         ++ apply SsUnionInR. apply (IHn BTop b2); [ simpl; lia | exact H2 ].
-      -- intro Hs. pose proof (ssub_union_tgt_inv _ _ _ Hs) as Hinv. simpl in Hinv.
-         apply orb_true_iff. destruct Hinv as [Hl | Hr];
-           [ left; apply (IHn BTop b1); [ simpl; lia | exact Hl ]
-           | right; apply (IHn BTop b2); [ simpl; lia | exact Hr ] ].
-    + (* a = BUnion a1 a2 — union-on-LEFT elim. *)
-      simpl in Hn. split.
-      * intro Hd. apply andb_true_iff in Hd. destruct Hd as [H1 H2].
-        apply SsUnionE; [ apply (IHn a1 b); [ simpl; lia | exact H1 ]
-                        | apply (IHn a2 b); [ simpl; lia | exact H2 ] ].
-      * intro Hs. apply andb_true_iff. split.
-        -- apply (IHn a1 b); [ lia | apply (ssub_union_src_l a1 a2 b); exact Hs ].
-        -- apply (IHn a2 b); [ lia | apply (ssub_union_src_r a1 a2 b); exact Hs ].
-    + (* a = BInter a1 a2 — DEFERRED connective: reflexive-only leaf, or right-union. *)
-      destruct b as [bx| | |b1 b2|b1 b2|b1|bg|A2 B2];
-        try (exfalso; apply HbTop; reflexivity);
-        (* non-union b: the [bty_eqb] leaf — true iff [a = b]; completeness via
-           [ssub_interneg_leaf] (the reflexive-only fragment). *)
-        try (split;
-          [ intro Hd; apply bty_eqb_true in Hd; rewrite Hd; apply SsRefl
-          | intro Hs; apply (ssub_interneg_leaf (BInter a1 a2) _ I) in Hs; simpl in Hs;
-            apply bty_eqb_true; symmetry; exact Hs ]).
-      (* the remaining goal is b = BUnion b1 b2: union-on-right. *)
-      simpl in Hn. split.
-      -- intro Hd. apply orb_true_iff in Hd. destruct Hd as [H1 | H2].
-         ++ apply SsUnionInL. apply (IHn (BInter a1 a2) b1); [ simpl; lia | exact H1 ].
-         ++ apply SsUnionInR. apply (IHn (BInter a1 a2) b2); [ simpl; lia | exact H2 ].
-      -- intro Hs. pose proof (ssub_union_tgt_inv _ _ _ Hs) as Hinv. simpl in Hinv.
-         apply orb_true_iff. destruct Hinv as [Hl | Hr];
-           [ left; apply (IHn (BInter a1 a2) b1); [ simpl; lia | exact Hl ]
-           | right; apply (IHn (BInter a1 a2) b2); [ simpl; lia | exact Hr ] ].
-    + (* a = BNeg a1 — DEFERRED connective, identical to BInter. *)
-      destruct b as [bx| | |b1 b2|b1 b2|b1|bg|A2 B2];
-        try (exfalso; apply HbTop; reflexivity);
-        try (split;
-          [ intro Hd; apply bty_eqb_true in Hd; rewrite Hd; apply SsRefl
-          | intro Hs; apply (ssub_interneg_leaf (BNeg a1) _ I) in Hs; simpl in Hs;
-            apply bty_eqb_true; symmetry; exact Hs ]).
-      simpl in Hn. split.
-      -- intro Hd. apply orb_true_iff in Hd. destruct Hd as [H1 | H2].
-         ++ apply SsUnionInL. apply (IHn (BNeg a1) b1); [ simpl; lia | exact H1 ].
-         ++ apply SsUnionInR. apply (IHn (BNeg a1) b2); [ simpl; lia | exact H2 ].
-      -- intro Hs. pose proof (ssub_union_tgt_inv _ _ _ Hs) as Hinv. simpl in Hinv.
-         apply orb_true_iff. destruct Hinv as [Hl | Hr];
-           [ left; apply (IHn (BNeg a1) b1); [ simpl; lia | exact Hl ]
-           | right; apply (IHn (BNeg a1) b2); [ simpl; lia | exact Hr ] ].
-    + (* a = BRec af — records. *)
+        try (apply bty_eqb_true in Hd; discriminate).
+      * apply orb_true_iff in Hd. destruct Hd as [H1 | H2];   (* Union *)
+          [ apply SsUnionInL; apply IHn; exact H1 | apply SsUnionInR; apply IHn; exact H2 ].
+      * apply andb_true_iff in Hd. destruct Hd as [H1 H2];   (* Inter *)
+          apply SsInterI; [ apply IHn; exact H1 | apply IHn; exact H2 ].
+    + (* a = BUnion: union-on-left elim *)
+      apply andb_true_iff in Hd. destruct Hd as [H1 H2].
+      apply SsUnionE; [ apply IHn; exact H1 | apply IHn; exact H2 ].
+    + (* a = BInter *)
       destruct b as [bx| | |b1 b2|b1 b2|b1|bg|A2 B2];
         try (exfalso; apply HbTop; reflexivity).
-      * (* b = BAtom: ssub rec atom impossible *)
-        split; [ intro Hd; apply bty_eqb_true in Hd; discriminate | ].
-        intro Hs. exfalso. eapply ssub_rec_not_atom; exact Hs.
-      * (* b = BBot: ssub rec Bot impossible? rec MAY be empty (BBot field) — but
-           ssub is syntactic; ssub (BRec) BBot => rec_above? No: target BBot.
-           Use ssub_rec_super: rec_above af BBot = False. *)
-        split; [ intro Hd; apply bty_eqb_true in Hd; discriminate | ].
-        intro Hs. exfalso. apply ssub_rec_super in Hs. simpl in Hs. exact Hs.
-      * (* b = BUnion: union-on-right *)
-        simpl in Hn. split.
-        -- intro Hd. apply orb_true_iff in Hd. destruct Hd as [H1 | H2].
-           ++ apply SsUnionInL. apply (IHn (BRec af) b1); [ simpl; lia | exact H1 ].
-           ++ apply SsUnionInR. apply (IHn (BRec af) b2); [ simpl; lia | exact H2 ].
-        -- intro Hs. pose proof (ssub_union_tgt_inv _ _ _ Hs) as Hinv. simpl in Hinv.
-           apply orb_true_iff. destruct Hinv as [Hl | Hr];
-             [ left; apply (IHn (BRec af) b1); [ simpl; lia | exact Hl ]
-             | right; apply (IHn (BRec af) b2); [ simpl; lia | exact Hr ] ].
-      * (* b = BInter: ssub rec inter impossible (rec_above) *)
-        split; [ intro Hd; apply bty_eqb_true in Hd; discriminate | ].
-        intro Hs. exfalso. apply ssub_rec_super in Hs. simpl in Hs. exact Hs.
-      * (* b = BNeg *)
-        split; [ intro Hd; apply bty_eqb_true in Hd; discriminate | ].
-        intro Hs. exfalso. apply ssub_rec_super in Hs. simpl in Hs. exact Hs.
-      * (* b = BRec bg: the real record case. *)
-        simpl in Hn.
-        assert (Hbud : forall k Tf Tg, In (k,Tf) af -> In (k,Tg) bg -> bsize Tf + bsize Tg <= n).
+      * apply orb_true_iff in Hd. destruct Hd as [H1 | H2];   (* Atom: inter-left *)
+          [ apply SsInterPL; apply IHn; exact H1 | apply SsInterPR; apply IHn; exact H2 ].
+      * apply orb_true_iff in Hd. destruct Hd as [H1 | H2];   (* Bot: inter-left *)
+          [ apply SsInterPL; apply IHn; exact H1 | apply SsInterPR; apply IHn; exact H2 ].
+      * apply orb_true_iff in Hd. destruct Hd as [H1 | H2];   (* Union: union-right *)
+          [ apply SsUnionInL; apply IHn; exact H1 | apply SsUnionInR; apply IHn; exact H2 ].
+      * apply andb_true_iff in Hd. destruct Hd as [H1 H2];   (* Inter: GLB *)
+          apply SsInterI; [ apply IHn; exact H1 | apply IHn; exact H2 ].
+      * apply orb_true_iff in Hd. destruct Hd as [H1 | H2];   (* Neg: inter-left *)
+          [ apply SsInterPL; apply IHn; exact H1 | apply SsInterPR; apply IHn; exact H2 ].
+      * apply orb_true_iff in Hd. destruct Hd as [H1 | H2];   (* Rec: inter-left *)
+          [ apply SsInterPL; apply IHn; exact H1 | apply SsInterPR; apply IHn; exact H2 ].
+      * apply orb_true_iff in Hd. destruct Hd as [H1 | H2];   (* Arrow: inter-left *)
+          [ apply SsInterPL; apply IHn; exact H1 | apply SsInterPR; apply IHn; exact H2 ].
+    + (* a = BNeg *)
+      destruct b as [bx| | |b1 b2|b1 b2|b1|bg|A2 B2];
+        try (exfalso; apply HbTop; reflexivity);
+        try (apply bty_eqb_true in Hd; rewrite Hd; apply SsRefl).
+      * apply orb_true_iff in Hd. destruct Hd as [H1 | H2];   (* Union *)
+          [ apply SsUnionInL; apply IHn; exact H1 | apply SsUnionInR; apply IHn; exact H2 ].
+      * apply andb_true_iff in Hd. destruct Hd as [H1 H2];   (* Inter *)
+          apply SsInterI; [ apply IHn; exact H1 | apply IHn; exact H2 ].
+    + (* a = BRec *)
+      destruct b as [bx| | |b1 b2|b1 b2|b1|bg|A2 B2];
+        try (exfalso; apply HbTop; reflexivity);
+        try (apply bty_eqb_true in Hd; discriminate).
+      * apply orb_true_iff in Hd. destruct Hd as [H1 | H2];   (* Union *)
+          [ apply SsUnionInL; apply IHn; exact H1 | apply SsUnionInR; apply IHn; exact H2 ].
+      * apply andb_true_iff in Hd. destruct Hd as [H1 H2];   (* Inter *)
+          apply SsInterI; [ apply IHn; exact H1 | apply IHn; exact H2 ].
+      * apply SsRec. apply (decide_srec_sound (decide_ssub_fuel n) af bg);   (* Rec *)
+          [ intros kk Tf Tg HinF HinG Hr; apply IHn; exact Hr | exact Hd ].
+    + (* a = BArrow *)
+      destruct b as [bx| | |b1 b2|b1 b2|b1|bg|A2 B2];
+        try (exfalso; apply HbTop; reflexivity);
+        try (apply bty_eqb_true in Hd; discriminate).
+      * apply orb_true_iff in Hd. destruct Hd as [H1 | H2];   (* Union *)
+          [ apply SsUnionInL; apply IHn; exact H1 | apply SsUnionInR; apply IHn; exact H2 ].
+      * apply andb_true_iff in Hd. destruct Hd as [H1 H2];   (* Inter *)
+          apply SsInterI; [ apply IHn; exact H1 | apply IHn; exact H2 ].
+      * apply andb_true_iff in Hd. destruct Hd as [Hdom Hcod];   (* Arrow *)
+          apply SsArrow; [ apply IHn; exact Hdom | apply IHn; exact Hcod ].
+Qed.
+
+(* ============= COMPLETENESS on the intersection-free fragment =============== *)
+Lemma decide_ssub_fuel_complete : forall n a b,
+  bsize a + bsize b <= n -> inter_free a -> inter_free b ->
+  ssub a b -> decide_ssub_fuel n a b = true.
+Proof.
+  intro n. induction n as [ | n IHn ]; intros a b Hn Hifa Hifb Hs.
+  - pose proof (bsize_pos a); pose proof (bsize_pos b); lia.
+  - destruct (bty_eq_dec b BTop) as [HbTop | HbTop].
+    { subst b. simpl. reflexivity. }
+    destruct (bty_eq_dec a BBot) as [HaBot | HaBot].
+    { subst a. simpl. destruct b; try reflexivity; exfalso; apply HbTop; reflexivity. }
+    rewrite (decide_ssub_step n a b HbTop HaBot).
+    destruct a as [ax| | |a1 a2|a1 a2|a1|af|A1 B1];
+      try (exfalso; apply HaBot; reflexivity);
+      try (simpl in Hifa; contradiction).
+    + (* a = BAtom *)
+      destruct b as [bx| | |b1 b2|b1 b2|b1|bg|A2 B2];
+        try (exfalso; apply HbTop; reflexivity);
+        try (simpl in Hifb; contradiction); simpl in Hn.
+      * apply ssub_atom_atom in Hs. apply orb_true_iff.       (* Atom *)
+        destruct Hs as [Hle | Heq];
+          [ left; apply atom_le_b_true; exact Hle
+          | right; subst; apply bty_eqb_true; reflexivity ].
+      * exfalso. apply ssub_atom_super in Hs. exact Hs.       (* Bot *)
+      * destruct Hifb as [Hb1 Hb2].                            (* Union *)
+        pose proof (ssub_union_tgt_inv (BAtom ax) b1 b2 Hs) as Hinv. simpl in Hinv.
+        apply orb_true_iff. destruct Hinv as [H1 | H2];
+          [ left; apply (IHn (BAtom ax) b1); [ simpl in Hn |- *; lia | exact I | exact Hb1 | exact H1 ]
+          | right; apply (IHn (BAtom ax) b2); [ simpl in Hn |- *; lia | exact I | exact Hb2 | exact H2 ] ].
+      * exfalso. apply ssub_atom_super in Hs. exact Hs.       (* Neg *)
+      * exfalso. eapply ssub_atom_not_rec; exact Hs.          (* Rec *)
+      * exfalso. eapply ssub_atom_not_arrow; exact Hs.        (* Arrow *)
+    + (* a = BTop *)
+      destruct b as [bx| | |b1 b2|b1 b2|b1|bg|A2 B2];
+        try (exfalso; apply HbTop; reflexivity);
+        try (simpl in Hifb; contradiction); simpl in Hn;
+        try (exfalso; apply ssub_top_super in Hs; simpl in Hs; exact Hs).
+      * destruct Hifb as [Hb1 Hb2]. apply ssub_top_super in Hs. simpl in Hs.   (* Union *)
+        apply orb_true_iff. destruct Hs as [H1 | H2];
+          [ left; apply (IHn BTop b1); [ simpl in Hn |- *; lia | exact I | exact Hb1 | apply top_above_sound; exact H1 ]
+          | right; apply (IHn BTop b2); [ simpl in Hn |- *; lia | exact I | exact Hb2 | apply top_above_sound; exact H2 ] ].
+    + (* a = BUnion: union-on-left elim *)
+      simpl in Hn. destruct Hifa as [Hifa1 Hifa2]. apply andb_true_iff. split;
+        [ apply (IHn a1 b); [ simpl in Hn |- *; lia | exact Hifa1 | exact Hifb | eapply ssub_union_src_l; exact Hs ]
+        | apply (IHn a2 b); [ simpl in Hn |- *; lia | exact Hifa2 | exact Hifb | eapply ssub_union_src_r; exact Hs ] ].
+    + (* a = BNeg *)
+      destruct b as [bx| | |b1 b2|b1 b2|b1|bg|A2 B2];
+        try (exfalso; apply HbTop; reflexivity);
+        try (simpl in Hifb; contradiction); simpl in Hn;
+        try (apply (ssub_interneg_leaf (BNeg a1) _ I) in Hs; simpl in Hs;
+             apply bty_eqb_true; symmetry; exact Hs).
+      * destruct Hifb as [Hb1 Hb2].                            (* Union *)
+        pose proof (ssub_union_tgt_inv (BNeg a1) b1 b2 Hs) as Hinv. simpl in Hinv.
+        apply orb_true_iff. destruct Hinv as [H1 | H2];
+          [ left; apply (IHn (BNeg a1) b1); [ simpl in Hn |- *; lia | exact Hifa | exact Hb1 | exact H1 ]
+          | right; apply (IHn (BNeg a1) b2); [ simpl in Hn |- *; lia | exact Hifa | exact Hb2 | exact H2 ] ].
+    + (* a = BRec *)
+      destruct b as [bx| | |b1 b2|b1 b2|b1|bg|A2 B2];
+        try (exfalso; apply HbTop; reflexivity);
+        try (simpl in Hifb; contradiction); simpl in Hn.
+      * exfalso. eapply ssub_rec_not_atom; exact Hs.          (* Atom *)
+      * exfalso. apply ssub_rec_super in Hs. simpl in Hs. exact Hs.   (* Bot *)
+      * destruct Hifb as [Hb1 Hb2].                            (* Union *)
+        pose proof (ssub_union_tgt_inv (BRec af) b1 b2 Hs) as Hinv. simpl in Hinv.
+        apply orb_true_iff. destruct Hinv as [H1 | H2];
+          [ left; apply (IHn (BRec af) b1); [ simpl in Hn |- *; lia | exact Hifa | exact Hb1 | exact H1 ]
+          | right; apply (IHn (BRec af) b2); [ simpl in Hn |- *; lia | exact Hifa | exact Hb2 | exact H2 ] ].
+      * exfalso. apply ssub_rec_super in Hs. simpl in Hs. exact Hs.   (* Neg *)
+      * assert (Hbud : forall k Tf Tg, In (k,Tf) af -> In (k,Tg) bg -> bsize Tf + bsize Tg <= n).   (* Rec *)
         { intros kk Tf Tg HinF HinG.
           pose proof (bsize_field_lt af kk Tf HinF) as HF;
           pose proof (bsize_field_lt bg kk Tg HinG) as HG; simpl in HF, HG; lia. }
-        split.
-        -- intro Hd. apply SsRec. apply (decide_srec_sound (decide_ssub_fuel n) af bg).
-           ++ intros kk Tf Tg HinF HinG Hr. apply (IHn Tf Tg); [ apply (Hbud kk Tf Tg HinF HinG) | exact Hr ].
-           ++ exact Hd.
-        -- intro Hs. apply (decide_srec_complete (decide_ssub_fuel n) af bg).
-           ++ intros kk Tf Tg HinF HinG Hsf. apply (IHn Tf Tg); [ apply (Hbud kk Tf Tg HinF HinG) | exact Hsf ].
-           ++ exact (ssub_rec_to_srec af bg Hs).
-      * (* b = BArrow: ssub rec arrow impossible *)
-        split; [ intro Hd; apply bty_eqb_true in Hd; discriminate | ].
-        intro Hs. exfalso. eapply ssub_rec_not_arrow; exact Hs.
-    + (* a = BArrow A1 B1 — arrows. *)
+        apply (decide_srec_complete (decide_ssub_fuel n) af bg).
+        -- intros kk Tf Tg HinF HinG Hsf.
+           apply (IHn Tf Tg);
+             [ apply (Hbud kk Tf Tg HinF HinG)
+             | clear -Hifa HinF;
+               induction af as [ | [k0 T0] af' IHaf ]; simpl in *;
+               [ contradiction
+               | destruct Hifa as [HfT Hfr]; destruct HinF as [Heq | Hin];
+                 [ injection Heq as <- <-; exact HfT | apply IHaf; [ exact Hfr | exact Hin ] ] ]
+             | clear -Hifb HinG;
+               induction bg as [ | [k0 T0] bg' IHbg ]; simpl in *;
+               [ contradiction
+               | destruct Hifb as [HfT Hfr]; destruct HinG as [Heq | Hin];
+                 [ injection Heq as <- <-; exact HfT | apply IHbg; [ exact Hfr | exact Hin ] ] ]
+             | exact Hsf ].
+        -- exact (ssub_rec_to_srec af bg Hs).
+      * exfalso. eapply ssub_rec_not_arrow; exact Hs.          (* Arrow *)
+    + (* a = BArrow *)
       destruct b as [bx| | |b1 b2|b1 b2|b1|bg|A2 B2];
-        try (exfalso; apply HbTop; reflexivity).
-      * (* b = BAtom: ssub arrow atom impossible *)
-        split; [ intro Hd; apply bty_eqb_true in Hd; discriminate | ].
-        intro Hs. exfalso. eapply ssub_arrow_not_atom; exact Hs.
-      * (* b = BBot: ssub arrow Bot impossible (arrow_above) *)
-        split; [ intro Hd; apply bty_eqb_true in Hd; discriminate | ].
-        intro Hs. exfalso. apply ssub_arrow_super in Hs. simpl in Hs. exact Hs.
-      * (* b = BUnion: union-on-right *)
-        simpl in Hn. split.
-        -- intro Hd. apply orb_true_iff in Hd. destruct Hd as [H1 | H2].
-           ++ apply SsUnionInL. apply (IHn (BArrow A1 B1) b1); [ simpl; lia | exact H1 ].
-           ++ apply SsUnionInR. apply (IHn (BArrow A1 B1) b2); [ simpl; lia | exact H2 ].
-        -- intro Hs. pose proof (ssub_union_tgt_inv _ _ _ Hs) as Hinv. simpl in Hinv.
-           apply orb_true_iff. destruct Hinv as [Hl | Hr];
-             [ left; apply (IHn (BArrow A1 B1) b1); [ simpl; lia | exact Hl ]
-             | right; apply (IHn (BArrow A1 B1) b2); [ simpl; lia | exact Hr ] ].
-      * (* b = BInter: ssub arrow inter impossible *)
-        split; [ intro Hd; apply bty_eqb_true in Hd; discriminate | ].
-        intro Hs. exfalso. apply ssub_arrow_super in Hs. simpl in Hs. exact Hs.
-      * split; [ intro Hd; apply bty_eqb_true in Hd; discriminate | ].
-        intro Hs. exfalso. apply ssub_arrow_super in Hs. simpl in Hs. exact Hs.
-      * (* b = BRec: ssub arrow rec impossible *)
-        split; [ intro Hd; apply bty_eqb_true in Hd; discriminate | ].
-        intro Hs. exfalso. eapply ssub_arrow_not_rec; exact Hs.
-      * (* b = BArrow A2 B2: the real arrow case. *)
-        simpl in Hn. split.
-        -- intro Hd. apply andb_true_iff in Hd. destruct Hd as [Hdom Hcod].
-           apply SsArrow.
-           ++ apply (IHn A2 A1); [ lia | exact Hdom ].
-           ++ apply (IHn B1 B2); [ lia | exact Hcod ].
-        -- intro Hs. apply ssub_arrow_inv in Hs. destruct Hs as [Hdom Hcod].
-           apply andb_true_iff. split.
-           ++ apply (IHn A2 A1); [ lia | exact Hdom ].
-           ++ apply (IHn B1 B2); [ lia | exact Hcod ].
+        try (exfalso; apply HbTop; reflexivity);
+        try (simpl in Hifb; contradiction); simpl in Hn; simpl in Hifa.
+      * exfalso. eapply ssub_arrow_not_atom; exact Hs.        (* Atom *)
+      * exfalso. apply ssub_arrow_super in Hs. simpl in Hs. exact Hs.   (* Bot *)
+      * destruct Hifb as [Hb1 Hb2].                            (* Union *)
+        pose proof (ssub_union_tgt_inv (BArrow A1 B1) b1 b2 Hs) as Hinv. simpl in Hinv.
+        apply orb_true_iff. destruct Hinv as [H1 | H2];
+          [ left; apply (IHn (BArrow A1 B1) b1); [ simpl in Hn |- *; lia | simpl; exact Hifa | exact Hb1 | exact H1 ]
+          | right; apply (IHn (BArrow A1 B1) b2); [ simpl in Hn |- *; lia | simpl; exact Hifa | exact Hb2 | exact H2 ] ].
+      * exfalso. apply ssub_arrow_super in Hs. simpl in Hs. exact Hs.   (* Neg *)
+      * exfalso. eapply ssub_arrow_not_rec; exact Hs.          (* Rec *)
+      * destruct Hifa as [HifA1 HifB1]. destruct Hifb as [HifA2 HifB2].   (* Arrow *)
+        apply ssub_arrow_inv in Hs. destruct Hs as [Hdom Hcod].
+        apply andb_true_iff. split;
+          [ apply (IHn A2 A1); [ simpl in Hn |- *; lia | exact HifA2 | exact HifA1 | exact Hdom ]
+          | apply (IHn B1 B2); [ simpl in Hn |- *; lia | exact HifB1 | exact HifB2 | exact Hcod ] ].
 Qed.
 
 (* ===========================================================================
-   7. THE EXPORTED THEOREMS — [decide_ssub] sound + complete, total, decidable.
+   7. THE EXPORTED THEOREMS — INCREMENT 12.
+
+   [decide_ssub] is TOTAL and SOUND on the WHOLE of [BTy] (every accepted pair is
+   a genuine [ssub], including all intersection/negation pairs). COMPLETENESS is
+   exported on the INTERSECTION-FREE fragment [inter_free a /\ inter_free b]
+   ([decide_ssub_complete]); the intersection-on-the-LEFT cross is the
+   NON-DISTRIBUTIVE frontier and is DEFERRED (see the lemma comment + TODO.md).
    =========================================================================== *)
 
-Theorem decide_ssub_correct : forall a b,
-  decide_ssub a b = true <-> ssub a b.
+(* SOUNDNESS — UNCONDITIONAL, the load-bearing direction (the checker subsumes
+   along [ssub], so a [decide_ssub]-true must be a real [ssub]). *)
+Corollary decide_ssub_sound : forall a b, decide_ssub a b = true -> ssub a b.
+Proof. intros a b H. unfold decide_ssub in H. apply decide_ssub_fuel_sound in H. exact H. Qed.
+
+(* COMPLETENESS — on the intersection-free fragment. *)
+Corollary decide_ssub_complete : forall a b,
+  inter_free a -> inter_free b -> ssub a b -> decide_ssub a b = true.
 Proof.
-  intros a b. unfold decide_ssub.
-  apply decide_ssub_fuel_correct. apply Nat.le_refl.
+  intros a b Ha Hb H. unfold decide_ssub.
+  apply decide_ssub_fuel_complete; [ apply Nat.le_refl | exact Ha | exact Hb | exact H ].
 Qed.
 
-Corollary decide_ssub_sound : forall a b, decide_ssub a b = true -> ssub a b.
-Proof. intros a b H. apply decide_ssub_correct. exact H. Qed.
-
-Corollary decide_ssub_complete : forall a b, ssub a b -> decide_ssub a b = true.
-Proof. intros a b H. apply decide_ssub_correct. exact H. Qed.
-
-(* TOTAL: [decide_ssub] returns a definite bool, and that bool decides [ssub]
-   either way — [false] means NOT [ssub]. (Improves on [gdecide]'s [DUnknown].) *)
-Corollary decide_ssub_false : forall a b, decide_ssub a b = false -> ~ ssub a b.
+(* The correctness iff, on the intersection-free fragment. *)
+Theorem decide_ssub_correct : forall a b,
+  inter_free a -> inter_free b -> (decide_ssub a b = true <-> ssub a b).
 Proof.
-  intros a b Hf Hs. apply decide_ssub_complete in Hs.
+  intros a b Ha Hb. split;
+    [ apply decide_ssub_sound | apply decide_ssub_complete; assumption ].
+Qed.
+
+(* TOTAL on the fragment: [false] means NOT [ssub] (when both sides inter-free). *)
+Corollary decide_ssub_false : forall a b,
+  inter_free a -> inter_free b -> decide_ssub a b = false -> ~ ssub a b.
+Proof.
+  intros a b Ha Hb Hf Hs. apply (decide_ssub_complete a b Ha Hb) in Hs.
   rewrite Hs in Hf. discriminate.
 Qed.
 
-(* The sumbool form — a runnable decision procedure for [ssub]. *)
-Definition ssub_dec (a b : BTy) : {ssub a b} + {~ ssub a b}.
+(* The sumbool form — a runnable decision procedure for [ssub] on the inter-free
+   fragment (where the decider is complete, so [false] is a genuine refutation). *)
+Definition ssub_dec (a b : BTy) (Ha : inter_free a) (Hb : inter_free b)
+  : {ssub a b} + {~ ssub a b}.
 Proof.
   destruct (decide_ssub a b) eqn:Hd.
   - left. apply decide_ssub_sound. exact Hd.
-  - right. apply decide_ssub_false. exact Hd.
+  - right. apply (decide_ssub_false a b Ha Hb). exact Hd.
 Defined.
 
 (* ===========================================================================
@@ -774,11 +842,42 @@ Proof. reflexivity. Qed.
 Example sanity_refl_connective :
   decide_ssub (BUnion (BAtom AInt) (BAtom AStr)) (BUnion (BAtom AInt) (BAtom AStr)) = true.
 Proof. reflexivity. Qed.
-(* connective coarseness: a SEMANTIC Boolean subtyping ([Int∩Str] <: Int) is NOT
-   recognised by [ssub] (it has no structural connective rule) — DEFERRED. *)
-Example sanity_connective_coarse :
-  decide_ssub (BInter (BAtom AInt) (BAtom AStr)) (BAtom AInt) = false.
+(* INCREMENT 12 — INTERSECTION sanity. The decider now DECIDES intersection
+   structurally: GLB on the right (full), projection on the left (sound). *)
+
+(* PROJECTION (inter-on-left): Int∩Str <: Int (left projection) — now TRUE (the
+   increment-11 decider returned false here; intersection is now a real rule). *)
+Example sanity_inter_proj_l : decide_ssub (BInter (BAtom AInt) (BAtom AStr)) (BAtom AInt) = true.
 Proof. reflexivity. Qed.
+Example sanity_inter_proj_r : decide_ssub (BInter (BAtom AInt) (BAtom AStr)) (BAtom AStr) = true.
+Proof. reflexivity. Qed.
+(* GLB (inter-on-right): Int <: Int∩Int; Int <: Num∩Num (Int≤Num both sides). *)
+Example sanity_inter_glb_refl : decide_ssub (BAtom AInt) (BInter (BAtom AInt) (BAtom AInt)) = true.
+Proof. reflexivity. Qed.
+Example sanity_inter_glb_num : decide_ssub (BAtom AInt) (BInter (BAtom ANum) (BAtom ANum)) = true.
+Proof. reflexivity. Qed.
+(* GLB rejects when a conjunct fails: Int ⊄ Int∩Str (Int ⊄ Str). *)
+Example sanity_inter_glb_false : decide_ssub (BAtom AInt) (BInter (BAtom AInt) (BAtom AStr)) = false.
+Proof. reflexivity. Qed.
+(* NON-DISTRIBUTIVE frontier — a CONCRETE INCOMPLETENESS WITNESS (DEFERRED,
+   honestly, and SOUND): [(Int∪Str)∩Bool <: Int∪Str] HOLDS in [ssub] (via
+   [SsInterPL] from refl: [(Int∪Str)∩Bool <: Int∪Str]), yet [decide_ssub] returns
+   FALSE on it — because the UNION-ON-RIGHT clause fires BEFORE the inter-on-left
+   clause, reducing to [decide ((Int∪Str)∩Bool) Int OR ... Str], neither of which
+   holds. This is exactly the inter-left / union-right CROSS = the distributivity
+   gap (subtype.v's N5). The answer is SOUND (false never claims a subtyping); the
+   LEFT type is NOT [inter_free], so this pair is OFF the completeness fragment —
+   no false claim, just an honest "not decided". (Deciding it needs the
+   emptiness/distributivity route — [dsub]/[gdecide].) *)
+Example sanity_inter_union_cross_incomplete :
+  decide_ssub (BInter (BUnion (BAtom AInt) (BAtom AStr)) (BAtom ABool))
+              (BUnion (BAtom AInt) (BAtom AStr)) = false.
+Proof. reflexivity. Qed.
+(* yet the subtyping genuinely HOLDS (so this is incompleteness, not unsoundness). *)
+Example sanity_inter_union_cross_holds :
+  ssub (BInter (BUnion (BAtom AInt) (BAtom AStr)) (BAtom ABool))
+       (BUnion (BAtom AInt) (BAtom AStr)).
+Proof. apply SsInterPL. apply SsRefl. Qed.
 
 (* INCREMENT 11 — UNION sanity. The decider now DECIDES union subtyping (intro on
    the right, elim on the left), no longer reflexive-only on [BUnion]. *)
@@ -811,14 +910,14 @@ Proof. reflexivity. Qed.
 Example sanity_union_agree_true : ssub (BAtom AInt) (BUnion (BAtom AInt) (BAtom AStr)).
 Proof. apply decide_ssub_sound. reflexivity. Qed.
 Example sanity_union_agree_false : ~ ssub (BUnion (BAtom AInt) (BAtom AStr)) (BAtom ANum).
-Proof. apply decide_ssub_false. reflexivity. Qed.
+Proof. apply decide_ssub_false; [ simpl; tauto | simpl; tauto | reflexivity ]. Qed.
 
 (* decides EXACTLY ssub: the true cases ARE ssub, the false cases are NOT. *)
 Example sanity_agree_true : ssub (BArrow (BAtom ANum) (BAtom AInt)) (BArrow (BAtom AInt) (BAtom AInt)).
 Proof. apply decide_ssub_sound. reflexivity. Qed.
 Example sanity_agree_false :
   ~ ssub (BArrow (BRec [("f"%string, BAtom AInt)]) (BAtom AInt)) (BArrow (BAtom AInt) BTop).
-Proof. apply decide_ssub_false. reflexivity. Qed.
+Proof. apply decide_ssub_false; [ simpl; tauto | simpl; tauto | reflexivity ]. Qed.
 
 (* ===========================================================================
    9. THE [ssub]-vs-[dsub] GAP — characterized.
@@ -838,7 +937,7 @@ Theorem dsub_ssub_gap :
 Proof.
   split.
   - exact arrow_top_collapse.
-  - apply decide_ssub_false. reflexivity.
+  - apply decide_ssub_false; [ simpl; tauto | simpl; tauto | reflexivity ].
 Qed.
 
 (* (b) COINCIDENCE on the ATOM fragment — and a SECOND, PRECISE gap instance.
@@ -897,7 +996,7 @@ Proof.
     unfold dsub. intros v Hv. destruct v as [r| | | | |]; simpl in Hv; try contradiction.
     simpl. exact I.
   - (* no ssub: decide_ssub returns false *)
-    apply decide_ssub_false. reflexivity.
+    apply decide_ssub_false; [ simpl; tauto | simpl; tauto | reflexivity ].
 Qed.
 
 (* (c) COINCIDENCE direction in general: every [decide_ssub]-accepted pair IS a
@@ -925,12 +1024,13 @@ Proof.
   intros G e S T He Hd. eapply TSub; [ exact He | apply decide_ssub_sound; exact Hd ].
 Qed.
 
-(* and the negative side: if the decider says false, no SINGLE subsumption step
-   from S reaches T (ssub is the only subsumption relation, so this is exactly
-   "T is not an ssub-supertype of S"). *)
+(* and the negative side: if the decider says false on the INTERSECTION-FREE
+   fragment (where it is complete), no subsumption step from S reaches T. (Off
+   that fragment, [false] only means "not decided true" — the intersection-left /
+   distributivity gap — so the refutation needs [inter_free].) *)
 Theorem subsumption_step_undecidable_false : forall S T,
-  decide_ssub S T = false -> ~ ssub S T.
-Proof. intros S T. apply decide_ssub_false. Qed.
+  inter_free S -> inter_free T -> decide_ssub S T = false -> ~ ssub S T.
+Proof. intros S T HS HT. apply (decide_ssub_false S T HS HT). Qed.
 
 (* ===========================================================================
    ASSUMPTION AUDIT — closed under the global context (no axioms/Admitted).

@@ -333,15 +333,39 @@ Assumptions` on `progress`, `preservation`, `ssub_arrow_inv`, `ssub_sound`,
   `3`. `Print Assumptions` closed under the global context.
 
 Still open (DEFERRED — recorded honestly, minimal core only):
-- [ ] **Flow NARROWING** (the actual flow-typing payoff, enabled by increment 11's
-  union substrate): narrow a variable's type inside a `tif` branch by the
-  condition (e.g. `if type(x)=="number" then …` narrows `x` to the number atom in
-  the then-branch). Where the `and`/`or`-bug class lives. Needs the typing
-  judgment to thread a per-branch refinement environment.
-- [ ] **INTERSECTION + NEGATION as `ssub` rules and TERM forms** (DEFERRED from
-  increment 11 — unions only). The type ALGEBRA has them via `BTy`; `ssub` still
-  has NO structural rule for `BInter`/`BNeg` (decided reflexively, via
-  `ssub_interneg_leaf`). Semantic connective subtyping stays `dsub`/`gdecide`'s job.
+- [x] **INTERSECTION + NEGATION as `ssub` rules** (increment 12, `proof/typing.v`
+  + `proof/ssub.v`, on unmodified `subtype.v`). `ssub` gains the composable GLB
+  rules `SsInterPL`/`SsInterPR`/`SsInterI` (projections + intro), **proven SOUND
+  vs `dsub`** (`ssub_sound` extended — intersection is the meet); `progress` +
+  `preservation` re-proved `Qed`. `BNeg` stays reflexive-only (the complement
+  disjointness `A∩¬A <: Bot` narrowing needs is kept a SEMANTIC `dsub` fact,
+  `dcomplement_inter`, NOT an `ssub` rule — adding it would force `ssub` to decide
+  emptiness). `decide_ssub` gains inter-on-RIGHT (GLB, COMPLETE) + inter-on-LEFT
+  (projection, SOUND); correctness SPLIT: `decide_ssub_sound` UNCONDITIONAL +
+  `decide_ssub_complete` on the `inter_free` fragment. **The full `<->` is
+  IMPOSSIBLE** with intersection projections present — the inter-left vs
+  union/inter-right CROSS is the non-distributive frontier (subtype.v's N5);
+  concrete sound-incompleteness witness `decide_ssub ((Int∪Str)∩Bool)(Int∪Str)
+  = false` while the subtyping holds. `Print Assumptions` closed under the global
+  context. (TERM-position intersection/negation introduction forms still
+  deferred; semantic connective decision stays `gdecide`'s job.)
+- [ ] **Flow NARROWING** (truthiness occurrence typing) — ATTEMPTED in increment
+  12, DEFERRED with PROOF. Narrow a variable's type inside a `tif` branch by the
+  condition (then-branch: `T ∩ ¬(nil∪false)`; else-branch: `T ∩ (nil∪false)`).
+  Two GENUINE FORKS block it (not budget/skill):
+  (1) **Operational-soundness fork.** progress/preservation are over CLOSED terms;
+  a `tif (tvar n)` narrowing rule is meaningful only under a binder, and when that
+  binder substitutes the substitution lemma supplies a value at the DECLARED type
+  `U`, not the narrowed `U∩¬falsy` — unsatisfiable for a falsy value (proved
+  concretely: `false ∉ Bool∩¬falsy` via `ssub_inter_tgt_r`+`ssub_sound`+`VBool
+  false`). Narrowing is sound only CONDITIONED ON BRANCH SELECTION, which happens
+  after substitution — so it needs the op-sem restructured to value-conditioned
+  branch steps (not pure context narrowing). (2) **Checker-payoff fork.** the
+  obligation `T∩¬falsy <: T` has intersection on the LEFT — off `decide_ssub`'s
+  `inter_free` completeness fragment (the distributivity frontier), so `check`
+  can't verify it completely without the `gdecide` emptiness route. The `ssub`
+  substrate (intersection GLB; complement as `dsub` fact) is LANDED + sound; the
+  narrowing rule + value-conditioned op-sem is the deferred increment.
 - [ ] **Statements / control flow** (while/blocks; `tif` done in increment 11) as terms.
 - [ ] **Mutation / references** (assignable cells; the value domain `V` is pure).
 - [ ] **Multi-arg / vararg / multi-return** functions (currently single→single).
