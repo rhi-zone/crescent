@@ -216,6 +216,21 @@ Fixpoint synth (G : list BTy) (e : tm) {struct e} : option BTy :=
       | Some Sb => if decide_ssub Sb T then Some T else None
       | None => None
       end
+  (* INCREMENT 15 — TYPE-TEST NARROWING. The scrutinee may have ANY type [U] (no
+     gate). The then-branch is synthesized under the TAG-NARROWED binder
+     [tag_type g]; the else-branch under the scrutinee's own type [U] (the sound
+     OVER-approximation — precise negative narrowing is DEFERRED). Result = union
+     of the branch types. Discharged by [TTypeTest] directly — no [decide_ssub]
+     obligation: the binder type IS the narrowed type. *)
+  | ttypetest g c e1 e2 =>
+      match synth G c with
+      | Some U =>
+          match synth (tag_type g :: G) e1, synth (U :: G) e2 with
+          | Some U1, Some U2 => Some (BUnion U1 U2)
+          | _, _ => None
+          end
+      | None => None
+      end
   end.
 
 Definition check (G : list BTy) (e : tm) (T : BTy) : bool :=
@@ -308,6 +323,17 @@ Proof.
     destruct (decide_ssub Sb T) eqn:Hd; [ | discriminate ].
     injection H as <-. apply TFix.
     eapply TSub; [ apply IHe; exact Hb | apply decide_ssub_sound; exact Hd ].
+  - (* ttypetest: scrutinee at any type U; then-branch under [tag_type g], else
+       under [U]; result is the union. Discharged by [TTypeTest] directly — no
+       subtyping obligation. *)
+    simpl in H.
+    destruct (synth G e1) as [ Uc | ] eqn:Hc; [ | discriminate ].
+    destruct (synth (tag_type g :: G) e2) as [ U1 | ] eqn:H1; [ | discriminate ].
+    destruct (synth (Uc :: G) e3) as [ U2 | ] eqn:H2; [ | discriminate ].
+    injection H as <-. eapply TTypeTest.
+    + apply IHe1; exact Hc.
+    + apply IHe2; exact H1.
+    + apply IHe3; exact H2.
   - (* Pl [] *) simpl in H. injection H as <-. apply HFnil.
   - (* Pl cons *) simpl in H.
     destruct (synth G e) as [ Te | ] eqn:He; [ | discriminate ].
@@ -411,6 +437,13 @@ Proof.
   - (* TFix: the body is under the self-ref binder [T], so its cut is [T::G1]. *)
     apply TFix.
     eapply (IHhas_type (T :: G1) _ G2 A'); [ reflexivity | eassumption ].
+  - (* TTypeTest: scrutinee narrows at cut G1; then-branch under (tag_type g::G1),
+       else-branch under (U::G1). *)
+    eapply TTypeTest;
+      [ eapply (IHhas_type1 G1 _ G2 A')
+      | eapply (IHhas_type2 (tag_type g :: G1) _ G2 A')
+      | eapply (IHhas_type3 (U :: G1) _ G2 A') ];
+      (reflexivity || eassumption).
   - apply HFnil.
   - apply HFcons;
       [ eapply (IHhas_type G1 _ G2 A') | eapply (IHhas_type0 G1 _ G2 A') ];
@@ -464,6 +497,7 @@ Fixpoint proj_free (e : tm) : Prop :=
   | tif c e1 e2 => proj_free c /\ proj_free e1 /\ proj_free e2
   | tifn c e1 e2 => proj_free c /\ proj_free e1 /\ proj_free e2
   | tfix _ b => proj_free b
+  | ttypetest _ c e1 e2 => proj_free c /\ proj_free e1 /\ proj_free e2
   end.
 
 (* SYNTHESIS IS PRINCIPAL (projection-free fragment) — the tractable completeness
@@ -550,6 +584,24 @@ Proof.
     destruct (decide_ssub Sb T) eqn:Hd; [ | discriminate ].
     injection H1 as <-.
     apply inv_fix in H0. destruct H0 as [_ Hsub]. exact Hsub.
+  - (* ttypetest: principality of each branch. The then-branch is under [tag_type g]
+       in BOTH synth and declarative, so its principality is direct. The else-branch
+       runs (in synth) under the SYNTHESIZED scrutinee type [Uc], but the declarative
+       [inv_typetest] types it under the DECLARATIVE scrutinee type [U]; since
+       [Uc ≤ U] (scrutinee principality), [narrowing_head] retypes the declarative
+       else-branch under [Uc], lining the binders up before invoking the else IH. *)
+    simpl in H1. simpl in H. destruct H as [Hpc [Hp1 Hp2]].
+    destruct (synth G e1) as [ Uc | ] eqn:Hc; [ | discriminate ].
+    destruct (synth (tag_type g :: G) e2) as [ Sc1 | ] eqn:H1e; [ | discriminate ].
+    destruct (synth (Uc :: G) e3) as [ Sc2 | ] eqn:H2e; [ | discriminate ].
+    injection H1 as <-.
+    apply inv_typetest in H0. destruct H0 as [U [V1 [V2 [HcU [HV1 [HV2 Hsub]]]]]].
+    pose proof (IHe1 G U Uc Hpc HcU Hc) as HscU.       (* Uc ≤ U *)
+    pose proof (IHe2 (tag_type g :: G) V1 Sc1 Hp1 HV1 H1e) as Hb1.
+    pose proof (narrowing_head U Uc G e3 V2 HV2 HscU) as HV2'.  (* else under Uc *)
+    pose proof (IHe3 (Uc :: G) V2 Sc2 Hp2 HV2' H2e) as Hb2.
+    eapply SsTrans; [ | exact Hsub ].
+    apply SsUnionE; [ apply SsUnionInL; exact Hb1 | apply SsUnionInR; exact Hb2 ].
   - (* Pl nil *) simpl in H1. injection H1 as <-.
     inversion H0; subst. apply SrNil.
   - (* Pl cons *) simpl in H. destruct H as [Hpe Hprest]. simpl in H1.
@@ -681,6 +733,41 @@ Example compute_ifn_payoff_unnarrowed_None :
     (tapp (tvar 1) (tvar 0)) = None.
 Proof. reflexivity. Qed.
 
+(* INCREMENT 15 — TYPE-TEST NARROWING checker. [type(x)=="number"] on a scrutinee:
+   the then-branch sees the de Bruijn-0 var at [tag_type TgNum = ANum]; the else-
+   branch sees it at the scrutinee's own type. *)
+Example compute_typetest_narrows :
+  synth [ BUnion (BAtom AStr) (BAtom ANum) ]   (* index 0 : a string-or-number *)
+    (ttypetest TgNum (tvar 0) (tvar 0) (tvar 0))
+  = Some (BUnion (BAtom ANum) (BUnion (BAtom AStr) (BAtom ANum))).
+Proof. reflexivity. Qed.
+
+(* THE TYPE-TEST CHECKER PAYOFF. A number-consumer [h : ANum → Int] applied to the
+   then-NARROWED scrutinee CHECKS; the scrutinee's declared type is the maybe-number
+   [Str ∪ Num] (a free var). The whole [ttypetest] synthesizes the union. *)
+Example compute_typetest_payoff_synth :
+  synth [ BUnion (BAtom AStr) (BAtom ANum) ; BArrow (BAtom ANum) (BAtom AInt) ]
+    (ttypetest TgNum (tvar 0)                  (* scrutinee = the maybe-number (index 0) *)
+       (tapp (tvar 2) (tvar 0))                (* then: h (index 2) applied to NARROWED var0 : ANum *)
+       (tlit (LInt 0)))
+  = Some (BUnion (BAtom AInt) (BAtom AInt)).
+Proof. reflexivity. Qed.
+
+(* and it is SOUND (declaratively well typed via check_sound). *)
+Example compute_typetest_payoff_sound :
+  has_type [ BUnion (BAtom AStr) (BAtom ANum) ; BArrow (BAtom ANum) (BAtom AInt) ]
+    (ttypetest TgNum (tvar 0) (tapp (tvar 2) (tvar 0)) (tlit (LInt 0)))
+    (BUnion (BAtom AInt) (BAtom AInt)).
+Proof. apply check_sound. reflexivity. Qed.
+
+(* WITHOUT type-test narrowing the SAME application is REJECTED by the checker: a
+   free var of [Str ∪ Num] passed to the [ANum]-demanding consumer fails the domain
+   check (a string is not a number). *)
+Example compute_typetest_payoff_unnarrowed_None :
+  synth [ BUnion (BAtom AStr) (BAtom ANum) ; BArrow (BAtom ANum) (BAtom AInt) ]
+    (tapp (tvar 1) (tvar 0)) = None.
+Proof. reflexivity. Qed.
+
 (* ILL-TYPED: projecting a field off a literal ⇒ None (not a record) *)
 Example compute_proj_of_lit_None :
   synth [] (tproj (tlit (LInt 3)) "f"%string) = None.
@@ -761,3 +848,5 @@ Print Assumptions synth_sound.
 Print Assumptions check_sound.
 Print Assumptions synth_principal.
 Print Assumptions narrowing.
+Print Assumptions compute_typetest_payoff_sound.
+Print Assumptions compute_typetest_payoff_synth.

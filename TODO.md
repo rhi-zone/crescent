@@ -386,10 +386,48 @@ Still open (DEFERRED — recorded honestly, minimal core only):
   two expressible bounds (`truthy_type` under-approximates-the-complement,
   `falsy_type` over-approximates falsy) — both SOUND, both inexact at the
   true/false split. Exact narrowing needs a literal-false type (a subtype.v change).
-  (3) **Type-test narrowing** `type(x)=="number"` (positive type-test occurrence
-  typing). (4) **Narrowing on non-variable paths** (`x.f`, `x[i]`).
+  (3) **Type-test narrowing** `type(x)=="number"` — DONE in increment 15 (see the
+  completed entry below); the NEGATIVE (else-branch) precision `U ∩ ¬tag_type g`
+  remains deferred (over-approximated to `U`), same intersection/negation wall as (1).
+  (4) **Narrowing on non-variable paths** (`x.f`, `x[i]`).
   (5) **Distributive simplification** `(T∪nil)∩¬nil <: T` — `dsub`-true, `ssub`-false
   (the N5 non-distributive frontier); routing it needs the `gdecide` emptiness path.
+  (6) **Combined truthiness + type-test narrowing** in one guard (e.g. `if x and
+  type(x)=="number"`) — each form is independently sound; composing their binders
+  is future work.
+- [x] **Flow NARROWING — type-test occurrence typing (increment 15, DONE).**
+  The real Lua `type(x)=="T"` guard — POSITIVE tag narrowing — machine-checked
+  end-to-end (`progress`+`preservation`+`tag_narrows`+`synth_sound`+`check_sound`+
+  `synth_principal`+`narrowing`+both payoffs all `Qed`, `Print Assumptions` closed).
+  Modifies `proof/typing.v` + `proof/check.v`; `subtype.v` + `ssub.v` UNMODIFIED.
+  Extends the increment-13 `tifn` binding-narrowing infrastructure with the SAME
+  value-conditioned fresh-binding discipline (the soundness crux). **Term/op-sem.**
+  `tm` gains `ttypetest : tag -> tm -> tm -> tm -> tm` where `tag = {TgNum, TgStr,
+  TgBool, TgNil, TgTable, TgFun}` (the `type()` tags; `TgNum` ↔ the whole number
+  type `ANum`, per the 5.1 model where `type()` returns `"number"` for all numbers).
+  The scrutinee is bound FRESH (de Bruijn 0) in each branch. `has_tag : tm -> tag ->
+  Prop` is total on values (`value_has_some_tag`) with a unique tag (`has_tag_unique`).
+  Value-conditioned step: `STtTrue` (tag matches `g` ⇒ `subst 0 v e1`), `STtFalse`
+  (some other tag `g'≠g` ⇒ `subst 0 v e2`), `STt1` (congruence). **Typing.**
+  `TTypeTest : has_type G c U -> has_type (tag_type g::G) e1 T1 -> has_type (U::G)
+  e2 T2 -> has_type G (ttypetest g c e1 e2) (T1∪T2)` — THEN under the tag-narrowed
+  binder `tag_type g`, ELSE under the scrutinee's own type `U` (a sound
+  OVER-approximation of the precise `U ∩ ¬tag_type g`). `tag_type`: TgNum↦ANum,
+  TgStr↦AStr, TgBool↦ABool, TgNil↦ANil, TgTable↦`BRec []` (the table top-type),
+  TgFun↦`BArrow BBot BTop` (the function top-type). **The bridging lemma (crux,
+  mirroring `truthy_narrows`):** `tag_narrows : has_type [] v U -> value v ->
+  has_tag v g -> has_type [] v (tag_type g)` — a value whose runtime tag is `g`
+  genuinely has type `tag_type g`, proved by canonical forms + `ssub`
+  atom/arrow-Top/record-`SrNil` subsumption only (no negation, no `dsub`-in-typing).
+  Preservation's THEN-branch uses it via `subst_top`; the ELSE-branch uses the
+  scrutinee's own `U`-typing directly (no narrowing). **Payoff (both proved):** a
+  number-consumer `h : ANum→Int` applied to the then-narrowed scrutinee of declared
+  type `Str∪Num` TYPES with `type(x)=="number"` narrowing and is REJECTED without it
+  (`Str∪Num` is not `≤ ANum` — a string is not a number, refuted at `VStr 0`).
+  **Honest scope.** POSITIVE (then-branch) tag narrowing only; precise NEGATIVE
+  narrowing (`U ∩ ¬tag_type g`, the intersection/negation wall), narrowing on
+  non-variable paths, and combined truthiness+type-test are DEFERRED (sub-items 3/4/6
+  above).
 - [ ] **Statements / control flow** (while/blocks; `tif` done in increment 11) as terms.
 - [ ] **Mutation / references** (assignable cells; the value domain `V` is pure).
 - [ ] **Multi-arg / vararg / multi-return** functions (currently single→single).

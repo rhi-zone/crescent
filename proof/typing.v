@@ -37,6 +37,21 @@ Import ListNotations.
    carry their payload directly (an [LInt] is integer-valued, typed [AInt]).
    =========================================================================== *)
 
+(* INCREMENT 15 — the runtime type-tags [type()] can return — one per value kind.
+   Note (LuaJIT 5.1 number model): [type()] returns ["number"] for ALL numbers,
+   so [TgNum] corresponds to the whole number type [ANum]; there is no integer/
+   float tag split at the [type()] level. *)
+Inductive tag : Type :=
+  | TgNum   : tag            (* type(x) == "number"   *)
+  | TgStr   : tag            (* type(x) == "string"   *)
+  | TgBool  : tag            (* type(x) == "boolean"  *)
+  | TgNil   : tag            (* type(x) == "nil"      *)
+  | TgTable : tag            (* type(x) == "table"    *)
+  | TgFun   : tag.           (* type(x) == "function" *)
+
+Definition tag_eq_dec (g1 g2 : tag) : {g1 = g2} + {g1 <> g2}.
+Proof. decide equality. Defined.
+
 Inductive lit : Type :=
   | LInt  : nat -> lit          (* integer-valued number literal; type AInt   *)
   | LStr  : nat -> lit          (* string literal;                 type AStr   *)
@@ -91,7 +106,41 @@ Inductive tm : Type :=
      synthesizes [body] under [T::G] and returns [T]). Lua's [local function f =
      ...] (which is recursion) is the derivable consumer. MUTUAL recursion and
      recursive TYPES (equirecursive μ) are DEFERRED (backlog). *)
-  | tfix  : BTy -> tm -> tm.                 (* tfix T body : recursive self-ref *)
+  | tfix  : BTy -> tm -> tm                  (* tfix T body : recursive self-ref *)
+  (* INCREMENT 15 — TYPE-TEST FLOW NARROWING (occurrence typing, value-conditioned).
+     [ttypetest g scrut e1 e2] is the real Lua [type(x) == "T"] guard: it tests
+     whether [scrut]'s RUNTIME value has the type-tag [g] (g ∈ {TgNum, TgStr,
+     TgBool, TgNil, TgTable, TgFun} — the [type()] tags). The scrutinee is BOUND
+     FRESH (de Bruijn 0) in BOTH branches. The THEN-branch [e1] sees the bound var
+     at [tag_type g] (the type the tag pins — TgNum↦ANum, etc.); the ELSE-branch
+     [e2] sees it at the scrutinee's own type [U] (a sound OVER-approximation —
+     precise negative narrowing [U ∩ ¬tag_type g] needs intersection/negation,
+     DEFERRED).
+
+     SAME BINDING DISCIPLINE AS [tifn] (the soundness crux). A non-binding type
+     test narrowing a FREE context entry is UNSOUND under de Bruijn substitution:
+     an enclosing [SLet]/[SBeta] substitutes the bound value into BOTH branches
+     before the test selects, so the DEAD branch carries a now-false narrowing
+     assumption and becomes an ill-typed residual. The fix: bind the scrutinee
+     fresh in each branch and have the value-conditioned step substitute the value
+     into ONLY the selected branch ([STtTrue]/[STtFalse]). The narrowing attaches
+     at the binder; the dead branch is never substituted into; soundness closes. *)
+  | ttypetest : tag -> tm -> tm -> tm -> tm.
+
+(* The type a tag pins (the THEN-branch narrowed type). TgNum ↦ ANum (all numbers,
+   per the 5.1 [type()] model), the other scalars to their atoms, TgTable to the
+   open empty record [BRec []] (the table top-type, exactly the [VTable] values —
+   see subtype.v [empty_rec_is_tables]), TgFun to [BArrow BBot BTop] (the function
+   top-type, every function value — every [VFun] inhabits it vacuously/by Top). *)
+Definition tag_type (g : tag) : BTy :=
+  match g with
+  | TgNum   => BAtom ANum
+  | TgStr   => BAtom AStr
+  | TgBool  => BAtom ABool
+  | TgNil   => BAtom ANil
+  | TgTable => BRec []
+  | TgFun   => BArrow BBot BTop
+  end.
 
 (* The base type of a literal. *)
 Definition lit_type (l : lit) : BTy :=
@@ -118,6 +167,7 @@ Section tm_ind_strong.
   Hypothesis Hif   : forall c e1 e2, P c -> P e1 -> P e2 -> P (tif c e1 e2).
   Hypothesis Hifn  : forall c e1 e2, P c -> P e1 -> P e2 -> P (tifn c e1 e2).
   Hypothesis Hfix  : forall T b, P b -> P (tfix T b).
+  Hypothesis Htt   : forall g c e1 e2, P c -> P e1 -> P e2 -> P (ttypetest g c e1 e2).
   Hypothesis Hnil  : Pl [].
   Hypothesis Hcons : forall k e rest, P e -> Pl rest -> Pl ((k, e) :: rest).
   Fixpoint tm_rect_strong (e : tm) : P e :=
@@ -138,6 +188,8 @@ Section tm_ind_strong.
     | tif c e1 e2 => Hif c e1 e2 (tm_rect_strong c) (tm_rect_strong e1) (tm_rect_strong e2)
     | tifn c e1 e2 => Hifn c e1 e2 (tm_rect_strong c) (tm_rect_strong e1) (tm_rect_strong e2)
     | tfix T b  => Hfix T b (tm_rect_strong b)
+    | ttypetest g c e1 e2 =>
+        Htt g c e1 e2 (tm_rect_strong c) (tm_rect_strong e1) (tm_rect_strong e2)
     end.
 End tm_ind_strong.
 
@@ -460,6 +512,21 @@ Inductive has_type : list BTy -> tm -> BTy -> Prop :=
   | TFix  : forall G T body,
       has_type (T :: G) body T ->
       has_type G (tfix T body) T
+  (* INCREMENT 15 — TYPE-TEST NARROWING. The scrutinee [c] has ANY type [U]. It is
+     BOUND FRESH (de Bruijn 0) in each branch: the THEN-branch [e1] under
+     [tag_type g] (the type the tag pins — POSITIVE narrowing, sound because a
+     value whose runtime tag is [g] genuinely inhabits [tag_type g], proved as
+     [tag_narrows]); the ELSE-branch [e2] under [U] (the scrutinee's own type — a
+     sound OVER-approximation of the negative narrowing [U ∩ ¬tag_type g], whose
+     PRECISE form needs intersection/negation and is DEFERRED). Result = union of
+     branch types. The fresh-binding makes narrowing sound under substitution
+     semantics, exactly as for [tifn]: the value-conditioned step substitutes the
+     scrutinee into ONLY the selected branch. *)
+  | TTypeTest : forall G g c e1 e2 U T1 T2,
+      has_type G c U ->
+      has_type (tag_type g :: G) e1 T1 ->
+      has_type (U :: G) e2 T2 ->
+      has_type G (ttypetest g c e1 e2) (BUnion T1 T2)
 (* key-aligned pointwise typing of record fields; mutual so the generated
    induction principle carries an IH on every field derivation. *)
 with has_fields : list BTy -> list (string * tm) -> list (string * BTy) -> Prop :=
@@ -519,6 +586,10 @@ Fixpoint lift (d k : nat) (e : tm) : tm :=
   (* tfix binds the self-reference fresh (de Bruijn 0) in the body: lift the body
      under one new binder ([S k]). *)
   | tfix T b  => tfix T (lift d (S k) b)
+  (* ttypetest binds the scrutinee fresh (de Bruijn 0) in each branch: lift the
+     branches under one new binder ([S k]); the scrutinee [c] lifts at [k]. *)
+  | ttypetest g c e1 e2 =>
+      ttypetest g (lift d k c) (lift d (S k) e1) (lift d (S k) e2)
   end.
 
 Fixpoint subst (j : nat) (s : tm) (e : tm) : tm :=
@@ -543,6 +614,11 @@ Fixpoint subst (j : nat) (s : tm) (e : tm) : tm :=
   (* tfix body is under one fresh binder (the self-ref): substitute at [S j] with
      [s] lifted past that binder. *)
   | tfix T b  => tfix T (subst (S j) (lift 1 0 s) b)
+  (* ttypetest branches are under one fresh binder: substitute at [S j] with [s]
+     lifted past that binder; the scrutinee [c] is not under the binder. *)
+  | ttypetest g c e1 e2 =>
+      ttypetest g (subst j s c)
+        (subst (S j) (lift 1 0 s) e1) (subst (S j) (lift 1 0 s) e2)
   end.
 
 (* record-field lookup at the term level (for projection) *)
@@ -583,6 +659,56 @@ Qed.
 (* truthy and falsy are mutually exclusive (a value is not both). *)
 Lemma truthy_not_falsy : forall v, truthy_value v -> falsy_value v -> False.
 Proof. intros v Ht Hf. exact (Ht Hf). Qed.
+
+(* ---- INCREMENT 15 — the RUNTIME TYPE-TAG of a term (Lua [type()]) ----------
+   [has_tag v g] holds iff value [v]'s runtime kind matches tag [g]. Defined on
+   TERMS (only meaningful on values), driving the value-conditioned type-test
+   step: a scrutinee value whose tag is [g] selects the then-branch, else the
+   else-branch. The number tag matches the single number literal [LInt] (the 5.1
+   number model: [type()] returns "number" for every number). [has_tag] is TOTAL
+   on values ([value_has_some_tag]) and the tag is UNIQUE ([has_tag_unique]) —
+   together the total partition the type test selects on (used in progress). *)
+Definition has_tag (v : tm) (g : tag) : Prop :=
+  match g, v with
+  | TgNum,   tlit (LInt _)  => True
+  | TgStr,   tlit (LStr _)  => True
+  | TgBool,  tlit (LBool _) => True
+  | TgNil,   tlit LNil      => True
+  | TgTable, trec _         => True
+  | TgFun,   tlam _ _       => True
+  | _, _ => False
+  end.
+
+(* every value has SOME tag (the type-test always selects a branch). *)
+Lemma value_has_some_tag : forall v, value v -> exists g, has_tag v g.
+Proof.
+  intros v Hv. destruct Hv as [l | T b | fs Hfs].
+  - destruct l as [n | n | bb | ].
+    + exists TgNum; exact I.
+    + exists TgStr; exact I.
+    + exists TgBool; exact I.
+    + exists TgNil; exact I.
+  - exists TgFun; exact I.
+  - exists TgTable; exact I.
+Qed.
+
+(* a value's tag is unique (it cannot match two distinct tags). *)
+Lemma has_tag_unique : forall v g1 g2, has_tag v g1 -> has_tag v g2 -> g1 = g2.
+Proof.
+  intros v g1 g2 H1 H2. destruct g1; destruct g2; try reflexivity;
+    destruct v as [l| | | | | | | | | |]; try destruct l; simpl in H1, H2; contradiction.
+Qed.
+
+(* DECIDABLE: a value either has tag [g] or it has some OTHER tag. The total
+   partition the type-test selects on (mirrors [value_truthy_or_falsy]). *)
+Lemma value_tag_or_not : forall v g,
+  value v -> has_tag v g \/ (exists g', g' <> g /\ has_tag v g').
+Proof.
+  intros v g Hv. destruct (value_has_some_tag v Hv) as [g0 Hg0].
+  destruct (tag_eq_dec g0 g) as [Heq | Hne].
+  - subst g0. left; exact Hg0.
+  - right. exists g0. split; [exact Hne | exact Hg0].
+Qed.
 
 Inductive step : tm -> tm -> Prop :=
   (* beta: (\T.b) v  ->  b[0 := v]  *)
@@ -630,7 +756,20 @@ Inductive step : tm -> tm -> Prop :=
      (progress is immediate). The unfold may loop forever (e.g. [tfix T (tvar 0)]
      reduces to itself), which is exactly why type soundness must — and does —
      tolerate non-termination: each unfold preserves the type [T]. *)
-  | SFix      : forall T body, step (tfix T body) (subst 0 (tfix T body) body).
+  | SFix      : forall T body, step (tfix T body) (subst 0 (tfix T body) body)
+  (* INCREMENT 15 — TYPE-TEST narrowing, VALUE-CONDITIONED. The scrutinee is
+     reduced to a value first ([STt1] congruence); then its RUNTIME TAG selects a
+     branch and the value is substituted into ONLY that branch (de Bruijn 0). The
+     unselected branch is DISCARDED — never substituted into — which is what keeps
+     narrowing sound (no dead-branch residual with a contradicted tag assumption).
+     [STtTrue] fires when the value's tag MATCHES [g]; [STtFalse] when the value
+     has some OTHER tag [g'] (≠ g). [value_tag_or_not] makes this total. *)
+  | STtTrue  : forall g v e1 e2,
+      value v -> has_tag v g -> step (ttypetest g v e1 e2) (subst 0 v e1)
+  | STtFalse : forall g g' v e1 e2,
+      value v -> g' <> g -> has_tag v g' -> step (ttypetest g v e1 e2) (subst 0 v e2)
+  | STt1     : forall g c c' e1 e2,
+      step c c' -> step (ttypetest g c e1 e2) (ttypetest g c' e1 e2).
 
 (* ===========================================================================
    4. SUBTYPING INVERSION — the lemmas progress/preservation rest on.
@@ -840,6 +979,25 @@ Proof.
   - subst. destruct (IHhas_type eq_refl) as [Hb Hd].
     split; [assumption | eapply SsTrans; eassumption].
   - injection Ee as <- <-. split; [assumption | apply SsRefl].
+Qed.
+
+(* INCREMENT 15 — [ttypetest] inversion, subsumption-transparent. The scrutinee
+   types at some [U]; the then-branch at [T1] under [tag_type g], the else-branch
+   at [T2] under [U]; the union is [ssub]-below the ascribed type [T]. *)
+Lemma inv_typetest : forall G g c e1 e2 T,
+  has_type G (ttypetest g c e1 e2) T ->
+  exists U T1 T2, has_type G c U /\
+                  has_type (tag_type g :: G) e1 T1 /\
+                  has_type (U :: G) e2 T2 /\
+                  ssub (BUnion T1 T2) T.
+Proof.
+  intros G g c e1 e2 T H. remember (ttypetest g c e1 e2) as e0 eqn:Ee.
+  induction H; try discriminate Ee.
+  - subst. destruct (IHhas_type eq_refl) as [U [T1 [T2 [Hc [H1 [H2 Hd]]]]]].
+    exists U, T1, T2.
+    split;[assumption|split;[assumption|split;[assumption|eapply SsTrans; eassumption]]].
+  - injection Ee as <- <- <- <-. do 3 eexists.
+    split;[eassumption|split;[eassumption|split;[eassumption|apply SsRefl]]].
 Qed.
 
 (* ===========================================================================
@@ -1537,6 +1695,49 @@ Proof.
 Qed.
 
 (* ===========================================================================
+   INCREMENT 15 — THE TYPE-TAG VALUE-NARROWING BRIDGING LEMMA (the crux, mirroring
+   [truthy_narrows]).
+
+   The operational justification of type-test flow narrowing: a value whose
+   RUNTIME TAG is [g] genuinely has the narrowed TYPE [tag_type g]. This is the
+   lemma preservation uses to retype the then-branch after the value-conditioned
+   step substitutes the scrutinee in.
+
+     tag_narrows : has_type [] v U -> value v -> has_tag v g
+                     -> has_type [] v (tag_type g)
+
+   PROOF SHAPE (canonical forms; no negation, no dsub-in-typing — the load-bearing
+   soundness move): case on the value's canonical form, then on the tag. Each
+   value class inhabits its tag's type directly — a number literal at [ANum] (via
+   [AInt ≤ ANum]), a string at [AStr], etc.; a lambda at [BArrow BBot BTop] (its
+   real arrow subsumes by [BBot ≤ dom] contra, [cod ≤ BTop] co); a record at
+   [BRec []] (every table; [srec Ts [] = SrNil]). Mismatched (value-class, tag)
+   pairs are excluded by [has_tag] being [False] there. *)
+Lemma tag_narrows : forall v U g,
+  has_type [] v U -> value v -> has_tag v g -> has_type [] v (tag_type g).
+Proof.
+  intros v U g Hty Hv Hg. destruct Hv as [l | T b | fs Hfs].
+  - (* literal: the tag is forced by the literal kind *)
+    destruct l as [n | n | bb | ]; destruct g; simpl in Hg; try contradiction;
+      simpl tag_type.
+    + (* LInt, TgNum : AInt ≤ ANum *)
+      eapply TSub; [ apply (TLit [] (LInt n)) | ]. apply SsAtom. apply ALInt.
+    + (* LStr, TgStr *) apply (TLit [] (LStr n)).
+    + (* LBool, TgBool *) apply (TLit [] (LBool bb)).
+    + (* LNil, TgNil *) apply (TLit [] LNil).
+  - (* lambda: the only matching tag is TgFun *)
+    destruct g; simpl in Hg; try contradiction. simpl tag_type.
+    apply inv_lam in Hty. destruct Hty as [Tb [Hb _]].
+    eapply TSub; [ apply TLam; exact Hb | ].
+    apply SsArrow; [ apply SsBot | apply SsTop ].
+  - (* record: the only matching tag is TgTable *)
+    destruct g; simpl in Hg; try contradiction. simpl tag_type.
+    apply inv_rec in Hty. destruct Hty as [Ts [Hf [Hnd _]]].
+    eapply TSub; [ apply TRec; [ exact Hf | exact Hnd ] | ].
+    apply SsRec. apply SrNil.
+Qed.
+
+(* ===========================================================================
    8. WEAKENING + SUBSTITUTION (the de Bruijn metatheory).
    =========================================================================== *)
 
@@ -1623,6 +1824,15 @@ Proof.
     apply TFix.
     match goal with [ IH : forall _ _ _, T :: ?g = _ -> _ |- _ ] =>
       exact (IH (T :: G1) G2 U eq_refl) end.
+  - (* TTypeTest: scrutinee IH at cut G1; then-branch under fresh binder cut
+       (tag_type g :: G1); else-branch under fresh binder cut (U0 :: G1). *)
+    eapply TTypeTest.
+    + match goal with [ IH : forall _ _ _, G1 ++ G2 = _ -> has_type _ _ U |- _ ] =>
+        exact (IH G1 G2 U0 eq_refl) end.
+    + match goal with [ IH : forall _ _ _, tag_type g :: _ = _ -> has_type _ _ T1 |- _ ] =>
+        exact (IH (tag_type g :: G1) G2 U0 eq_refl) end.
+    + match goal with [ IH : forall _ _ _, U :: _ = _ -> has_type _ _ T2 |- _ ] =>
+        exact (IH (U :: G1) G2 U0 eq_refl) end.
   - (* HFnil *) apply HFnil.
   - (* HFcons *) apply HFcons.
     + match goal with [ IH : forall _ _ _, _ = _ -> has_type _ _ _ |- _ ] =>
@@ -1659,6 +1869,8 @@ Fixpoint closed_at (k : nat) (e : tm) : Prop :=
   | tifn c e1 e2 => closed_at k c /\ closed_at (S k) e1 /\ closed_at (S k) e2
   (* tfix binds the self-reference fresh: body closed at [S k]. *)
   | tfix _ b  => closed_at (S k) b
+  (* ttypetest binds the scrutinee fresh in each branch: branches closed at [S k]. *)
+  | ttypetest _ c e1 e2 => closed_at k c /\ closed_at (S k) e1 /\ closed_at (S k) e2
   end.
 
 (* Ltac: solve a [closed_at _ x] goal from the subterm-IH for exactly [x]. *)
@@ -1702,6 +1914,12 @@ Proof.
        length (T::G). *)
     apply inv_fix in H. destruct H as [Hb _].
     exact (IHe (T :: G) T Hb).
+  - (* ttypetest: scrutinee at length G; then-branch under (tag_type g :: G),
+       else-branch under (U :: G) — both closed at S(length G). *)
+    apply inv_typetest in H. destruct H as [U [T1 [T2 [Hc [H1 [H2 _]]]]]].
+    split; [ exact (IHe1 G U Hc)
+           | split; [ exact (IHe2 (tag_type g :: G) T1 H1)
+                    | exact (IHe3 (U :: G) T2 H2) ] ].
   - (* Pl nil *) exact I.
   - (* Pl cons *) inversion H; subst. simpl. split.
     + match goal with
@@ -1741,6 +1959,11 @@ Proof.
       | apply (IHe3 (S k)); [exact H2 | lia] ].
   - (* tfix: body at S k (lift cut also rises by one). *)
     f_equal. apply (IHe (S k)); [exact H | lia].
+  - (* ttypetest: scrutinee at k; branches at S k (lift cut also rises by one). *)
+    destruct H as [Hc [H1 H2]]. f_equal;
+      [ apply (IHe1 k); [exact Hc | exact H0]
+      | apply (IHe2 (S k)); [exact H1 | lia]
+      | apply (IHe3 (S k)); [exact H2 | lia] ].
   - (* Pl nil *) reflexivity.
   - (* Pl cons *) destruct H as [Hc Hr]. f_equal;
       [ f_equal; apply (IHe k0); [exact Hc | exact H0]
@@ -1842,6 +2065,15 @@ Proof.
     rewrite (closed_lift s U H0 1 0).
     eapply TSub; [ apply TFix | exact Hsub ].
     apply (IHe (T :: G1) G2 U T s); [ exact Hb | exact H0 ].
+  - (* ttypetest: scrutinee substituted at cut [length G1]; each branch is under
+       one fresh binder, cut [tag_type g :: G1] (then) / [Uc :: G1] (else), and [s]
+       lifts to itself (closed). *)
+    apply inv_typetest in H. destruct H as [Uc [T1 [T2 [Hc [H1 [H2 Hsub]]]]]]. simpl.
+    rewrite (closed_lift s U H0 1 0).
+    eapply TSub; [ eapply TTypeTest | exact Hsub ].
+    + apply (IHe1 G1 G2 U Uc s); [ exact Hc | exact H0 ].
+    + apply (IHe2 (tag_type g :: G1) G2 U T1 s); [ exact H1 | exact H0 ].
+    + apply (IHe3 (Uc :: G1) G2 U T2 s); [ exact H2 | exact H0 ].
   - (* Pl nil *) inversion H; subst. simpl. apply HFnil.
   - (* Pl cons *) inversion H; subst. simpl. apply HFcons.
     + match goal with [ Hh : has_type (G1 ++ U :: G2) e ?Tk |- _ ] =>
@@ -2049,6 +2281,34 @@ Proof.
     eapply TSub; [ | exact Hsub ].
     apply (subst_top T [] body T (tfix T body));
       [ exact Hb | apply TFix; exact Hb ].
+  (* INCREMENT 15 — TYPE-TEST narrowing preservation. THE CRUX: the value-
+     conditioned step justifies the narrowing. [STtTrue] substitutes a value whose
+     runtime tag IS [g] into the then-branch (typed under [tag_type g]); the
+     bridging lemma [tag_narrows] gives [v : tag_type g] from its operational tag,
+     so [subst_top] retypes the branch. [STtFalse] substitutes into the else-branch
+     (typed under [U], the scrutinee's own type — and the scrutinee value [v] has
+     type [U] by inversion, so [subst_top] applies with NO narrowing needed). The
+     dead branch is discarded — never substituted — so no contradicted-tag residual
+     arises. *)
+  - (* STtTrue: ttypetest g v e1 e2 ↦ subst 0 v e1, with v's tag = g *)
+    apply inv_typetest in Hty. destruct Hty as [U [T1 [T2 [Hc [Hthen [Helse Hsub]]]]]].
+    eapply TSub;
+      [ apply (subst_top (tag_type g) [] e1 T1 v);
+          [ exact Hthen | apply (tag_narrows v U g Hc); assumption ]
+      | eapply SsTrans; [ apply ssub_union_inl | exact Hsub ] ].
+  - (* STtFalse: ttypetest g v e1 e2 ↦ subst 0 v e2, with v's tag ≠ g. The
+       else-branch is typed under [U] (the scrutinee's own type); the scrutinee
+       value [v] HAS type [U] (it is [c] reduced to a value — here [c = v] already),
+       so [subst_top] retypes the else-branch with no narrowing. *)
+    apply inv_typetest in Hty. destruct Hty as [U [T1 [T2 [Hc [Hthen [Helse Hsub]]]]]].
+    eapply TSub;
+      [ apply (subst_top U [] e2 T2 v); [ exact Helse | exact Hc ]
+      | eapply SsTrans; [ apply ssub_union_inr | exact Hsub ] ].
+  - (* STt1: congruence — the scrutinee steps, preserving its type [U]. *)
+    apply inv_typetest in Hty. destruct Hty as [U [T1 [T2 [Hc [Hthen [Helse Hsub]]]]]].
+    eapply TSub;
+      [ eapply TTypeTest; [ apply IHHstep; exact Hc | exact Hthen | exact Helse ]
+      | exact Hsub ].
 Qed.
 
 (* ===========================================================================
@@ -2169,6 +2429,20 @@ Proof.
        is never a value and never stuck, so progress is immediate even though the
        unfold may diverge. *)
     right. eexists. apply SFix.
+  - (* TTypeTest: the scrutinee has SOME type [U]. If it is a value, [value_tag_or_not]
+       gives either its tag IS [g] (select then-branch, STtTrue) or it has some other
+       tag [g' ≠ g] (select else-branch, STtFalse); else it steps (STt1). Total — any
+       value has a tag. *)
+    right.
+    match goal with
+    | [ IHc : [] = [] -> value c \/ _ |- _ ] =>
+        destruct (IHc eq_refl) as [Hvc | [c' Hc']]
+    end.
+    + (* scrutinee is a value: split on whether its tag is [g] *)
+      destruct (value_tag_or_not c g Hvc) as [Hyes | [g' [Hne Hg']]].
+      * eexists. apply STtTrue; assumption.
+      * eexists. eapply STtFalse; eassumption.
+    + (* scrutinee steps *) eexists. apply STt1. exact Hc'.
   - (* P0 HFnil *) intros ke [].
   - (* P0 HFcons *) intros ke Hin. simpl in Hin. destruct Hin as [Heq | Hin].
     + subst ke.
@@ -2399,6 +2673,107 @@ Proof.
 Qed.
 
 (* ===========================================================================
+   INCREMENT 15 — THE TYPE-TEST PAYOFF. The real Lua [type(x) == "number"] guard.
+   A consumer requiring [ANum] applied to a maybe-typed scrutinee in the THEN-
+   branch of a [type(x)=="number"] test TYPES; the SAME use WITHOUT narrowing is
+   REJECTED. This is occurrence typing for the [type()]-guard idiom, machine-
+   checked sound.
+
+   THE CONSUMER. [h := λ(_ : ANum). 0] : [ANum → Int] — accepts only numbers.
+   THE SCRUTINEE. A value of type [U := Str ∪ Num] (a string-or-number). In the
+   THEN-branch of [type(x)=="number"], the scrutinee is known to be a NUMBER, so
+   passing it to [h] is sound. WITHOUT narrowing it carries [Str ∪ Num], which is
+   NOT [≤ ANum] (a string is not a number), so the SAME application is rejected. *)
+
+Definition h_consumer : tm := tlam (BAtom ANum) (tlit (LInt 0)).
+
+Example h_consumer_typed : has_type [] h_consumer (BArrow (BAtom ANum) (BAtom AInt)).
+Proof. apply TLam. apply (TLit (BAtom ANum :: []) (LInt 0)). Qed.
+
+(* THE NARROWING-REQUIRED TERM. Bind [h], bind a [Str ∪ Num] scrutinee, then test
+   [type(scrutinee) == "number"]: in the then-branch the bound var (index 0) is
+   narrowed to [ANum], so [h (var0)] is well-typed; index 2 is [h]. *)
+Definition tt_payoff_term : tm :=
+  tlet h_consumer                                  (* 0 ↦ h : ANum→Int *)
+    (tlet (tlit (LInt 5))                          (* 0 ↦ 5 : Int, subsumed to Str∪Num (the maybe-num scrutinee) *)
+      (ttypetest TgNum (tvar 0)                    (* type(scrutinee) == "number" *)
+        (tapp (tvar 2) (tvar 0))                   (* then: h (index 2) applied to NARROWED scrutinee (var0 : ANum) *)
+        (tlit (LInt 0)))).                          (* else: any Int *)
+
+(* (a) WITH TYPE-TEST NARROWING the term typechecks: the then-branch sees the
+   bound var at [tag_type TgNum = ANum], where [h (var0)] is well-typed. *)
+Example tt_payoff_types_WITH_narrowing :
+  has_type [] tt_payoff_term (BUnion (BAtom AInt) (BAtom AInt)).
+Proof.
+  unfold tt_payoff_term.
+  eapply TLet; [ apply h_consumer_typed | ].
+  (* context: [ h : ANum→Int ] *)
+  eapply TLet.
+  - (* the scrutinee: 5 : Int, subsumed to Str ∪ Num (maybe-number) *)
+    eapply TSub; [ apply (TLit _ (LInt 5)) | ].
+    (* Int ≤ Num ≤ Str ∪ Num *)
+    apply SsUnionInR. apply SsAtom. apply ALInt.
+  - (* context: [ Str∪Num ; ANum→Int ] ; scrutinee at index 0 *)
+    eapply (TTypeTest _ TgNum _ _ _ (BUnion (BAtom AStr) (BAtom ANum))).
+    + apply TVar. reflexivity.
+    + (* then-branch: index 0 narrowed to ANum (tag_type TgNum); index 2 = h *)
+      eapply TApp.
+      * apply (TVar _ 2). reflexivity.            (* h : ANum→Int at index 2 *)
+      * apply (TVar _ 0). reflexivity.            (* var0 : ANum (NARROWED) *)
+    + (* else-branch: any Int *)
+      apply (TLit _ (LInt 0)).
+Qed.
+
+(* (b) WITHOUT TYPE-TEST NARROWING the SAME use is ILL-TYPED. Under a context
+   where the scrutinee carries its [Str ∪ Num] type (no narrowing), applying [h]
+   (which demands [ANum]) to it is REJECTED — because [Str ∪ Num] is NOT an
+   [ssub]-subtype of [ANum] (a string is not a number). This is the exact
+   unsoundness type-test narrowing prevents, proven as a NON-typing. *)
+Example tt_payoff_rejected_WITHOUT_narrowing :
+  forall T, ~ has_type
+    [ BUnion (BAtom AStr) (BAtom ANum) ; BArrow (BAtom ANum) (BAtom AInt) ]
+    (tapp (tvar 1) (tvar 0)) T.
+Proof.
+  intros T H. apply inv_app in H.
+  destruct H as [A [B [Hf [Ha _]]]].
+  (* h (index 1) has type ANum→Int (up to ssub): A is its domain *)
+  apply inv_var in Hf. destruct Hf as [Sf [Hlf Hsf]]. simpl in Hlf. injection Hlf as <-.
+  apply ssub_arrow_inv in Hsf. destruct Hsf as [Hdom _].
+  (* the argument (index 0) has type Str∪Num (up to ssub to A) *)
+  apply inv_var in Ha. destruct Ha as [Sa [Hla Hsa]]. simpl in Hla. injection Hla as <-.
+  (* so Str∪Num ≤ A ≤ ANum — but that is FALSE (a string ∉ Num). Refute
+     semantically at VStr 0. *)
+  pose proof (SsTrans _ _ _ Hsa Hdom) as Hbad.
+  apply ssub_sound in Hbad. unfold dsub in Hbad.
+  assert (HstrU : denote (BUnion (BAtom AStr) (BAtom ANum)) (VStr 0))
+    by (simpl; left; exact I).
+  pose proof (Hbad (VStr 0) HstrU) as Hstr_num. simpl in Hstr_num. exact Hstr_num.
+Qed.
+
+(* THE NARROWING STEP, operationally: the type-test payoff term reduces — the
+   scrutinee is a number (Int 5), tag TgNum matches, so the then-branch is
+   selected with the value substituted in. *)
+Example tt_payoff_steps :
+  exists e', step tt_payoff_term e'.
+Proof.
+  eapply ex_intro. unfold tt_payoff_term, h_consumer.
+  apply SLet. apply VLam.
+Qed.
+
+(* SANITY — the value-conditioned type test SELECTS by runtime tag. A number
+   scrutinee (Int 5, tag TgNum) selects the then-branch; a string scrutinee
+   (Str 0, tag TgStr ≠ TgNum) selects the else-branch. *)
+Example tt_select_then :
+  step (ttypetest TgNum (tlit (LInt 5)) (tvar 0) (tlit (LInt 9)))
+       (subst 0 (tlit (LInt 5)) (tvar 0)).
+Proof. apply STtTrue; [ apply VLit | exact I ]. Qed.
+
+Example tt_select_else :
+  step (ttypetest TgNum (tlit (LStr 0)) (tvar 0) (tlit (LInt 9)))
+       (subst 0 (tlit (LStr 0)) (tlit (LInt 9))).
+Proof. apply (STtFalse TgNum TgStr); [ apply VLit | discriminate | exact I ]. Qed.
+
+(* ===========================================================================
    INCREMENT 14 — GENERAL RECURSION sanity. (1) A recursive FUNCTION term types
    and reduces a step. (2) A DIVERGING term is well-typed and ALWAYS steps (never
    stuck) — type soundness tolerating non-termination, made machine-checked.
@@ -2476,8 +2851,11 @@ Print Assumptions progress.
 Print Assumptions preservation.
 Print Assumptions truthy_narrows.
 Print Assumptions falsy_narrows.
+Print Assumptions tag_narrows.
 Print Assumptions payoff_types_WITH_narrowing.
 Print Assumptions payoff_rejected_WITHOUT_narrowing.
+Print Assumptions tt_payoff_types_WITH_narrowing.
+Print Assumptions tt_payoff_rejected_WITHOUT_narrowing.
 Print Assumptions ssub_arrow_inv.
 Print Assumptions ssub_sound.
 Print Assumptions arrow_top_collapse.

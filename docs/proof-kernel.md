@@ -1133,6 +1133,94 @@ the global context** — no axioms, no `Admitted`, no `Classical`, no `admit`.
 `subtype.v` AND `ssub.v` unmodified; whole chain compiles (`coqc subtype.v && coqc
 typing.v && coqc ssub.v && coqc check.v`).
 
+## Increment 15 — TYPE-TEST FLOW NARROWING: the `type(x)=="T"` guard (value-conditioned)
+
+The real Lua **`type(x) == "number"`** flow-typing idiom — POSITIVE tag narrowing —
+made machine-checked sound. This extends the audited increment-13 `tifn`
+binding-narrowing infrastructure with the **same value-conditioned fresh-binding
+discipline** (the soundness crux), applied to runtime type-tag tests instead of
+truthiness. Modifies `proof/typing.v` + `proof/check.v`; `proof/subtype.v` and
+`proof/ssub.v` are **unmodified**. Build order unchanged.
+
+- **Term + tags + op-sem.** A standalone enum `tag = {TgNum, TgStr, TgBool, TgNil,
+  TgTable, TgFun}` (the six `type()` tags), with `tag_eq_dec`. `tm` gains
+  `ttypetest : tag -> tm -> tm -> tm -> tm`. In `ttypetest g scrut e1 e2`, the
+  scrutinee is **bound FRESH** (de Bruijn 0) in BOTH branches. `has_tag : tm -> tag
+  -> Prop` reads a value's runtime kind off its head (number literal `LInt` ↦ TgNum
+  — the 5.1 model: `type()` is `"number"` for all numbers; `tlam` ↦ TgFun; `trec` ↦
+  TgTable; etc.); it is **total on values** (`value_has_some_tag`) with a **unique**
+  tag (`has_tag_unique`), and `value_tag_or_not` gives the decidable partition
+  progress selects on. The **value-conditioned** step reduces the scrutinee to a
+  value, then selects by tag and substitutes into ONLY the selected branch:
+  `STtTrue` (tag matches `g` ⇒ `subst 0 v e1`), `STtFalse` (some OTHER tag `g'≠g` ⇒
+  `subst 0 v e2`), `STt1` (congruence). `lift`/`subst`/`closed_at` thread the
+  branches under one fresh binder (`S k` / `S j`), exactly like `tifn`.
+- **Typing (declarative).** `TTypeTest : has_type G c U -> has_type (tag_type g::G)
+  e1 T1 -> has_type (U::G) e2 T2 -> has_type G (ttypetest g c e1 e2) (T1∪T2)` — the
+  THEN-branch is typed under the **tag-narrowed** binder `tag_type g`; the
+  ELSE-branch under the scrutinee's **own type `U`** (a sound OVER-approximation of
+  the precise negative narrowing `U ∩ ¬tag_type g`, the deferred intersection/
+  negation wall). `tag_type`: TgNum↦`ANum`, TgStr↦`AStr`, TgBool↦`ABool`,
+  TgNil↦`ANil`, TgTable↦`BRec []` (the table top-type, every `VTable`),
+  TgFun↦`BArrow BBot BTop` (the function top-type, every `VFun`). Result = union of
+  branch types. Subsumption-transparent inversion `inv_typetest` threads `TTypeTest`
+  through arbitrary `TSub` chains.
+- **The bridging lemma (the crux, mirroring `truthy_narrows`).**
+  `tag_narrows : has_type [] v U -> value v -> has_tag v g -> has_type [] v
+  (tag_type g)` — a value whose runtime tag is `g` genuinely inhabits `tag_type g`.
+  Proved by **canonical forms** (case on the value's form, then the tag; mismatched
+  pairs excluded because `has_tag` is `False` there), each class subsuming into its
+  tag's type by `ssub` atom-order / arrow-`BBot`/`BTop` / record-`SrNil` only — **no
+  negation, no `dsub`-in-typing** (the load-bearing soundness move).
+- **`progress` + `preservation` re-proved (`Qed`), threading `ttypetest`.**
+  - **progress:** the `TTypeTest` case — if the scrutinee is a value, `value_tag_or_not`
+    gives either its tag IS `g` (`STtTrue`) or it has some other tag (`STtFalse`);
+    else it steps (`STt1`). Always steps or is selected — total because every value
+    has a tag.
+  - **preservation:** `STtTrue` substitutes a tag-`g` value into the THEN-branch
+    (typed under `tag_type g`); `tag_narrows` retypes it via `subst_top`. `STtFalse`
+    substitutes into the ELSE-branch (typed under `U`); the scrutinee value already
+    HAS type `U` by inversion, so `subst_top` applies with **no narrowing needed**.
+    The dead branch is discarded — never substituted — so no contradicted-tag
+    residual arises (the same substitution-soundness argument as `tifn`).
+  - Threaded through `weakening`, `has_type_closed`, `closed_at`/`closed_at_lift`,
+    `subst_lemma`, `tm_rect_strong` / `has_type_mind` (all extended with a
+    `ttypetest` case).
+- **Checker (`synth`/`check`) + re-proved soundness/principality.** `synth
+  (ttypetest g c e1 e2)` synthesizes `c` at `U`, the then-branch under `tag_type g`,
+  the else-branch under `U`, returning `Some (U1∪U2)` — no `decide_ssub` obligation
+  (the binder type IS the narrowed type). `synth_sound` discharges by `TTypeTest`
+  directly; `synth_principal`'s case uses `narrowing_head` to retype the declarative
+  else-branch under the SYNTHESIZED scrutinee type `Uc` (which is `≤` the declarative
+  `U`) before invoking the else-branch IH, then `SsUnionE`+intro for the union.
+  `narrowing` extended. `synth_sound`, `check_sound`, `synth_principal`, `narrowing`
+  re-proved `Qed`.
+- **THE PAYOFF (both proved).** A number-consumer `h : ANum→Int` applied to the
+  then-narrowed scrutinee of declared type `Str∪Num` (the "maybe-number" shape):
+  (a) `tt_payoff_types_WITH_narrowing` — the whole `type(x)=="number"` guard TYPES
+  (the then-branch sees `var0 : ANum`); (b) `tt_payoff_rejected_WITHOUT_narrowing` —
+  the SAME application under the un-narrowed `Str∪Num` is REJECTED at every type
+  (`Str∪Num` is not `ssub ≤ ANum` — a string is not a number, refuted semantically at
+  `VStr 0`). `Compute`-level: `compute_typetest_payoff_synth` synthesizes the union,
+  `compute_typetest_payoff_unnarrowed_None` is `None`; `tt_select_then`/`tt_select_else`
+  witness the value-conditioned tag selection.
+- **HONEST SCOPE.** **POSITIVE (then-branch) tag narrowing** only. The ELSE-branch is
+  OVER-approximated to `U` — sound but imprecise; **precise NEGATIVE narrowing**
+  `U ∩ ¬tag_type g` needs an intersection/negation typing rule (the same wall as
+  increment-13's `U ∩ truthy_type` — `(A1→B1)∩(A2→B2)` is not `ssub`-below any single
+  arrow, so `inv_app` cannot invert it). **Narrowing on non-variable paths** (`x.f`,
+  `x[i]`) and **combined truthiness + type-test** in one guard are DEFERRED. No
+  soundness subtlety was hit beyond the documented over-approximation: the else-branch
+  carries the scrutinee's genuine type, so `STtFalse` preservation needs no bridging
+  lemma at all (unlike the then-branch).
+
+`Print Assumptions` on `progress`, `preservation`, `tag_narrows`, `synth_sound`,
+`check_sound`, `synth_principal`, `narrowing`, and both payoffs
+(`tt_payoff_types_WITH_narrowing`, `tt_payoff_rejected_WITHOUT_narrowing`,
+`compute_typetest_payoff_sound`): **Closed under the global context** — no axioms, no
+`Admitted`, no `Classical`, no `admit`. `subtype.v` AND `ssub.v` unmodified; whole
+chain compiles (`coqc subtype.v && coqc typing.v && coqc ssub.v && coqc check.v`).
+
 ## Staging
 
 - **[done]** mechanized lattice + subtype `refl`/`trans` (Rocq);
