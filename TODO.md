@@ -237,9 +237,33 @@ Op-sem parity must hold at every commit. After the handler deletion, the adversa
   `VTable` value as a graph input or output. Deferred from the scalar function
   bridge; depends on the table bridge (fork C) for the real-image + membership of
   compound values. `reality-bridge.md` §4(B) "Deferred".
+- [x] **Records/tables bridge (fork C RESOLVED for the string-keyed scalar
+  fragment).** Bridged `VTable` (finite string-keyed scalar assoc) to a real Lua
+  table `{ [k]=real_image(v), … }` via OPEN/WIDTH record membership. `lib/sem/
+  bridge/rec.lua` builds the real table + ports `denote_dec (BRec fields)
+  (VTable t)`; `rec_test.lua` runs the membership leg (model port vs real
+  `∀(k,T)∈fields. real_table[k]~=nil ∧ real_table[k]∈T`) — they AGREE (oracle 7/7
+  0-disagree; random tables × record types 80/80). **Open/width confirmed against
+  real tables** (extra keys ⇒ still member). Model side validated against
+  `proof/bridge_rec_oracle.v` `Compute`, member (incl. extra-fields/open + field-
+  order-irrelevant) + non-member (missing field; wrong field type; scalar is not a
+  record). STRING-keyed SCALAR records only. `reality-bridge.md` §4(C) RESOLVED
+  (for the fragment) + Status "Done (increment 5)".
+- [ ] **[nice-to-have] Nested / function-valued record fields in the table
+  bridge.** A `VTable` or `VFun` value as a record FIELD value (table-valued or
+  function-valued fields). Deferred from the string-keyed scalar record bridge
+  (fork C); needs a recursive real-image + membership story for compound field
+  values (depends on the same machinery as the function bridge's higher-order /
+  table-in-graph items). `reality-bridge.md` §4(C) "Deferred".
+- [ ] **[nice-to-have] `nil`-valued record fields (nil-hole axis) in the table
+  bridge.** A `VNil`-valued entry collapses to "absent key" in real Lua, conflating
+  present-nil with absent. The string-keyed scalar bridge excludes nil-valued
+  entries; bridging them faithfully needs a nil-hole semantics decision (and
+  interacts with `ANil`-typed fields whose real predicate reads an absent key).
+  `reality-bridge.md` §4(C) "Deferred".
 - [ ] **[nice-to-have] Table richness bridge.** Any-key, array part, metatables,
   `nil`-hole semantics, iteration-order non-determinism — bridging beyond
-  string-keyed records. `reality-bridge.md` §4(C) "Scoped".
+  string-keyed scalar records. `reality-bridge.md` §4(C) "Scoped".
 
 ### Arrows (laws beyond the closed one)
 
@@ -861,6 +885,18 @@ Open items, ordered by priority:
   structural shapes (`{ _parse: _ }`) or inline anon functions, both
   correctly suppressed. Worth one more pass after refining union dedup to
   see what gets unblocked.
+- [ ] **[nice-to-have] Contextual row/element type only pushes to a row
+  literal's FIRST field; later anonymous fields fall back to `any`/diverge.**
+  Production-checker (`lib/type/static/`) imprecision: when an array/row literal
+  is checked against a contextual type (e.g. `local atoms = { "AStr", … } --[[:
+  RecAtom[] ]]`), the contextual element/field type pushes down only to the FIRST
+  element; later anonymous elements are inferred from the literal (widening
+  `"AStr" | …` to `string`), so a downstream `pick(atoms) --[[: RecAtom]]` checked
+  cast then rejects (`string` not a subtype of the union). Surfaced in
+  `lib/sem/bridge/rec_test.lua` (worked around with direct indexing
+  `atoms[rng:int(1,#atoms)]`, which preserves the element type; the generic
+  `pick`'s `T` decays it). Nice-to-have precision: propagate the contextual
+  element/field type to ALL anonymous fields, not just the first.
 
 ### Desktop integration follow-ups (2026-04-30)
 

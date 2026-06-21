@@ -318,7 +318,51 @@ output) and **table-valued graph entries** are deferred — they need the table
 bridge (fork C) and a recursive real-image/equality story for compound values.
 `reality-bridge.md` Status below.
 
-### (C) Tables — open/closed, key types, finite-assoc vs real semantics
+### (C) Tables — open/closed, key types, finite-assoc vs real semantics  *(RESOLVED for the string-keyed scalar fragment)*
+
+**This increment RESOLVES fork (C) for the string-keyed-scalar-record fragment:
+record membership is bridged and open/width is confirmed against real Lua
+tables.** Harness: `lib/sem/bridge/rec.lua` (the model `VTable`→real-table
+correspondence + the membership ports), test `lib/sem/bridge/rec_test.lua`. Coq
+oracle for record membership reproduced via `proof/bridge_rec_oracle.v` (a scratch
+`.v`, not part of the build).
+
+**The correspondence.** The model `VTable [(k1,v1);…]` maps to the real Lua table
+`{ [k1] = real_image(v1), … }` — string-literal keys, scalar field values
+(number/string/bool) rendered by the atom bridge's renderer.
+`rec.table_to_lua_expr` emits the constructor source.
+
+**The membership leg.** The model says `VTable t ∈ BRec fields` iff `t` is a
+table AND for every `(k,T)∈fields` there is an entry at `k` whose value `∈ T`
+(extra keys allowed = OPEN/width). `rec.model_rec_verdict` ports `denote_dec
+(BRec fields) (VTable t)` (per-field `assoc_lookup` + recursive scalar atom
+membership, folded with conjunction). The REAL verdict builds the real table and
+checks, per field, `real_table[k] ~= nil and (real_table[k] ∈ T via the atom
+oracle)`. The two are asserted to AGREE. Measured: oracle rows 7/7 (0
+disagreements); random tables × random record types 80/80.
+
+**Coq validation of the model side.** `proof/bridge_rec_oracle.v` `Compute`s
+`memb (BRec fields) (VTable t)` for 9 concrete cases — **member** (empty record
+`{}` ∋ every table; exact `{x:Int}`; exact `{x:Int,y:Str}`; **EXTRA field present**
+`{x:Int} ∋ {x=3,z=true}` confirming OPEN/width; **field order irrelevant**
+`{x:Int,y:Str} ∋ {y="s",x=3}`) and **non-member** (missing field; wrong field
+type `{x:Int} ∌ {x="s"}`; a SCALAR value is not a record — `VInt 3`/`VStr 0`).
+The Lua `model_rec_verdict` is asserted equal to every member/non-member Coq
+verdict (7/7 over the VTable-domain rows), so the bridge faithfully reflects the
+proven model.
+
+**Deferred (recorded in `TODO.md` proof-dev backlog):** STRING keys + SCALAR
+field VALUES only this increment. **Nested records** (table-valued fields),
+**function-valued fields**, **non-string keys**, **array part**, **metatables**,
+**iteration order**, and **`nil`-valued fields** (which collapse to "absent key"
+in real Lua — a nil-hole axis) are deferred — they need a recursive
+real-image/membership story for compound field values and a key-type/array
+decision. The richer table behaviors below stay open.
+
+The richness axes below (any-key, array part, metatables, nil-holes,
+iteration-order) remain the open part of fork (C):
+
+
 
 - **Open vs closed.** The model's `BRec` reads **open/width** (extra keys
   allowed). Real Lua tables are always "open" in that sense; a *closed/exact*
@@ -367,12 +411,28 @@ open/closed/index-signature reading first.
   `proof/bridge_arrow_oracle.v` `Compute` for 8 concrete (arrow, graph) cases —
   member AND non-member (incl. the headline `Int→Int [(1,"s")]` = false). SCALAR
   graphs only; higher-order + table-in-graph deferred.
+- **Done (increment 5, this one): fork (C) RESOLVED for the string-keyed-scalar-
+  record fragment.** `lib/sem/bridge/rec.lua` maps a model `VTable` to a real Lua
+  table `{ [k]=real_image(v), … }`; `rec_test.lua` runs the membership leg — model
+  `denote_dec (BRec fields) (VTable t)` port vs the real-computed open/width
+  verdict (per field `real_table[k] ~= nil and real_table[k] ∈ T`). They AGREE
+  (oracle rows 7/7, 0 disagreements; random tables × record types 80/80).
+  **Open/width confirmed against real tables**: extra keys present ⇒ still a
+  member, on BOTH the model and reality. Model side validated against
+  `proof/bridge_rec_oracle.v` `Compute` for 9 concrete cases — member (incl.
+  extra-fields/open + field-order-irrelevant) AND non-member (missing field; wrong
+  field type; a scalar is not a record). STRING-keyed SCALAR records only; nested/
+  function-valued fields, non-string keys, array part, metatables, iteration order,
+  nil-valued fields deferred (TODO.md proof-dev backlog).
 - **Resolved:** fork (A) = **REFINE** (type-level `AInt <: ANum`); fork (A′) =
   **collapse to one double** (`int <: float`); fork (B) = **functions bridged via
-  the operational I/O check** (scalar graphs).
+  the operational I/O check** (scalar graphs); fork (C) = **string-keyed scalar
+  records bridged via open/width membership against real tables**.
 - **Deferred:** version-parametric 5.3/5.4 distinct-integer-sibling values (a
   future version-parameterized `V`); FFI cdata integers (`type()=="cdata"`) — a
   separate runtime-representation axis. **Higher-order graphs** (functions inside a
   `VFun` graph) and **table-valued graph entries** — the function bridge's scalar
   restriction (TODO.md proof-dev backlog).
-- **Scoped:** fork (C) tables — string-keyed records, richer behaviors tracked.
+- **Scoped:** fork (C) tables — string-keyed SCALAR records BRIDGED (this
+  increment); richer behaviors (nested/function-valued fields, non-string keys,
+  array part, metatables, nil-holes, iteration order) tracked as deferred.
