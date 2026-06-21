@@ -561,6 +561,98 @@ union/negation/arrow types as TERM introduction forms, duplicate-key record
 literals, `ssub` completeness vs `dsub`, and the reality bridge to `lib/sem`.
 All recorded in `TODO.md` §"Typing layer".
 
+## Increment 9 — `ssub` solidified: preorder + total decision procedure + the `dsub`/`ssub` gap
+
+A NEW file `proof/ssub.v` (builds on **unmodified** `proof/subtype.v` and
+`proof/typing.v`) makes the checker's syntactic subtyping relation `ssub` — the
+one `TSub` subsumes along, already proved sound vs `dsub` (`ssub_sound`) — into a
+solid, runnable, characterized relation. Build order:
+`coqc proof/subtype.v` → `coqc proof/typing.v` → `coqc proof/ssub.v`.
+
+- **PREORDER.** `ssub_refl : forall t, ssub t t` and
+  `ssub_trans : forall a b c, ssub a b -> ssub b c -> ssub a c`, exposed as named
+  lemmas (the typing metatheory composes subsumption along them). Both are the
+  `SsRefl`/`SsTrans` constructors of `ssub` — `ssub` bakes transitivity in as a
+  primitive (unlike `subtype.v`'s free-lattice `sub`, where transitivity was real
+  size-induction metatheory). The arrow/record "care" that transitivity needs
+  lives in the INVERSION lemmas already in `typing.v` (`ssub_arrow_inv`,
+  `ssub_rec_inv`), surfaced here as `ssub_trans_arrow` / `ssub_trans_rec`
+  (contra/co recomposition at arrows; per-field composition at records).
+
+- **A TOTAL, TERMINATING DECISION PROCEDURE `decide_ssub : BTy -> BTy -> bool`,
+  proved SOUND AND COMPLETE:** `decide_ssub_correct : decide_ssub a b = true <->
+  ssub a b` (`Qed`), with corollaries `decide_ssub_sound`, `decide_ssub_complete`,
+  `decide_ssub_false` (false ⇒ `~ ssub`), and the sumbool `ssub_dec`.
+  - **Terminating BY CONSTRUCTION.** A structural fuel recursion on the combined
+    size measure `bsize a + bsize b` (stated explicitly); every recursive call
+    strictly decreases the sum — contravariant arrow domain (`decide A2 A1`),
+    covariant codomain (`decide B1 B2`), record width+depth (each field strictly
+    inside its `BRec`, via `bsize_field_lt`). NO emptiness/DNF machinery (that was
+    for the SEMANTIC `dsub`); `ssub` is syntactic, so this is clean structural
+    recursion. The top-level `decide_ssub a b := decide_ssub_fuel (bsize a +
+    bsize b) a b` uses exactly-sufficient fuel.
+  - **TOTAL over the WHOLE of `BTy`** — a definite `bool` for every pair, a clean
+    improvement over `gdecide`'s `DUnknown`.
+  - **FRAGMENT that is total-decidable EXACTLY (honest scope):** the structural
+    fragment `ssub` actually relates — **atoms** (by the declared atom order),
+    **arrows** (contra/co), **records** (width + depth), plus `Top`/`Bot`. On the
+    **Boolean connectives** (`BUnion`/`BInter`/`BNeg`) `ssub` has NO structural
+    rule: its constructors are `SsRefl`/`SsTrans`/`SsTop`/`SsBot`/`SsAtom`/
+    `SsArrow`/`SsRec` only. So `ssub c d` for a connective-headed `c` holds iff
+    `d = BTop` or `c = BBot` or `c = d` SYNTACTICALLY (`ssub_connective_super` /
+    `ssub_connective_sub`, proved by derivation induction). `decide_ssub` decides
+    THIS exactly and totally (via a derived `BTy` equality test `bty_eq_dec`) — it
+    is total on connectives but COARSE: it recognises only the reflexive/Top/Bot
+    connective subtypings, NOT the semantic Boolean ones (e.g. `BInter X Y <: X`).
+    Deciding connective-`ssub` semantically is `dsub`'s job (`gdecide`) and is
+    DEFERRED (TODO.md). This is correct: the typing core subsumes only along
+    `ssub`, whose connective subtypings ARE exactly the structural ones, so
+    `decide_ssub` decides precisely what the checker needs.
+  - **`Compute` sanity (non-vacuity — returns BOTH true and false, decides
+    exactly `ssub`):** the crux `decide_ssub (Rec→Int) (Int→Top) = false` (ssub
+    correctly REJECTS the unsound collapse, unlike `dsub`); contravariant
+    `decide_ssub (Num→Int)(Int→Int) = true`, `decide_ssub (Int→Int)(Num→Int) =
+    false`; covariant codomain true/false; record width true/false; record depth
+    `{a:Int} <: {a:Num} = true`, reverse false; atoms; Top/Bot; and the connective
+    coarseness `decide_ssub (Int∩Str) Int = false`. `agree_*`-style examples route
+    definite answers back to real `ssub` / `~ssub` facts.
+
+- **THE `ssub`-vs-`dsub` GAP, characterized — `ssub_sound` gives `ssub ⊆ dsub`;
+  the inclusion is STRICT, with TWO precise gap instances:**
+  - `dsub_ssub_gap`: `dsub (BArrow Rec Int) (BArrow Int Top) /\ ~ ssub (BArrow Rec
+    Int) (BArrow Int Top)` — the operationally-unsound arrow/Top collapse `dsub`
+    admits (`arrow_top_collapse`, typing.v) and `ssub` correctly rejects (the
+    central preservation-breaking witness).
+  - `dsub_ssub_gap_atom`: a SECOND, atom-level instance — `dsub (BAtom AFloat)
+    (BAtom ANum) /\ ~ ssub (BAtom AFloat) (BAtom ANum)`. On LuaJIT 5.1 `AFloat`
+    and `ANum` BOTH denote all numbers (float ≡ number), so they are
+    `dsub`-equivalent, but the SYNTACTIC atom order `atom_le` has NO edge between
+    them (only `AInt <: ANum`, `AInt <: AFloat`). `ssub` tracks the DECLARED
+    order, not the value sets — the honest price.
+  - **COINCIDENCE where they agree:** on the AFLOAT-FREE atom fragment `ssub` and
+    `dsub` are EQUAL (`ssub_dsub_coincide_atom`, with `dsub_atom_atom_noafloat`
+    proving the converse by value-witness refutation); and the structural
+    direction holds generally — every `decide_ssub`-true pair is a `dsub`
+    (`decide_ssub_implies_dsub`).
+  - **The general `ssub`-completeness vs ALL operationally-sound subtypings is the
+    DEEP open characterization question — DEFERRED** (TODO.md). What is proved
+    here is the precise WHERE-they-differ (the two gap instances) and
+    WHERE-they-coincide (afloat-free atoms; the structural ⊆ direction), as
+    partial progress.
+
+- **WIRING.** The subtyping side of the typing layer is now runnable:
+  `subsumption_decidable : has_type G e S -> decide_ssub S T = true -> has_type G
+  e T` makes `TSub`'s `ssub` premise discharge by the executable `decide_ssub`;
+  `subsumption_step_undecidable_false` is the negative side. (Full algorithmic
+  typechecking is a later increment — only the subtyping decision is wired here.)
+
+`Print Assumptions` on `ssub_refl`, `ssub_trans`, `decide_ssub_sound`,
+`decide_ssub_complete`, `decide_ssub_correct`, `dsub_ssub_gap`,
+`dsub_ssub_gap_atom`, `ssub_dsub_coincide_atom`: **Closed under the global
+context** — no axioms, no `Admitted`, no `Classical`. `subtype.v` AND `typing.v`
+are unmodified; the whole dev compiles
+(`coqc proof/subtype.v && coqc proof/typing.v && coqc proof/ssub.v`).
+
 ## Staging
 
 - **[done]** mechanized lattice + subtype `refl`/`trans` (Rocq);
@@ -669,6 +761,26 @@ All recorded in `TODO.md` §"Typing layer".
   + `Print Assumptions` closed under the global context. DEFERRED: statements,
   mutation, multi-arg/return, recursion (μ), metatables, term-level
   union/neg/arrow intro, dup-key records, `ssub` completeness, the reality bridge.
+- **[done — increment 9: `ssub` solidified]** a NEW file `proof/ssub.v` (on
+  unmodified `subtype.v` + `typing.v`) makes the checker's subsumption relation
+  `ssub` a solid runnable relation: **PREORDER** (`ssub_refl`/`ssub_trans` as
+  named lemmas; arrow/record recomposition surfaced as `ssub_trans_arrow`/`_rec`);
+  a **TOTAL, TERMINATING decision procedure** `decide_ssub : BTy -> BTy -> bool`,
+  **sound + complete** (`decide_ssub_correct : decide_ssub a b = true <-> ssub a
+  b`), terminating by construction (structural fuel recursion on `bsize a + bsize
+  b`; no DNF/emptiness machinery — `ssub` is syntactic), **total over all `BTy`**
+  (a definite bool, improving on `gdecide`'s `DUnknown`). Total-decidable fragment
+  is EXACTLY what `ssub` relates: atoms/arrows/records + Top/Bot structurally,
+  connectives COARSELY (reflexive/Top/Bot only — semantic Boolean connective-`ssub`
+  DEFERRED to `dsub`/`gdecide`). **`dsub`/`ssub` GAP characterized:** two strict
+  gap instances — the arrow/Top collapse `dsub (Rec→Int)(Int→Top)` (`dsub_ssub_gap`,
+  the preservation-breaker `ssub` rejects) AND the atom-level `AFloat`≡`ANum`
+  (`dsub_ssub_gap_atom` — dsub-equal, no `ssub` edge); COINCIDENCE on afloat-free
+  atoms (`ssub_dsub_coincide_atom`) and the structural ⊆ direction generally
+  (`decide_ssub_implies_dsub`). General `ssub`-completeness vs all
+  operationally-sound subtypings is the DEEP open question, DEFERRED. Subtyping
+  side WIRED into the typing layer (`subsumption_decidable`). `Compute` sanity
+  (esp. `decide_ssub (Rec→Int)(Int→Top) = false`). Closed under the global context.
 - **[then — arrow decision procedure + multi-return]** make arrow subtyping
   DEFINITE (lift the `has_arrow`-defer), and generalise to multi-arg / multi-
   return / vararg function types.

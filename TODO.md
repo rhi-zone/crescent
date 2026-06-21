@@ -321,9 +321,37 @@ Still open (DEFERRED — recorded honestly, minimal core only):
   ALGEBRA has them via `BTy`; the term language's intro forms are the min core).
 - [ ] **Duplicate-key record literals** (currently `TRec` requires `NoDup` keys,
   Lua-faithful; last-wins literal semantics is a separate concern).
-- [ ] **`ssub` completeness vs `dsub`** (only soundness `ssub_sound` is proved;
-  the reverse direction / a decision procedure for `ssub` is future work, tied to
-  the increment-6 emptiness-based decider).
+- [x] **`ssub` preorder + total decision procedure + `dsub`/`ssub` gap**
+  (increment 9, `proof/ssub.v`, on unmodified `subtype.v` + `typing.v`).
+  `ssub_refl`/`ssub_trans` named; `decide_ssub : BTy -> BTy -> bool` **total +
+  sound + complete** (`decide_ssub_correct`), terminating by structural fuel
+  recursion on `bsize a + bsize b` (no DNF — `ssub` is syntactic). Total-decidable
+  fragment = exactly what `ssub` relates (atoms/arrows/records + Top/Bot
+  structural; connectives coarse). Two gap instances exhibited
+  (`dsub_ssub_gap` arrow/Top; `dsub_ssub_gap_atom` AFloat≡ANum); coincidence on
+  afloat-free atoms + the structural ⊆ direction. Subtyping wired into typing
+  (`subsumption_decidable`). `Print Assumptions` closed under the global context.
+- [ ] **Connective-`ssub` decided SEMANTICALLY (lift `decide_ssub`'s connective
+  coarseness).** PRECISE PREDICATE: for connective-headed `c`/`d` (`BUnion`/
+  `BInter`/`BNeg`), `decide_ssub c d` currently returns `true` ONLY for the
+  reflexive/Top/Bot subtypings (`ssub_connective_super`/`_sub` prove these are the
+  ONLY ones `ssub` admits). Deciding the SEMANTIC Boolean subtypings (e.g.
+  `BInter X Y <: X`, `X <: BUnion X Y`) is `dsub`'s job and is the increment-6
+  `gdecide` emptiness route — NOT `ssub`'s. The open question is whether the
+  typing layer should subsume along connective subtypings at all (it currently
+  does not need them); if so, route connective subsumption through `gdecide`
+  rather than widening `ssub`. Substrate: requires the typing core to actually
+  introduce connective types in term position (deferred above).
+- [ ] **`ssub` GENERAL completeness vs ALL operationally-sound subtypings** (the
+  DEEP open characterization). Partial progress proved in increment 9: the two
+  precise gap instances (`dsub_ssub_gap`, `dsub_ssub_gap_atom`) and the
+  coincidence fragments (`ssub_dsub_coincide_atom` on afloat-free atoms;
+  `decide_ssub_implies_dsub` for the structural ⊆ direction). The full question —
+  characterize EXACTLY the subtypings that preserve operational soundness and show
+  `ssub` decides precisely those — is not tractable at this increment and remains
+  open. (The `AFloat`≡`ANum` gap suggests a candidate refinement: add the missing
+  `atom_le` edges that the value model justifies — but that is a `subtype.v`
+  change, out of scope for the unmodified-substrate increment.)
 - [ ] **Reality bridge** to the executable `lib/sem` semantics (the empirical
   anchor proof cannot establish — that `V`/`step` match real LuaJIT behaviour).
 
