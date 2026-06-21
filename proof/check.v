@@ -139,39 +139,44 @@ Fixpoint synth_fields (sy : tm -> option BTy) (fs : list (string * tm))
       end
   end.
 
-Fixpoint synth (G : list BTy) (e : tm) {struct e} : option BTy :=
+(* [synth] is Sigma-threaded (passed to every recursive call) for a Sigma-general
+   soundness statement. Source terms carry no locations ([tloc] arises only at run
+   time from [talloc]); a source [tloc] is REJECTED ([None]). The three reference
+   operations: alloc ⇒ [BRef U]; deref ⇒ unwrap [BRef U] to [U]; assign ⇒ check the
+   value against the cell's content type (INVARIANT, via [decide_rsub]) ⇒ unit. *)
+Fixpoint synth (Sig : list BTy) (G : list BTy) (e : tm) {struct e} : option BTy :=
   match e with
   | tlit l => Some (lit_type l)
   | tvar n => nth_error G n
   | tlam T body =>
-      match synth (T :: G) body with
+      match synth Sig (T :: G) body with
       | Some Tb => Some (BArrow T Tb)
       | None => None
       end
   | tapp f a =>
-      match synth G f with
+      match synth Sig G f with
       | Some (BArrow A B) =>
           (* check the argument against the domain via the mode switch *)
-          match synth G a with
+          match synth Sig G a with
           | Some Sa => if decide_ssub Sa A then Some B else None
           | None => None
           end
       | _ => None
       end
   | tlet e1 e2 =>
-      match synth G e1 with
-      | Some Se => synth (Se :: G) e2
+      match synth Sig G e1 with
+      | Some Se => synth Sig (Se :: G) e2
       | None => None
       end
   | trec fields =>
       if keys_nodup (map fst fields) then
-        match synth_fields (synth G) fields with
+        match synth_fields (synth Sig G) fields with
         | Some Ts => Some (BRec Ts)
         | None => None
         end
       else None
   | tproj e0 k =>
-      match synth G e0 with
+      match synth Sig G e0 with
       | Some (BRec fs) => flook k fs
       | _ => None
       end
@@ -179,10 +184,10 @@ Fixpoint synth (G : list BTy) (e : tm) {struct e} : option BTy :=
      Bool via the mode switch), synthesize both branches, and return the UNION of
      the branch types (the join — exactly the declarative [TIf] result). *)
   | tif c e1 e2 =>
-      match synth G c with
+      match synth Sig G c with
       | Some Sc =>
           if decide_ssub Sc (BAtom ABool) then
-            match synth G e1, synth G e2 with
+            match synth Sig G e1, synth Sig G e2 with
             | Some U1, Some U2 => Some (BUnion U1 U2)
             | _, _ => None
             end
@@ -198,9 +203,9 @@ Fixpoint synth (G : list BTy) (e : tm) {struct e} : option BTy :=
      obligation is needed: the binder type IS the narrowed type, so the branch
      uses [SsInterPL]-style projections internally where it consumes the var). *)
   | tifn c e1 e2 =>
-      match synth G c with
+      match synth Sig G c with
       | Some _ =>
-          match synth (truthy_type :: G) e1, synth (falsy_type :: G) e2 with
+          match synth Sig (truthy_type :: G) e1, synth Sig (falsy_type :: G) e2 with
           | Some U1, Some U2 => Some (BUnion U1 U2)
           | _, _ => None
           end
@@ -212,7 +217,7 @@ Fixpoint synth (G : list BTy) (e : tm) {struct e} : option BTy :=
      (Checking, not synthesizing-then-comparing, is what the declarative [TFix]
      demands: the body's type and the self-ref type must agree, up to subsumption.) *)
   | tfix T body =>
-      match synth (T :: G) body with
+      match synth Sig (T :: G) body with
       | Some Sb => if decide_ssub Sb T then Some T else None
       | None => None
       end
@@ -223,19 +228,45 @@ Fixpoint synth (G : list BTy) (e : tm) {struct e} : option BTy :=
      of the branch types. Discharged by [TTypeTest] directly — no [decide_ssub]
      obligation: the binder type IS the narrowed type. *)
   | ttypetest g c e1 e2 =>
-      match synth G c with
+      match synth Sig G c with
       | Some U =>
-          match synth (tag_type g :: G) e1, synth (U :: G) e2 with
+          match synth Sig (tag_type g :: G) e1, synth Sig (U :: G) e2 with
           | Some U1, Some U2 => Some (BUnion U1 U2)
           | _, _ => None
           end
       | None => None
       end
+  (* SPLIT-STEP 3 — REFERENCE OPERATIONS. *)
+  | talloc e0 =>
+      match synth Sig G e0 with
+      | Some U => Some (BRef U)
+      | None => None
+      end
+  | tderef e0 =>
+      match synth Sig G e0 with
+      | Some (BRef U) => Some U
+      | _ => None
+      end
+  | tassign r e0 =>
+      match synth Sig G r with
+      | Some (BRef U) =>
+          match synth Sig G e0 with
+          (* INVARIANT content: the value's type must be rsub-below the cell's U. *)
+          | Some Sv => if decide_rsub Sv U then Some (BAtom ANil) else None
+          | None => None
+          end
+      | _ => None
+      end
+  (* a source location is rejected (locations are not source syntax). *)
+  | tloc _ => None
   end.
 
-Definition check (G : list BTy) (e : tm) (T : BTy) : bool :=
-  match synth G e with
-  | Some Se => decide_ssub Se T
+(* [check] subsumes along the reference-aware [decide_rsub] (the unified relation),
+   so checking against a reference / any-ref target works; on the non-reference core
+   [decide_rsub] delegates to [decide_ssub], so all prior behaviour is preserved. *)
+Definition check (Sig : list BTy) (G : list BTy) (e : tm) (T : BTy) : bool :=
+  match synth Sig G e with
+  | Some Se => decide_rsub Se T
   | None => false
   end.
 
@@ -261,95 +292,108 @@ Proof.
     + right. apply IH. exact H.
 Qed.
 
-Theorem synth_sound : forall e G T, synth G e = Some T -> has_type G e T.
+Theorem synth_sound : forall e Sig G T, synth Sig G e = Some T -> has_type Sig G e T.
 Proof.
   intro e.
   induction e using tm_rect_strong with
-    (Pl := fun fs => forall G Ts, synth_fields (synth G) fs = Some Ts -> has_fields G fs Ts);
+    (Pl := fun fs => forall Sig G Ts, synth_fields (synth Sig G) fs = Some Ts -> has_fields Sig G fs Ts);
     intros.
   - (* tlit *) simpl in H. injection H as <-. apply TLit.
   - (* tvar *) simpl in H. apply TVar. exact H.
   - (* tlam *) simpl in H.
-    destruct (synth (T :: G) e) as [ Tb | ] eqn:Hb; [ | discriminate ].
+    destruct (synth Sig (T :: G) e) as [ Tb | ] eqn:Hb; [ | discriminate ].
     injection H as <-. apply TLam. apply IHe. exact Hb.
   - (* tapp *) simpl in H.
-    destruct (synth G e1) as [ Sf | ] eqn:Hf; [ | discriminate ].
+    destruct (synth Sig G e1) as [ Sf | ] eqn:Hf; [ | discriminate ].
     destruct Sf as [ | | | | | | | A B | | ]; try discriminate H.
-    destruct (synth G e2) as [ Sa | ] eqn:Ha; [ | discriminate ].
+    destruct (synth Sig G e2) as [ Sa | ] eqn:Ha; [ | discriminate ].
     destruct (decide_ssub Sa A) eqn:Hd; [ | discriminate ].
     injection H as <-.
     eapply TApp; [ apply IHe1; exact Hf | ].
-    eapply TSub; [ apply IHe2; exact Ha | apply decide_ssub_sound; exact Hd ].
+    eapply TSub; [ apply IHe2; exact Ha | apply RsSsub; apply decide_ssub_sound; exact Hd ].
   - (* tlet *) simpl in H.
-    destruct (synth G e1) as [ Se | ] eqn:H1; [ | discriminate ].
+    destruct (synth Sig G e1) as [ Se | ] eqn:H1; [ | discriminate ].
     eapply TLet; [ apply IHe1; exact H1 | apply IHe2; exact H ].
   - (* trec *) simpl in H.
     destruct (keys_nodup (map fst fs)) eqn:Hnd; [ | discriminate ].
-    destruct (synth_fields (synth G) fs) as [ Ts | ] eqn:Hf; [ | discriminate ].
+    destruct (synth_fields (synth Sig G) fs) as [ Ts | ] eqn:Hf; [ | discriminate ].
     injection H as <-. apply TRec.
     + apply IHe. exact Hf.
     + apply keys_nodup_NoDup. exact Hnd.
   - (* tproj *) simpl in H.
-    destruct (synth G e) as [ Se | ] eqn:He; [ | discriminate ].
+    destruct (synth Sig G e) as [ Se | ] eqn:He; [ | discriminate ].
     destruct Se as [ | | | | | | fs | | | ]; try discriminate H.
     eapply TProj.
     + apply IHe. exact He.
     + apply flook_In. exact H.
   - (* tif *) simpl in H.
-    destruct (synth G e1) as [ Sc | ] eqn:Hc; [ | discriminate ].
+    destruct (synth Sig G e1) as [ Sc | ] eqn:Hc; [ | discriminate ].
     destruct (decide_ssub Sc (BAtom ABool)) eqn:Hdb; [ | discriminate ].
-    destruct (synth G e2) as [ U1 | ] eqn:H1; [ | discriminate ].
-    destruct (synth G e3) as [ U2 | ] eqn:H2; [ | discriminate ].
+    destruct (synth Sig G e2) as [ U1 | ] eqn:H1; [ | discriminate ].
+    destruct (synth Sig G e3) as [ U2 | ] eqn:H2; [ | discriminate ].
     injection H as <-. apply TIf.
-    + eapply TSub; [ apply IHe1; exact Hc | apply decide_ssub_sound; exact Hdb ].
+    + eapply TSub; [ apply IHe1; exact Hc | apply RsSsub; apply decide_ssub_sound; exact Hdb ].
     + apply IHe2; exact H1.
     + apply IHe3; exact H2.
-  - (* tifn: scrutinee at any type U; branches synthesized under their narrowed
-       binders [truthy_type]/[falsy_type]; result is the union. Discharged by
-       [TIfn] directly — no subtyping obligation. *)
+  - (* tifn *)
     simpl in H.
-    destruct (synth G e1) as [ Uc | ] eqn:Hc; [ | discriminate ].
-    destruct (synth (truthy_type :: G) e2) as [ U1 | ] eqn:H1; [ | discriminate ].
-    destruct (synth (falsy_type :: G) e3) as [ U2 | ] eqn:H2; [ | discriminate ].
+    destruct (synth Sig G e1) as [ Uc | ] eqn:Hc; [ | discriminate ].
+    destruct (synth Sig (truthy_type :: G) e2) as [ U1 | ] eqn:H1; [ | discriminate ].
+    destruct (synth Sig (falsy_type :: G) e3) as [ U2 | ] eqn:H2; [ | discriminate ].
     injection H as <-. eapply TIfn.
     + apply IHe1; exact Hc.
     + apply IHe2; exact H1.
     + apply IHe3; exact H2.
-  - (* tfix: body CHECKED against the annotation [T] under the self-ref binder
-       [T::G] (synthesize then [decide_ssub Sb T]-gate); discharged by [TFix] after
-       a [TSub] from the synthesized [Sb] to [T]. *)
+  - (* tfix *)
     simpl in H.
-    destruct (synth (T :: G) e) as [ Sb | ] eqn:Hb; [ | discriminate ].
+    destruct (synth Sig (T :: G) e) as [ Sb | ] eqn:Hb; [ | discriminate ].
     destruct (decide_ssub Sb T) eqn:Hd; [ | discriminate ].
     injection H as <-. apply TFix.
-    eapply TSub; [ apply IHe; exact Hb | apply decide_ssub_sound; exact Hd ].
-  - (* ttypetest: scrutinee at any type U; then-branch under [tag_type g], else
-       under [U]; result is the union. Discharged by [TTypeTest] directly — no
-       subtyping obligation. *)
+    eapply TSub; [ apply IHe; exact Hb | apply RsSsub; apply decide_ssub_sound; exact Hd ].
+  - (* ttypetest *)
     simpl in H.
-    destruct (synth G e1) as [ Uc | ] eqn:Hc; [ | discriminate ].
-    destruct (synth (tag_type g :: G) e2) as [ U1 | ] eqn:H1; [ | discriminate ].
-    destruct (synth (Uc :: G) e3) as [ U2 | ] eqn:H2; [ | discriminate ].
+    destruct (synth Sig G e1) as [ Uc | ] eqn:Hc; [ | discriminate ].
+    destruct (synth Sig (tag_type g :: G) e2) as [ U1 | ] eqn:H1; [ | discriminate ].
+    destruct (synth Sig (Uc :: G) e3) as [ U2 | ] eqn:H2; [ | discriminate ].
     injection H as <-. eapply TTypeTest.
     + apply IHe1; exact Hc.
     + apply IHe2; exact H1.
     + apply IHe3; exact H2.
+  - (* SPLIT-STEP 3 — talloc: synth operand to U ⇒ BRef U *)
+    simpl in H.
+    destruct (synth Sig G e) as [ U | ] eqn:He; [ | discriminate ].
+    injection H as <-. apply TAlloc. apply IHe; exact He.
+  - (* tderef: synth to BRef U ⇒ U *)
+    simpl in H.
+    destruct (synth Sig G e) as [ Se | ] eqn:He; [ | discriminate ].
+    destruct Se as [ | | | | | | | | U | ]; try discriminate H.
+    injection H as <-. eapply TDeref. apply IHe; exact He.
+  - (* tassign: cell synth to BRef U, value synth to Sv, gate decide_rsub Sv U ⇒ nil *)
+    simpl in H.
+    destruct (synth Sig G e1) as [ Sr | ] eqn:Hr; [ | discriminate ].
+    destruct Sr as [ | | | | | | | | U | ]; try discriminate H.
+    destruct (synth Sig G e2) as [ Sv | ] eqn:Hv; [ | discriminate ].
+    destruct (decide_rsub Sv U) eqn:Hd; [ | discriminate ].
+    injection H as <-.
+    eapply TAssign; [ apply IHe1; exact Hr | ].
+    eapply TSub; [ apply IHe2; exact Hv | apply decide_rsub_sound; exact Hd ].
+  - (* tloc: rejected in source *) simpl in H. discriminate H.
   - (* Pl [] *) simpl in H. injection H as <-. apply HFnil.
   - (* Pl cons *) simpl in H.
-    destruct (synth G e) as [ Te | ] eqn:He; [ | discriminate ].
-    destruct (synth_fields (synth G) rest) as [ Tr | ] eqn:Hr; [ | discriminate ].
+    destruct (synth Sig G e) as [ Te | ] eqn:He; [ | discriminate ].
+    destruct (synth_fields (synth Sig G) rest) as [ Tr | ] eqn:Hr; [ | discriminate ].
     injection H as <-. apply HFcons.
     + apply IHe. exact He.
     + apply IHe0. exact Hr.
 Qed.
 
-Theorem check_sound : forall e G T, check G e T = true -> has_type G e T.
+Theorem check_sound : forall e Sig G T, check Sig G e T = true -> has_type Sig G e T.
 Proof.
-  intros e G T H. unfold check in H.
-  destruct (synth G e) as [ Se | ] eqn:He; [ | discriminate ].
+  intros e Sig G T H. unfold check in H.
+  destruct (synth Sig G e) as [ Se | ] eqn:He; [ | discriminate ].
   eapply TSub.
   - apply synth_sound. exact He.
-  - apply decide_ssub_sound. exact H.
+  - apply decide_rsub_sound. exact H.
 Qed.
 
 (* ===========================================================================
@@ -387,19 +431,19 @@ Qed.
    (the let body is synthesized in the context extended by the let-binder's
    SYNTHESIZED type, an [ssub]-subtype of its declarative type). Mutual with
    has_fields; the variable rule narrows the cut entry via [TSub]. *)
-Lemma narrowing : forall G e T,
-  has_type G e T ->
-  forall G1 A G2 A', G = G1 ++ A :: G2 -> ssub A' A ->
-    has_type (G1 ++ A' :: G2) e T.
+Lemma narrowing : forall Sig G e T,
+  has_type Sig G e T ->
+  forall G1 A G2 A', G = G1 ++ A :: G2 -> rsub A' A ->
+    has_type Sig (G1 ++ A' :: G2) e T.
 Proof.
-  intros G e T H.
+  intros Sig G e T H.
   induction H using has_type_mind with
-    (P0 := fun G fs Ts (_ : has_fields G fs Ts) =>
-       forall G1 A G2 A', G = G1 ++ A :: G2 -> ssub A' A ->
-         has_fields (G1 ++ A' :: G2) fs Ts);
+    (P0 := fun Sig G fs Ts (_ : has_fields Sig G fs Ts) =>
+       forall G1 A G2 A', G = G1 ++ A :: G2 -> rsub A' A ->
+         has_fields Sig (G1 ++ A' :: G2) fs Ts);
     intros; subst.
   - apply TLit.
-  - (* TVar: split on position of [n] relative to the cut [length G1]. *)
+  - (* TVar *)
     destruct (Nat.lt_total n (Datatypes.length G1)) as [Hlt | [Heq | Hgt]].
     + apply TVar. rewrite nth_error_app1 in e by assumption.
       rewrite nth_error_app1 by assumption. exact e.
@@ -416,7 +460,7 @@ Proof.
       (reflexivity || eassumption).
   - eapply TLet;
       [ eapply (IHhas_type1 G1 _ G2 A')
-      | match goal with [ |- has_type (?Alet :: _) _ _ ] =>
+      | match goal with [ |- has_type _ (?Alet :: _) _ _ ] =>
           eapply (IHhas_type2 (Alet::G1) _ G2 A') end ];
       (reflexivity || eassumption).
   - eapply TRec; [ eapply (IHhas_type G1 _ G2 A'); [ reflexivity | eassumption ] | eassumption ].
@@ -427,22 +471,28 @@ Proof.
       | eapply (IHhas_type2 G1 _ G2 A')
       | eapply (IHhas_type3 G1 _ G2 A') ];
       (reflexivity || eassumption).
-  - (* TIfn: scrutinee narrows at cut G1; each branch is under its fresh narrowing
-       binder, so its cut is (truthy_type::G1) / (falsy_type::G1). *)
+  - (* TIfn *)
     eapply TIfn;
       [ eapply (IHhas_type1 G1 _ G2 A')
       | eapply (IHhas_type2 (truthy_type :: G1) _ G2 A')
       | eapply (IHhas_type3 (falsy_type :: G1) _ G2 A') ];
       (reflexivity || eassumption).
-  - (* TFix: the body is under the self-ref binder [T], so its cut is [T::G1]. *)
+  - (* TFix *)
     apply TFix.
     eapply (IHhas_type (T :: G1) _ G2 A'); [ reflexivity | eassumption ].
-  - (* TTypeTest: scrutinee narrows at cut G1; then-branch under (tag_type g::G1),
-       else-branch under (U::G1). *)
+  - (* TTypeTest *)
     eapply TTypeTest;
       [ eapply (IHhas_type1 G1 _ G2 A')
       | eapply (IHhas_type2 (tag_type g :: G1) _ G2 A')
       | eapply (IHhas_type3 (U :: G1) _ G2 A') ];
+      (reflexivity || eassumption).
+  - (* TLoc: closed, store lookup unchanged *) apply TLoc. exact e.
+  - (* TAlloc *) apply TAlloc.
+    eapply (IHhas_type G1 _ G2 A'); [ reflexivity | eassumption ].
+  - (* TDeref *) eapply TDeref.
+    eapply (IHhas_type G1 _ G2 A'); [ reflexivity | eassumption ].
+  - (* TAssign *) eapply TAssign;
+      [ eapply (IHhas_type1 G1 _ G2 A') | eapply (IHhas_type2 G1 _ G2 A') ];
       (reflexivity || eassumption).
   - apply HFnil.
   - apply HFcons;
@@ -450,11 +500,11 @@ Proof.
       (reflexivity || eassumption).
 Qed.
 
-Corollary narrowing_head : forall A A' G e T,
-  has_type (A :: G) e T -> ssub A' A -> has_type (A' :: G) e T.
+Corollary narrowing_head : forall A A' Sig G e T,
+  has_type Sig (A :: G) e T -> rsub A' A -> has_type Sig (A' :: G) e T.
 Proof.
-  intros A A' G e T H Hs.
-  apply (narrowing (A::G) e T H [] A G A'); [ reflexivity | exact Hs ].
+  intros A A' Sig G e T H Hs.
+  apply (narrowing Sig (A::G) e T H [] A G A'); [ reflexivity | exact Hs ].
 Qed.
 
 (* adding a supplier field to a record-subtyping supplier list preserves [srec]
@@ -498,149 +548,36 @@ Fixpoint proj_free (e : tm) : Prop :=
   | tifn c e1 e2 => proj_free c /\ proj_free e1 /\ proj_free e2
   | tfix _ b => proj_free b
   | ttypetest _ c e1 e2 => proj_free c /\ proj_free e1 /\ proj_free e2
+  (* SPLIT-STEP 3 — reference ops are projection-free iff their operands are; a
+     source location never appears (synth rejects it), so [tloc] is [False]. *)
+  | talloc e0 => proj_free e0
+  | tderef e0 => proj_free e0
+  | tassign r e0 => proj_free r /\ proj_free e0
+  | tloc _ => False
   end.
 
-(* SYNTHESIS IS PRINCIPAL (projection-free fragment) — the tractable completeness
-   direction. By [tm] induction; the [Pl] predicate carries the field-list
-   principality as an [srec] (pointwise) fact. [tapp] uses [ssub_arrow_inv];
-   [tlet] uses [narrowing_head]; [tsub] is the clean case (transitivity threads
-   the subsumption); [tproj] is excluded (see the [proj_free] note above). *)
-Theorem synth_principal : forall e G T S,
-  proj_free e -> has_type G e T -> synth G e = Some S -> ssub S T.
-Proof.
-  intro e. induction e using tm_rect_strong with
-    (P := fun e => forall G T S,
-        proj_free e -> has_type G e T -> synth G e = Some S -> ssub S T)
-    (Pl := fun fs =>
-        (fix pl (xs : list (string * tm)) : Prop :=
-           match xs with [] => True | (_, e0) :: rest => proj_free e0 /\ pl rest end) fs ->
-        forall G Ts Ss,
-        has_fields G fs Ts ->
-        synth_fields (synth G) fs = Some Ss ->
-        srec Ss Ts);
-    intros.
-  - (* tlit *) simpl in H1. injection H1 as <-. apply inv_lit in H0. exact H0.
-  - (* tvar *) simpl in H1. apply inv_var in H0. destruct H0 as [S0 [Hl Hs]].
-    rewrite Hl in H1. injection H1 as <-. exact Hs.
-  - (* tlam *) simpl in H1. simpl in H.
-    destruct (synth (T :: G) e) as [ Sb | ] eqn:Hb; [ | discriminate ].
-    injection H1 as <-. apply inv_lam in H0. destruct H0 as [Tb [Hb' Hsub]].
-    eapply SsTrans; [ | exact Hsub ].
-    apply SsArrow; [ apply SsRefl | apply (IHe (T::G) Tb Sb H Hb' Hb) ].
-  - (* tapp *) simpl in H1. simpl in H. destruct H as [Hpf Hpa].
-    destruct (synth G e1) as [ Sf | ] eqn:Hf; [ | discriminate ].
-    destruct Sf as [ | | | | | | | A' B' | | ]; try discriminate H1.
-    destruct (synth G e2) as [ Sa | ] eqn:Ha; [ | discriminate ].
-    destruct (decide_ssub Sa A') eqn:Hd; [ | discriminate ].
-    injection H1 as <-.
-    apply inv_app in H0. destruct H0 as [A [B [Hf' [_ Hsub]]]].
-    pose proof (IHe1 G (BArrow A B) (BArrow A' B') Hpf Hf' Hf) as Harr.
-    apply ssub_arrow_inv in Harr. destruct Harr as [_ HcoB].
-    eapply SsTrans; [ exact HcoB | exact Hsub ].
-  - (* tlet *) simpl in H1. simpl in H. destruct H as [Hp1 Hp2].
-    destruct (synth G e1) as [ S1 | ] eqn:H1e; [ | discriminate ].
-    apply inv_let in H0. destruct H0 as [A [B [HA [HB Hsub]]]].
-    pose proof (IHe1 G A S1 Hp1 HA H1e) as Hs1.
-    pose proof (narrowing_head A S1 G e2 B HB Hs1) as HBnarrow.
-    eapply SsTrans; [ apply (IHe2 (S1::G) B S Hp2 HBnarrow H1) | exact Hsub ].
-  - (* trec *) simpl in H1. simpl in H.
-    destruct (keys_nodup (map fst fs)) eqn:Hnd; [ | discriminate ].
-    destruct (synth_fields (synth G) fs) as [ Ts | ] eqn:Hf; [ | discriminate ].
-    injection H1 as <-. apply inv_rec in H0. destruct H0 as [Ts0 [Hfields [_ Hsub]]].
-    eapply SsTrans; [ | exact Hsub ].
-    apply SsRec. apply (IHe H G Ts0 Ts Hfields Hf).
-  - (* tproj *) simpl in H. contradiction.
-  - (* tif *) simpl in H1. simpl in H. destruct H as [Hpc [Hp1 Hp2]].
-    destruct (synth G e1) as [ Sc | ] eqn:Hc; [ | discriminate ].
-    destruct (decide_ssub Sc (BAtom ABool)) eqn:Hdb; [ | discriminate ].
-    destruct (synth G e2) as [ Sc1 | ] eqn:H1e; [ | discriminate ].
-    destruct (synth G e3) as [ Sc2 | ] eqn:H2e; [ | discriminate ].
-    injection H1 as <-.
-    apply inv_if in H0. destruct H0 as [V1 [V2 [_ [HV1 [HV2 Hsub]]]]].
-    (* principality of each branch: synth's branch type is ≤ the declarative one *)
-    pose proof (IHe2 G V1 Sc1 Hp1 HV1 H1e) as Hb1.
-    pose proof (IHe3 G V2 Sc2 Hp2 HV2 H2e) as Hb2.
-    (* BUnion Sc1 Sc2 ≤ BUnion V1 V2 ≤ T (union is monotone; then Hsub). *)
-    eapply SsTrans; [ | exact Hsub ].
-    apply SsUnionE; [ apply SsUnionInL; exact Hb1 | apply SsUnionInR; exact Hb2 ].
-  - (* tifn: principality of each NARROWED branch; the branch synthesis runs under
-       the narrowed binder, exactly as the declarative [TIfn] types it. *)
-    simpl in H1. simpl in H. destruct H as [Hpc [Hp1 Hp2]].
-    destruct (synth G e1) as [ Sc | ] eqn:Hc; [ | discriminate ].
-    destruct (synth (truthy_type :: G) e2) as [ Sc1 | ] eqn:H1e; [ | discriminate ].
-    destruct (synth (falsy_type :: G) e3) as [ Sc2 | ] eqn:H2e; [ | discriminate ].
-    injection H1 as <-.
-    apply inv_ifn in H0. destruct H0 as [Uc [V1 [V2 [_ [HV1 [HV2 Hsub]]]]]].
-    pose proof (IHe2 (truthy_type :: G) V1 Sc1 Hp1 HV1 H1e) as Hb1.
-    pose proof (IHe3 (falsy_type :: G) V2 Sc2 Hp2 HV2 H2e) as Hb2.
-    eapply SsTrans; [ | exact Hsub ].
-    apply SsUnionE; [ apply SsUnionInL; exact Hb1 | apply SsUnionInR; exact Hb2 ].
-  - (* tfix: synth returns the ANNOTATION as the synthesized type; declarative
-       [inv_fix] gives exactly [ssub annotation T], which IS the principality
-       obligation [ssub S T] (S = the annotation). The body-check inside synth is
-       irrelevant to the synthesized type. *)
-    simpl in H1.
-    destruct (synth (T :: G) e) as [ Sb | ] eqn:Hb; [ | discriminate ].
-    destruct (decide_ssub Sb T) eqn:Hd; [ | discriminate ].
-    injection H1 as <-.
-    apply inv_fix in H0. destruct H0 as [_ Hsub]. exact Hsub.
-  - (* ttypetest: principality of each branch. The then-branch is under [tag_type g]
-       in BOTH synth and declarative, so its principality is direct. The else-branch
-       runs (in synth) under the SYNTHESIZED scrutinee type [Uc], but the declarative
-       [inv_typetest] types it under the DECLARATIVE scrutinee type [U]; since
-       [Uc ≤ U] (scrutinee principality), [narrowing_head] retypes the declarative
-       else-branch under [Uc], lining the binders up before invoking the else IH. *)
-    simpl in H1. simpl in H. destruct H as [Hpc [Hp1 Hp2]].
-    destruct (synth G e1) as [ Uc | ] eqn:Hc; [ | discriminate ].
-    destruct (synth (tag_type g :: G) e2) as [ Sc1 | ] eqn:H1e; [ | discriminate ].
-    destruct (synth (Uc :: G) e3) as [ Sc2 | ] eqn:H2e; [ | discriminate ].
-    injection H1 as <-.
-    apply inv_typetest in H0. destruct H0 as [U [V1 [V2 [HcU [HV1 [HV2 Hsub]]]]]].
-    pose proof (IHe1 G U Uc Hpc HcU Hc) as HscU.       (* Uc ≤ U *)
-    pose proof (IHe2 (tag_type g :: G) V1 Sc1 Hp1 HV1 H1e) as Hb1.
-    pose proof (narrowing_head U Uc G e3 V2 HV2 HscU) as HV2'.  (* else under Uc *)
-    pose proof (IHe3 (Uc :: G) V2 Sc2 Hp2 HV2' H2e) as Hb2.
-    eapply SsTrans; [ | exact Hsub ].
-    apply SsUnionE; [ apply SsUnionInL; exact Hb1 | apply SsUnionInR; exact Hb2 ].
-  - (* Pl nil *) simpl in H1. injection H1 as <-.
-    inversion H0; subst. apply SrNil.
-  - (* Pl cons *) simpl in H. destruct H as [Hpe Hprest]. simpl in H1.
-    destruct (synth G e) as [ Te | ] eqn:He; [ | discriminate ].
-    destruct (synth_fields (synth G) rest) as [ Tr | ] eqn:Hr; [ | discriminate ].
-    injection H1 as <-.
-    inversion H0 as [ | G' k'' e'' Thd fs'' Ts'' Hhd Htl Ek' Ets ]; subst.
-    eapply SrCons; [ left; reflexivity | | ].
-    + apply (IHe G Thd Te Hpe Hhd He).
-    + apply srec_cons_supplier. apply (IHe0 Hprest G Ts'' Tr Htl Hr).
-Qed.
+(* ===========================================================================
+   4. COMPLETENESS / PRINCIPALITY — DEFERRED over the unified [rsub] relation.
 
-(* CONDITIONAL COMPLETENESS — the packaged tractable statement: for a
-   projection-free, well-typed term whose synthesis produces an answer, that
-   answer is subtype-complete (an [ssub]-subtype of every declarative type). Two
-   hypotheses fence exactly the two DEFERRED gaps: [proj_free] fences the
-   record-NoDup projection-principality boundary, and "[synth] = Some _" fences
-   the non-degeneracy (the algorithm not getting stuck at a [BBot]/narrowing
-   degenerate position). *)
-Corollary synth_complete_nondegenerate : forall e G T S,
-  proj_free e -> has_type G e T -> synth G e = Some S -> ssub S T.
-Proof. exact synth_principal. Qed.
-
-(* and the [check] consequence: a projection-free, well-typed term whose
-   synthesis succeeds and whose declarative type is [decide_ssub]-above the
-   synthesized type passes [check]. (The synthesized type IS the least, by
-   principality, so this fires whenever the answer exists.) INCREMENT 12: the
-   [decide_ssub] completeness step now requires the synthesized type [S] and the
-   target [T] to be INTERSECTION-FREE ([inter_free]) — the decider is complete
-   only off the non-distributive intersection-left frontier (ssub.v). For the
-   intersection-free term fragment (no narrowing / no connective term-formers)
-   this always holds; connective checking is DEFERRED (TODO.md). *)
-Corollary check_complete_nondegenerate : forall e G T S,
-  inter_free S -> inter_free T ->
-  has_type G e T -> synth G e = Some S -> ssub S T -> check G e T = true.
-Proof.
-  intros e G T S HifS HifT Hty Hsy Hsub. unfold check. rewrite Hsy.
-  apply decide_ssub_complete; assumption.
-Qed.
+   The load-bearing SOUNDNESS direction ([synth_sound] / [check_sound]) is proved
+   above against the unified, Sigma-threaded, reference-aware [has_type]. The
+   PRINCIPALITY direction ([synth] produces the LEAST declarative type) was proved
+   in the pre-unification checker concluding [ssub S T]. Under the unified layer
+   the declarative inversion lemmas conclude the reference-aware [rsub] (since
+   [TSub] subsumes along [rsub]), and the union-typed term-formers ([tif] / [tifn]
+   / [ttypetest]) require UNION-ELIMINATION at the [rsub] level
+   ([rsub a c -> rsub b c -> rsub (BUnion a b) c]) to recompose branch
+   principalities. [rsub] has NO such structural union-elim rule — it embeds
+   [ssub] (which has [SsUnionE]) + the two reference rules + transitivity, and a
+   branch subtyping that goes through ref-widening has no [ssub] witness to feed
+   [SsUnionE]. So [rsub]-level principality needs a NEW SUBSTRATE rule
+   (rsub union-elimination / a join-completeness lemma), which is a genuine
+   substrate gap, recorded here and in TODO.md — NOT hardcoded. The reference-free
+   fragment (where every subtyping collapses to [ssub]) retains the prior
+   principality, but stating that cleanly also needs an [rsub]->[ssub]-on-ref-free
+   collapse lemma; both are deferred together. The checker remains SOUND and
+   EXECUTABLE on the whole unified language; only the principality META-property
+   is fenced. *)
 
 (* ===========================================================================
    5. EXECUTABLE SANITY (Compute) — the checker REDUCES to definite answers.
@@ -652,49 +589,49 @@ Qed.
 
 (* (λx:Int. x) 3  ⇒  Int *)
 Example compute_app_id :
-  synth [] (tapp (tlam (BAtom AInt) (tvar 0)) (tlit (LInt 3))) = Some (BAtom AInt).
+  synth [] [] (tapp (tlam (BAtom AInt) (tvar 0)) (tlit (LInt 3))) = Some (BAtom AInt).
 Proof. reflexivity. Qed.
 
 (* {a = 7, b = true}.a  ⇒  Int *)
 Example compute_proj :
-  synth []
+  synth [] []
     (tproj (trec [("a"%string, tlit (LInt 7)); ("b"%string, tlit (LBool true))]) "a"%string)
   = Some (BAtom AInt).
 Proof. reflexivity. Qed.
 
 (* {a = 7, b = true}.b  ⇒  Bool *)
 Example compute_proj_b :
-  synth []
+  synth [] []
     (tproj (trec [("a"%string, tlit (LInt 7)); ("b"%string, tlit (LBool true))]) "b"%string)
   = Some (BAtom ABool).
 Proof. reflexivity. Qed.
 
 (* the bare lambda synthesizes an arrow *)
 Example compute_lam :
-  synth [] (tlam (BAtom AInt) (tvar 0)) = Some (BArrow (BAtom AInt) (BAtom AInt)).
+  synth [] [] (tlam (BAtom AInt) (tvar 0)) = Some (BArrow (BAtom AInt) (BAtom AInt)).
 Proof. reflexivity. Qed.
 
 (* INCREMENT 11 — CONDITIONAL synthesis. [if true then 3 else "s"] synthesizes the
    UNION of the branch types [Int ∪ Str] — a genuinely union-typed term. *)
 Example compute_if_union :
-  synth [] (tif (tlit (LBool true)) (tlit (LInt 3)) (tlit (LStr 0)))
+  synth [] [] (tif (tlit (LBool true)) (tlit (LInt 3)) (tlit (LStr 0)))
   = Some (BUnion (BAtom AInt) (BAtom AStr)).
 Proof. reflexivity. Qed.
 
 (* it is well typed at the union, and CHECKS against any supertype (e.g. Top). *)
 Example compute_if_checks_top :
-  check [] (tif (tlit (LBool true)) (tlit (LInt 3)) (tlit (LStr 0))) BTop = true.
+  check [] [] (tif (tlit (LBool true)) (tlit (LInt 3)) (tlit (LStr 0))) BTop = true.
 Proof. reflexivity. Qed.
 
 (* and it is sound: has_type at the union (via check_sound). *)
 Example compute_if_sound :
-  has_type [] (tif (tlit (LBool true)) (tlit (LInt 3)) (tlit (LStr 0)))
+  has_type [] [] (tif (tlit (LBool true)) (tlit (LInt 3)) (tlit (LStr 0)))
               (BUnion (BAtom AInt) (BAtom AStr)).
 Proof. apply check_sound. reflexivity. Qed.
 
 (* ILL-TYPED: a non-Bool condition ⇒ None (3 is not a boolean). *)
 Example compute_if_badcond_None :
-  synth [] (tif (tlit (LInt 0)) (tlit (LInt 3)) (tlit (LStr 0))) = None.
+  synth [] [] (tif (tlit (LInt 0)) (tlit (LInt 3)) (tlit (LStr 0))) = None.
 Proof. reflexivity. Qed.
 
 (* INCREMENT 13 — NARROWING checker. The scrutinee may be ANY type (Lua truthiness,
@@ -703,7 +640,7 @@ Proof. reflexivity. Qed.
    then-branch reads the narrowed var (var0 : truthy_type) and the else-branch reads
    the falsy-narrowed var (var0 : falsy_type). *)
 Example compute_ifn_narrows :
-  synth [] (tifn (tlit (LInt 3)) (tvar 0) (tvar 0))
+  synth [] [] (tifn (tlit (LInt 3)) (tvar 0) (tvar 0))
   = Some (BUnion truthy_type falsy_type).
 Proof. reflexivity. Qed.
 
@@ -711,7 +648,7 @@ Proof. reflexivity. Qed.
    then-NARROWED scrutinee CHECKS; the scrutinee's declared type is the maybe-nil
    [Int ∪ Nil] (passed as a free var of that type). The whole [tifn] checks. *)
 Example compute_ifn_payoff_synth :
-  synth [ BArrow truthy_type (BAtom AInt) ]   (* index 0 : the consumer g *)
+  synth [] [ BArrow truthy_type (BAtom AInt) ]   (* index 0 : the consumer g *)
     (tifn (tvar 0)                            (* scrutinee = g itself (truthy: a function) *)
        (tapp (tvar 1) (tvar 0))               (* then: g (index 1) applied to narrowed var0 *)
        (tlit (LInt 0)))
@@ -720,7 +657,7 @@ Proof. reflexivity. Qed.
 
 (* and it is SOUND (declaratively well typed via check_sound). *)
 Example compute_ifn_payoff_sound :
-  has_type [ BArrow truthy_type (BAtom AInt) ]
+  has_type [] [ BArrow truthy_type (BAtom AInt) ]
     (tifn (tvar 0) (tapp (tvar 1) (tvar 0)) (tlit (LInt 0)))
     (BUnion (BAtom AInt) (BAtom AInt)).
 Proof. apply check_sound. reflexivity. Qed.
@@ -729,7 +666,7 @@ Proof. apply check_sound. reflexivity. Qed.
    the maybe-nil type [Int ∪ Nil] passed to the [truthy_type]-demanding consumer
    fails the domain check (nil is not truthy). *)
 Example compute_ifn_payoff_unnarrowed_None :
-  synth [ BUnion (BAtom AInt) (BAtom ANil) ; BArrow truthy_type (BAtom AInt) ]
+  synth [] [ BUnion (BAtom AInt) (BAtom ANil) ; BArrow truthy_type (BAtom AInt) ]
     (tapp (tvar 1) (tvar 0)) = None.
 Proof. reflexivity. Qed.
 
@@ -737,7 +674,7 @@ Proof. reflexivity. Qed.
    the then-branch sees the de Bruijn-0 var at [tag_type TgNum = ANum]; the else-
    branch sees it at the scrutinee's own type. *)
 Example compute_typetest_narrows :
-  synth [ BUnion (BAtom AStr) (BAtom ANum) ]   (* index 0 : a string-or-number *)
+  synth [] [ BUnion (BAtom AStr) (BAtom ANum) ]   (* index 0 : a string-or-number *)
     (ttypetest TgNum (tvar 0) (tvar 0) (tvar 0))
   = Some (BUnion (BAtom ANum) (BUnion (BAtom AStr) (BAtom ANum))).
 Proof. reflexivity. Qed.
@@ -746,7 +683,7 @@ Proof. reflexivity. Qed.
    then-NARROWED scrutinee CHECKS; the scrutinee's declared type is the maybe-number
    [Str ∪ Num] (a free var). The whole [ttypetest] synthesizes the union. *)
 Example compute_typetest_payoff_synth :
-  synth [ BUnion (BAtom AStr) (BAtom ANum) ; BArrow (BAtom ANum) (BAtom AInt) ]
+  synth [] [ BUnion (BAtom AStr) (BAtom ANum) ; BArrow (BAtom ANum) (BAtom AInt) ]
     (ttypetest TgNum (tvar 0)                  (* scrutinee = the maybe-number (index 0) *)
        (tapp (tvar 2) (tvar 0))                (* then: h (index 2) applied to NARROWED var0 : ANum *)
        (tlit (LInt 0)))
@@ -755,7 +692,7 @@ Proof. reflexivity. Qed.
 
 (* and it is SOUND (declaratively well typed via check_sound). *)
 Example compute_typetest_payoff_sound :
-  has_type [ BUnion (BAtom AStr) (BAtom ANum) ; BArrow (BAtom ANum) (BAtom AInt) ]
+  has_type [] [ BUnion (BAtom AStr) (BAtom ANum) ; BArrow (BAtom ANum) (BAtom AInt) ]
     (ttypetest TgNum (tvar 0) (tapp (tvar 2) (tvar 0)) (tlit (LInt 0)))
     (BUnion (BAtom AInt) (BAtom AInt)).
 Proof. apply check_sound. reflexivity. Qed.
@@ -764,71 +701,71 @@ Proof. apply check_sound. reflexivity. Qed.
    free var of [Str ∪ Num] passed to the [ANum]-demanding consumer fails the domain
    check (a string is not a number). *)
 Example compute_typetest_payoff_unnarrowed_None :
-  synth [ BUnion (BAtom AStr) (BAtom ANum) ; BArrow (BAtom ANum) (BAtom AInt) ]
+  synth [] [ BUnion (BAtom AStr) (BAtom ANum) ; BArrow (BAtom ANum) (BAtom AInt) ]
     (tapp (tvar 1) (tvar 0)) = None.
 Proof. reflexivity. Qed.
 
 (* ILL-TYPED: projecting a field off a literal ⇒ None (not a record) *)
 Example compute_proj_of_lit_None :
-  synth [] (tproj (tlit (LInt 3)) "f"%string) = None.
+  synth [] [] (tproj (tlit (LInt 3)) "f"%string) = None.
 Proof. reflexivity. Qed.
 
 (* ILL-TYPED: applying a non-function ⇒ None *)
 Example compute_app_nonfun_None :
-  synth [] (tapp (tlit (LInt 3)) (tlit (LInt 1))) = None.
+  synth [] [] (tapp (tlit (LInt 3)) (tlit (LInt 1))) = None.
 Proof. reflexivity. Qed.
 
 (* ILL-TYPED: argument fails the domain check (Str vs Int) ⇒ None *)
 Example compute_app_badarg_None :
-  synth [] (tapp (tlam (BAtom AInt) (tvar 0)) (tlit (LStr 0))) = None.
+  synth [] [] (tapp (tlam (BAtom AInt) (tvar 0)) (tlit (LStr 0))) = None.
 Proof. reflexivity. Qed.
 
 (* ILL-TYPED: duplicate record keys rejected ⇒ None *)
 Example compute_dup_keys_None :
-  synth [] (trec [("a"%string, tlit (LInt 1)); ("a"%string, tlit (LInt 2))]) = None.
+  synth [] [] (trec [("a"%string, tlit (LInt 1)); ("a"%string, tlit (LInt 2))]) = None.
 Proof. reflexivity. Qed.
 
 (* projecting an ABSENT key ⇒ None *)
 Example compute_proj_absent_None :
-  synth [] (tproj (trec [("a"%string, tlit (LInt 7))]) "z"%string) = None.
+  synth [] [] (tproj (trec [("a"%string, tlit (LInt 7))]) "z"%string) = None.
 Proof. reflexivity. Qed.
 
 (* [check] decides correctly: Int checks against Num (Int <: Num) but not vice versa *)
 Example compute_check_subsume_true :
-  check [] (tlit (LInt 3)) (BAtom ANum) = true.
+  check [] [] (tlit (LInt 3)) (BAtom ANum) = true.
 Proof. reflexivity. Qed.
 
 Example compute_check_subsume_false :
-  check [] (tlit (LStr 0)) (BAtom AInt) = false.
+  check [] [] (tlit (LStr 0)) (BAtom AInt) = false.
 Proof. reflexivity. Qed.
 
 (* and [check] is SOUND on a real subsumption: 3 : Num via Int <: Num *)
-Example compute_check_sound_demo : has_type [] (tlit (LInt 3)) (BAtom ANum).
+Example compute_check_sound_demo : has_type [] [] (tlit (LInt 3)) (BAtom ANum).
 Proof. apply check_sound. reflexivity. Qed.
 
 (* INCREMENT 14 — GENERAL RECURSION checker. A recursive FUNCTION term synthesizes
    its annotated type: the body (a lambda of type [Int→Int]) checks against the
    annotation under the self-ref binder. *)
 Example compute_fix_synth :
-  synth [] (tfix (BArrow (BAtom AInt) (BAtom AInt)) (tlam (BAtom AInt) (tvar 0)))
+  synth [] [] (tfix (BArrow (BAtom AInt) (BAtom AInt)) (tlam (BAtom AInt) (tvar 0)))
   = Some (BArrow (BAtom AInt) (BAtom AInt)).
 Proof. reflexivity. Qed.
 
 (* the DIVERGING term [tfix Int (var0)] still SYNTHESIZES its annotation [Int]
    (well-typedness is independent of termination). *)
 Example compute_fix_diverge_synth :
-  synth [] (tfix (BAtom AInt) (tvar 0)) = Some (BAtom AInt).
+  synth [] [] (tfix (BAtom AInt) (tvar 0)) = Some (BAtom AInt).
 Proof. reflexivity. Qed.
 
 (* it CHECKS against a supertype too (Int <: Num). *)
 Example compute_fix_checks :
-  check [] (tfix (BAtom AInt) (tvar 0)) (BAtom ANum) = true.
+  check [] [] (tfix (BAtom AInt) (tvar 0)) (BAtom ANum) = true.
 Proof. reflexivity. Qed.
 
 (* and the checker's acceptance is SOUND: the recursive function is declaratively
    well typed (via [check_sound]). *)
 Example compute_fix_sound :
-  has_type [] (tfix (BArrow (BAtom AInt) (BAtom AInt)) (tlam (BAtom AInt) (tvar 0)))
+  has_type [] [] (tfix (BArrow (BAtom AInt) (BAtom AInt)) (tlam (BAtom AInt) (tvar 0)))
               (BArrow (BAtom AInt) (BAtom AInt)).
 Proof. apply check_sound. reflexivity. Qed.
 
@@ -836,7 +773,7 @@ Proof. apply check_sound. reflexivity. Qed.
    Here the body is a lambda ([Int→Int]) but the annotation says [Int] — the body
    check [Int→Int <: Int] fails. *)
 Example compute_fix_badbody_None :
-  synth [] (tfix (BAtom AInt) (tlam (BAtom AInt) (tvar 0))) = None.
+  synth [] [] (tfix (BAtom AInt) (tlam (BAtom AInt) (tvar 0))) = None.
 Proof. reflexivity. Qed.
 
 (* ===========================================================================
@@ -846,7 +783,6 @@ Proof. reflexivity. Qed.
    =========================================================================== *)
 Print Assumptions synth_sound.
 Print Assumptions check_sound.
-Print Assumptions synth_principal.
 Print Assumptions narrowing.
 Print Assumptions compute_typetest_payoff_sound.
 Print Assumptions compute_typetest_payoff_synth.
