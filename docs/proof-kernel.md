@@ -1679,3 +1679,46 @@ WIDENING, and the one-way ASYMMETRY. `proof/ssub.v` ONLY — `subtype.v`,
   connective-target clauses to close the union/inter-of-refs completeness frontier,
   and add store-based mutation soundness (deref/assign typing, preservation over a
   typed store).
+
+## Increment 19 — THE REFERENCES UNIFICATION (split-step 3): one store-aware typed language
+
+Split-step 3 lands the unification the prior increments staged: the separate
+imperative file `proof/imp.v` is **RETIRED** and its store + reference machinery
+is threaded into the MAIN proof chain, so records, flow-narrowing
+(`tifn`/`ttypetest`), recursion (`tfix`), references, and the store now coexist
+in ONE language with ONE `has_type`. Commits `1e7f7fe5` (unify store + references
+into the typing layer) + `01aae498` (retire `imp.v`; algorithmic checker over the
+unified store language).
+
+- **What unified.** `typing.v`'s term language gains `talloc`/`tderef`/`tassign`/
+  `tloc` and a store-typing `Σ`-threaded `has_type Sig G e T`; `subtype.v`'s
+  `BRef`/`BAnyRef` (increment 17) are the reference types; `ssub.v`'s `rsub`
+  (increment 18) is the subsumption relation `TSub` now subsumes along; `check.v`'s
+  `synth`/`check` are Σ-threaded over the unified language. The whole chain
+  (`subtype → typing → ssub → check`) compiles with `imp.v` gone.
+
+- **Preserved (`Qed`, Print Assumptions closed).** `progress` + `preservation`
+  over the unified, store-threaded judgment; `synth_sound` / `check_sound` over the
+  Σ-threaded checker. Store-weakening, the Σ-adapted substitution lemma, and the
+  store invariant carry through.
+
+- **The COST — algorithmic principality fenced (framed as substrate, NOT
+  hardcoded).** Under the unified layer the declarative inversion lemmas conclude
+  the reference-aware `rsub` (since `TSub` subsumes along `rsub`), and the
+  union-typed term-formers (`tif`/`tifn`/`ttypetest`) need union-elimination at the
+  `rsub` level — `rsub a c -> rsub b c -> rsub (BUnion a b) c` — to recompose
+  branch principalities. `rsub` has NO such structural rule (it embeds `ssub`'s
+  `SsUnionE` + the two reference rules + transitivity; a branch subtyping through
+  ref-widening has no `ssub` witness to feed `SsUnionE`). So `rsub`-level
+  principality needs a NEW SUBSTRATE rule (an `rsub` union-elim / join-completeness
+  lemma); the reference-free fragment also needs an `rsub`→`ssub` collapse lemma to
+  restore the prior principality cleanly. Both are DEFERRED together — recorded as
+  a substrate need in `TODO.md`, never faked. The checker stays SOUND and
+  EXECUTABLE on the whole unified language; only the principality META-property is
+  fenced. See the framed-deferral comment at `proof/check.v:560-580`.
+
+- **DEFERRED frontiers carried forward** (all in `TODO.md`): the `decide_rsub`
+  reference-source-into-connective completeness gap (its own connective-target
+  clauses); the named CONSUMERS of the ref core — Lua's mutable TABLE FIELDS and
+  reassignable LOCALS, aliasing / strong-update precision; precise reference
+  narrowing (truthy location → `BAnyRef` is sound-but-imprecise).

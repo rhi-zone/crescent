@@ -139,13 +139,18 @@ Op-sem parity must hold at every commit. After the handler deletion, the adversa
 ## Proof-dev / type-system backlog (deferred items)
 
 > **THE single source of truth** for everything deferred / scoped-out / future
-> across the Coq subtype metatheory (`proof/subtype.v`, narrated in
-> `docs/proof-kernel.md`) and the reality bridge (`lib/sem/bridge/`, narrated in
-> `docs/reality-bridge.md`). Those two docs keep their per-increment notes; this
-> is the consolidated list they both point to. Items tagged **[BLOCKING]** stand
-> between the current dev (a sound-but-often-`DUnknown` subtyping algebra) and a
-> *usable static checker*; **[nice-to-have]** are precision / faithfulness
-> refinements. Pointers are `file:increment` or `file:line` at time of writing.
+> across the Coq metatheory — the subtype algebra (`proof/subtype.v`), the typing
+> layer + operational semantics (`proof/typing.v`), the algorithmic subtyping
+> relation (`proof/ssub.v`, incl. the reference `rsub`), and the bidirectional
+> checker (`proof/check.v`) — all narrated in `docs/proof-kernel.md`, plus the
+> reality bridge (`lib/sem/bridge/`, narrated in `docs/reality-bridge.md`). Those
+> docs keep their per-increment notes; this is the consolidated list they both
+> point to. **Last re-consolidated after the references unification** (commits
+> `1e7f7fe5` + `01aae498`: store + references threaded into the MAIN typing layer,
+> `imp.v` retired). Items tagged **[BLOCKING]** stand between the current dev (a
+> sound-but-often-`DUnknown`/`rsub`-fenced checker) and a *usable static checker*;
+> **[nice-to-have]** are precision / faithfulness refinements. Pointers are
+> `file:increment` or `file:line` at time of writing.
 
 ### Decision-procedure completeness (the emptiness-based `gdecide`)
 
@@ -167,6 +172,29 @@ Op-sem parity must hold at every commit. After the handler deletion, the adversa
   defers (`clause_wit3`, `proof/subtype.v:3235`). Needs the Castagna-style
   arrow-aware emptiness / decomposition algorithm. Deferred at `proof-kernel.md`
   increment 7 ("[then — arrow decision procedure + multi-return]").
+- [ ] **[BLOCKING] Reference subtyping decision (`has_ref` defer in `gdecide`).**
+  Any DNF clause carrying a ref literal hits the `has_ref` guard (beside
+  `has_arrow`) and defers — `gdecide ⇒ DUnknown`, never a wrong ref answer. The
+  invariant `BRef` + any-ref widening rules ARE decided structurally by
+  `decide_rsub` (`proof/ssub.v`, increment 18), but the emptiness-based `gdecide`
+  in `subtype.v` itself does not decide refs. Deferred at `proof/subtype.v:2177`
+  (the `has_arrow c || has_ref c` guard) + increment 17/18.
+- [ ] **[BLOCKING] `decide_ssub`/`decide_rsub` inter-left distributivity (the N5
+  frontier).** `decide_ssub` is COMPLETE only on the `inter_free` fragment: the
+  inter-on-the-LEFT vs union/inter-on-the-right CROSS is the non-distributive
+  frontier (subtype.v's N5 free lattice). Concrete sound-incompleteness witness:
+  `decide_ssub ((Int∪Str)∩Bool)(Int∪Str) = false` while the subtyping holds.
+  Closing it routes the connective subsumption through the `gdecide` emptiness
+  path rather than widening `ssub`. Deferred at `proof-kernel.md` increment 12 +
+  `proof/ssub.v:329` / `:502`.
+- [ ] **[nice-to-have] Reference SOURCE into a connective target — `decide_rsub`
+  completeness gap.** A `BRef`/`BAnyRef` SOURCE into a UNION/INTERSECTION target
+  whose disjuncts are content-equivalent-but-not-syntactically-equal references is
+  decided SOUNDLY but not completely — the delegated `decide_ssub` cannot observe
+  ref-invariance through a connective. Closing it needs `decide_rsub` to grow its
+  own connective-target clauses (the same inter-free boundary `decide_ssub`
+  carries). Deferred at `proof/ssub.v:1356-1365` + `proof-kernel.md` increment 18
+  "DEFERRED FRONTIER".
 
 ### Type formers
 
@@ -443,6 +471,12 @@ Still open (DEFERRED — recorded honestly, minimal core only):
   (6) **Combined truthiness + type-test narrowing** in one guard (e.g. `if x and
   type(x)=="number"`) — each form is independently sound; composing their binders
   is future work.
+  (7) **Precise REFERENCE narrowing.** A truthy location currently narrows to its
+  bound type / `BAnyRef` (content-agnostic — sound, since a truthy value IS some
+  `VRef n`), not to a precise content type. Precise negative reference narrowing
+  (`U ∩ ¬BAnyRef`, "is not a reference") hits the same intersection-type arrow-
+  inversion wall as (1)/(3) — the hard core of intersection-type systems.
+  `typing.v:584` (BAnyRef binding-form narrowing).
 - [x] **Flow NARROWING — type-test occurrence typing (increment 15, DONE).**
   The real Lua `type(x)=="T"` guard — POSITIVE tag narrowing — machine-checked
   end-to-end (`progress`+`preservation`+`tag_narrows`+`synth_sound`+`check_sound`+
@@ -477,6 +511,17 @@ Still open (DEFERRED — recorded honestly, minimal core only):
   non-variable paths, and combined truthiness+type-test are DEFERRED (sub-items 3/4/6
   above).
 - [ ] **Statements / control flow** (while/blocks; `tif` done in increment 11) as terms.
+- [ ] **[BLOCKING] Mutable TABLE fields (record fields as refs).** The next
+  consumer of the unified ref core (increment 16 + the references unification):
+  record fields that are mutable cells, so `t.f = v` type-checks and mutates.
+  Built on `BRef`/store-typing; needs records re-expressed with ref-typed fields.
+  Deferred at `proof-kernel.md` increment 16 ("noteworthy CONSUMERS").
+- [ ] **[BLOCKING] Reassignable locals.** A `local x` whose binding is reassigned
+  (`x = v`) — modelled as a ref cell over the ref core; the other named consumer of
+  the unified store layer. Deferred at `proof-kernel.md` increment 16.
+- [ ] **[nice-to-have] Aliasing / strong-update precision.** Two names bound to the
+  same cell; flow-sensitive strong update on a uniquely-owned cell. Deferred at
+  `proof-kernel.md` increment 16 ("aliasing / strong-update precision").
 - [x] **Mutation / references — store-based soundness (increment 16, DONE).**
   NEW file `proof/imp.v` (on unmodified `subtype.v`+`typing.v`; `ssub.v`+`check.v`
   untouched). Own type syntax `RTy` (atoms + `RArrow` + `RRef`, since `subtype.v`'s
@@ -505,11 +550,15 @@ Still open (DEFERRED — recorded honestly, minimal core only):
   (string into `RRef Int`) REJECTED at every type + by the checker.
   `Print Assumptions` on progress/preservation/synthR_sound/checkR_sound + the
   mutation/ill-typed sanity: **Closed under the global context**; whole chain
-  compiles, protected files unmodified. **DEFERRED (next increment):** re-thread
-  RECORDS, flow-narrowing (`tifn`/type-test), recursion (`tfix`) through Σ
-  (orthogonal to the store — mechanical case multiplication); the noteworthy
-  CONSUMERS — Lua's mutable TABLE FIELDS (record fields as refs) and reassignable
-  LOCALS — built on this ref core; aliasing / strong-update precision.
+  compiles, protected files unmodified. **RESOLVED by the references unification**
+  (`01aae498` + `1e7f7fe5`): `imp.v` is RETIRED and the store + references are
+  threaded into the MAIN `typing.v`/`ssub.v`/`check.v` — RECORDS, flow-narrowing
+  (`tifn`/`ttypetest`), and recursion (`tfix`) now all coexist with Σ in ONE
+  language (progress + preservation re-proved `Qed` over the unified judgment;
+  `synth_sound`/`check_sound` survive). Cost: algorithmic principality is fenced
+  (see the `rsub` union-elim substrate item above). **STILL DEFERRED — the
+  noteworthy CONSUMERS built on this ref core:** Lua's mutable TABLE FIELDS (record
+  fields as refs) and reassignable LOCALS; aliasing / strong-update precision.
 - [ ] **Multi-arg / vararg / multi-return** functions (currently single→single).
 - [x] **General recursion — single fixpoint `tfix` (increment 14, DONE).**
   `proof/typing.v` + `proof/check.v` (on unmodified `subtype.v` + `ssub.v`). `tm`
@@ -583,7 +632,29 @@ Still open (DEFERRED — recorded honestly, minimal core only):
   synth G e = Some S -> ssub S T` (synth's output is the LEAST declarative type);
   supporting general context `narrowing` lemma. `Print Assumptions` on
   `synth_sound`, `check_sound`, `synth_principal`, `narrowing` all **Closed under
-  the global context** (no Admitted/Axiom/Classical).
+  the global context** (no Admitted/Axiom/Classical). **NOTE — this PRINCIPALITY
+  result was REMOVED by the references unification** (see the next item): under the
+  unified, Sigma-threaded, reference-aware `has_type`, the declarative inversion
+  lemmas conclude `rsub` (not `ssub`), and `rsub` lacks the union-elimination rule
+  that recomposed branch principalities. `synth_sound`/`check_sound` survive the
+  unification; `synth_principal` is fenced until the substrate below lands.
+- [ ] **[BLOCKING] `rsub` union-elimination substrate — restore algorithmic
+  principality over the unified relation.** The references unification
+  (`01aae498` + `1e7f7fe5`, retiring `imp.v` into a unified `typing.v`/`ssub.v`/
+  `check.v`) made `TSub` subsume along the reference-aware `rsub`. The union-typed
+  term-formers (`tif`/`tifn`/`ttypetest`) need UNION-ELIMINATION at the `rsub`
+  level — `rsub a c -> rsub b c -> rsub (BUnion a b) c` — to recompose branch
+  principalities, but `rsub` has NO such structural rule: it embeds `ssub` (which
+  HAS `SsUnionE`) + the two reference rules + transitivity, and a branch subtyping
+  that goes through ref-widening has no `ssub` witness to feed `SsUnionE`. So
+  `rsub`-level principality needs a NEW SUBSTRATE rule (an `rsub` union-elim / a
+  join-completeness lemma) — a genuine substrate gap, NOT hardcoded. **Simpler
+  partial:** an `rsub`→`ssub`-on-ref-free collapse lemma restores prior
+  principality on the reference-free fragment (every subtyping there collapses to
+  `ssub`); both are deferred together. The checker remains SOUND and EXECUTABLE on
+  the whole unified language — only the principality META-property is fenced.
+  Deferred at `proof/check.v:560-580` (framed-deferral comment) + `proof-kernel.md`
+  (the references-unification increment).
 - [ ] **Algorithmic adequacy / non-degeneracy of `synth`** (DEFERRED from
   increment 10). The completeness proved is principality (IF synth answers, that
   answer is least); NOT that synth ALWAYS answers on a well-typed term. Two
@@ -604,8 +675,14 @@ Still open (DEFERRED — recorded honestly, minimal core only):
   connectives (increment 9 coarseness). So connective subtyping in checking
   inherits that limitation; full connective checking needs the `dsub`/`gdecide`
   route — same substrate need as the connective-`ssub` item above.
-- [ ] **Reality bridge** to the executable `lib/sem` semantics (the empirical
-  anchor proof cannot establish — that `V`/`step` match real LuaJIT behaviour).
+- [ ] **[BLOCKING] Operational-semantics reality bridge (`step` ↔ real Lua
+  execution).** The bridge so far validates the proof's VALUE model (`V`/`denote`
+  ↔ real Lua values + membership predicates; atoms/functions/records all RESOLVED,
+  `lib/sem/bridge/`). The unvalidated axis is the proof's small-step `step` /
+  `rstep` REDUCTION matching real LuaJIT execution — the empirical anchor proof
+  cannot establish (that the modelled operational semantics, incl. store
+  mutation, is faithful to what real Lua does). `reality-bridge.md` §3 (the
+  differential pipeline targets values, not reductions, today).
 
 ## Slice typechecker — coverage and precision open threads
 
