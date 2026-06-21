@@ -79,7 +79,19 @@ Inductive tm : Type :=
      note in proof-kernel.md for the full diagnosis: this is the genuine refinement
      of the prior "value-conditioned op-sem" diagnosis, which was incomplete for
      substitution semantics.) *)
-  | tifn  : tm -> tm -> tm -> tm.            (* tifn cond then else (narrowing)  *)
+  | tifn  : tm -> tm -> tm -> tm             (* tifn cond then else (narrowing)  *)
+  (* INCREMENT 14 — GENERAL RECURSION (single fixpoint). [tfix T body]: de Bruijn
+     index 0 in [body] is the RECURSIVE SELF-REFERENCE, of type [T]; the whole
+     [tfix T body] has type [T]. The unfold-rule operational form ([SFix] below)
+     reduces [tfix T body] to [subst 0 (tfix T body) body] — replacing the self-ref
+     by the fixpoint itself. This is the simplest sound encoding: it always steps
+     (never a value), so type soundness TOLERATES NON-TERMINATION — progress and
+     preservation do NOT require termination (a recursive unfold always steps and
+     preserves typing). The annotation [T] makes it synthesizable (the checker
+     synthesizes [body] under [T::G] and returns [T]). Lua's [local function f =
+     ...] (which is recursion) is the derivable consumer. MUTUAL recursion and
+     recursive TYPES (equirecursive μ) are DEFERRED (backlog). *)
+  | tfix  : BTy -> tm -> tm.                 (* tfix T body : recursive self-ref *)
 
 (* The base type of a literal. *)
 Definition lit_type (l : lit) : BTy :=
@@ -105,6 +117,7 @@ Section tm_ind_strong.
   Hypothesis Hproj : forall e k, P e -> P (tproj e k).
   Hypothesis Hif   : forall c e1 e2, P c -> P e1 -> P e2 -> P (tif c e1 e2).
   Hypothesis Hifn  : forall c e1 e2, P c -> P e1 -> P e2 -> P (tifn c e1 e2).
+  Hypothesis Hfix  : forall T b, P b -> P (tfix T b).
   Hypothesis Hnil  : Pl [].
   Hypothesis Hcons : forall k e rest, P e -> Pl rest -> Pl ((k, e) :: rest).
   Fixpoint tm_rect_strong (e : tm) : P e :=
@@ -124,6 +137,7 @@ Section tm_ind_strong.
     | tproj e k => Hproj e k (tm_rect_strong e)
     | tif c e1 e2 => Hif c e1 e2 (tm_rect_strong c) (tm_rect_strong e1) (tm_rect_strong e2)
     | tifn c e1 e2 => Hifn c e1 e2 (tm_rect_strong c) (tm_rect_strong e1) (tm_rect_strong e2)
+    | tfix T b  => Hfix T b (tm_rect_strong b)
     end.
 End tm_ind_strong.
 
@@ -438,6 +452,14 @@ Inductive has_type : list BTy -> tm -> BTy -> Prop :=
       has_type (truthy_type :: G) e1 T1 ->
       has_type (falsy_type :: G) e2 T2 ->
       has_type G (tifn c e1 e2) (BUnion T1 T2)
+  (* INCREMENT 14 — GENERAL RECURSION. The body, given the recursive binding [T]
+     (de Bruijn 0 : T), has type [T]; the whole [tfix T body] then has type [T].
+     The annotation [T] is what makes the form synthesizable. Type soundness holds
+     even though [tfix] may diverge — the unfold step always makes progress and
+     preserves the type [T] (substituting a [tfix…:T] for the self-ref [:T]). *)
+  | TFix  : forall G T body,
+      has_type (T :: G) body T ->
+      has_type G (tfix T body) T
 (* key-aligned pointwise typing of record fields; mutual so the generated
    induction principle carries an IH on every field derivation. *)
 with has_fields : list BTy -> list (string * tm) -> list (string * BTy) -> Prop :=
@@ -494,6 +516,9 @@ Fixpoint lift (d k : nat) (e : tm) : tm :=
      branches under one new binder ([S k]); the scrutinee [c] itself is not under
      the fresh binder, so it lifts at [k]. *)
   | tifn c e1 e2 => tifn (lift d k c) (lift d (S k) e1) (lift d (S k) e2)
+  (* tfix binds the self-reference fresh (de Bruijn 0) in the body: lift the body
+     under one new binder ([S k]). *)
+  | tfix T b  => tfix T (lift d (S k) b)
   end.
 
 Fixpoint subst (j : nat) (s : tm) (e : tm) : tm :=
@@ -515,6 +540,9 @@ Fixpoint subst (j : nat) (s : tm) (e : tm) : tm :=
      lifted past that binder; the scrutinee [c] is not under the binder. *)
   | tifn c e1 e2 =>
       tifn (subst j s c) (subst (S j) (lift 1 0 s) e1) (subst (S j) (lift 1 0 s) e2)
+  (* tfix body is under one fresh binder (the self-ref): substitute at [S j] with
+     [s] lifted past that binder. *)
+  | tfix T b  => tfix T (subst (S j) (lift 1 0 s) b)
   end.
 
 (* record-field lookup at the term level (for projection) *)
@@ -595,7 +623,14 @@ Inductive step : tm -> tm -> Prop :=
       value v -> truthy_value v -> step (tifn v e1 e2) (subst 0 v e1)
   | SIfnFalse : forall v e1 e2,
       value v -> falsy_value v -> step (tifn v e1 e2) (subst 0 v e2)
-  | SIfn1     : forall c c' e1 e2, step c c' -> step (tifn c e1 e2) (tifn c' e1 e2).
+  | SIfn1     : forall c c' e1 e2, step c c' -> step (tifn c e1 e2) (tifn c' e1 e2)
+  (* INCREMENT 14 — RECURSIVE UNFOLD. [tfix T body] always steps: it unfolds by
+     substituting ITSELF for its de Bruijn-0 self-reference. This is the only rule
+     for [tfix], and it has no premise — [tfix] is NEVER a value and is NEVER stuck
+     (progress is immediate). The unfold may loop forever (e.g. [tfix T (tvar 0)]
+     reduces to itself), which is exactly why type soundness must — and does —
+     tolerate non-termination: each unfold preserves the type [T]. *)
+  | SFix      : forall T body, step (tfix T body) (subst 0 (tfix T body) body).
 
 (* ===========================================================================
    4. SUBTYPING INVERSION — the lemmas progress/preservation rest on.
@@ -789,6 +824,22 @@ Proof.
     split;[assumption|split;[assumption|split;[assumption|eapply SsTrans; eassumption]]].
   - injection Ee as <- <- <-. do 3 eexists.
     split;[eassumption|split;[eassumption|split;[eassumption|apply SsRefl]]].
+Qed.
+
+(* INCREMENT 14 — [tfix] inversion, subsumption-transparent. The body types at
+   some [S] under the recursive binder [S::G], and [S] is [ssub]-below the ascribed
+   type [T]. (The body's type and the self-ref type COINCIDE in [TFix]: the binder
+   carries [S], the body produces [S]; the recovered binder is the synthesized
+   [S].) *)
+Lemma inv_fix : forall G Tf body T,
+  has_type G (tfix Tf body) T ->
+  has_type (Tf :: G) body Tf /\ ssub Tf T.
+Proof.
+  intros G Tf body T H. remember (tfix Tf body) as e0 eqn:Ee.
+  induction H; try discriminate Ee.
+  - subst. destruct (IHhas_type eq_refl) as [Hb Hd].
+    split; [assumption | eapply SsTrans; eassumption].
+  - injection Ee as <- <-. split; [assumption | apply SsRefl].
 Qed.
 
 (* ===========================================================================
@@ -1567,6 +1618,11 @@ Proof.
         exact (IH (truthy_type :: G1) G2 U0 eq_refl) end.
     + match goal with [ IH : forall _ _ _, falsy_type :: _ = _ -> has_type _ _ _ |- _ ] =>
         exact (IH (falsy_type :: G1) G2 U0 eq_refl) end.
+  - (* TFix: the body is under the recursive self-ref binder [T], so its cut is
+       [T::G1]. *)
+    apply TFix.
+    match goal with [ IH : forall _ _ _, T :: ?g = _ -> _ |- _ ] =>
+      exact (IH (T :: G1) G2 U eq_refl) end.
   - (* HFnil *) apply HFnil.
   - (* HFcons *) apply HFcons.
     + match goal with [ IH : forall _ _ _, _ = _ -> has_type _ _ _ |- _ ] =>
@@ -1601,6 +1657,8 @@ Fixpoint closed_at (k : nat) (e : tm) : Prop :=
   | tif c e1 e2 => closed_at k c /\ closed_at k e1 /\ closed_at k e2
   (* tifn binds the scrutinee fresh in each branch: branches closed at [S k]. *)
   | tifn c e1 e2 => closed_at k c /\ closed_at (S k) e1 /\ closed_at (S k) e2
+  (* tfix binds the self-reference fresh: body closed at [S k]. *)
+  | tfix _ b  => closed_at (S k) b
   end.
 
 (* Ltac: solve a [closed_at _ x] goal from the subterm-IH for exactly [x]. *)
@@ -1640,6 +1698,10 @@ Proof.
     split; [ exact (IHe1 G U Hc)
            | split; [ exact (IHe2 (truthy_type :: G) T1 H1)
                     | exact (IHe3 (falsy_type :: G) T2 H2) ] ].
+  - (* tfix: body typed under the self-ref binder; closed at S(length G) =
+       length (T::G). *)
+    apply inv_fix in H. destruct H as [Hb _].
+    exact (IHe (T :: G) T Hb).
   - (* Pl nil *) exact I.
   - (* Pl cons *) inversion H; subst. simpl. split.
     + match goal with
@@ -1677,6 +1739,8 @@ Proof.
       [ apply (IHe1 k); [exact Hc | exact H0]
       | apply (IHe2 (S k)); [exact H1 | lia]
       | apply (IHe3 (S k)); [exact H2 | lia] ].
+  - (* tfix: body at S k (lift cut also rises by one). *)
+    f_equal. apply (IHe (S k)); [exact H | lia].
   - (* Pl nil *) reflexivity.
   - (* Pl cons *) destruct H as [Hc Hr]. f_equal;
       [ f_equal; apply (IHe k0); [exact Hc | exact H0]
@@ -1772,6 +1836,12 @@ Proof.
     + apply (IHe1 G1 G2 U Uc s); [ exact Hc | exact H0 ].
     + apply (IHe2 (truthy_type :: G1) G2 U T1 s); [ exact H1 | exact H0 ].
     + apply (IHe3 (falsy_type :: G1) G2 U T2 s); [ exact H2 | exact H0 ].
+  - (* tfix: body is under one fresh binder (the self-ref), so its cut is [T::G1]
+       and [s] lifts to itself (closed). *)
+    apply inv_fix in H. destruct H as [Hb Hsub]. simpl.
+    rewrite (closed_lift s U H0 1 0).
+    eapply TSub; [ apply TFix | exact Hsub ].
+    apply (IHe (T :: G1) G2 U T s); [ exact Hb | exact H0 ].
   - (* Pl nil *) inversion H; subst. simpl. apply HFnil.
   - (* Pl cons *) inversion H; subst. simpl. apply HFcons.
     + match goal with [ Hh : has_type (G1 ++ U :: G2) e ?Tk |- _ ] =>
@@ -1968,6 +2038,17 @@ Proof.
   - (* SIfn1: congruence — the scrutinee steps, preserving its type [U]. *)
     apply inv_ifn in Hty. destruct Hty as [U [T1 [T2 [Hc [H1 [H2 Hsub]]]]]].
     eapply TSub; [ eapply TIfn; [ apply IHHstep; exact Hc | exact H1 | exact H2 ] | exact Hsub ].
+  (* INCREMENT 14 — RECURSIVE UNFOLD preservation. [tfix T body ↦ subst 0 (tfix T
+     body) body]. The body types at [T] under the self-ref binder [T]; substituting
+     the WHOLE fixpoint (itself of type [T], by [TFix]) for that [:T] self-ref
+     preserves [T] via the substitution lemma. This is where divergence is "fine":
+     the substituted-in term is [tfix…] again — it will step again — but the type
+     [T] is invariant, so preservation closes without any termination argument. *)
+  - (* SFix: tfix T body ↦ subst 0 (tfix T body) body *)
+    pose proof (inv_fix [] T body Tres Hty) as [Hb Hsub].
+    eapply TSub; [ | exact Hsub ].
+    apply (subst_top T [] body T (tfix T body));
+      [ exact Hb | apply TFix; exact Hb ].
 Qed.
 
 (* ===========================================================================
@@ -2084,6 +2165,10 @@ Proof.
       * eexists. apply SIfnTrue; assumption.
       * eexists. apply SIfnFalse; assumption.
     + (* scrutinee steps *) eexists. apply SIfn1. exact Hc'.
+  - (* TFix: a fixpoint ALWAYS steps (the unfold rule [SFix] has no premise) — it
+       is never a value and never stuck, so progress is immediate even though the
+       unfold may diverge. *)
+    right. eexists. apply SFix.
   - (* P0 HFnil *) intros ke [].
   - (* P0 HFcons *) intros ke Hin. simpl in Hin. destruct Hin as [Heq | Hin].
     + subst ke.
@@ -2314,6 +2399,77 @@ Proof.
 Qed.
 
 (* ===========================================================================
+   INCREMENT 14 — GENERAL RECURSION sanity. (1) A recursive FUNCTION term types
+   and reduces a step. (2) A DIVERGING term is well-typed and ALWAYS steps (never
+   stuck) — type soundness tolerating non-termination, made machine-checked.
+   =========================================================================== *)
+
+(* (1) A RECURSIVE FUNCTION. [tfix (Int→Int) (λx:Int. x)] : the self-reference
+   (de Bruijn 0) has type [Int→Int]; the body is a lambda of that type, so the
+   whole fixpoint types at [Int→Int]. (The body ignores the self-ref here; a real
+   recursive call would be [tapp (tvar 1) …] inside the lambda — index 1 being the
+   self-ref under the lambda binder. Typing this minimal shape exercises [TFix].) *)
+Definition rec_fn : tm := tfix (BArrow (BAtom AInt) (BAtom AInt))
+                                (tlam (BAtom AInt) (tvar 0)).
+
+Example rec_fn_typed : has_type [] rec_fn (BArrow (BAtom AInt) (BAtom AInt)).
+Proof.
+  unfold rec_fn. apply TFix. apply TLam. apply TVar. reflexivity.
+Qed.
+
+(* it reduces a step (the unfold): [tfix T b ↦ subst 0 (tfix T b) b]. *)
+Example rec_fn_steps :
+  step rec_fn (subst 0 rec_fn (tlam (BAtom AInt) (tvar 0))).
+Proof. unfold rec_fn. apply SFix. Qed.
+
+(* the synthesizable annotation: progress holds on it (it steps). *)
+Example rec_fn_progress :
+  value rec_fn \/ exists e', step rec_fn e'.
+Proof. apply (progress rec_fn _ rec_fn_typed). Qed.
+
+(* and preservation: the unfolded term still has the recursive type. *)
+Example rec_fn_preservation :
+  has_type [] (subst 0 rec_fn (tlam (BAtom AInt) (tvar 0)))
+              (BArrow (BAtom AInt) (BAtom AInt)).
+Proof.
+  apply (preservation rec_fn _ _ rec_fn_typed rec_fn_steps).
+Qed.
+
+(* (2) A DIVERGING TERM, WELL-TYPED. [tfix T (tvar 0)] : the body IS the self-ref
+   (de Bruijn 0 : T), so it types at [T] for ANY [T] (here [Int]). It unfolds to
+   [subst 0 (tfix T (tvar 0)) (tvar 0) = tfix T (tvar 0)] — ITSELF — so it loops
+   forever. Type soundness TOLERATES this: it is well typed and ALWAYS steps. *)
+Definition diverge : tm := tfix (BAtom AInt) (tvar 0).
+
+Example diverge_typed : has_type [] diverge (BAtom AInt).
+Proof. unfold diverge. apply TFix. apply TVar. reflexivity. Qed.
+
+(* it steps — and the successor is [diverge] itself (the loop is explicit). *)
+Example diverge_steps : step diverge diverge.
+Proof.
+  unfold diverge.
+  (* subst 0 (tfix Int (tvar 0)) (tvar 0) = tfix Int (tvar 0) = diverge *)
+  replace (tfix (BAtom AInt) (tvar 0))
+    with  (subst 0 (tfix (BAtom AInt) (tvar 0)) (tvar 0)) at 2 by reflexivity.
+  apply SFix.
+Qed.
+
+(* PROGRESS holds for the diverging term: it is NEVER stuck (never a value, always
+   steps) — the precise statement that soundness survives non-termination. *)
+Example diverge_progress : value diverge \/ exists e', step diverge e'.
+Proof. apply (progress diverge _ diverge_typed). Qed.
+
+(* it is not a value (a fixpoint is never a value). *)
+Example diverge_not_value : ~ value diverge.
+Proof. unfold diverge. intro Hv. inversion Hv. Qed.
+
+(* PRESERVATION across the looping step: the type [Int] is invariant under unfold,
+   forever. (Here the successor is [diverge] again, so this is [diverge_typed] —
+   but obtained THROUGH preservation, witnessing the invariance.) *)
+Example diverge_preservation : has_type [] diverge (BAtom AInt).
+Proof. apply (preservation diverge _ _ diverge_typed diverge_steps). Qed.
+
+(* ===========================================================================
    ASSUMPTION AUDIT — closed under the global context (no axioms/Admitted).
    =========================================================================== *)
 Print Assumptions progress.
@@ -2325,3 +2481,6 @@ Print Assumptions payoff_rejected_WITHOUT_narrowing.
 Print Assumptions ssub_arrow_inv.
 Print Assumptions ssub_sound.
 Print Assumptions arrow_top_collapse.
+Print Assumptions rec_fn_typed.
+Print Assumptions diverge_progress.
+Print Assumptions diverge_preservation.

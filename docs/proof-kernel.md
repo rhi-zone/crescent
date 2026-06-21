@@ -1060,6 +1060,79 @@ across the chain): **Closed under the global context** — no axioms, no
 whole chain compiles (`coqc subtype.v && coqc typing.v && coqc ssub.v && coqc
 check.v`).
 
+## Increment 14 — GENERAL RECURSION (single fixpoint); soundness tolerates non-termination
+
+The term core gains **general recursion** — necessary for real programs. A single
+fixpoint former `tfix`, with the unfold operational rule. The key metatheory point:
+**type soundness holds even with non-termination** — progress and preservation do
+NOT require termination. A recursive unfold always *steps* (progress is immediate)
+and *preserves the type* (the substitution lemma), with no well-foundedness
+argument anywhere. Modifies `proof/typing.v` + `proof/check.v`; `proof/subtype.v`
+and `proof/ssub.v` are **unmodified**. Build order unchanged.
+
+- **Term + op-sem.** `tm` gains `tfix : BTy -> tm -> tm`. In `tfix T body`, de
+  Bruijn index 0 of `body` is the RECURSIVE SELF-REFERENCE, of type `T`; the whole
+  `tfix T body` has type `T`. The operational rule is the **unfold** (chosen for
+  the cleanest progress/preservation — simplest and sound):
+  `SFix : step (tfix T body) (subst 0 (tfix T body) body)` — substitute the
+  fixpoint itself for its self-reference. It has NO premise: `tfix` is **never a
+  value** and **never stuck**, so progress is trivial; `value` is unchanged (no
+  `tfix` value form). `lift`/`subst`/`closed_at` thread it under one fresh binder
+  (`S k` / `S j`), exactly like the other binders.
+- **Typing (declarative).** `TFix : has_type (T :: G) body T -> has_type G (tfix T
+  body) T` — the body, given the recursive binding `T` at de Bruijn 0, has type
+  `T`. The annotation `T` is what makes the form synthesizable. Subsumption-
+  transparent inversion `inv_fix : has_type G (tfix Tf body) T -> has_type (Tf ::
+  G) body Tf /\ ssub Tf T` threads `TFix` through arbitrary `TSub` chains.
+- **`progress` + `preservation` re-proved (`Qed`), threading `tfix`.**
+  - **progress:** the `TFix` case is immediate — `right; eexists; apply SFix` — a
+    fixpoint always steps. (The `value`-first `try` in the proof falls through since
+    `tfix` has no `value` constructor.)
+  - **preservation:** the `SFix` case unfolds `tfix T body ↦ subst 0 (tfix T body)
+    body`. `inv_fix` gives `has_type (T::[]) body T` and `ssub T Tres`;
+    `subst_top T [] body T (tfix T body)` substitutes the WHOLE fixpoint (typed `T`
+    by `TFix` on the body) for the `:T` self-reference, preserving `T`; then `TSub`
+    to `Tres`. **This is where divergence is "fine":** the substituted-in term is
+    `tfix…` again (it will step again), but the type `T` is invariant, so
+    preservation closes with NO termination argument.
+  - Threaded through all inversion / weakening / closedness / substitution lemmas
+    (`weakening`, `has_type_closed`, `closed_at`/`closed_at_lift`, `subst_lemma`)
+    via the `tfix` case of `tm_rect_strong` / `has_type_mind` (both extended with a
+    `tfix` case).
+- **Checker (`synth`/`check`) + re-proved soundness.** `synth (tfix T body)` CHECKS
+  `body` against the annotation `T` under the self-ref binder `T::G` (synthesize
+  `body`, gate `decide_ssub Sb T`), returning `Some T`. `synth_sound` discharges it
+  by `TFix` after a `TSub` from the synthesized `Sb` to `T`; `synth_principal`'s
+  `tfix` case is immediate (the synthesized type IS the annotation, and `inv_fix`'s
+  `ssub annotation T` is exactly the principality obligation). `narrowing` extended.
+  `synth_sound`, `check_sound`, `synth_principal`, `narrowing` re-proved `Qed`.
+- **Sanity (`Compute` + proofs).**
+  - A **recursive function** types and reduces a step: `tfix (Int→Int) (λx:Int.x)`
+    types at `Int→Int` (`rec_fn_typed`), `synth` gives the annotated type
+    (`compute_fix_synth`), and it steps via `SFix` (`rec_fn_steps`,
+    `rec_fn_preservation`).
+  - A **DIVERGING** term is well-typed and ALWAYS steps (never stuck):
+    `diverge := tfix Int (tvar 0)` — its body IS the self-reference, so it types at
+    `Int` (`diverge_typed`) and unfolds to ITSELF (`diverge_steps : step diverge
+    diverge`); `diverge_progress` (never stuck), `diverge_not_value`,
+    `diverge_preservation` (the type `Int` is invariant under the looping unfold,
+    forever). `synth` still synthesizes its annotation (`compute_fix_diverge_synth`).
+    This is the machine-checked statement that **type soundness tolerates
+    non-termination**.
+  - `synth`/`check` accept a well-typed recursive term (`compute_fix_synth`,
+    `compute_fix_checks`, `compute_fix_sound` via `check_sound`); an annotation/body
+    mismatch is rejected (`compute_fix_badbody_None`).
+- **HONEST SCOPE.** This is **general (single) recursion** via `tfix`. **Mutual
+  recursion** and **recursive TYPES** (equirecursive μ — the coinductive-`V` fork)
+  are DEFERRED (backlog). A Lua-faithful `local function f = …` (which IS recursion)
+  is the **derivable** consumer of `tfix`.
+
+`Print Assumptions` on `progress`, `preservation`, `synth_sound`, `check_sound`
+(plus `rec_fn_typed`, `diverge_progress`, `diverge_preservation`): **Closed under
+the global context** — no axioms, no `Admitted`, no `Classical`, no `admit`.
+`subtype.v` AND `ssub.v` unmodified; whole chain compiles (`coqc subtype.v && coqc
+typing.v && coqc ssub.v && coqc check.v`).
+
 ## Staging
 
 - **[done]** mechanized lattice + subtype `refl`/`trans` (Rocq);

@@ -393,7 +393,26 @@ Still open (DEFERRED — recorded honestly, minimal core only):
 - [ ] **Statements / control flow** (while/blocks; `tif` done in increment 11) as terms.
 - [ ] **Mutation / references** (assignable cells; the value domain `V` is pure).
 - [ ] **Multi-arg / vararg / multi-return** functions (currently single→single).
-- [ ] **Recursion** (`tfix` / μ; the term language has no fixpoint former).
+- [x] **General recursion — single fixpoint `tfix` (increment 14, DONE).**
+  `proof/typing.v` + `proof/check.v` (on unmodified `subtype.v` + `ssub.v`). `tm`
+  gains `tfix : BTy -> tm -> tm`: in `tfix T body`, de Bruijn 0 of `body` is the
+  recursive self-ref of type `T`, the whole `tfix T body : T`. Op-sem: the unfold
+  rule `SFix : step (tfix T body) (subst 0 (tfix T body) body)` — no premise, so
+  `tfix` is never a value / never stuck. Typing `TFix : has_type (T::G) body T ->
+  has_type G (tfix T body) T`. **`progress` + `preservation` re-proved `Qed`**
+  threading `tfix` (progress immediate via `SFix`; preservation by substituting the
+  whole fixpoint for its `:T` self-ref — `inv_fix` + `subst_top`). **Type soundness
+  TOLERATES NON-TERMINATION** — no termination argument: `diverge := tfix Int (tvar
+  0)` is well-typed and `step diverge diverge` (loops forever, type `Int`
+  invariant). `synth (tfix T body)` checks `body` against `T` under `T::G` ⇒ `Some
+  T`; `synth_sound`/`check_sound`/`synth_principal`/`narrowing` re-proved.
+  `Print Assumptions` on `progress`/`preservation`/`synth_sound`/`check_sound`
+  closed under the global context. DEFERRED below: mutual recursion, recursive
+  TYPES (μ). Lua's `local function f` is the derivable consumer.
+- [ ] **Mutual recursion** (`tfix` is single-binding; mutual `local function`
+  groups need either a tupled fixpoint or a multi-binding `tfix`). Backlog.
+- [ ] **Recursive TYPES — equirecursive μ** (distinct from the recursive TERM
+  `tfix` above; needs the coinductive-`V` fork). See the BLOCKING μ item below.
 - [ ] **Metatables.**
 - [ ] **Arrow types as TERM introduction forms** (the type ALGEBRA has arrows via
   `BTy` and `tlam` introduces them; broader arrow-term ergonomics are min-core).

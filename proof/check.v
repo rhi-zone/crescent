@@ -206,6 +206,16 @@ Fixpoint synth (G : list BTy) (e : tm) {struct e} : option BTy :=
           end
       | None => None
       end
+  (* INCREMENT 14 — GENERAL RECURSION. The annotation [T] makes [tfix] synthesizable:
+     CHECK the body against [T] under the recursive self-ref binder [T::G] — i.e.
+     synthesize the body and gate it [≤ T] via the mode switch — then return [T].
+     (Checking, not synthesizing-then-comparing, is what the declarative [TFix]
+     demands: the body's type and the self-ref type must agree, up to subsumption.) *)
+  | tfix T body =>
+      match synth (T :: G) body with
+      | Some Sb => if decide_ssub Sb T then Some T else None
+      | None => None
+      end
   end.
 
 Definition check (G : list BTy) (e : tm) (T : BTy) : bool :=
@@ -290,6 +300,14 @@ Proof.
     + apply IHe1; exact Hc.
     + apply IHe2; exact H1.
     + apply IHe3; exact H2.
+  - (* tfix: body CHECKED against the annotation [T] under the self-ref binder
+       [T::G] (synthesize then [decide_ssub Sb T]-gate); discharged by [TFix] after
+       a [TSub] from the synthesized [Sb] to [T]. *)
+    simpl in H.
+    destruct (synth (T :: G) e) as [ Sb | ] eqn:Hb; [ | discriminate ].
+    destruct (decide_ssub Sb T) eqn:Hd; [ | discriminate ].
+    injection H as <-. apply TFix.
+    eapply TSub; [ apply IHe; exact Hb | apply decide_ssub_sound; exact Hd ].
   - (* Pl [] *) simpl in H. injection H as <-. apply HFnil.
   - (* Pl cons *) simpl in H.
     destruct (synth G e) as [ Te | ] eqn:He; [ | discriminate ].
@@ -390,6 +408,9 @@ Proof.
       | eapply (IHhas_type2 (truthy_type :: G1) _ G2 A')
       | eapply (IHhas_type3 (falsy_type :: G1) _ G2 A') ];
       (reflexivity || eassumption).
+  - (* TFix: the body is under the self-ref binder [T], so its cut is [T::G1]. *)
+    apply TFix.
+    eapply (IHhas_type (T :: G1) _ G2 A'); [ reflexivity | eassumption ].
   - apply HFnil.
   - apply HFcons;
       [ eapply (IHhas_type G1 _ G2 A') | eapply (IHhas_type0 G1 _ G2 A') ];
@@ -442,6 +463,7 @@ Fixpoint proj_free (e : tm) : Prop :=
   | tproj _ _ => False
   | tif c e1 e2 => proj_free c /\ proj_free e1 /\ proj_free e2
   | tifn c e1 e2 => proj_free c /\ proj_free e1 /\ proj_free e2
+  | tfix _ b => proj_free b
   end.
 
 (* SYNTHESIS IS PRINCIPAL (projection-free fragment) — the tractable completeness
@@ -519,6 +541,15 @@ Proof.
     pose proof (IHe3 (falsy_type :: G) V2 Sc2 Hp2 HV2 H2e) as Hb2.
     eapply SsTrans; [ | exact Hsub ].
     apply SsUnionE; [ apply SsUnionInL; exact Hb1 | apply SsUnionInR; exact Hb2 ].
+  - (* tfix: synth returns the ANNOTATION as the synthesized type; declarative
+       [inv_fix] gives exactly [ssub annotation T], which IS the principality
+       obligation [ssub S T] (S = the annotation). The body-check inside synth is
+       irrelevant to the synthesized type. *)
+    simpl in H1.
+    destruct (synth (T :: G) e) as [ Sb | ] eqn:Hb; [ | discriminate ].
+    destruct (decide_ssub Sb T) eqn:Hd; [ | discriminate ].
+    injection H1 as <-.
+    apply inv_fix in H0. destruct H0 as [_ Hsub]. exact Hsub.
   - (* Pl nil *) simpl in H1. injection H1 as <-.
     inversion H0; subst. apply SrNil.
   - (* Pl cons *) simpl in H. destruct H as [Hpe Hprest]. simpl in H1.
@@ -687,6 +718,39 @@ Proof. reflexivity. Qed.
 (* and [check] is SOUND on a real subsumption: 3 : Num via Int <: Num *)
 Example compute_check_sound_demo : has_type [] (tlit (LInt 3)) (BAtom ANum).
 Proof. apply check_sound. reflexivity. Qed.
+
+(* INCREMENT 14 — GENERAL RECURSION checker. A recursive FUNCTION term synthesizes
+   its annotated type: the body (a lambda of type [Int→Int]) checks against the
+   annotation under the self-ref binder. *)
+Example compute_fix_synth :
+  synth [] (tfix (BArrow (BAtom AInt) (BAtom AInt)) (tlam (BAtom AInt) (tvar 0)))
+  = Some (BArrow (BAtom AInt) (BAtom AInt)).
+Proof. reflexivity. Qed.
+
+(* the DIVERGING term [tfix Int (var0)] still SYNTHESIZES its annotation [Int]
+   (well-typedness is independent of termination). *)
+Example compute_fix_diverge_synth :
+  synth [] (tfix (BAtom AInt) (tvar 0)) = Some (BAtom AInt).
+Proof. reflexivity. Qed.
+
+(* it CHECKS against a supertype too (Int <: Num). *)
+Example compute_fix_checks :
+  check [] (tfix (BAtom AInt) (tvar 0)) (BAtom ANum) = true.
+Proof. reflexivity. Qed.
+
+(* and the checker's acceptance is SOUND: the recursive function is declaratively
+   well typed (via [check_sound]). *)
+Example compute_fix_sound :
+  has_type [] (tfix (BArrow (BAtom AInt) (BAtom AInt)) (tlam (BAtom AInt) (tvar 0)))
+              (BArrow (BAtom AInt) (BAtom AInt)).
+Proof. apply check_sound. reflexivity. Qed.
+
+(* ILL-TYPED: a [tfix] whose body's type does NOT match the annotation ⇒ None.
+   Here the body is a lambda ([Int→Int]) but the annotation says [Int] — the body
+   check [Int→Int <: Int] fails. *)
+Example compute_fix_badbody_None :
+  synth [] (tfix (BAtom AInt) (tlam (BAtom AInt) (tvar 0))) = None.
+Proof. reflexivity. Qed.
 
 (* ===========================================================================
    ASSUMPTION AUDIT — closed under the global context (no axioms / Admitted /
