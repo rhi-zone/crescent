@@ -382,6 +382,87 @@ three-valued general relation.
 `gdecide_complete`**: **Closed under the global context** — no axioms, no
 `Admitted`, no `Classical`. Whole dev compiles (`coqc proof/subtype.v`).
 
+## Increment 7 — SINGLE-ARG / SINGLE-RETURN FUNCTION TYPES (arrows)
+
+The first **behavioural** type former. Single input / single output per call;
+**multi-return / vararg DEFERRED**. Function VALUES are modelled by their FINITE
+input/output graph — a de-risk choice that keeps the value domain a plain
+positive inductive (no coinduction, no step-indexing).
+
+`proof/subtype.v` (new section, additive — increments 1–6 untouched; the decider
+is threaded but stays unconditionally sound):
+
+- **Value-domain extension.** `V` gains `VFun : list (V * V) -> V` — a function
+  value is a finite list of (input, output) pairs. `V` occurs only POSITIVELY (as
+  the element type of the graph list), so this is Coq-legal: no negative
+  occurrence. Cyclic / higher-order-via-`V` values are fine (positive `V`); the
+  hand-rolled `V_rect_strong` is extended with the `VFun` case (a second
+  list-property `Pg` over the graph; a plain `Fixpoint`, no axiom).
+- **Type former.** `BTy` gains `BArrow : BTy -> BTy -> BTy`.
+- **Denotation (semantic-subtyping reading).**
+  `denote (BArrow A B) (VFun g) := forall i o, In (i,o) g -> denote A i -> denote
+  B o`; `denote (BArrow _ _) v := False` for any non-`VFun` `v` (functions are a
+  distinct value-kind, disjoint from scalars and tables). Written as a structural
+  nested fixpoint over the graph (so the recursive `denote A i` / `denote B o`
+  calls at structural subterms `A`, `B` are guard-accepted); the `In`-quantified
+  reading is recovered as `denote_arrow_iff`.
+- **`denote_dec` extended, stays general + total.** Arrow membership is decidable:
+  the graph is finite, and for each pair the implication `denote A i -> denote B
+  o` is decided (decide the antecedent; if it holds, decide the consequent).
+  Constructive, no `Classical`; `Defined`.
+- **CORE arrow laws — theorems-for-free from the denotation:**
+  - **CONTRA/COVARIANCE** — `darrow_variance`: `dsub A' A -> dsub B B' -> dsub
+    (BArrow A B) (BArrow A' B')` (contravariant domain, covariant codomain), with
+    one-sided corollaries `darrow_covariant_cod` / `darrow_contravariant_dom`.
+    Follows by unfolding `denote` + pushing the inclusions through the graph
+    quantifier.
+  - **DISJOINTNESS** — arrows are a distinct kind: `arrow_disjoint_atom`
+    (`(A→B) ∩ atom <: Bot`) and `arrow_disjoint_rec` (`(A→B) ∩ record <: Bot`),
+    since `VFun ≠` scalar/table heads (`discriminate`).
+- **Boolean-algebra laws STILL hold — confirmed, no fix needed.** The increment-3
+  laws were proved generically by unfolding `denote` to propositional logic; they
+  never case-analyzed the `BTy` constructors, so adding `BArrow` leaves them
+  untouched — they compile verbatim. (`Print Assumptions ddistrib_inter_union`:
+  Closed under the global context.)
+- **DECIDER STAYS UNCONDITIONALLY SOUND — arrow ⇒ Deferred ⇒ DUnknown.** Adding
+  `BArrow` touches `denote`, `denote_dec`, the DNF/literal machinery, the
+  witness-finder, and `atomic`/`flat`. All are threaded: a new **arrow literal**
+  kind (`LPosArrow`/`LNegArrow`), `to_dnf`/`to_dnf_neg` emit them, `to_dnf_pres`
+  stays unconditional. The witness-finder gains a `has_arrow` guard: **any clause
+  containing an arrow literal returns `Deferred`** (three-valued `clause_wit3`) /
+  `None` (bool-era `clause_wit`), BEFORE the scalar/record branches — so the
+  finder NEVER claims a witness exists or that an arrow-involving clause is empty.
+  `atomic`, `no_rec`, `flat`, `neg_atomic` all send `BArrow` to `False` (arrows
+  are outside the head-decidable / proven-complete fragment), and `cl_rf` is
+  strengthened to require arrow-freeness. The **two unconditional soundness
+  theorems are re-established for the extended `BTy`** (all `a b`, arrows
+  included): `gdecide_DSub_sound : gdecide a b = DSub -> dsub a b` and
+  `gdecide_DNotSub_sound : gdecide a b = DNotSub -> ~ dsub a b` remain TRUE —
+  arrows ⇒ `DUnknown` ⇒ no claim. Sanity (`reflexivity`): `gdecide (Int→Int)
+  (Int→Str) = DUnknown`, `gdecide (Int→Int) (Num→Int) = DUnknown`, and
+  `gd_arrow_not_dsub_claim : gdecide (Int→Int) (Int→Str) <> DSub`.
+- **Non-vacuity / faithfulness.** Arrow types are inhabited (`arrow_inhabited`;
+  `empty_fun_in_every_arrow` — the empty graph vacuously inhabits every arrow).
+  CORRECT non-subtypes with explicit witnesses:
+  - `~ dsub (Int→Int) (Int→Str)` — codomain, witness `VFun [(VInt 0, VInt 0)]`;
+  - `~ dsub (Int→Int) (Num→Int)` — domain contravariance, witness
+    `VFun [(VFloat 0, VStr 0)]` (vacuously in `Int→Int` since `VFloat ∉ Int`, but
+    not in `Num→Int` since `VFloat ∈ Num` forces the `VStr` output into `Int`).
+- **DECOMPOSITION LAW — codomain intersection CLOSES; the rest DEFERRED.**
+  `darrow_inter_cod : dequiv ((A→B) ∩ (A→C)) (A → (B∩C))` is proved both
+  directions, directly from `denote` (set inclusion). **The finite-graph model
+  VALIDATES it — no faithfulness gap / no fork.** The harder decomposition facts —
+  `(A→C) ∩ (A'→C) <: (A∪A')→C` and the arrow-emptiness laws — are DEFERRED to a
+  future increment (they need either an arrow-aware decision procedure or further
+  model lemmas). No intended arrow law was found to FAIL in the finite-graph model,
+  so no genuine model-design fork was hit at this increment.
+
+`Print Assumptions` on `gdecide_DSub_sound`, `gdecide_DNotSub_sound`,
+`gdecide_complete`, `darrow_variance`, `arrow_disjoint_atom`, `arrow_disjoint_rec`,
+`darrow_inter_cod`, `denote_dec`, `ddistrib_inter_union`: **Closed under the
+global context** — no axioms, no `Admitted`, no `Classical`. Whole dev compiles
+(`coqc proof/subtype.v`).
+
 ## Staging
 
 - **[done]** mechanized lattice + subtype `refl`/`trans` (Rocq);
@@ -455,15 +536,29 @@ three-valued general relation.
   refinements; closed records need a "no other keys" denotation, index sigs a
   `∀ key`-quantified field); **(d)** a first-class **table atom** (records
   subtype an atom, not just `BRec []`).
-- **[then — arrows with variance — LIKELY DESIGN FORK]** function types with
-  co/contra-variance. **Flagged as a probable no-default fork:** modelling
-  function VALUES in the concrete domain `V` is the open question — a function is
-  not a finite structure like a table, so the head-class / finite-witness style
-  that drives `find_wit_fuel` does not obviously transfer. Options span
-  (i) an *extensional* finite-graph approximation, (ii) an *intensional* opaque
-  arrow atom with a separate variance rule, (iii) a step-indexed / logical-
-  relation denotation. This should be decided (design-it-twice) before
-  implementation, not chosen by default.
+- **[done — increment 7: arrows (single→single, finite-graph)]** the first
+  **behavioural** former, taken via the **extensional finite-graph** route
+  (option (i) of the prior fork): `V` gains `VFun : list (V*V) -> V` (positive
+  inductive — no coinduction / step-indexing), `BTy` gains `BArrow A B` with the
+  semantic-subtyping denotation `∀(i,o)∈g, i∈A → o∈B`. `denote_dec` extended
+  (general, total). **CONTRA/COVARIANCE** (`darrow_variance`) and **DISJOINTNESS**
+  from atoms and records (`arrow_disjoint_atom`/`_rec`) proved for free from the
+  denotation. Boolean laws confirmed still holding (generic over `denote`).
+  **Decider stays UNCONDITIONALLY SOUND**: arrow literals (`LPosArrow`/`LNegArrow`)
+  threaded through the DNF; a `has_arrow` guard DEFERS any arrow-involving clause
+  (`Deferred`/`None`) — `gdecide` returns `DUnknown`, never a wrong `DSub`/
+  `DNotSub`; the two unconditional soundness theorems are re-established for the
+  extended `BTy`. `atomic`/`no_rec`/`flat`/`neg_atomic` exclude arrows;
+  `cl_rf` strengthened to arrow-free. Non-vacuity: arrow types inhabited; correct
+  non-subtypes `~dsub (Int→Int)(Int→Str)` and `~dsub (Int→Int)(Num→Int)` with
+  explicit `VFun` witnesses. **Decomposition law `(A→B)∩(A→C) ≡ A→(B∩C)` CLOSES**
+  (`darrow_inter_cod`) — finite-graph model validates it, no faithfulness fork.
+  Closed under the global context. **DEFERRED:** multi-return / vararg; the
+  arrow-aware *decision procedure* (arrow subtyping is currently `DUnknown`); the
+  harder decomposition laws (`(A→C)∩(A'→C) <: (A∪A')→C`, arrow-emptiness).
+- **[then — arrow decision procedure + multi-return]** make arrow subtyping
+  DEFINITE (lift the `has_arrow`-defer), and generalise to multi-arg / multi-
+  return / vararg function types.
 - **[then — equirecursive μ]** extend `BTy` with recursive types (`μ`) and
   coinductive/contractive denotation; re-establish the laws and the decision
   procedure under recursion.
