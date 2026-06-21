@@ -1412,3 +1412,109 @@ chain compiles (`coqc subtype.v && coqc typing.v && coqc ssub.v && coqc check.v`
   the executable semantics in `lib/sem` as the empirical reality-anchor — the
   one thing proof *cannot* establish: that the model matches real LuaJIT value
   behavior.
+
+## Increment 16 — THE IMPERATIVE LAYER: mutable references, store-based soundness
+
+A NEW file `proof/imp.v` (builds on **unmodified** `proof/subtype.v` and
+`proof/typing.v`; `proof/ssub.v` / `proof/check.v` also untouched) adds the
+**mutation core** — mutable references with a STORE-BASED operational semantics
+and STORE TYPING, the classic STLC-with-references metatheory (Software
+Foundations "References") instantiated over crescent's atom order + the
+contravariant/covariant arrow rule that motivated `ssub`. Build order:
+`subtype.v → typing.v → ssub.v → check.v → imp.v`.
+
+- **WHY A NEW TYPE SYNTAX `RTy` (not threading Σ into typing.v).** References
+  force a NEW type former `RRef T` — which `subtype.v`'s `BTy` does not have and
+  which we may not add (`subtype.v` is unmodified) — and a STORE-TYPING parameter
+  Σ on the typing relation. So the imperative layer gets its own `RTy` (atoms +
+  `RArrow` + `RRef`, with `RTop`/`RBot`) and its own `rsub` (atom order; arrow
+  CONTRA-domain / CO-codomain — the same rule `ssub` uses, the reason
+  preservation survives subsumption; `RRef` **INVARIANT**, the standard sound
+  reference rule). The structural `_above`-predicate inversion technique from
+  `typing.v` is reused for `rsub` (`rsub_arrow_inv`, `rsub_ref_inv`, atom order,
+  cross-kind non-subtypings).
+
+- **Term language + values.** `rtm` = the references CORE (de Bruijn): lit / var /
+  lam / app / let / if PLUS `ralloc e` (allocate, returns a fresh location),
+  `rderef e` (read `!r`), `rassign r e` (write `r := v`), and `rloc n` (a store
+  ADDRESS — a VALUE, never source syntax). Values: literals, lambdas, locations.
+
+- **Store + CONFIGURATION op-sem.** `store := list rtm`; `rstep : rtm*store ->
+  rtm*store -> Prop`. EVERY existing reduction/congruence threads the store
+  UNCHANGED (beta, let, if, the CBV congruences). The three imperative reductions
+  MUTATE it: `ralloc v / st ↦ rloc (length st) / st++[v]` (append),
+  `rderef (rloc n) / st ↦ store_lookup n st / st` (read),
+  `rassign (rloc n) v / st ↦ nil / store_update n v st` (in-place write).
+  **Assignment yields the unit value `rlit LNil`** (Lua: an assignment has no
+  useful value), typed at `runit = RAtom ANil` — the documented choice (returning
+  the assigned value is a one-line change; unit is the stricter obligation).
+
+- **Store typing + extension.** `Σ : list RTy`; `has_typeR Σ Γ e T` — the typing
+  judgment threaded with Σ. `RTLoc : nth_error Σ n = Some T -> rloc n : RRef T`;
+  alloc ⇒ `RRef T`; deref `RRef T ⇒ T`; assign `RRef T, T ⇒ unit`. Every existing
+  rule threads Σ unchanged. `store_well_typed Σ st` (equal length; each stored
+  value typed at its Σ-type in the empty context). `extends Σ' Σ` = Σ a PREFIX of
+  Σ' (Σ' = Σ ++ ext) — the monotone growth of allocation; `extends_nth_error`
+  keeps earlier locations valid.
+
+- **The two soundness theorems, BOTH `Qed` WITH the store.**
+  - `progress : has_typeR Σ [] e T -> store_well_typed Σ st -> rvalue e \/ exists
+    e' st', rstep (e,st) (e',st')`. By induction on the derivation; the store
+    hypothesis fires the deref/assign location cases (a well-typed location is in
+    range), alloc-of-a-value always steps.
+  - `preservation : has_typeR Σ [] e T -> store_well_typed Σ st -> rstep (e,st)
+    (e',st') -> exists Σ', extends Σ' Σ /\ has_typeR Σ' [] e' T /\
+    store_well_typed Σ' st'`. By induction on the STEP. The substantive cases:
+    **alloc EXTENDS Σ by `[T]`** (the new cell typed; old cells re-typed by
+    STORE-WEAKENING + the append being a prefix); **deref** reads `store_lookup n
+    st`, typed by the store-well-typedness invariant; **assign** keeps Σ fixed,
+    updates the cell in place, and re-establishes `store_well_typed` (the new
+    value has the cell's invariant content type; `store_lookup_update_eq` /
+    `_neq` localize the change). Congruence cases recurse, threading the
+    (possibly extended) Σ' and STORE-WEAKENING the unchanged surroundings.
+  Supporting metatheory all `Qed`: subsumption-transparent inversion lemmas for
+  every form (incl. loc/alloc/deref/assign), variable weakening, closedness +
+  lift-invariance of closed terms, **store-weakening** (`rstore_weakening` —
+  typing stable under Σ-extension), the **substitution lemma** adapted to Σ, the
+  store-update/lookup lemmas, and canonical forms (arrow⇒lambda, ref⇒location,
+  Bool⇒boolean literal).
+
+- **Checker (Σ-threaded), proven SOUND.** Locations never appear in SOURCE, so
+  `synthR` runs over source with Σ implicit (no `rloc` case — a source `rloc` is
+  rejected). The ref operations: alloc synth ⇒ `RRef` of the operand's type;
+  deref ⇒ unwrap `RRef`; assign ⇒ synth the cell to `RRef U`, gate the value
+  `≤ U` (the invariant content type) by the total `decide_rsub`, result `runit`.
+  `decide_rsub` (atoms by the two declared edges; arrows contra/co via a
+  structural FUEL = size, since the contravariant domain swap is not structural on
+  either argument; refs by `RTy` equality — invariance) is proved SOUND
+  (`decide_rsub_sound`). `synthR_sound` / `checkR_sound` both `Qed`.
+
+- **Sanity (all proved).** (a) allocate an Int ref and dereference it — TYPES
+  (`ex_alloc_deref_typed`) and STEPS (`ex_alloc_step` then `ex_deref_step`, reading
+  back `7`). (b) **the store actually MUTATES**: `ex_assign_mutates_store` (the
+  assign step changes the store), `ex_after_assign_lookup` (the updated cell holds
+  `9`), `ex_deref_after_assign` (a deref of the updated store reads `9`, NOT the
+  old `7`). (c) a ref-of-int genuinely typed as `RRef AInt`
+  (`ex_ref_int_is_ref_int`; the checker agrees, `ex_check_ref_int`). (d) an
+  ILL-TYPED assign — a STRING into a `RRef AInt` — is REJECTED at EVERY type
+  (`ex_bad_assign_untyped`, refuted via `AStr` not `<: AInt`); the checker rejects
+  the source-variable form (`ex_bad_assign_var_check_None`) while the good
+  int-into-ref-int CHECKS (`ex_good_assign_var_check`). Plus `progress` /
+  `preservation` instantiated on the store (`ex_progress_alloc`,
+  `ex_preservation_assign`).
+
+- **`Print Assumptions` on `progress`, `preservation`, `synthR_sound`,
+  `checkR_sound`, `ex_assign_mutates_store`, `ex_bad_assign_untyped`,
+  `ex_preservation_assign`: Closed under the global context** — no axioms, no
+  `Admitted`, no `Classical`. `subtype.v` / `typing.v` / `ssub.v` / `check.v`
+  unmodified; whole chain compiles.
+
+- **HONEST SCOPE + DEFERRALS.** This is the references CORE: lit / var / lam / app
+  / let / if + alloc / deref / assign. **RECORDS, flow-narrowing (`tifn` /
+  type-test), and recursion (`tfix`) are NOT re-threaded through Σ here** — they
+  are ORTHOGONAL to the store (they interact with it only via value-substitution
+  and congruence, both already exercised by let / lam / app / if), so re-adding
+  them is mechanical case multiplication, recorded as the next increment. The
+  noteworthy CONSUMERS built on this ref core — Lua's **mutable TABLE FIELDS**
+  (records whose fields are references) and **reassignable LOCALS** — are the next
+  increment. Aliasing / strong-update precision is deferred. See `TODO.md`.

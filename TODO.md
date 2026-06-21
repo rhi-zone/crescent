@@ -429,7 +429,39 @@ Still open (DEFERRED — recorded honestly, minimal core only):
   non-variable paths, and combined truthiness+type-test are DEFERRED (sub-items 3/4/6
   above).
 - [ ] **Statements / control flow** (while/blocks; `tif` done in increment 11) as terms.
-- [ ] **Mutation / references** (assignable cells; the value domain `V` is pure).
+- [x] **Mutation / references — store-based soundness (increment 16, DONE).**
+  NEW file `proof/imp.v` (on unmodified `subtype.v`+`typing.v`; `ssub.v`+`check.v`
+  untouched). Own type syntax `RTy` (atoms + `RArrow` + `RRef`, since `subtype.v`'s
+  `BTy` has no ref former and stays unmodified) with `rsub` (atom order; arrow
+  contra/co — the same rule as `ssub`, the reason preservation survives
+  subsumption; `RRef` **INVARIANT**). `rtm` = references CORE (lit/var/lam/app/let/
+  if) + `ralloc`/`rderef`/`rassign`/`rloc` (a location is a VALUE, not source).
+  CONFIGURATION op-sem `rstep : rtm*store -> rtm*store` (`store := list rtm`):
+  every existing reduction threads the store unchanged; alloc appends
+  (`rloc(length st), st++[v]`), deref reads (`store_lookup n st`), assign writes
+  in place (`store_update n v st`) yielding the unit value `nil`. STORE TYPING
+  `has_typeR Σ Γ e T` (Σ threaded through every rule; `RTLoc` reads Σ; alloc⇒`RRef
+  T`, deref `RRef T⇒T`, assign `RRef T,T⇒unit`), `store_well_typed Σ st`,
+  `extends Σ' Σ` (prefix). **`progress` + `preservation` BOTH `Qed` WITH the
+  store** — progress: `has_typeR Σ [] e T -> store_well_typed Σ st -> value e \/
+  exists e' st', rstep (e,st) (e',st')`; preservation: `... -> rstep (e,st)
+  (e',st') -> exists Σ', extends Σ' Σ /\ has_typeR Σ' [] e' T /\ store_well_typed
+  Σ' st'`. Substantive cases: alloc EXTENDS Σ (store-weakening re-types old
+  cells), deref uses the store invariant, assign re-establishes `store_well_typed`
+  in place. Supporting metatheory `Qed`: store-weakening, the Σ-adapted
+  substitution lemma, store-update/lookup lemmas, canonical forms. Σ-threaded
+  `synthR`/`checkR` proven SOUND (`synthR_sound`/`checkR_sound`); `decide_rsub`
+  (fuel-structural for the contravariant arrow swap) sound. SANITY (all proved):
+  alloc/read (types+steps), **assign-MUTATES** (deref of the updated store reads
+  the NEW value, not the old), ref-of-int as ref-of-int, ill-typed assign
+  (string into `RRef Int`) REJECTED at every type + by the checker.
+  `Print Assumptions` on progress/preservation/synthR_sound/checkR_sound + the
+  mutation/ill-typed sanity: **Closed under the global context**; whole chain
+  compiles, protected files unmodified. **DEFERRED (next increment):** re-thread
+  RECORDS, flow-narrowing (`tifn`/type-test), recursion (`tfix`) through Σ
+  (orthogonal to the store — mechanical case multiplication); the noteworthy
+  CONSUMERS — Lua's mutable TABLE FIELDS (record fields as refs) and reassignable
+  LOCALS — built on this ref core; aliasing / strong-update precision.
 - [ ] **Multi-arg / vararg / multi-return** functions (currently single→single).
 - [x] **General recursion — single fixpoint `tfix` (increment 14, DONE).**
   `proof/typing.v` + `proof/check.v` (on unmodified `subtype.v` + `ssub.v`). `tm`
