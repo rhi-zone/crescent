@@ -274,7 +274,7 @@ Proof.
     injection H as <-. apply TLam. apply IHe. exact Hb.
   - (* tapp *) simpl in H.
     destruct (synth G e1) as [ Sf | ] eqn:Hf; [ | discriminate ].
-    destruct Sf as [ | | | | | | | A B ]; try discriminate H.
+    destruct Sf as [ | | | | | | | A B | | ]; try discriminate H.
     destruct (synth G e2) as [ Sa | ] eqn:Ha; [ | discriminate ].
     destruct (decide_ssub Sa A) eqn:Hd; [ | discriminate ].
     injection H as <-.
@@ -291,7 +291,7 @@ Proof.
     + apply keys_nodup_NoDup. exact Hnd.
   - (* tproj *) simpl in H.
     destruct (synth G e) as [ Se | ] eqn:He; [ | discriminate ].
-    destruct Se as [ | | | | | | fs | ]; try discriminate H.
+    destruct Se as [ | | | | | | fs | | | ]; try discriminate H.
     eapply TProj.
     + apply IHe. exact He.
     + apply flook_In. exact H.
@@ -529,7 +529,7 @@ Proof.
     apply SsArrow; [ apply SsRefl | apply (IHe (T::G) Tb Sb H Hb' Hb) ].
   - (* tapp *) simpl in H1. simpl in H. destruct H as [Hpf Hpa].
     destruct (synth G e1) as [ Sf | ] eqn:Hf; [ | discriminate ].
-    destruct Sf as [ | | | | | | | A' B' ]; try discriminate H1.
+    destruct Sf as [ | | | | | | | A' B' | | ]; try discriminate H1.
     destruct (synth G e2) as [ Sa | ] eqn:Ha; [ | discriminate ].
     destruct (decide_ssub Sa A') eqn:Hd; [ | discriminate ].
     injection H1 as <-.

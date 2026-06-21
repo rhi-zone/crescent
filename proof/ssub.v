@@ -152,6 +152,10 @@ Fixpoint bsize (t : BTy) : nat :=
                      | [] => 0
                      | (_, T) :: r => bsize T + ms r
                      end) fs)
+  (* SPLIT-STEP 1 (reference substrate): references contribute their content's
+     size (so structural recursions over [BRef] still decrease). *)
+  | BRef T => S (bsize T)
+  | BAnyRef => 1
   end.
 
 Lemma bsize_pos : forall t, 1 <= bsize t.
@@ -182,8 +186,8 @@ Proof. decide equality. Defined.
 Definition bty_eq_dec : forall (a b : BTy), {a = b} + {a <> b}.
 Proof.
   fix REC 1. intros a b.
-  destruct a as [a1| | |a1 a2|a1 a2|a1|f|A1 B1];
-  destruct b as [b1| | |b1 b2|b1 b2|b1|g|A2 B2];
+  destruct a as [a1| | |a1 a2|a1 a2|a1|f|A1 B1|Ra|];
+  destruct b as [b1| | |b1 b2|b1 b2|b1|g|A2 B2|Rb|];
     try (right; discriminate); try (left; reflexivity).
   - (* BAtom *) destruct (atom_eq_dec a1 b1); [left|right]; congruence.
   - (* BUnion *) destruct (REC a1 b1); destruct (REC a2 b2);
@@ -209,6 +213,8 @@ Proof.
     + right. congruence.
   - (* BArrow *) destruct (REC A1 A2); destruct (REC B1 B2);
       try (right; congruence). left; congruence.
+  - (* BRef — compare content types via the outer REC. *)
+    destruct (REC Ra Rb); [left|right]; congruence.
 Defined.
 
 Definition bty_eqb (a b : BTy) : bool :=
@@ -219,6 +225,9 @@ Proof.
   intros a b. unfold bty_eqb. destruct (bty_eq_dec a b); split; intro H;
     (reflexivity || discriminate || assumption || (subst; reflexivity) || contradiction).
 Qed.
+
+Lemma bty_eqb_refl : forall t, bty_eqb t t = true.
+Proof. intro t. apply bty_eqb_true. reflexivity. Qed.
 
 (* decidable [atom_le] (the atom sub-order: only [AInt<:ANum], [AInt<:AFloat]). *)
 Definition atom_le_dec (a b : Atom) : {atom_le a b} + {~ atom_le a b}.
@@ -509,6 +518,9 @@ Fixpoint inter_free (t : BTy) : Prop :=
   | BArrow a b => inter_free a /\ inter_free b
   | BRec fs => (fix il (xs : list (string * BTy)) : Prop :=
                   match xs with [] => True | (_, T) :: r => inter_free T /\ il r end) fs
+  (* references: inter-free iff the content type is. *)
+  | BRef T => inter_free T
+  | BAnyRef => True
   end.
 
 (* One-step computation of [decide_ssub_fuel] when neither short-circuit fires. *)
@@ -534,6 +546,12 @@ Qed.
 (* Helper tactics applied per (a-head, b-head). The [b] order after excluding
    BTop is: Atom, Bot, Union, Inter, Neg, Rec, Arrow. *)
 
+(* SPLIT-STEP 1 — references are LEAVES for [ssub]: the decider treats them
+   reflexively (catch-all [bty_eqb]) plus the union/inter-target clauses. Real
+   invariant ref subtyping is DEFERRED to a later increment; the soundness/
+   completeness proofs below handle ref targets inline (guarded by [match goal] on
+   the target head so non-ref subgoals stay for their own bullets). *)
+
 (* ============================ SOUNDNESS (unconditional) ===================== *)
 Lemma decide_ssub_fuel_sound : forall n a b,
   decide_ssub_fuel n a b = true -> ssub a b.
@@ -546,11 +564,14 @@ Proof.
     { subst a. apply SsBot. }
     rewrite (decide_ssub_step n a b HbTop HaBot) in Hd.
     (* shorthand discharges for the connective-target clauses on a leaf [a]. *)
-    destruct a as [ax| | |a1 a2|a1 a2|a1|af|A1 B1];
+    destruct a as [ax| | |a1 a2|a1 a2|a1|af|A1 B1|Ra|];
       try (exfalso; apply HaBot; reflexivity).
     + (* a = BAtom : b ∈ {Atom,Bot,Union,Inter,Neg,Rec,Arrow} *)
-      destruct b as [bx| | |b1 b2|b1 b2|b1|bg|A2 B2];
-        try (exfalso; apply HbTop; reflexivity).
+      destruct b as [bx| | |b1 b2|b1 b2|b1|bg|A2 B2|Rb|];
+        try (exfalso; apply HbTop; reflexivity);
+        (* ref/anyref targets ONLY (guarded): bty_eqb (BAtom _) (ref) = false *)
+        try (match goal with |- ssub _ (BRef _) => idtac | |- ssub _ BAnyRef => idtac end;
+             apply bty_eqb_true in Hd; discriminate).
       * apply orb_true_iff in Hd. destruct Hd as [Hle | Heq].
         -- apply SsAtom. apply atom_le_b_true. exact Hle.
         -- apply bty_eqb_true in Heq. rewrite Heq. apply SsRefl.
@@ -563,7 +584,7 @@ Proof.
       * apply bty_eqb_true in Hd. discriminate.       (* Rec *)
       * apply bty_eqb_true in Hd. discriminate.       (* Arrow *)
     + (* a = BTop *)
-      destruct b as [bx| | |b1 b2|b1 b2|b1|bg|A2 B2];
+      destruct b as [bx| | |b1 b2|b1 b2|b1|bg|A2 B2|Rb|];
         try (exfalso; apply HbTop; reflexivity);
         try (apply bty_eqb_true in Hd; discriminate).
       * apply orb_true_iff in Hd. destruct Hd as [H1 | H2];   (* Union *)
@@ -574,8 +595,12 @@ Proof.
       apply andb_true_iff in Hd. destruct Hd as [H1 H2].
       apply SsUnionE; [ apply IHn; exact H1 | apply IHn; exact H2 ].
     + (* a = BInter *)
-      destruct b as [bx| | |b1 b2|b1 b2|b1|bg|A2 B2];
-        try (exfalso; apply HbTop; reflexivity).
+      destruct b as [bx| | |b1 b2|b1 b2|b1|bg|A2 B2|Rb|];
+        try (exfalso; apply HbTop; reflexivity);
+        (* ref/anyref targets: inter-left projection, same orb shape as other leaves *)
+        try (match goal with |- ssub _ (BRef _) => idtac | |- ssub _ BAnyRef => idtac end;
+             apply orb_true_iff in Hd; destruct Hd as [H1 | H2];
+             [ apply SsInterPL; apply IHn; exact H1 | apply SsInterPR; apply IHn; exact H2 ]).
       * apply orb_true_iff in Hd. destruct Hd as [H1 | H2];   (* Atom: inter-left *)
           [ apply SsInterPL; apply IHn; exact H1 | apply SsInterPR; apply IHn; exact H2 ].
       * apply orb_true_iff in Hd. destruct Hd as [H1 | H2];   (* Bot: inter-left *)
@@ -591,7 +616,7 @@ Proof.
       * apply orb_true_iff in Hd. destruct Hd as [H1 | H2];   (* Arrow: inter-left *)
           [ apply SsInterPL; apply IHn; exact H1 | apply SsInterPR; apply IHn; exact H2 ].
     + (* a = BNeg *)
-      destruct b as [bx| | |b1 b2|b1 b2|b1|bg|A2 B2];
+      destruct b as [bx| | |b1 b2|b1 b2|b1|bg|A2 B2|Rb|];
         try (exfalso; apply HbTop; reflexivity);
         try (apply bty_eqb_true in Hd; rewrite Hd; apply SsRefl).
       * apply orb_true_iff in Hd. destruct Hd as [H1 | H2];   (* Union *)
@@ -599,7 +624,7 @@ Proof.
       * apply andb_true_iff in Hd. destruct Hd as [H1 H2];   (* Inter *)
           apply SsInterI; [ apply IHn; exact H1 | apply IHn; exact H2 ].
     + (* a = BRec *)
-      destruct b as [bx| | |b1 b2|b1 b2|b1|bg|A2 B2];
+      destruct b as [bx| | |b1 b2|b1 b2|b1|bg|A2 B2|Rb|];
         try (exfalso; apply HbTop; reflexivity);
         try (apply bty_eqb_true in Hd; discriminate).
       * apply orb_true_iff in Hd. destruct Hd as [H1 | H2];   (* Union *)
@@ -609,7 +634,7 @@ Proof.
       * apply SsRec. apply (decide_srec_sound (decide_ssub_fuel n) af bg);   (* Rec *)
           [ intros kk Tf Tg HinF HinG Hr; apply IHn; exact Hr | exact Hd ].
     + (* a = BArrow *)
-      destruct b as [bx| | |b1 b2|b1 b2|b1|bg|A2 B2];
+      destruct b as [bx| | |b1 b2|b1 b2|b1|bg|A2 B2|Rb|];
         try (exfalso; apply HbTop; reflexivity);
         try (apply bty_eqb_true in Hd; discriminate).
       * apply orb_true_iff in Hd. destruct Hd as [H1 | H2];   (* Union *)
@@ -618,6 +643,95 @@ Proof.
           apply SsInterI; [ apply IHn; exact H1 | apply IHn; exact H2 ].
       * apply andb_true_iff in Hd. destruct Hd as [Hdom Hcod];   (* Arrow *)
           apply SsArrow; [ apply IHn; exact Hdom | apply IHn; exact Hcod ].
+    + (* a = BRef: a leaf for [ssub]. The decider treats refs reflexively (catch-all
+         [bty_eqb], plus the union/inter-target clauses). Ref's real invariant
+         subtyping is DEFERRED to a later increment; here [ssub] relates refs only
+         reflexively / via the connective targets. Each leaf/union/inter b-case is
+         handled by a cascade of [try]s (no per-case bullets). *)
+      destruct b as [bx| | |b1 b2|b1 b2|b1|bg|A2 B2|Rb|];
+        try (exfalso; apply HbTop; reflexivity);
+        try apply SsRefl;   (* b = BRef Ra / BAnyRef syntactically equal: reflexive *)
+        try (apply bty_eqb_true in Hd; rewrite Hd; apply SsRefl);
+        try (apply orb_true_iff in Hd; destruct Hd as [H1 | H2];
+             [ apply SsUnionInL; apply IHn; exact H1 | apply SsUnionInR; apply IHn; exact H2 ]);
+        try (apply andb_true_iff in Hd; destruct Hd as [H1 H2];
+             apply SsInterI; [ apply IHn; exact H1 | apply IHn; exact H2 ]).
+    + (* a = BAnyRef: same — a reflexive leaf for [ssub]. *)
+      destruct b as [bx| | |b1 b2|b1 b2|b1|bg|A2 B2|Rb|];
+        try (exfalso; apply HbTop; reflexivity);
+        try apply SsRefl;
+        try (apply bty_eqb_true in Hd; rewrite Hd; apply SsRefl);
+        try (apply orb_true_iff in Hd; destruct Hd as [H1 | H2];
+             [ apply SsUnionInL; apply IHn; exact H1 | apply SsUnionInR; apply IHn; exact H2 ]);
+        try (apply andb_true_iff in Hd; destruct Hd as [H1 H2];
+             apply SsInterI; [ apply IHn; exact H1 | apply IHn; exact H2 ]).
+Qed.
+
+(* SPLIT-STEP 1 — supertypes of a REFERENCE leaf [L] (= [BRef _] or [BAnyRef]):
+   BTop, [L] itself, a union of such (one disjunct), or an intersection of such
+   (BOTH conjuncts). Mirrors [atom_above] / [interneg_above]. References are
+   reflexive-only leaves for [ssub] (their real invariant subtyping is DEFERRED to
+   a later increment), so [ssub L T] holds exactly when [ref_above L T]. *)
+Fixpoint ref_above (L T : BTy) : Prop :=
+  match T with
+  | BTop          => True
+  | BUnion Tl Tr  => ref_above L Tl \/ ref_above L Tr
+  | BInter Tl Tr  => ref_above L Tl /\ ref_above L Tr
+  | _             => T = L
+  end.
+
+(* monotone along [ssub], for a reference leaf [L]. *)
+Lemma ref_above_mono : forall L, (exists T0, L = BRef T0) \/ L = BAnyRef ->
+  forall M C, ssub M C -> ref_above L M -> ref_above L C.
+Proof.
+  (* make L concrete so every leaf [ref_above]-equation [leaf = L] is a
+     [discriminate]-able mismatch. *)
+  intros L HL M C H.
+  induction H; intros Hab; simpl in *;
+    (* trivial / reflexive cases *)
+    try exact I; try exact Hab;
+    (* leaf cases: Hab : leaf = L, impossible since L is a reference *)
+    try (exfalso; destruct HL as [[T0 HL] | HL]; subst L; discriminate Hab).
+  - (* SsTrans *) apply IHssub2. apply IHssub1. exact Hab.
+  - (* SsUnionInL *) left. apply IHssub. exact Hab.
+  - (* SsUnionInR *) right. apply IHssub. exact Hab.
+  - (* SsUnionE *) destruct Hab as [Ha | Hb]; [ apply IHssub1 | apply IHssub2 ]; assumption.
+  - (* SsInterPL *) destruct Hab as [Ha _]. apply IHssub. exact Ha.
+  - (* SsInterPR *) destruct Hab as [_ Hb]. apply IHssub. exact Hb.
+  - (* SsInterI *) split; [ apply IHssub1 | apply IHssub2 ]; exact Hab.
+Qed.
+
+Lemma ssub_ref_super : forall T0 T, ssub (BRef T0) T -> ref_above (BRef T0) T.
+Proof.
+  intros T0 T H. apply (ref_above_mono (BRef T0) (or_introl (ex_intro _ T0 eq_refl)) (BRef T0) T H).
+  simpl. reflexivity.
+Qed.
+
+Lemma ssub_anyref_super : forall T, ssub BAnyRef T -> ref_above BAnyRef T.
+Proof.
+  intros T H. apply (ref_above_mono BAnyRef (or_intror eq_refl) BAnyRef T H).
+  simpl. reflexivity.
+Qed.
+
+(* the converse direction: [ref_above L T] re-builds an [ssub L T] derivation
+   (refl for the leaf, SsTop, union-injection, inter-introduction). Needed by the
+   completeness recursion to feed [IHn] at the union/inter targets. *)
+Lemma ref_above_to_ssub : forall L, (exists T0, L = BRef T0) \/ L = BAnyRef ->
+  forall T, ref_above L T -> ssub L T.
+Proof.
+  intros L HL T. induction T; simpl; intro Hab.
+  - rewrite <- Hab. apply SsRefl.                 (* BAtom: Hab : BAtom _ = L *)
+  - apply SsTop.                                  (* BTop *)
+  - rewrite <- Hab. apply SsRefl.                 (* BBot *)
+  - destruct Hab as [H1 | H2];                    (* BUnion *)
+      [ apply SsUnionInL; apply IHT1; exact H1 | apply SsUnionInR; apply IHT2; exact H2 ].
+  - destruct Hab as [H1 H2].                       (* BInter *)
+    apply SsInterI; [ apply IHT1; exact H1 | apply IHT2; exact H2 ].
+  - rewrite <- Hab. apply SsRefl.                  (* BNeg *)
+  - rewrite <- Hab. apply SsRefl.                  (* BRec *)
+  - rewrite <- Hab. apply SsRefl.                  (* BArrow *)
+  - rewrite <- Hab. apply SsRefl.                  (* BRef *)
+  - rewrite <- Hab. apply SsRefl.                  (* BAnyRef *)
 Qed.
 
 (* ============= COMPLETENESS on the intersection-free fragment =============== *)
@@ -632,11 +746,11 @@ Proof.
     destruct (bty_eq_dec a BBot) as [HaBot | HaBot].
     { subst a. simpl. destruct b; try reflexivity; exfalso; apply HbTop; reflexivity. }
     rewrite (decide_ssub_step n a b HbTop HaBot).
-    destruct a as [ax| | |a1 a2|a1 a2|a1|af|A1 B1];
+    destruct a as [ax| | |a1 a2|a1 a2|a1|af|A1 B1|Ra|];
       try (exfalso; apply HaBot; reflexivity);
       try (simpl in Hifa; contradiction).
     + (* a = BAtom *)
-      destruct b as [bx| | |b1 b2|b1 b2|b1|bg|A2 B2];
+      destruct b as [bx| | |b1 b2|b1 b2|b1|bg|A2 B2|Rb|];
         try (exfalso; apply HbTop; reflexivity);
         try (simpl in Hifb; contradiction); simpl in Hn.
       * apply ssub_atom_atom in Hs. apply orb_true_iff.       (* Atom *)
@@ -652,32 +766,38 @@ Proof.
       * exfalso. apply ssub_atom_super in Hs. exact Hs.       (* Neg *)
       * exfalso. eapply ssub_atom_not_rec; exact Hs.          (* Rec *)
       * exfalso. eapply ssub_atom_not_arrow; exact Hs.        (* Arrow *)
+      * (* BRef: atom not below a reference — Hs absurd ([atom_above _ (BRef _)] = False) *)
+        exfalso. apply ssub_atom_super in Hs. exact Hs.
+      * (* BAnyRef: same *)
+        exfalso. apply ssub_atom_super in Hs. exact Hs.
     + (* a = BTop *)
-      destruct b as [bx| | |b1 b2|b1 b2|b1|bg|A2 B2];
+      destruct b as [bx| | |b1 b2|b1 b2|b1|bg|A2 B2|Rb|];
         try (exfalso; apply HbTop; reflexivity);
         try (simpl in Hifb; contradiction); simpl in Hn;
-        try (exfalso; apply ssub_top_super in Hs; simpl in Hs; exact Hs).
-      * destruct Hifb as [Hb1 Hb2]. apply ssub_top_super in Hs. simpl in Hs.   (* Union *)
-        apply orb_true_iff. destruct Hs as [H1 | H2];
-          [ left; apply (IHn BTop b1); [ simpl in Hn |- *; lia | exact I | exact Hb1 | apply top_above_sound; exact H1 ]
-          | right; apply (IHn BTop b2); [ simpl in Hn |- *; lia | exact I | exact Hb2 | apply top_above_sound; exact H2 ] ].
+        try (exfalso; apply ssub_top_super in Hs; simpl in Hs; exact Hs);
+        (* Union (the only surviving target) *)
+        try (destruct Hifb as [Hb1 Hb2]; apply ssub_top_super in Hs; simpl in Hs;
+             apply orb_true_iff; destruct Hs as [H1 | H2];
+             [ left; apply (IHn BTop b1); [ simpl in Hn |- *; lia | exact I | exact Hb1 | apply top_above_sound; exact H1 ]
+             | right; apply (IHn BTop b2); [ simpl in Hn |- *; lia | exact I | exact Hb2 | apply top_above_sound; exact H2 ] ]).
     + (* a = BUnion: union-on-left elim *)
       simpl in Hn. destruct Hifa as [Hifa1 Hifa2]. apply andb_true_iff. split;
         [ apply (IHn a1 b); [ simpl in Hn |- *; lia | exact Hifa1 | exact Hifb | eapply ssub_union_src_l; exact Hs ]
         | apply (IHn a2 b); [ simpl in Hn |- *; lia | exact Hifa2 | exact Hifb | eapply ssub_union_src_r; exact Hs ] ].
     + (* a = BNeg *)
-      destruct b as [bx| | |b1 b2|b1 b2|b1|bg|A2 B2];
+      destruct b as [bx| | |b1 b2|b1 b2|b1|bg|A2 B2|Rb|];
         try (exfalso; apply HbTop; reflexivity);
         try (simpl in Hifb; contradiction); simpl in Hn;
         try (apply (ssub_interneg_leaf (BNeg a1) _ I) in Hs; simpl in Hs;
-             apply bty_eqb_true; symmetry; exact Hs).
-      * destruct Hifb as [Hb1 Hb2].                            (* Union *)
-        pose proof (ssub_union_tgt_inv (BNeg a1) b1 b2 Hs) as Hinv. simpl in Hinv.
-        apply orb_true_iff. destruct Hinv as [H1 | H2];
-          [ left; apply (IHn (BNeg a1) b1); [ simpl in Hn |- *; lia | exact Hifa | exact Hb1 | exact H1 ]
-          | right; apply (IHn (BNeg a1) b2); [ simpl in Hn |- *; lia | exact Hifa | exact Hb2 | exact H2 ] ].
+             apply bty_eqb_true; symmetry; exact Hs);
+        (* Union (the only surviving target) *)
+        try (destruct Hifb as [Hb1 Hb2];
+             pose proof (ssub_union_tgt_inv (BNeg a1) b1 b2 Hs) as Hinv; simpl in Hinv;
+             apply orb_true_iff; destruct Hinv as [H1 | H2];
+             [ left; apply (IHn (BNeg a1) b1); [ simpl in Hn |- *; lia | exact Hifa | exact Hb1 | exact H1 ]
+             | right; apply (IHn (BNeg a1) b2); [ simpl in Hn |- *; lia | exact Hifa | exact Hb2 | exact H2 ] ]).
     + (* a = BRec *)
-      destruct b as [bx| | |b1 b2|b1 b2|b1|bg|A2 B2];
+      destruct b as [bx| | |b1 b2|b1 b2|b1|bg|A2 B2|Rb|];
         try (exfalso; apply HbTop; reflexivity);
         try (simpl in Hifb; contradiction); simpl in Hn.
       * exfalso. eapply ssub_rec_not_atom; exact Hs.          (* Atom *)
@@ -709,8 +829,12 @@ Proof.
              | exact Hsf ].
         -- exact (ssub_rec_to_srec af bg Hs).
       * exfalso. eapply ssub_rec_not_arrow; exact Hs.          (* Arrow *)
+      * (* BRef: record not below a reference — [rec_above _ (BRef _)] = False *)
+        exfalso. apply ssub_rec_super in Hs. exact Hs.
+      * (* BAnyRef: same *)
+        exfalso. apply ssub_rec_super in Hs. exact Hs.
     + (* a = BArrow *)
-      destruct b as [bx| | |b1 b2|b1 b2|b1|bg|A2 B2];
+      destruct b as [bx| | |b1 b2|b1 b2|b1|bg|A2 B2|Rb|];
         try (exfalso; apply HbTop; reflexivity);
         try (simpl in Hifb; contradiction); simpl in Hn; simpl in Hifa.
       * exfalso. eapply ssub_arrow_not_atom; exact Hs.        (* Atom *)
@@ -727,6 +851,43 @@ Proof.
         apply andb_true_iff. split;
           [ apply (IHn A2 A1); [ simpl in Hn |- *; lia | exact HifA2 | exact HifA1 | exact Hdom ]
           | apply (IHn B1 B2); [ simpl in Hn |- *; lia | exact HifB1 | exact HifB2 | exact Hcod ] ].
+      * (* BRef: arrow not below a reference — [arrow_above _ _ (BRef _)] = False *)
+        exfalso. apply ssub_arrow_super in Hs. exact Hs.
+      * (* BAnyRef: same *)
+        exfalso. apply ssub_arrow_super in Hs. exact Hs.
+    + (* a = BRef Ra: a reflexive leaf. [ssub_ref_super] characterizes the
+         supertypes ([ref_above]); the decider matches it (bty_eqb for the
+         reflexive/leaf targets, union/inter recursion otherwise). A cascade of
+         [try]s handles each b-case (no per-case bullets). *)
+      pose proof (ssub_ref_super Ra b Hs) as Hra.
+      destruct b as [bx| | |b1 b2|b1 b2|b1|bg|A2 B2|Rb|]; simpl in Hra;
+        try (exfalso; apply HbTop; reflexivity);
+        try (simpl in Hifb; contradiction);             (* b = BInter: inter_free is False *)
+        try apply bty_eqb_refl;                          (* b = BRef Ra: syntactically equal *)
+        try (rewrite <- Hra; apply bty_eqb_refl);        (* other leaf b: Hra : b = BRef Ra *)
+        try (destruct Hifb as [Hb1 Hb2];                 (* Union *)
+             apply orb_true_iff; destruct Hra as [H1 | H2];
+             [ left; apply (IHn (BRef Ra) b1); [ simpl in Hn |- *; lia | exact Hifa | exact Hb1 | apply (ref_above_to_ssub (BRef Ra) (or_introl (ex_intro _ Ra eq_refl)) b1 H1) ]
+             | right; apply (IHn (BRef Ra) b2); [ simpl in Hn |- *; lia | exact Hifa | exact Hb2 | apply (ref_above_to_ssub (BRef Ra) (or_introl (ex_intro _ Ra eq_refl)) b2 H2) ] ]);
+        try (destruct Hifb as [Hb1 Hb2];                 (* Inter *)
+             destruct Hra as [H1 H2]; apply andb_true_iff; split;
+             [ apply (IHn (BRef Ra) b1); [ simpl in Hn |- *; lia | exact Hifa | exact Hb1 | apply (ref_above_to_ssub (BRef Ra) (or_introl (ex_intro _ Ra eq_refl)) b1 H1) ]
+             | apply (IHn (BRef Ra) b2); [ simpl in Hn |- *; lia | exact Hifa | exact Hb2 | apply (ref_above_to_ssub (BRef Ra) (or_introl (ex_intro _ Ra eq_refl)) b2 H2) ] ]).
+    + (* a = BAnyRef: same — a reflexive leaf. *)
+      pose proof (ssub_anyref_super b Hs) as Hra.
+      destruct b as [bx| | |b1 b2|b1 b2|b1|bg|A2 B2|Rb|]; simpl in Hra;
+        try (exfalso; apply HbTop; reflexivity);
+        try (simpl in Hifb; contradiction);             (* b = BInter: inter_free is False *)
+        try apply bty_eqb_refl;                          (* b = BAnyRef: syntactically equal *)
+        try (rewrite <- Hra; apply bty_eqb_refl);        (* other leaf b: Hra : b = BAnyRef *)
+        try (destruct Hifb as [Hb1 Hb2];                 (* Union *)
+             apply orb_true_iff; destruct Hra as [H1 | H2];
+             [ left; apply (IHn BAnyRef b1); [ simpl in Hn |- *; lia | exact Hifa | exact Hb1 | apply (ref_above_to_ssub BAnyRef (or_intror eq_refl) b1 H1) ]
+             | right; apply (IHn BAnyRef b2); [ simpl in Hn |- *; lia | exact Hifa | exact Hb2 | apply (ref_above_to_ssub BAnyRef (or_intror eq_refl) b2 H2) ] ]);
+        try (destruct Hifb as [Hb1 Hb2];                 (* Inter *)
+             destruct Hra as [H1 H2]; apply andb_true_iff; split;
+             [ apply (IHn BAnyRef b1); [ simpl in Hn |- *; lia | exact Hifa | exact Hb1 | apply (ref_above_to_ssub BAnyRef (or_intror eq_refl) b1 H1) ]
+             | apply (IHn BAnyRef b2); [ simpl in Hn |- *; lia | exact Hifa | exact Hb2 | apply (ref_above_to_ssub BAnyRef (or_intror eq_refl) b2 H2) ] ]).
 Qed.
 
 (* ===========================================================================
@@ -993,7 +1154,7 @@ Theorem dsub_ssub_gap_atom :
 Proof.
   split.
   - (* AFloat ⊆ ANum: both denote all numbers *)
-    unfold dsub. intros v Hv. destruct v as [r| | | | |]; simpl in Hv; try contradiction.
+    unfold dsub. intros v Hv. destruct v as [r| | | | | |]; simpl in Hv; try contradiction.
     simpl. exact I.
   - (* no ssub: decide_ssub returns false *)
     apply decide_ssub_false; [ simpl; tauto | simpl; tauto | reflexivity ].

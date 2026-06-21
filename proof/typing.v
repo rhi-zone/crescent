@@ -338,7 +338,7 @@ Proof.
   - unfold dsub; intros v Hv;
       match goal with [ Hle : atom_le _ _ |- _ ] => rename Hle into Hle0 end;
       inversion Hle0; subst; simpl in *;
-      destruct v as [r| | | | |]; try contradiction; try destruct r;
+      destruct v as [r| | | | | |]; try contradiction; try destruct r;
       simpl; exact I.
   - apply darrow_variance; assumption.
   - (* SsRec: use the P0 fact to transport every demanded field *)
@@ -1549,7 +1549,7 @@ Proof.
   intros a A B H. apply ssub_sound in H.
   destruct (atom_has_member a) as [v Hv].
   pose proof (H v Hv) as Hav.
-  destruct a; destruct v as [r| | | | |]; simpl in Hv, Hav; contradiction.
+  destruct a; destruct v as [r| | | | | |]; simpl in Hv, Hav; contradiction.
 Qed.
 
 (* record SUBTYPE shape (used by ssub.v / ex_bad): below a CONCRETE record, the
@@ -1561,7 +1561,7 @@ Proof.
   destruct (atom_has_member a) as [v Hv].
   pose proof (H v Hv) as Hav. apply denote_rec_iff in Hav.
   destruct Hav as [ents [Hbad _]].
-  destruct a; destruct v as [r| | | | |]; simpl in Hv; try contradiction;
+  destruct a; destruct v as [r| | | | | |]; simpl in Hv; try contradiction;
     discriminate Hbad.
 Qed.
 

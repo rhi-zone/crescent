@@ -1518,3 +1518,86 @@ contravariant/covariant arrow rule that motivated `ssub`. Build order:
   noteworthy CONSUMERS built on this ref core — Lua's **mutable TABLE FIELDS**
   (records whose fields are references) and **reassignable LOCALS** — are the next
   increment. Aliasing / strong-update precision is deferred. See `TODO.md`.
+
+## Increment 17 — REFERENCE TYPE substrate: `BRef` + `BAnyRef` opaque leaves (split-step 1 of the reference unification)
+
+The first step of unifying references into the type algebra. This increment adds
+reference TYPES to the Boolean algebra in `proof/subtype.v` ONLY — so references
+can later be unified into the typing layer (`typing.v`/`ssub.v`/`check.v`, the
+DEFERRED split-step 2). It is additive — increments 1–7 untouched.
+
+> Increment 16 (`imp.v`) is a SEPARATE, store-based mutation core over its own
+> `RTy` ref type. This increment 17 is the reference type former in the SHARED
+> Boolean-algebra `BTy` of `subtype.v` — the substrate the eventual unified
+> reference subtyping will be built on, distinct from `imp.v`'s standalone `RTy`.
+
+- **The diagnosis insight — TWO formers.** References need BOTH a specific
+  `BRef T` (a reference whose content is typed `T`) AND an "any-reference"
+  `BAnyRef` (all references, content-agnostic) — so a truthy location can be
+  NARROWED to "is a reference" without committing to a content type. `BTy` gains
+  both; `V` gains `VRef : nat -> V`, a bare location address (the `nat` is an
+  identity tag; the value carries NO store, so a location's content type is NOT
+  observable from the value — this is exactly why references are invariant).
+
+- **Denotation — CONTENT-BLIND (the price of invariance).** `denote (BRef _) v`
+  and `denote BAnyRef v` BOTH = `exists n, v = VRef n` (the set of ALL locations),
+  content-independent. So denotationally `BRef T ≡ BAnyRef ≡ BRef U` for all T,U
+  (`anyref_equiv_ref`, `ref_equiv_ref`). The syntactic distinction (invariance,
+  any-ref widening) is **DEFERRED to `ssub`** in split-step 2 — fine, because
+  `ssub ⊊ dsub` in the SAFE direction. `denote_dec` decides ref membership (is `v`
+  a `VRef`?), constructive, `Defined`. `V_rect_strong` extended for `VRef`
+  (a leaf, like `VStr`), axiom-free.
+
+- **OPAQUE LEAVES — mirroring `BArrow` exactly.** For the decision machinery:
+  literals `LPosRef`/`LNegRef`/`LPosAnyRef`/`LNegAnyRef` (emitted by
+  `to_dnf`/`to_dnf_neg`); `to_dnf_pres` stays unconditional. A `has_ref` guard
+  (beside `has_arrow`) makes the witness-finder **DEFER** on any clause carrying a
+  ref literal — `clause_wit`/`clause_wit3` return `None`/`Deferred` BEFORE the
+  scalar/record branches, so `gdecide` returns `DUnknown`, NEVER a wrong answer
+  about refs (ref subtyping is decided syntactically by `ssub` later, not by
+  `gdecide`). `BRef`/`BAnyRef` excluded from `atomic`/`flat`/`no_rec`/`neg_atomic`
+  (sent to `False`), just as `BArrow` is; `cl_rf`/`dnf_no_ref` carry the
+  arrow-freeness analog for references.
+
+- **Every existing result PRESERVED.** All Boolean-algebra laws (distributivity
+  both directions, De Morgan, complement, double-negation), the two UNCONDITIONAL
+  soundness theorems `gdecide_DSub_sound`/`gdecide_DNotSub_sound`, `gdecide_complete`,
+  `decide_empty`, `to_dnf_pres`, `denote_dec`, `V_rect_strong` — all still close
+  `Qed` after the extension (parallel `BRef`/`BAnyRef`/`VRef` cases added wherever
+  a `match` over `BTy`/`V`/literals was exhaustive). `gdecide` is still
+  unconditionally sound over the extended `BTy` (refs ⇒ `DUnknown` ⇒ no claim);
+  sanity `reflexivity`: `gdecide (BRef Int)(BRef Str) = DUnknown`,
+  `gdecide BAnyRef (BRef Int) = DUnknown`, with `gd_ref_not_dsub_claim`.
+
+- **Non-vacuity / sanity (all `Qed`).** `ref_int_inhabited` (`denote (BRef Int)
+  (VRef 0)`), `anyref_inhabited`; `nonref_not_ref`/`nonref_not_anyref` (a non-ref
+  value is in neither); `anyref_equiv_ref` / `ref_equiv_ref` (content-blindness
+  made precise — all denote all-refs); `ref_disjoint_atom`/`_rec`/`_arrow` (a
+  location is a distinct value-kind, disjoint from scalars/tables/functions by
+  `discriminate`).
+
+`Print Assumptions` on the Boolean-algebra laws (`ddistrib_inter_union`,
+`dde_morgan_inter`), `gdecide_DSub_sound`/`_DNotSub_sound`/`_complete`,
+`denote_dec`, `V_rect_strong`, and the new ref facts (`denote_ref_iff`,
+`denote_anyref_iff`, `ref_int_inhabited`, `anyref_equiv_ref`, `ref_equiv_ref`,
+`ref_disjoint_atom`/`_rec`/`_arrow`): **Closed under the global context** — no
+axioms, no `Admitted`, no `Classical`. Whole dev compiles (`coqc subtype.v`).
+
+- **WHOLE CHAIN re-verified (with care — the brief's "unaffected" premise was
+  partly wrong).** `typing.v`/`ssub.v`/`check.v`/`imp.v` do NOT reference
+  `BRef`/`BAnyRef`, but they SHARE `subtype.v`'s `V` and `BTy`, so adding the
+  `VRef` value constructor and the two `BTy` constructors broke their exhaustive
+  `destruct`/`match`. Those were extended with the (semantically inert) new
+  branches: in `typing.v` three `destruct v` over `V` gain a `VRef` arm
+  (`contradiction` — a location inhabits no atom/record); in `ssub.v`
+  `bsize`/`inter_free` gain `BRef`/`BAnyRef` arms, `bty_eq_dec` gains the two
+  constructors, and `decide_ssub`'s soundness+completeness gain ref cases —
+  references are treated as **REFLEXIVE-ONLY LEAVES** for `ssub` (new substrate:
+  `ref_above` + `ref_above_mono` + `ssub_ref_super`/`ssub_anyref_super` +
+  `ref_above_to_ssub`, mirroring `atom_above`/`interneg_above`), i.e.
+  invariant/non-widening for now; in `check.v` three `synth`-result `destruct` over
+  `BTy` gain the two arms. **Real invariant + any-ref-widening ref subtyping is the
+  DEFERRED split-step 2** (references unified into the typing layer with
+  store-based mutation soundness). The reality bridge (`lib/sem/bridge/`) does NOT
+  generate ref values (locations have no observable content type), so its non-ref
+  differential tests still pass unchanged — no gating needed.

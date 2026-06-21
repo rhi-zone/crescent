@@ -185,6 +185,32 @@ Op-sem parity must hold at every commit. After the handler deletion, the adversa
   Re-establish all laws + the decision procedure under recursion. Deferred at
   `proof-kernel.md` increment 5 ("cyclic deferred to μ") + staging
   "[then — equirecursive μ]". `proof/subtype.v:690`.
+- [x] **Reference TYPE substrate — `BRef` + `BAnyRef` opaque leaves (split-step 1
+  of the reference unification, DONE).** `subtype.v` gains the value `VRef : nat
+  -> V` (a bare location address) and the types `BRef : BTy -> BTy` (a reference
+  to `T`) and `BAnyRef` (all references, content-agnostic — so a truthy location
+  can be NARROWED to "is a reference" without committing to a content type, the
+  key diagnosis insight). References are INVARIANT and lack a store-free
+  denotation, so the denotation is **content-blind**: `denote (BRef _) v` and
+  `denote BAnyRef v` BOTH = "`v` is some `VRef n`", so denotationally `BRef T ≡
+  BAnyRef ≡ BRef U` for all T,U. They are **OPAQUE LEAVES**, mirroring `BArrow`
+  exactly: literals `LPosRef`/`LNegRef`/`LPosAnyRef`/`LNegAnyRef`; a `has_ref`
+  guard (beside `has_arrow`) makes the witness-finder DEFER on any clause with a
+  ref literal (`gdecide ⇒ DUnknown`, never a wrong ref answer); `BRef`/`BAnyRef`
+  excluded from `atomic`/`flat`/`no_rec`/`neg_atomic`. All Boolean-algebra laws +
+  `gdecide_DSub_sound`/`_DNotSub_sound` + `denote_dec` + `V_rect_strong` re-close
+  `Qed` (Print Assumptions: closed under the global context). Non-vacuity:
+  `ref_int_inhabited`, `anyref_inhabited`, `nonref_not_ref`/`_anyref`,
+  `anyref_equiv_ref`, `ref_equiv_ref`, `ref_disjoint_atom`/`_rec`/`_arrow`.
+  **NEXT (split-step 2, DEFERRED):** the syntactic invariance + any-ref widening
+  distinction is currently `dsub`-collapsed (content-blind); it must be decided in
+  the typing layer via `ssub` (`ssub ⊊ dsub` in the safe direction) — references
+  unified into `typing.v`/`ssub.v`/`check.v` as INVARIANT `BRef` + the `BAnyRef`
+  narrowing supertype, with store-based mutation soundness. (Note: `ssub.v`'s
+  `decide_ssub` already treats `BRef`/`BAnyRef` as **reflexive-only leaves** —
+  `ref_above` + `ssub_ref_super`/`ssub_anyref_super` — i.e. invariant/non-widening
+  for now; real invariant+widening ref subtyping is the split-step-2 work.)
+  Recorded at `proof-kernel.md` increment 17 (reference TYPE substrate).
 
 ### Lua semantics (model faithfulness)
 

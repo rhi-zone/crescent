@@ -659,7 +659,21 @@ Inductive BTy : Type :=
      B] is the type of functions whose every (input,output) pair has: input in A
      ⇒ output in B (the standard semantic-subtyping reading, see [denote]).
      Multi-arg / vararg / multi-return are DEFERRED. *)
-  | BArrow : BTy -> BTy -> BTy.
+  | BArrow : BTy -> BTy -> BTy
+  (* SPLIT-STEP 1 of the reference unification — REFERENCE types. A reference is
+     a mutable location (a Lua-style box / cell). Two formers are needed, mirroring
+     the diagnosis: [BRef T] is the type of references whose CONTENT is typed [T];
+     [BAnyRef] is the type of ALL references, content-agnostic (so a truthy
+     location can be NARROWED to "is a reference" without committing to its
+     content type). References are INVARIANT and lack a clean store-free
+     denotation — a location's content type is NOT observable from the value (we
+     model a location as a bare [nat] address). So BOTH [BRef _] and [BAnyRef]
+     denote exactly the set of all locations [{VRef _}]; the syntactic distinction
+     (invariance, any-ref widening) is DEFERRED to [ssub] in a later increment.
+     They are OPAQUE LEAVES — exactly like [BArrow] — for the decision procedure:
+     any clause carrying a ref literal DEFERS ([gdecide ⇒ DUnknown]). *)
+  | BRef : BTy -> BTy
+  | BAnyRef : BTy.
 
 (* ---- The number representation (LuaJIT 5.1: one double per number) ---------
    A number value is a single double. [NumRep] is the value-level witness of
@@ -699,7 +713,14 @@ Inductive V : Type :=
      issue. Cyclic / self-referential function values and higher-order-via-V are
      fine because [V] occurs positively. Multi-arg / vararg / multi-return are
      DEFERRED (single input, single output per pair). *)
-  | VFun : list (V * V) -> V.
+  | VFun : list (V * V) -> V
+  (* SPLIT-STEP 1 — REFERENCE/location values. A reference VALUE is modelled by a
+     bare location address [VRef : nat -> V] — distinct constructor head, so a
+     location is disjoint from every scalar / table / function value (decided by
+     [discriminate]). The address is just an identity tag; the CONTENT a location
+     points at is NOT carried by the value (no store in this model), which is
+     precisely why references are content-blind / invariant here. *)
+  | VRef : nat -> V.
 
 (* ---- VInt / VFloat as NOTATIONS over the single number value --------------
    [VInt n] is literally [VNum (NRint n)] (an integer-valued double) and
@@ -741,6 +762,8 @@ Section V_ind_strong.
   Hypothesis HFun   : forall g, Pg g -> P (VFun g).
   Hypothesis Hgnil  : Pg [].
   Hypothesis Hgcons : forall i o rest, P i -> P o -> Pg rest -> Pg ((i, o) :: rest).
+  (* VRef carries a bare [nat] address — a leaf, like VStr; no recursive V. *)
+  Hypothesis HRef   : forall n, P (VRef n).
   Fixpoint V_rect_strong (v : V) : P v :=
     match v with
     | VNum (NRint n)  => HInt n
@@ -748,6 +771,7 @@ Section V_ind_strong.
     | VStr n   => HStr n
     | VBool b  => HBool b
     | VNil     => HNil
+    | VRef n   => HRef n
     | VTable l =>
         HTable l
           ((fix go (l : list (string * V)) : Pl l :=
@@ -829,6 +853,14 @@ Fixpoint denote (t : BTy) (v : V) : Prop :=
              end) g
       | _ => False
       end
+  (* REFERENCE membership — CONTENT-BLIND (the price of invariance). A value
+     inhabits [BRef T] iff it is a location [VRef n]; the content type [T] is NOT
+     inspected (the value carries no store), so EVERY location inhabits EVERY
+     [BRef T]. [BAnyRef] denotes the same set. Denotationally therefore
+     [BRef T ≡ BAnyRef ≡ BRef U] for all T,U — the syntactic invariance / any-ref
+     distinction is deferred to [ssub] (the safe direction: [ssub ⊊ dsub]). *)
+  | BRef _   => match v with VRef _ => True | _ => False end
+  | BAnyRef  => match v with VRef _ => True | _ => False end
   end.
 
 (* The brief's [In]-quantified reading, recovered as a characterization lemma.
@@ -897,7 +929,7 @@ Theorem denote_arrow_iff : forall A B v,
   <-> exists g, v = VFun g /\ (forall i o, In (i, o) g -> denote A i -> denote B o).
 Proof.
   intros A B v. simpl. split.
-  - destruct v as [ | | | | ents | g ]; try contradiction.
+  - destruct v as [ | | | | ents | g | n ]; try contradiction.
     intros Hfold. exists g. split; [ reflexivity | ]. apply arrow_fold_iff. exact Hfold.
   - intros [g [Hv Hall]]. subst v. apply arrow_fold_iff. exact Hall.
 Qed.
@@ -911,7 +943,7 @@ Qed.
 
 Definition atom_dec (a : Atom) (v : V) : {atom_denote a v} + {~ atom_denote a v}.
 Proof.
-  destruct a; destruct v as [ r | | | | | ]; try destruct r;
+  destruct a; destruct v as [ r | | | | | | ]; try destruct r;
     simpl; (left; exact I) || (right; intro H; exact H).
 Defined.
 
@@ -932,7 +964,7 @@ Proof.
        table; if not, no membership. If [v = VTable ents], decide each listed
        field by [string_dec]-driven lookup + recursive [denote_dec] on the
        field type — finite over [fields]. Constructive, no Classical. *)
-    destruct v as [ | | | | ents | g ];
+    destruct v as [ | | | | ents | g | n ];
       try (right; intros [ents [Hbad _]]; discriminate Hbad).
     (* v = VTable ents *)
     assert (Hdec :
@@ -967,7 +999,7 @@ Proof.
        for each (i,o) the implication [denote t1 i -> denote t2 o] is decidable
        (decide the antecedent; if it holds, decide the consequent). Constructive,
        no Classical. *)
-    destruct v as [ | | | | ents | g ];
+    destruct v as [ | | | | ents | g | n ];
       try (right; intro H; exact H).
     (* v = VFun g *)
     assert (Hdec :
@@ -995,6 +1027,13 @@ Proof.
           * right. intros [_ Hr]. exact (Hnr Hr).
         + right. intros [Hp _]. exact (Hnp Hp). }
     destruct Hdec as [HY | HN]; [ left; exact HY | right; exact HN ].
+  - (* BRef: membership is "is v a location?" — decide by the constructor head.
+       Constructive, no Classical. *)
+    destruct v as [ | | | | | | n ];
+      try (right; intro H; exact H). left; exact I.
+  - (* BAnyRef: same — decide by the VRef head. *)
+    destruct v as [ | | | | | | n ];
+      try (right; intro H; exact H). left; exact I.
 Defined.
 
 (* Excluded middle and double-negation elimination for [denote], derived from
@@ -1171,7 +1210,7 @@ Proof. disjoint. Qed.
 
 (* Base order: AInt <: ANum, by construction ([VNum (NRint _)] inhabits both). *)
 Theorem base_order_int_num : dsub (BAtom AInt) (BAtom ANum).
-Proof. unfold dsub; simpl; intros v H; destruct v as [ r | | | | | ]; try destruct r; auto. Qed.
+Proof. unfold dsub; simpl; intros v H; destruct v as [ r | | | | | | ]; try destruct r; auto. Qed.
 
 (* ---- LuaJIT 5.1 number atoms: int <: float, the genuine value-domain edge ---
    The user's explicit point. On 5.1 an integer-valued number IS a float (one
@@ -1182,7 +1221,7 @@ Proof. unfold dsub; simpl; intros v H; destruct v as [ r | | | | | ]; try destru
 
 (* int <: float — the headline 5.1 fact. *)
 Theorem AInt_sub_AFloat : dsub (BAtom AInt) (BAtom AFloat).
-Proof. unfold dsub; simpl; intros v H; destruct v as [ r | | | | | ]; try destruct r; auto. Qed.
+Proof. unfold dsub; simpl; intros v H; destruct v as [ r | | | | | | ]; try destruct r; auto. Qed.
 
 (* int <: num — same subset relationship against the number type. *)
 Theorem AInt_sub_ANum : dsub (BAtom AInt) (BAtom ANum).
@@ -1192,7 +1231,7 @@ Proof. exact base_order_int_num. Qed.
    a double). So AFloat is a synonym of ANum, not a distinct sibling type. *)
 Theorem AFloat_equiv_ANum : dequiv (BAtom AFloat) (BAtom ANum).
 Proof.
-  split; unfold dsub; simpl; intros v H; destruct v as [ r | | | | | ];
+  split; unfold dsub; simpl; intros v H; destruct v as [ r | | | | | | ];
     try destruct r; auto.
 Qed.
 
@@ -1296,6 +1335,10 @@ Fixpoint atomic (t : BTy) : Prop :=
   | BNeg a     => atomic a
   | BRec _     => False
   | BArrow _ _ => False
+  (* references are OPAQUE leaves — outside the head-decidable fragment, like
+     arrows (a location's content type is not head-observable). *)
+  | BRef _     => False
+  | BAnyRef    => False
   end.
 
 (* ---- Head classes: canonical representatives ------------------------------
@@ -1330,15 +1373,21 @@ Definition head (v : V) : V :=
      representative suffices. Arrows DO inspect the graph, which is why the
      head-enumeration decider is re-scoped to [atomic] and arrows are deferred. *)
   | VFun _ => VFun []
+  (* All locations collapse to the canonical address 0. SOUND ONLY for the
+     [atomic] fragment (no [BRef]/[BAnyRef]): for atomic types [denote] never
+     inspects a location — every atom sends [VRef _] to the same answer — so one
+     representative suffices. References are OPAQUE leaves (like arrows), excluded
+     from [atomic], so the head-enumeration decider is not used on them. *)
+  | VRef _ => VRef 0
   end.
 
 Definition head_reps : list V :=
-  VInt 0 :: VFloat 0 :: VStr 0 :: VBool false :: VNil :: VTable [] :: VFun [] :: nil.
+  VInt 0 :: VFloat 0 :: VStr 0 :: VBool false :: VNil :: VTable [] :: VFun [] :: VRef 0 :: nil.
 
 (* [head v] is always one of the seven representatives. *)
 Lemma head_in_reps : forall v, In (head v) head_reps.
 Proof.
-  intro v; destruct v as [ r | | | | | ]; try destruct r; simpl;
+  intro v; destruct v as [ r | | | | | | ]; try destruct r; simpl;
     repeat first [ left; reflexivity | right ].
 Qed.
 
@@ -1351,7 +1400,7 @@ Qed.
 
 (* Atom step: [atom_denote a v] iff [atom_denote a (head v)]. *)
 Lemma atom_denote_head : forall a v, atom_denote a v <-> atom_denote a (head v).
-Proof. intros a v; destruct a; destruct v as [ r | | | | | ]; try destruct r; simpl; tauto. Qed.
+Proof. intros a v; destruct a; destruct v as [ r | | | | | | ]; try destruct r; simpl; tauto. Qed.
 
 (* The head-dependence lemma, by induction on the type — RE-SCOPED to the
    [atomic] fragment (increment 5). For an atomic type [denote] never looks past
@@ -1371,6 +1420,8 @@ Proof.
   - rewrite (IHt Hat v); tauto.
   - contradiction.        (* BRec: excluded by [atomic] *)
   - contradiction.        (* BArrow: excluded by [atomic] *)
+  - contradiction.        (* BRef: excluded by [atomic] *)
+  - contradiction.        (* BAnyRef: excluded by [atomic] *)
 Qed.
 
 (* Two values with the SAME head are indistinguishable by any ATOMIC type —
@@ -1740,7 +1791,17 @@ Inductive Lit :=
      arrow literal (so [gdecide] returns [DUnknown], never a wrong answer); the
      decision procedure does not yet decide arrow subtyping. *)
   | LPosArrow : BTy -> BTy -> Lit
-  | LNegArrow : BTy -> BTy -> Lit.
+  | LNegArrow : BTy -> BTy -> Lit
+  (* SPLIT-STEP 1 — REFERENCE literals, mirroring the arrow literals exactly. A
+     positive ref literal carries the content type ([LPosRef T] for [BRef T]);
+     [LPosAnyRef]/[LNegAnyRef] are the content-agnostic any-ref. The witness-finder
+     DEFERS on any clause containing a ref literal (so [gdecide] returns
+     [DUnknown], never a wrong answer): ref subtyping is invariant and decided
+     SYNTACTICALLY by [ssub] later, not by [gdecide]. *)
+  | LPosRef : BTy -> Lit
+  | LNegRef : BTy -> Lit
+  | LPosAnyRef : Lit
+  | LNegAnyRef : Lit.
 
 Definition denote_lit (l:Lit)(v:V) : Prop :=
   match l with
@@ -1750,6 +1811,10 @@ Definition denote_lit (l:Lit)(v:V) : Prop :=
   | LNegRec f  => ~ denote (BRec f) v
   | LPosArrow A B => denote (BArrow A B) v
   | LNegArrow A B => ~ denote (BArrow A B) v
+  | LPosRef T => denote (BRef T) v
+  | LNegRef T => ~ denote (BRef T) v
+  | LPosAnyRef => denote BAnyRef v
+  | LNegAnyRef => ~ denote BAnyRef v
   end.
 
 Definition Clause := list Lit.
@@ -1814,11 +1879,16 @@ Fixpoint neg_atomic (t:BTy) : Prop :=
       | BUnion x y | BInter x y => no_rec x /\ no_rec y
       | BNeg x => no_rec x
       | BRec _ => False
-      | BArrow _ _ => False end) a
+      | BArrow _ _ => False
+      | BRef _ => False
+      | BAnyRef => False end) a
   | BRec fields => (fix nar (fs:list (string*BTy)) : Prop :=
       match fs with [] => True | (_,T)::r => neg_atomic T /\ nar r end) fields
-  (* arrows are NOT in the record-free decidable fragment (they defer). *)
+  (* arrows and references are NOT in the record-free decidable fragment (they
+     defer). *)
   | BArrow _ _ => False
+  | BRef _ => False
+  | BAnyRef => False
   end.
 
 (* positive / negative DNF, mutually defined by structural recursion. *)
@@ -1832,6 +1902,8 @@ Fixpoint to_dnf (t:BTy) : Dnf :=
   | BNeg a => to_dnf_neg a
   | BRec f => [[LPosRec f]]
   | BArrow A B => [[LPosArrow A B]]
+  | BRef T => [[LPosRef T]]
+  | BAnyRef => [[LPosAnyRef]]
   end
 with to_dnf_neg (t:BTy) : Dnf :=
   match t with
@@ -1843,6 +1915,8 @@ with to_dnf_neg (t:BTy) : Dnf :=
   | BNeg a => to_dnf a     (* double negation *)
   | BRec f => [[LNegRec f]]
   | BArrow A B => [[LNegArrow A B]]
+  | BRef T => [[LNegRef T]]
+  | BAnyRef => [[LNegAnyRef]]
   end.
 
 (* Preservation, mutual + UNCONDITIONAL. With [LNegRec] in the literal language,
@@ -1878,6 +1952,10 @@ Proof.
   - (* BRec neg *) simpl. tauto.
   - (* BArrow pos *) simpl. tauto.
   - (* BArrow neg *) simpl. tauto.
+  - (* BRef pos *) simpl. tauto.
+  - (* BRef neg *) simpl. tauto.
+  - (* BAnyRef pos *) simpl. tauto.
+  - (* BAnyRef neg *) simpl. tauto.
 Qed.
 
 Definition to_dnf_pres : forall t v,
@@ -1897,6 +1975,10 @@ Fixpoint rdepth (t:BTy) : nat :=
   (* arrows are never recursed into by the witness finder (arrow clauses defer),
      so they contribute no record-nesting depth of their own. *)
   | BArrow A B => Nat.max (rdepth A) (rdepth B)
+  (* references are never recursed into by the witness finder (ref clauses defer),
+     so they contribute no record-nesting depth of their own. *)
+  | BRef T => rdepth T
+  | BAnyRef => 0
   end.
 
 (* scalar-only clause satisfaction at a head value (only atom literals matter;
@@ -1910,6 +1992,10 @@ Definition lit_satb (l:Lit)(v:V) : bool :=
   | LNegRec f  => if denote_dec (BRec f) v then false else true
   | LPosArrow A B => if denote_dec (BArrow A B) v then true else false
   | LNegArrow A B => if denote_dec (BArrow A B) v then false else true
+  | LPosRef T => if denote_dec (BRef T) v then true else false
+  | LNegRef T => if denote_dec (BRef T) v then false else true
+  | LPosAnyRef => if denote_dec BAnyRef v then true else false
+  | LNegAnyRef => if denote_dec BAnyRef v then false else true
   end.
 Fixpoint clause_satb (c:Clause)(v:V) : bool :=
   match c with [] => true | l::r => lit_satb l v && clause_satb r v end.
@@ -1943,6 +2029,26 @@ Proof.
     + discriminate H.
     + contradiction.
   - destruct (denote_dec (BArrow b b0) v) as [Hd|Hd]; split; intro H.
+    + discriminate H.
+    + contradiction.
+    + exact Hd.
+    + reflexivity.
+  - destruct (denote_dec (BRef b) v) as [Hd|Hd]; split; intro H.
+    + exact Hd.
+    + reflexivity.
+    + discriminate H.
+    + contradiction.
+  - destruct (denote_dec (BRef b) v) as [Hd|Hd]; split; intro H.
+    + discriminate H.
+    + contradiction.
+    + exact Hd.
+    + reflexivity.
+  - destruct (denote_dec BAnyRef v) as [Hd|Hd]; split; intro H.
+    + exact Hd.
+    + reflexivity.
+    + discriminate H.
+    + contradiction.
+  - destruct (denote_dec BAnyRef v) as [Hd|Hd]; split; intro H.
     + discriminate H.
     + contradiction.
     + exact Hd.
@@ -2010,6 +2116,31 @@ Proof.
   - destruct l; simpl; try (rewrite IH; reflexivity); reflexivity.
 Qed.
 
+(* SPLIT-STEP 1 — does the clause contain a REFERENCE literal? Mirrors
+   [has_arrow] exactly. Any clause carrying a ref literal is DEFERRED by the
+   witness finder: ref subtyping is invariant and decided syntactically by [ssub]
+   later, not by [gdecide]. So [gdecide] never gives a wrong answer about refs —
+   it returns [DUnknown]. This keeps the exported decider unconditionally sound in
+   the presence of references. *)
+Fixpoint has_ref (c:Clause) : bool :=
+  match c with
+  | [] => false
+  | LPosRef _ :: _ => true
+  | LNegRef _ :: _ => true
+  | LPosAnyRef :: _ => true
+  | LNegAnyRef :: _ => true
+  | _ :: r => has_ref r
+  end.
+
+(* has_ref distributes over clause append. *)
+Lemma has_ref_app : forall c1 c2,
+  has_ref (c1 ++ c2) = orb (has_ref c1) (has_ref c2).
+Proof.
+  induction c1 as [|l r IH]; simpl; intros c2.
+  - reflexivity.
+  - destruct l; simpl; try (rewrite IH; reflexivity); reflexivity.
+Qed.
+
 (* find first head rep satisfying all literals of a (scalar) clause. *)
 Definition scalar_wit (c:Clause) : option V :=
   find (fun h => clause_satb c h) head_reps.
@@ -2043,7 +2174,7 @@ Definition table_wit_neg (allf Nj:list (string*BTy)) (wf:BTy -> option V) : opti
          table_wit (allf ++ [(fst kT, BNeg (field_inter (fst kT) Nj))]) wf) Nj).
 
 Definition clause_wit (c:Clause) (wf:BTy -> option V) : option V :=
-  if has_arrow c then None    (* arrow literal present: DEFERRED *)
+  if has_arrow c || has_ref c then None    (* arrow or ref literal present: DEFERRED *)
   else
   match pos_recs c with
   | [] => scalar_wit c
@@ -2105,6 +2236,10 @@ Definition lit_scalar (l:Lit) : bool :=
   | LPosRec _ => false
   | LPosArrow _ _ => false
   | LNegArrow _ _ => false
+  | LPosRef _ => false
+  | LNegRef _ => false
+  | LPosAnyRef => false
+  | LNegAnyRef => false
   | _ => true
   end.
 
@@ -2113,12 +2248,12 @@ Lemma lit_denote_head : forall l v, lit_scalar l = true ->
   denote_lit l v -> denote_lit l (head v).
 Proof.
   intros l v Hsc H. destruct l; simpl in *; try discriminate Hsc.
-  - destruct a; destruct v as [ r | | | | | ]; try destruct r; simpl in *; tauto.
-  - destruct a; destruct v as [ r | | | | | ]; try destruct r; simpl in *; tauto.
+  - destruct a; destruct v as [ r | | | | | | ]; try destruct r; simpl in *; tauto.
+  - destruct a; destruct v as [ r | | | | | | ]; try destruct r; simpl in *; tauto.
   - (* LNegRec: ~denote (BRec l) v -> ~denote (BRec l) (head v).
        head v is either a scalar / function (not a table => not in BRec) or
        VTable [] (which is in BRec l only if l = []; but then v was in BRec [] too). *)
-    intro Hc. apply H. destruct v as [ r | | | | | ]; [ destruct r | | | | | ]; simpl in Hc.
+    intro Hc. apply H. destruct v as [ r | | | | | | ]; [ destruct r | | | | | | ]; simpl in Hc.
     + destruct Hc as [ents [Hbad _]]; discriminate.
     + destruct Hc as [ents [Hbad _]]; discriminate.
     + destruct Hc as [ents [Hbad _]]; discriminate.
@@ -2132,6 +2267,8 @@ Proof.
       * destruct Hfields as [[vv [Hlk _]] _]. simpl in Hlk. discriminate Hlk.
     + (* head (VFun g) = VFun []; not a table, so BRec l fails (no ents) *)
       destruct Hc as [ents [Hbad _]]; discriminate.
+    + (* head (VRef n) = VRef n; a location is not a table, so BRec l fails *)
+      destruct Hc as [ents [Hbad _]]; discriminate.
 Qed.
 
 (* a clause with no positive-record literal AND no arrow literal: every literal is
@@ -2139,16 +2276,18 @@ Qed.
 Fixpoint no_pos_rec (c:Clause) : Prop :=
   match c with [] => True | LPosRec _ :: _ => False
     | LPosArrow _ _ :: _ => False | LNegArrow _ _ :: _ => False
+    | LPosRef _ :: _ => False | LNegRef _ :: _ => False
+    | LPosAnyRef :: _ => False | LNegAnyRef :: _ => False
     | _ :: r => no_pos_rec r end.
 
 Lemma pos_recs_nil_no_pos_rec : forall c,
-  pos_recs c = [] -> has_arrow c = false -> no_pos_rec c.
+  pos_recs c = [] -> has_arrow c = false -> has_ref c = false -> no_pos_rec c.
 Proof.
-  induction c as [|l r IH]; simpl; intros Hp Ha.
+  induction c as [|l r IH]; simpl; intros Hp Ha Hr.
   - exact I.
   - destruct l; simpl in *;
-      try (apply IH; [exact Hp | exact Ha]);
-      try discriminate Hp; try discriminate Ha.
+      try (apply IH; [exact Hp | exact Ha | exact Hr]);
+      try discriminate Hp; try discriminate Ha; try discriminate Hr.
 Qed.
 
 Lemma clause_denote_head : forall c v, no_pos_rec c ->
@@ -2163,6 +2302,10 @@ Proof.
     + split; [apply (lit_denote_head (LNegRec l) v); [reflexivity|exact Hl]| apply IH; assumption].
     + contradiction.
     + contradiction.
+    + contradiction.   (* LPosRef: no_pos_rec is False *)
+    + contradiction.   (* LNegRef *)
+    + contradiction.   (* LPosAnyRef *)
+    + contradiction.   (* LNegAnyRef *)
 Qed.
 
 Lemma scalar_wit_sound : forall c v, scalar_wit c = Some v -> denote_clause c v.
@@ -2282,7 +2425,9 @@ Fixpoint no_rec (s:BTy) : Prop :=
   | BUnion x y | BInter x y => no_rec x /\ no_rec y
   | BNeg x => no_rec x
   | BRec _ => False
-  | BArrow _ _ => False end.
+  | BArrow _ _ => False
+  | BRef _ => False
+  | BAnyRef => False end.
 
 (* field_inter over a list whose every field type is no_rec is no_rec. *)
 Lemma field_inter_no_rec : forall k fs,
@@ -2315,12 +2460,12 @@ Qed.
 
 (* ===== decompose a table clause's denotation into record requirements ===== *)
 Lemma denote_clause_of_table : forall c ents,
-  has_pos_atom c = false -> has_arrow c = false ->
+  has_pos_atom c = false -> has_arrow c = false -> has_ref c = false ->
   (forall f, In f (pos_recs c) -> denote (BRec f) (VTable ents)) ->
   (forall g, In g (neg_recs c) -> ~ denote (BRec g) (VTable ents)) ->
   denote_clause c (VTable ents).
 Proof.
-  induction c as [|l r IH]; intros ents Hpa Hha Hpr Hnr; simpl in *.
+  induction c as [|l r IH]; intros ents Hpa Hha Href Hpr Hnr; simpl in *.
   - exact I.
   - destruct l; simpl in *.
     + discriminate Hpa.   (* LPosAtom excluded *)
@@ -2329,6 +2474,10 @@ Proof.
     + split; [apply Hnr; left; reflexivity | apply IH; auto].
     + discriminate Hha.   (* LPosArrow excluded by has_arrow=false *)
     + discriminate Hha.   (* LNegArrow excluded *)
+    + discriminate Href.  (* LPosRef excluded by has_ref=false *)
+    + discriminate Href.  (* LNegRef excluded *)
+    + discriminate Href.  (* LPosAnyRef excluded *)
+    + discriminate Href.  (* LNegAnyRef excluded *)
 Qed.
 
 Lemma denote_clause_components : forall c v,
@@ -2345,6 +2494,10 @@ Proof.
     + split; [exact Hpr | intros g [Hg|Hg]; [subst; exact Hl | apply Hnr; exact Hg]].
     + split; assumption.   (* LPosArrow: pos_recs/neg_recs unchanged *)
     + split; assumption.   (* LNegArrow *)
+    + split; assumption.   (* LPosRef: pos_recs/neg_recs unchanged *)
+    + split; assumption.   (* LNegRef *)
+    + split; assumption.   (* LPosAnyRef *)
+    + split; assumption.   (* LNegAnyRef *)
 Qed.
 
 (* a value satisfying any positive record is a table. *)
@@ -2649,6 +2802,7 @@ Lemma clause_wit_sound : forall c wf v,
 Proof.
   intros c wf v Hwfs H. unfold clause_wit in H.
   destruct (has_arrow c) eqn:Hha; [discriminate H|].
+  destruct (has_ref c) eqn:Href; [discriminate H|]. simpl in H.
   destruct (pos_recs c) as [|p ps] eqn:Hpr.
   - (* scalar branch *) apply scalar_wit_sound. exact H.
   - (* record clause *)
@@ -2657,7 +2811,7 @@ Proof.
     + (* no negated records *)
       pose proof (table_wit_models _ wf v Hwfs H) as Hm.
       destruct Hm as [ents [Hv Hall]]. subst v.
-      apply denote_clause_of_table; [exact Hpa | exact Hha | | ].
+      apply denote_clause_of_table; [exact Hpa | exact Hha | exact Href | | ].
       * intros f Hf. apply (table_models_allpos (pos_recs c)).
         rewrite Hpr. exists ents; split; [reflexivity| exact Hall]. exact Hf.
       * rewrite Hnr. intros g [].
@@ -2666,7 +2820,7 @@ Proof.
         pose proof (table_wit_neg_sound (List.concat (p::ps)) Nj wf v Hwfs H) as Hs.
         destruct Hs as [Hm Hviol].
         destruct Hm as [ents [Hv Hall]]. subst v.
-        apply denote_clause_of_table; [exact Hpa | exact Hha | | ].
+        apply denote_clause_of_table; [exact Hpa | exact Hha | exact Href | | ].
         -- intros f Hf. apply (table_models_allpos (pos_recs c)).
            rewrite Hpr. exists ents; split; [reflexivity| exact Hall]. exact Hf.
         -- rewrite Hnr. intros g [Hg|[]]. subst g. exact Hviol.
@@ -2681,13 +2835,13 @@ Definition good_clause (c:Clause) : Prop :=
 
 Lemma clause_wit_complete : forall c wf,
   (forall T, no_rec T -> wf T = None -> forall v, ~ denote T v) ->
-  has_arrow c = false ->
+  has_arrow c = false -> has_ref c = false ->
   good_clause c -> clause_ok c -> clause_wit c wf = None -> forall v, ~ denote_clause c v.
 Proof.
-  intros c wf Hwfc Hna [Hgp Hgn] Hok H v Hd. unfold clause_wit in H.
-  rewrite Hna in H.
+  intros c wf Hwfc Hna Hnref [Hgp Hgn] Hok H v Hd. unfold clause_wit in H.
+  rewrite Hna, Hnref in H. simpl in H.
   destruct (pos_recs c) as [|p ps] eqn:Hpr.
-  - (* scalar *) apply (scalar_wit_complete c (pos_recs_nil_no_pos_rec c Hpr Hna) H v Hd).
+  - (* scalar *) apply (scalar_wit_complete c (pos_recs_nil_no_pos_rec c Hpr Hna Hnref) H v Hd).
   - (* record clause: v must be a table satisfying all positive records *)
     destruct (has_pos_atom c) eqn:Hpa.
     + (* has_pos_atom = true AND a positive record present: v would be both a
@@ -2697,7 +2851,7 @@ Proof.
       pose proof (denote_clause_components c v Hd) as [Hprc _].
       destruct (posrec_is_table p v (Hprc p Hpex)) as [ents Hve]. subst v.
       (* now show some positive atom holds at VTable ents — contradiction *)
-      clear Hpr Hpex Hprc Hgp Hgn Hwfc Hna. revert Hd Hpa. induction c as [|l r IH]; simpl; intros Hd Hpa.
+      clear Hpr Hpex Hprc Hgp Hgn Hwfc Hna Hnref. revert Hd Hpa. induction c as [|l r IH]; simpl; intros Hd Hpa.
       * discriminate Hpa.
       * destruct Hd as [Hl Hd]. destruct l; simpl in *.
         -- apply (table_neg_atom ents a); exact Hl.
@@ -2706,6 +2860,10 @@ Proof.
         -- apply IH; assumption.
         -- exact Hl.   (* LPosArrow: denote (BArrow _ _) (VTable _) = False *)
         -- apply IH; assumption.   (* LNegArrow: ~denote arrow holds; recurse *)
+        -- exact Hl.   (* LPosRef: denote (BRef _) (VTable _) = False *)
+        -- apply IH; assumption.   (* LNegRef: ~denote ref holds; recurse *)
+        -- exact Hl.   (* LPosAnyRef: denote BAnyRef (VTable _) = False *)
+        -- apply IH; assumption.   (* LNegAnyRef *)
     + (* no positive atom *)
       pose proof (denote_clause_components c v Hd) as [Hprc Hnrc].
       (* v is a table (satisfies p, a positive record) *)
@@ -2741,7 +2899,7 @@ Definition fields_flat (fs:list (string*BTy)) : Prop :=
 (* record-free AND arrow-free clause predicate (a pure scalar/atom clause,
    decided by head enumeration; wf never consulted). *)
 Definition cl_rf (c:Clause) : Prop :=
-  pos_recs c = [] /\ neg_recs c = [] /\ has_arrow c = false.
+  pos_recs c = [] /\ neg_recs c = [] /\ has_arrow c = false /\ has_ref c = false.
 
 Lemma pos_recs_app : forall c1 c2, pos_recs (c1 ++ c2) = pos_recs c1 ++ pos_recs c2.
 Proof. induction c1 as [|l r IH]; simpl; intros c2. reflexivity. destruct l; simpl; rewrite IH; reflexivity. Qed.
@@ -2750,10 +2908,10 @@ Proof. induction c1 as [|l r IH]; simpl; intros c2. reflexivity. destruct l; sim
 
 Lemma cl_rf_app : forall c1 c2, cl_rf c1 -> cl_rf c2 -> cl_rf (c1 ++ c2).
 Proof.
-  intros c1 c2 [Hp1 [Hn1 Ha1]] [Hp2 [Hn2 Ha2]]. unfold cl_rf.
-  rewrite pos_recs_app, neg_recs_app, has_arrow_app.
-  rewrite Hp1, Hp2, Hn1, Hn2, Ha1, Ha2.
-  split; [reflexivity | split; reflexivity].
+  intros c1 c2 [Hp1 [Hn1 [Ha1 Hr1]]] [Hp2 [Hn2 [Ha2 Hr2]]]. unfold cl_rf.
+  rewrite pos_recs_app, neg_recs_app, has_arrow_app, has_ref_app.
+  rewrite Hp1, Hp2, Hn1, Hn2, Ha1, Ha2, Hr1, Hr2.
+  split; [reflexivity | split; [reflexivity | split; reflexivity]].
 Qed.
 
 Lemma Forall_cl_rf_and : forall d1 d2,
@@ -2773,9 +2931,9 @@ Lemma no_rec_no_rec_lits : forall t,
   no_rec t -> Forall cl_rf (to_dnf t) /\ Forall cl_rf (to_dnf_neg t).
 Proof.
   fix IH 1. intros t Hnr. destruct t; simpl in *.
-  - split; (constructor; [split; [reflexivity | split; reflexivity] | constructor]).
-  - split; [ (constructor; [split; [reflexivity | split; reflexivity] | constructor]) | constructor ].
-  - split; [ constructor | (constructor; [split; [reflexivity | split; reflexivity] | constructor]) ].
+  - split; (constructor; [split; [reflexivity | split; [reflexivity | split; reflexivity]] | constructor]).
+  - split; [ (constructor; [split; [reflexivity | split; [reflexivity | split; reflexivity]] | constructor]) | constructor ].
+  - split; [ constructor | (constructor; [split; [reflexivity | split; [reflexivity | split; reflexivity]] | constructor]) ].
   - destruct Hnr as [Ha Hb]. split.
     + apply Forall_cl_rf_or; [apply (IH t1 Ha)| apply (IH t2 Hb)].
     + apply Forall_cl_rf_and; [apply (IH t1 Ha)| apply (IH t2 Hb)].
@@ -2785,6 +2943,8 @@ Proof.
   - split; [ apply (proj2 (IH t Hnr)) | apply (proj1 (IH t Hnr)) ].
   - contradiction.       (* BRec: no_rec is False *)
   - contradiction.       (* BArrow: no_rec is False *)
+  - contradiction.       (* BRef: no_rec is False *)
+  - contradiction.       (* BAnyRef: no_rec is False *)
 Qed.
 
 (* clauses that are record-free are clause_ok. *)
@@ -2792,7 +2952,10 @@ Lemma cl_rf_ok : forall c, cl_rf c -> clause_ok c.
 Proof. intros c [Hp _]. left; exact Hp. Qed.
 
 Lemma cl_rf_no_arrow : forall c, cl_rf c -> has_arrow c = false.
-Proof. intros c [_ [_ Ha]]. exact Ha. Qed.
+Proof. intros c [_ [_ [Ha _]]]. exact Ha. Qed.
+
+Lemma cl_rf_no_ref : forall c, cl_rf c -> has_ref c = false.
+Proof. intros c [_ [_ [_ Hr]]]. exact Hr. Qed.
 
 Definition dnf_ok (d:Dnf) : Prop := Forall clause_ok d.
 
@@ -2805,8 +2968,10 @@ Fixpoint flat (t:BTy) : Prop :=
   | BNeg a => flat a
   | BRec fs => (fix ff (xs:list (string*BTy)) : Prop :=
       match xs with [] => True | (_,T)::r => no_rec T /\ ff r end) fs
-  (* arrows are outside the proven-complete fragment (they defer). *)
+  (* arrows and references are outside the proven-complete fragment (they defer). *)
   | BArrow _ _ => False
+  | BRef _ => False
+  | BAnyRef => False
   end.
 
 Lemma no_rec_flat : forall t, no_rec t -> flat t.
@@ -2817,6 +2982,8 @@ Proof.
   - apply IH; exact H.
   - contradiction.       (* BRec *)
   - contradiction.       (* BArrow *)
+  - contradiction.       (* BRef *)
+  - contradiction.       (* BAnyRef *)
 Qed.
 
 (* field types of a flat record are no_rec. *)
@@ -2873,6 +3040,8 @@ Proof.
              | intros f [] ].
     + split; [ intros f [] | intros f [Heq|[]]; subst f; intros k T Hin; exact (flat_field_no_rec l k T Hf Hin) ].
   - (* BArrow: flat is False, vacuous *) contradiction.
+  - (* BRef: flat is False *) contradiction.
+  - (* BAnyRef: flat is False *) contradiction.
 Qed.
 
 Definition dnf_no_arrow (d:Dnf) : Prop := Forall (fun c => has_arrow c = false) d.
@@ -2911,7 +3080,50 @@ Proof.
   - (* BRec: literals are LPosRec / LNegRec, has_arrow = false *)
     split; repeat constructor.
   - (* BArrow: flat is False *) contradiction.
+  - (* BRef: flat is False *) contradiction.
+  - (* BAnyRef: flat is False *) contradiction.
 Qed.
+
+(* SPLIT-STEP 1 — the [has_ref]-free analog of [dnf_no_arrow]. A [flat] type
+   contains no [BRef]/[BAnyRef] subterm ([flat] sends them to [False]), so its
+   DNF emits no ref literals. Mirrors [dnf_no_arrow] / [flat_no_arrow] exactly. *)
+Definition dnf_no_ref (d:Dnf) : Prop := Forall (fun c => has_ref c = false) d.
+
+Lemma dnf_no_ref_and : forall d1 d2,
+  dnf_no_ref d1 -> dnf_no_ref d2 -> dnf_no_ref (dnf_and d1 d2).
+Proof.
+  intros d1 d2 H1 H2. unfold dnf_no_ref, dnf_and in *. apply Forall_flat_map.
+  rewrite Forall_forall in H1 |- *. intros c1 Hc1. apply Forall_map.
+  rewrite Forall_forall. intros c2 Hc2.
+  rewrite Forall_forall in H2.
+  rewrite has_ref_app. rewrite (H1 c1 Hc1). rewrite (H2 c2 Hc2). reflexivity.
+Qed.
+
+Lemma dnf_no_ref_or : forall d1 d2,
+  dnf_no_ref d1 -> dnf_no_ref d2 -> dnf_no_ref (dnf_or d1 d2).
+Proof. intros d1 d2 H1 H2. unfold dnf_no_ref, dnf_or. apply Forall_app; split; assumption. Qed.
+
+Lemma flat_no_ref : forall t,
+  flat t -> dnf_no_ref (to_dnf t) /\ dnf_no_ref (to_dnf_neg t).
+Proof.
+  fix IH 1. intros t Hf. destruct t; simpl in *.
+  - split; repeat constructor.
+  - split; [repeat constructor | constructor].
+  - split; [constructor | repeat constructor].
+  - destruct Hf as [Ha Hb]. split.
+    + apply dnf_no_ref_or; [apply (IH t1 Ha)|apply (IH t2 Hb)].
+    + apply dnf_no_ref_and; [apply (IH t1 Ha)|apply (IH t2 Hb)].
+  - destruct Hf as [Ha Hb]. split.
+    + apply dnf_no_ref_and; [apply (IH t1 Ha)|apply (IH t2 Hb)].
+    + apply dnf_no_ref_or; [apply (IH t1 Ha)|apply (IH t2 Hb)].
+  - split; [apply (proj2 (IH t Hf)) | apply (proj1 (IH t Hf))].
+  - (* BRec: literals are LPosRec / LNegRec, has_ref = false *)
+    split; repeat constructor.
+  - (* BArrow: flat is False *) contradiction.
+  - (* BRef: flat is False *) contradiction.
+  - (* BAnyRef: flat is False *) contradiction.
+Qed.
+
 Lemma no_rec_rdepth0 : forall t, no_rec t -> rdepth t = 0.
 Proof.
   fix IH 1. intro t. destruct t; simpl; intro H; try reflexivity.
@@ -2920,6 +3132,8 @@ Proof.
   - apply IH; exact H.
   - contradiction.       (* BRec *)
   - contradiction.       (* BArrow *)
+  - contradiction.       (* BRef: rdepth (BRef T) = rdepth T, needs no_rec=False *)
+  (* BAnyRef: rdepth BAnyRef = 0, closed by [reflexivity] above *)
 Qed.
 
 (* records appearing in the DNF of t have rdepth <= rdepth t. *)
@@ -2992,6 +3206,10 @@ Proof.
   - (* BArrow: to_dnf = [[LPosArrow A B]] — pos_recs/neg_recs are empty, so
        clause_recs_shallow is vacuous. *)
     split; (constructor; [split; intros f []|constructor]).
+  - (* BRef: to_dnf = [[LPosRef T]] — pos_recs/neg_recs empty, vacuous. *)
+    split; (constructor; [split; intros f []|constructor]).
+  - (* BAnyRef: to_dnf = [[LPosAnyRef]] — pos_recs/neg_recs empty, vacuous. *)
+    split; (constructor; [split; intros f []|constructor]).
 Qed.
 
 (* ===== dnf_wit correctness ===== *)
@@ -3007,18 +3225,19 @@ Qed.
 
 Lemma dnf_wit_complete : forall d wf,
   (forall T, no_rec T -> wf T = None -> forall v, ~ denote T v) ->
-  dnf_no_arrow d ->
+  dnf_no_arrow d -> dnf_no_ref d ->
   Forall good_clause d -> dnf_ok d -> dnf_wit d wf = None -> forall v, ~ denote_dnf d v.
 Proof.
-  induction d as [|c r IH]; intros wf Hwfc Hna Hgd Hok H v Hd; simpl in *.
+  induction d as [|c r IH]; intros wf Hwfc Hna Href Hgd Hok H v Hd; simpl in *.
   - exact Hd.
   - pose proof (Forall_inv Hgd) as Hgc. pose proof (Forall_inv_tail Hgd) as Hgr.
     pose proof (Forall_inv Hok) as Hokc. pose proof (Forall_inv_tail Hok) as Hokr.
     pose proof (Forall_inv Hna) as Hnac. pose proof (Forall_inv_tail Hna) as Hnar.
+    pose proof (Forall_inv Href) as Hrefc. pose proof (Forall_inv_tail Href) as Hrefr.
     destruct (clause_wit c wf) as [w|] eqn:Ec; [discriminate H|].
     destruct Hd as [Hd|Hd].
-    + exact (clause_wit_complete c wf Hwfc Hnac Hgc Hokc Ec v Hd).
-    + exact (IH wf Hwfc Hnar Hgr Hokr H v Hd).
+    + exact (clause_wit_complete c wf Hwfc Hnac Hrefc Hgc Hokc Ec v Hd).
+    + exact (IH wf Hwfc Hnar Hrefr Hgr Hokr H v Hd).
 Qed.
 
 (* ===== MASTER: find_wit_fuel soundness (GLOBAL, unconditional) ===== *)
@@ -3037,7 +3256,7 @@ Qed.
 (* a scalar clause (cl_rf) is decided by scalar_wit, ignoring wf. *)
 Lemma clause_wit_scalar : forall c wf, cl_rf c -> clause_wit c wf = scalar_wit c.
 Proof.
-  intros c wf [Hp [_ Ha]]. unfold clause_wit. rewrite Ha, Hp. reflexivity.
+  intros c wf [Hp [_ [Ha Hr]]]. unfold clause_wit. rewrite Ha, Hr, Hp. reflexivity.
 Qed.
 
 Lemma dnf_wit_complete_scalar : forall d wf,
@@ -3050,7 +3269,7 @@ Proof.
     destruct (scalar_wit c) eqn:Es; [discriminate H|].
     destruct Hd as [Hd|Hd].
     + apply (scalar_wit_complete c
-               (pos_recs_nil_no_pos_rec c (proj1 Hc) (cl_rf_no_arrow c Hc)) Es v Hd).
+               (pos_recs_nil_no_pos_rec c (proj1 Hc) (cl_rf_no_arrow c Hc) (cl_rf_no_ref c Hc)) Es v Hd).
     + exact (IH wf Hr H v Hd).
 Qed.
 
@@ -3073,6 +3292,7 @@ Proof.
   apply (dnf_wit_complete (to_dnf t) (find_wit_fuel (S (rdepth t)))
            (fun T HT => find_wit_norec_complete (rdepth t) T HT)
            (proj1 (flat_no_arrow t Hflat))
+           (proj1 (flat_no_ref t Hflat))
            (proj1 (flat_good_clauses t Hflat))
            Hok H v).
   apply to_dnf_pres. exact Hd.
@@ -3232,7 +3452,7 @@ Definition table_wit_neg3 (allf Nj:list (string*BTy)) (wf3:BTy->wit_result) : wi
 
 (* ---- three-valued clause / dnf / fuel finder ----------------------------- *)
 Definition clause_wit3 (c:Clause) (wf3:BTy->wit_result) : wit_result :=
-  if has_arrow c then Deferred    (* arrow literal present: DEFERRED, never lie *)
+  if has_arrow c || has_ref c then Deferred    (* arrow or ref literal present: DEFERRED, never lie *)
   else
   match pos_recs c with
   | [] => match scalar_wit c with Some v => Found v | None => NoWitness end
@@ -3275,6 +3495,7 @@ Lemma clause_wit3_found_bridge : forall c wf3 v,
 Proof.
   intros c wf3 v H. unfold clause_wit3, clause_wit in *.
   destruct (has_arrow c); [discriminate H|].
+  destruct (has_ref c); [discriminate H|]. cbn [orb] in H |- *.
   destruct (pos_recs c) as [|p ps].
   - destruct (scalar_wit c) as [w|]; [injection H as <-; reflexivity | discriminate].
   - destruct (has_pos_atom c); [discriminate|].
@@ -3461,16 +3682,17 @@ Lemma clause_wit3_nowit_empty : forall c wf3,
 Proof.
   intros c wf3 Hwfn H v Hd. unfold clause_wit3 in H.
   destruct (has_arrow c) eqn:Hna; [discriminate H|].
+  destruct (has_ref c) eqn:Href; [discriminate H|]. cbn [orb] in H.
   destruct (pos_recs c) as [|p ps] eqn:Hpr.
   - (* scalar *)
     destruct (scalar_wit c) as [w|] eqn:Es; [discriminate|].
-    exact (scalar_wit_complete c (pos_recs_nil_no_pos_rec c Hpr Hna) Es v Hd).
+    exact (scalar_wit_complete c (pos_recs_nil_no_pos_rec c Hpr Hna Href) Es v Hd).
   - destruct (has_pos_atom c) eqn:Hpa.
     + (* positive record + positive scalar atom: v both table and scalar — empty *)
       assert (Hpex : In p (pos_recs c)) by (rewrite Hpr; left; reflexivity).
       pose proof (denote_clause_components c v Hd) as [Hprc _].
       destruct (posrec_is_table p v (Hprc p Hpex)) as [ents Hve]. subst v.
-      clear H Hpr Hpex Hprc Hwfn Hna. revert Hd Hpa. induction c as [|l r IH]; simpl; intros Hd Hpa.
+      clear H Hpr Hpex Hprc Hwfn Hna Href. revert Hd Hpa. induction c as [|l r IH]; simpl; intros Hd Hpa.
       * discriminate Hpa.
       * destruct Hd as [Hl Hd]. destruct l; simpl in *.
         -- apply (table_neg_atom ents a); exact Hl.
@@ -3479,6 +3701,10 @@ Proof.
         -- apply IH; assumption.
         -- exact Hl.   (* LPosArrow: denote (BArrow _ _)(VTable _) = False *)
         -- apply IH; assumption.   (* LNegArrow *)
+        -- exact Hl.   (* LPosRef: denote (BRef _)(VTable _) = False *)
+        -- apply IH; assumption.   (* LNegRef *)
+        -- exact Hl.   (* LPosAnyRef: denote BAnyRef (VTable _) = False *)
+        -- apply IH; assumption.   (* LNegAnyRef *)
     + (* no positive atom: v is a table satisfying all positive records *)
       pose proof (denote_clause_components c v Hd) as [Hprc Hnrc].
       assert (Hpex : In p (pos_recs c)) by (rewrite Hpr; left; reflexivity).
@@ -3567,7 +3793,8 @@ Qed.
 Lemma clause_wit3_clrf_not_deferred : forall c wf3,
   cl_rf c -> clause_wit3 c wf3 <> Deferred.
 Proof.
-  intros c wf3 [Hp [_ Hna]] H. unfold clause_wit3 in H. rewrite Hna, Hp in H.
+  intros c wf3 [Hp [_ [Hna Href]]] H. unfold clause_wit3 in H.
+  rewrite Hna, Href, Hp in H. cbn [orb] in H.
   destruct (scalar_wit c); discriminate H.
 Qed.
 
@@ -3597,11 +3824,11 @@ Qed.
    defer on the record-free field types it queries. *)
 Lemma clause_wit3_not_deferred : forall c wf3,
   (forall T, no_rec T -> wf3 T <> Deferred) ->
-  has_arrow c = false ->
+  has_arrow c = false -> has_ref c = false ->
   good_clause c -> clause_ok c -> clause_wit3 c wf3 <> Deferred.
 Proof.
-  intros c wf3 Hwf Hna [Hgp Hgn] Hok H. unfold clause_wit3 in H.
-  rewrite Hna in H.
+  intros c wf3 Hwf Hna Href [Hgp Hgn] Hok H. unfold clause_wit3 in H.
+  rewrite Hna, Href in H. cbn [orb] in H.
   destruct (pos_recs c) as [|p ps] eqn:Hpr.
   - (* scalar *) destruct (scalar_wit c); discriminate H.
   - destruct (has_pos_atom c); [discriminate H|].
@@ -3664,18 +3891,19 @@ Qed.
 
 Lemma dnf_wit3_not_deferred : forall d wf3,
   (forall T, no_rec T -> wf3 T <> Deferred) ->
-  dnf_no_arrow d ->
+  dnf_no_arrow d -> dnf_no_ref d ->
   Forall good_clause d -> dnf_ok d -> dnf_wit3 d wf3 <> Deferred.
 Proof.
-  induction d as [|c r IH]; intros wf3 Hwf Hna Hgd Hok H; simpl in H.
+  induction d as [|c r IH]; intros wf3 Hwf Hna Href Hgd Hok H; simpl in H.
   - discriminate.
   - pose proof (Forall_inv Hgd) as Hgc. pose proof (Forall_inv_tail Hgd) as Hgr.
     pose proof (Forall_inv Hok) as Hokc. pose proof (Forall_inv_tail Hok) as Hokr.
     pose proof (Forall_inv Hna) as Hnac. pose proof (Forall_inv_tail Hna) as Hnar.
+    pose proof (Forall_inv Href) as Hrefc. pose proof (Forall_inv_tail Href) as Hrefr.
     destruct (clause_wit3 c wf3) as [w| |] eqn:Ec.
     + discriminate H.
-    + exact (IH wf3 Hwf Hnar Hgr Hokr H).
-    + exact (clause_wit3_not_deferred c wf3 Hwf Hnac Hgc Hokc Ec).
+    + exact (IH wf3 Hwf Hnar Hrefr Hgr Hokr H).
+    + exact (clause_wit3_not_deferred c wf3 Hwf Hnac Hrefc Hgc Hokc Ec).
 Qed.
 
 (* MASTER fragment completeness: on [flat]/[dnf_ok], the finder is never Deferred
@@ -3688,6 +3916,7 @@ Proof.
   apply (dnf_wit3_not_deferred (to_dnf t) (find_wit3 (S (rdepth t)))
            (fun T HT => find_wit3_norec_not_deferred (rdepth t) T HT)
            (proj1 (flat_no_arrow t Hflat))
+           (proj1 (flat_no_ref t Hflat))
            (proj1 (flat_good_clauses t Hflat)) Hok).
 Qed.
 
@@ -3991,6 +4220,142 @@ Proof.
 Qed.
 
 (* ===========================================================================
+   SPLIT-STEP 1 of the REFERENCE UNIFICATION — BRef + BAnyRef opaque leaves.
+
+   References are added to the Boolean algebra so they can later be unified into
+   the typing layer. The DIAGNOSIS insight: references need BOTH a specific
+   [BRef T] AND an "any-reference" [BAnyRef] (so a truthy location can be narrowed
+   to "is a reference" without committing to a content type).
+
+   References are INVARIANT and lack a clean store-free denotation — a location's
+   content type is NOT observable from the value (we model a location as a bare
+   [nat] address [VRef n], carrying no store). So BOTH [BRef T] and [BAnyRef]
+   denote exactly the set of all locations [{VRef _}], CONTENT-BLIND:
+
+       denote (BRef _) v  =  (exists n, v = VRef n)
+       denote BAnyRef  v  =  (exists n, v = VRef n)
+
+   Denotationally therefore [BRef T ≡ BAnyRef ≡ BRef U] for all T,U. The syntactic
+   distinction (invariance, any-ref widening) is DEFERRED to [ssub] in the next
+   increment — fine, because [ssub ⊊ dsub] in the SAFE direction.
+
+   For the DECISION procedure, references are OPAQUE LEAVES exactly like [BArrow]:
+   the literals [LPosRef]/[LNegRef]/[LPosAnyRef]/[LNegAnyRef] are emitted by
+   [to_dnf]/[to_dnf_neg], and the witness-finder DEFERS on any clause carrying a
+   ref literal (the [has_ref] guard, alongside [has_arrow]) — so [gdecide] returns
+   [DUnknown], never a wrong answer about refs. [BRef]/[BAnyRef] are excluded from
+   [atomic]/[flat]/[no_rec]/[neg_atomic] (sent to [False]) just as [BArrow] is.
+   The two UNCONDITIONAL soundness theorems
+   [gdecide_DSub_sound]/[gdecide_DNotSub_sound] therefore stay TRUE over the
+   extended [BTy] (refs ⇒ DUnknown ⇒ no claim) — confirmed by [Print Assumptions].
+   =========================================================================== *)
+
+(* ---- The membership characterization: BRef/BAnyRef denote exactly all locations.
+   These are the [denote_arrow_iff]-analog facts for references. *)
+Lemma denote_ref_iff : forall T v, denote (BRef T) v <-> exists n, v = VRef n.
+Proof.
+  intros T v. simpl. destruct v as [ | | | | | | n ]; split;
+    try (intros [n0 Hbad]; discriminate Hbad);
+    try contradiction; try (intros _; exact I); intros _; exists n; reflexivity.
+Qed.
+
+Lemma denote_anyref_iff : forall v, denote BAnyRef v <-> exists n, v = VRef n.
+Proof.
+  intros v. simpl. destruct v as [ | | | | | | n ]; split;
+    try (intros [n0 Hbad]; discriminate Hbad);
+    try contradiction; try (intros _; exact I); intros _; exists n; reflexivity.
+Qed.
+
+(* ---- NON-VACUITY / SANITY for references ----------------------------------- *)
+
+(* a concrete location inhabits [BRef BInt] — content-blind: [VRef 0] is in
+   [BRef BInt] regardless of what BInt is. *)
+Theorem ref_int_inhabited : denote (BRef (BAtom AInt)) (VRef 0).
+Proof. simpl. exact I. Qed.
+
+(* a location inhabits [BAnyRef]. *)
+Theorem anyref_inhabited : denote BAnyRef (VRef 0).
+Proof. simpl. exact I. Qed.
+
+(* a NON-reference value is in NEITHER [BRef _] NOR [BAnyRef]. *)
+Theorem nonref_not_ref : forall T, ~ denote (BRef T) (VInt 0).
+Proof. intros T H. simpl in H. exact H. Qed.
+
+Theorem nonref_not_anyref : ~ denote BAnyRef (VInt 0).
+Proof. intro H. simpl in H. exact H. Qed.
+
+(* CONTENT-BLINDNESS, made precise: [BAnyRef] and [BRef T] denote the SAME set
+   (all locations) for every content type T — the price of invariance. The
+   syntactic invariance/any-ref distinction is deferred to [ssub]. *)
+Theorem anyref_equiv_ref : forall T, dequiv BAnyRef (BRef T).
+Proof.
+  intro T. split; unfold dsub; intros v H.
+  - apply denote_ref_iff. apply denote_anyref_iff. exact H.
+  - apply denote_anyref_iff. apply denote_ref_iff in H. exact H.
+Qed.
+
+(* and any two specific ref types are denotationally equivalent (content-blind). *)
+Theorem ref_equiv_ref : forall T U, dequiv (BRef T) (BRef U).
+Proof.
+  intros T U. split; unfold dsub; intros v H;
+    apply denote_ref_iff; apply denote_ref_iff in H; exact H.
+Qed.
+
+(* a reference is DISJOINT from every scalar atom (locations are a distinct kind:
+   [VRef] is not any scalar constructor — decided by [discriminate]). *)
+Theorem ref_disjoint_atom : forall T a,
+  dsub (BInter (BRef T) (BAtom a)) BBot.
+Proof.
+  intros T a. unfold dsub. intros v [Hr Ha].
+  apply denote_ref_iff in Hr. destruct Hr as [n Hv]. subst v.
+  destruct a; simpl in Ha; exact Ha.
+Qed.
+
+(* a reference is DISJOINT from every record (a location is not a [VTable]). *)
+Theorem ref_disjoint_rec : forall T fields,
+  dsub (BInter (BRef T) (BRec fields)) BBot.
+Proof.
+  intros T fields. unfold dsub. intros v [Hr Hrec].
+  apply denote_ref_iff in Hr. destruct Hr as [n Hv]. subst v.
+  apply denote_rec_iff in Hrec. destruct Hrec as [ents [Hbad _]]. discriminate Hbad.
+Qed.
+
+(* a reference is DISJOINT from every arrow (a location is not a [VFun]). *)
+Theorem ref_disjoint_arrow : forall T A B,
+  dsub (BInter (BRef T) (BArrow A B)) BBot.
+Proof.
+  intros T A B. unfold dsub. intros v [Hr Harr].
+  apply denote_ref_iff in Hr. destruct Hr as [n Hv]. subst v.
+  apply denote_arrow_iff in Harr. destruct Harr as [g [Hbad _]]. discriminate Hbad.
+Qed.
+
+(* ---- DECISION PROCEDURE STAYS SOUND WITH REFERENCES (sanity) ----------------
+   Any ref-involving query reduces to a clause carrying a ref literal, which the
+   finder DEFERS — so [gdecide] returns [DUnknown], never a confident wrong
+   answer. The unconditional soundness theorems still apply (no fragment
+   hypothesis), so a definite answer, when given, remains correct. *)
+
+(* a ref subtyping query DEFERS (DUnknown), never lies. *)
+Example gd_ref_defers :
+  gdecide (BRef (BAtom AInt)) (BRef (BAtom AStr)) = DUnknown.
+Proof. reflexivity. Qed.
+
+(* the any-ref query likewise defers (ref subtyping is decided by [ssub] later). *)
+Example gd_anyref_defers : gdecide BAnyRef (BRef (BAtom AInt)) = DUnknown.
+Proof. reflexivity. Qed.
+
+(* the load-bearing guarantee: the decider CANNOT claim DSub on a genuine ref
+   non-subtyping query (it would be unsound — instead it defers). *)
+Theorem gd_ref_not_dsub_claim :
+  gdecide (BRef (BAtom AInt)) (BRef (BAtom AStr)) <> DSub.
+Proof. discriminate. Qed.
+
+(* a mixed query — a ref intersected with an atom on the left — also defers. *)
+Example gd_ref_atom_defers :
+  gdecide (BInter (BRef (BAtom AInt)) (BAtom AInt)) BBot = DUnknown.
+Proof. reflexivity. Qed.
+
+(* ===========================================================================
    PRINT ASSUMPTIONS — the three unconditional/headline theorems are closed
    under the global context (no axioms, no Admitted, no Classical) — AND remain
    so after [BArrow] is threaded through the whole development. The core arrow
@@ -4013,3 +4378,18 @@ Print Assumptions AInt_sub_ANum.
 Print Assumptions AFloat_equiv_ANum.
 Print Assumptions base_order_int_num.
 Print Assumptions decide_dsub_correct.
+(* SPLIT-STEP 1 — the reference substrate. The hand-rolled induction principle
+   (extended for VRef), the De Morgan / distributivity Boolean law (re-checked
+   post-extension), [denote_dec] (decides ref membership too), and the new ref
+   membership + disjointness + content-blindness facts — all closed under the
+   global context. *)
+Print Assumptions V_rect_strong.
+Print Assumptions dde_morgan_inter.
+Print Assumptions denote_ref_iff.
+Print Assumptions denote_anyref_iff.
+Print Assumptions ref_int_inhabited.
+Print Assumptions anyref_equiv_ref.
+Print Assumptions ref_equiv_ref.
+Print Assumptions ref_disjoint_atom.
+Print Assumptions ref_disjoint_rec.
+Print Assumptions ref_disjoint_arrow.
