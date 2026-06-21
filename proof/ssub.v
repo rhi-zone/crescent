@@ -1177,12 +1177,12 @@ Qed.
    decided by [decide_ssub S T].
    =========================================================================== *)
 
-Theorem subsumption_decidable : forall G e S T,
-  has_type G e S ->
-  decide_ssub S T = true ->
-  has_type G e T.
+Theorem subsumption_decidable : forall Sig G e A T,
+  has_type Sig G e A ->
+  decide_ssub A T = true ->
+  has_type Sig G e T.
 Proof.
-  intros G e S T He Hd. eapply TSub; [ exact He | apply decide_ssub_sound; exact Hd ].
+  intros Sig G e A T He Hd. eapply TSub; [ exact He | apply RsSsub; apply decide_ssub_sound; exact Hd ].
 Qed.
 
 (* and the negative side: if the decider says false on the INTERSECTION-FREE
@@ -1234,32 +1234,12 @@ Proof. intros S T HS HT. apply (decide_ssub_false S T HS HT). Qed.
    [rsub ⊊ dsub] in the safe direction, exactly as the diagnosis predicted.
    =========================================================================== *)
 
-Inductive rsub : BTy -> BTy -> Prop :=
-  | RsSsub   : forall a b, ssub a b -> rsub a b
-  | RsTrans  : forall a b c, rsub a b -> rsub b c -> rsub a c
-  | RsRefInv : forall S T, rsub S T -> rsub T S -> rsub (BRef S) (BRef T)
-  | RsAnyRef : forall U, rsub (BRef U) BAnyRef.
-
-(* PREORDER. Reflexivity is [ssub]'s reflexivity lifted; transitivity is the
-   [RsTrans] constructor. *)
-Lemma rsub_refl : forall t, rsub t t.
-Proof. intro t. apply RsSsub. apply SsRefl. Qed.
-
-Lemma rsub_trans : forall a b c, rsub a b -> rsub b c -> rsub a c.
-Proof. intros a b c Hab Hbc. eapply RsTrans; eassumption. Qed.
-
-(* SOUNDNESS vs [dsub]: [rsub a b -> dsub a b]. The reference rules collapse to
-   equal-denotation inclusions ([denote (BRef _) = denote BAnyRef = {VRef _}]). *)
-Lemma rsub_sound : forall a b, rsub a b -> dsub a b.
-Proof.
-  intros a b H. induction H.
-  - apply ssub_sound. exact H.                          (* RsSsub *)
-  - eapply dsub_trans; eassumption.                     (* RsTrans *)
-  - (* RsRefInv: denote (BRef S) v -> denote (BRef T) v; both = {VRef _}. *)
-    intros v Hv. simpl in *. destruct v; try contradiction; exact I.
-  - (* RsAnyRef: denote (BRef U) v -> denote BAnyRef v; both = {VRef _}. *)
-    intros v Hv. simpl in *. destruct v; try contradiction; exact I.
-Qed.
+(* SPLIT-STEP 3 NOTE: [rsub] (inductive), [rsub_refl]/[rsub_trans]/[rsub_sound],
+   the [rsub_*_above] inversion machinery, [rsub_ref_super]/[rsub_anyref_super],
+   [rsub_ref_inv], and [rsub_anyref_not_ref] are now defined ONCE in [typing.v]
+   (promoted into the layer that owns [ssub], so [TSub] can subsume references).
+   This file IMPORTS them and adds only the DECISION procedure [decide_rsub] +
+   its soundness/completeness/sanity. No duplicate [rsub] relation remains. *)
 
 (* ---- THE DECISION PROCEDURE for [rsub] -------------------------------------
    [decide_rsub] intercepts the four reference pairs and delegates everything
@@ -1366,88 +1346,6 @@ Proof. intros a b H. apply (decide_rsub_fuel_sound (bsize a + bsize b)). exact H
 (* supertypes of [BRef S] under [rsub], structurally. On the inter-free target
    fragment the [BInter] case is vacuous (handled by [contradiction] in the
    converse). *)
-Fixpoint rsub_ref_above (S T : BTy) : Prop :=
-  match T with
-  | BTop          => True
-  | BAnyRef       => True
-  | BRef T'       => rsub S T' /\ rsub T' S
-  | BUnion Tl Tr  => rsub_ref_above S Tl \/ rsub_ref_above S Tr
-  | BInter Tl Tr  => rsub_ref_above S Tl /\ rsub_ref_above S Tr
-  | _             => False
-  end.
-
-(* supertypes of [BAnyRef] under [rsub] — the same MINUS any [BRef _]. *)
-Fixpoint rsub_anyref_above (T : BTy) : Prop :=
-  match T with
-  | BTop          => True
-  | BAnyRef       => True
-  | BUnion Tl Tr  => rsub_anyref_above Tl \/ rsub_anyref_above Tr
-  | BInter Tl Tr  => rsub_anyref_above Tl /\ rsub_anyref_above Tr
-  | _             => False
-  end.
-
-(* the ssub-level monotonicity steps (an ssub edge preserves each predicate) —
-   mirror [ref_above_mono]; proved as two clean single-conclusion inductions on
-   the [ssub] derivation. The leaf-source constructors (SsAtom/SsArrow/SsRec)
-   have [rsub_*_above _ M = False] so [contradiction] discharges them; SsTop/
-   SsBot/SsRefl are the trivial/identity cases. *)
-Lemma rsub_ref_above_ssub_mono : forall M C, ssub M C ->
-  forall S, rsub_ref_above S M -> rsub_ref_above S C.
-Proof.
-  intros M C H. induction H; intros S0 Hab; simpl in *;
-    try exact I; try exact Hab; try contradiction.
-  - (* SsTrans *) apply IHssub2. apply IHssub1. exact Hab.
-  - (* SsUnionInL *) left. apply IHssub. exact Hab.
-  - (* SsUnionInR *) right. apply IHssub. exact Hab.
-  - (* SsUnionE *) destruct Hab as [Ha|Hb]; [ apply IHssub1 | apply IHssub2 ]; assumption.
-  - (* SsInterPL *) destruct Hab as [Ha _]. apply IHssub. exact Ha.
-  - (* SsInterPR *) destruct Hab as [_ Hb]. apply IHssub. exact Hb.
-  - (* SsInterI *) split; [ apply IHssub1 | apply IHssub2 ]; exact Hab.
-Qed.
-
-Lemma rsub_anyref_above_ssub_mono : forall M C, ssub M C ->
-  rsub_anyref_above M -> rsub_anyref_above C.
-Proof.
-  intros M C H. induction H; intro Hab; simpl in *;
-    try exact I; try exact Hab; try contradiction.
-  - (* SsTrans *) apply IHssub2. apply IHssub1. exact Hab.
-  - (* SsUnionInL *) left. apply IHssub. exact Hab.
-  - (* SsUnionInR *) right. apply IHssub. exact Hab.
-  - (* SsUnionE *) destruct Hab as [Ha|Hb]; [ apply IHssub1 | apply IHssub2 ]; assumption.
-  - (* SsInterPL *) destruct Hab as [Ha _]. apply IHssub. exact Ha.
-  - (* SsInterPR *) destruct Hab as [_ Hb]. apply IHssub. exact Hb.
-  - (* SsInterI *) split; [ apply IHssub1 | apply IHssub2 ]; exact Hab.
-Qed.
-
-Lemma rsub_above_mono : forall M C, rsub M C ->
-  (forall S, rsub_ref_above S M -> rsub_ref_above S C) /\
-  (rsub_anyref_above M -> rsub_anyref_above C).
-Proof.
-  intros M C H. induction H.
-  - (* RsSsub *) split;
-      [ apply rsub_ref_above_ssub_mono; exact H | apply rsub_anyref_above_ssub_mono; exact H ].
-  - (* RsTrans *) destruct IHrsub1 as [Hr1 Ha1]. destruct IHrsub2 as [Hr2 Ha2].
-    split; [ intros S Hab; apply Hr2; apply Hr1; exact Hab
-           | intro Hab; apply Ha2; apply Ha1; exact Hab ].
-  - (* RsRefInv S T : M = BRef S, C = BRef T *)
-    split.
-    + intros S0 Hab. simpl in Hab. destruct Hab as [HS0S HSS0]. simpl.
-      split; [ eapply rsub_trans; eassumption | eapply rsub_trans; eassumption ].
-    + intro Hab. simpl in Hab. contradiction.
-  - (* RsAnyRef U : M = BRef U, C = BAnyRef *)
-    split; [ intros S _; simpl; exact I | intro Hab; simpl in Hab; contradiction ].
-Qed.
-
-Lemma rsub_ref_super : forall S T, rsub (BRef S) T -> rsub_ref_above S T.
-Proof.
-  intros S T H. apply (proj1 (rsub_above_mono (BRef S) T H) S).
-  simpl. split; apply rsub_refl.
-Qed.
-
-Lemma rsub_anyref_super : forall T, rsub BAnyRef T -> rsub_anyref_above T.
-Proof.
-  intros T H. apply (proj2 (rsub_above_mono BAnyRef T H)). simpl. exact I.
-Qed.
 
 (* ---- COMPLETENESS of [decide_rsub] on the REFERENCE rules. -----------------
    We prove completeness for each of the four reference pairs the split-step-2
@@ -1518,8 +1416,6 @@ Qed.
 (* and it is a real non-subtyping: [~ rsub BAnyRef (BRef U)] — the asymmetry is
    SOUND, not merely undecided. Via [rsub_anyref_super]: [rsub_anyref_above
    (BRef U)] is [False]. *)
-Lemma rsub_anyref_not_ref : forall U, ~ rsub BAnyRef (BRef U).
-Proof. intros U H. apply rsub_anyref_super in H. simpl in H. exact H. Qed.
 
 (* INVARIANT completeness, relative to [ssub]-witnessed content equivalence on
    the inter-free, non-reference-head content fragment: [BRef S <: BRef T] is
@@ -1586,6 +1482,16 @@ Proof. apply decide_rsub_sound. reflexivity. Qed.
 (* nested references: invariance threads through — BRef (BRef Int) reflexive. *)
 Example sanity_ref_nested : decide_rsub (BRef (BRef (BAtom AInt))) (BRef (BRef (BAtom AInt))) = true.
 Proof. reflexivity. Qed.
+
+(* WIRING — the reference-aware subsumption is DECIDABLE: [TSub] (typing.v) fires
+   [rsub A T]; [decide_rsub] is its executable counterpart. *)
+Theorem subsumption_decidable_rsub : forall Sig G e A T,
+  has_type Sig G e A ->
+  decide_rsub A T = true ->
+  has_type Sig G e T.
+Proof.
+  intros Sig G e A T He Hd. eapply TSub; [ exact He | apply decide_rsub_sound; exact Hd ].
+Qed.
 
 Print Assumptions ssub_refl.
 Print Assumptions ssub_trans.
