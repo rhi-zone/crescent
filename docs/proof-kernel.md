@@ -928,6 +928,138 @@ audited results across the chain): **Closed under the global context** — no
 axioms, no `Admitted`, no `Classical`. `subtype.v` unmodified; whole chain
 compiles (`coqc subtype.v && coqc typing.v && coqc ssub.v && coqc check.v`).
 
+## Increment 13 — SOUND FLOW NARROWING: truthiness occurrence typing (value-conditioned)
+
+The actual flow-typing payoff, machine-checked: sound **truthiness occurrence
+typing** — the `and`/`or`-nil class, the bug class that motivated the whole
+proof effort. Modifies `proof/typing.v`, `proof/check.v`; **`proof/subtype.v`
+AND `proof/ssub.v` unmodified**. Build order unchanged.
+
+### The refined diagnosis — value-conditioned op-sem ALONE is not enough
+
+Increment 12 deferred narrowing with the diagnosis "narrowing is sound only
+CONDITIONED ON BRANCH SELECTION; needs value-conditioned branch steps." That is
+**necessary but INCOMPLETE for de Bruijn SUBSTITUTION semantics**, and the gap is
+the genuine finding of this increment. A `tif (tvar n) e1 e2` narrowing the FREE
+context entry `n` (then-branch `n : U∩¬falsy`, else-branch `n : U∩falsy`) is still
+unsound even with value-conditioned selection, because an enclosing `SLet`/`SBeta`
+substitutes the bound value into **BOTH** branches *before* the conditional
+selects. The DEAD branch then carries a now-contradicted narrowing assumption —
+e.g. a truthy value pushed into the falsy-narrowed else-branch, which used `n`
+falsy-ly — and becomes an **ill-typed residual**. Value-conditioning fixes the
+SELECTED branch; it does nothing for the blindly-substituted dead one. (This is
+why the prior increment's `subst_lemma`-based attempt could not close: the
+substitution lemma supplies the value at one type for both branches.)
+
+### The fix that closes — a BINDING narrowing-conditional `tifn`
+
+`tm` gains `tifn c e1 e2` (distinct from the increment-11 `tif`, which stays the
+Bool-condition / union-typing / non-narrowing form). The scrutinee is **bound
+FRESH (de Bruijn 0)** in each branch at the narrowed type, and the value-
+conditioned op-sem substitutes the scrutinee into **ONLY the selected branch**:
+
+- `SIfnTrue : value v -> truthy_value v -> step (tifn v e1 e2) (subst 0 v e1)`
+- `SIfnFalse: value v -> falsy_value v  -> step (tifn v e1 e2) (subst 0 v e2)`
+- `SIfn1 : step c c' -> step (tifn c e1 e2) (tifn c' e1 e2)` (reduce scrutinee first)
+
+`truthy_value`/`falsy_value` are the Lua partition on values (falsy = `nil` or
+`false`; truthy = everything else), total on values (`value_truthy_or_falsy`).
+The unselected branch is **discarded by the step — never substituted into** — so
+no dead-branch residual ever exists. That is the structural fix the substitution
+semantics needs.
+
+### Typing rule + the bridging lemmas (the operational⇒type justification)
+
+```
+TIfn : has_type G c U ->
+       has_type (truthy_type :: G) e1 T1 ->
+       has_type (falsy_type :: G) e2 T2 ->
+       has_type G (tifn c e1 e2) (BUnion T1 T2)
+```
+
+The scrutinee may have ANY type `U` (Lua truthiness — no Bool gate). Preservation
+of `SIfnTrue` rests on the **bridging lemma** `truthy_narrows : has_type [] v U ->
+value v -> truthy_value v -> has_type [] v truthy_type` (dually `falsy_narrows`):
+the value's operational TRUTHINESS gives it the narrowed TYPE, so `subst_top`
+retypes the selected branch. Proof shape (the load-bearing soundness move): case
+on the value's CANONICAL FORM; each non-nil class subsumes into `truthy_type` by
+an `ssub` **UNION INTRODUCTION** (`SsUnionInL/InR` + atom/arrow/record membership)
+— **no negation rule, no `dsub`-in-typing**, entirely through the existing sound
+`ssub` union rules.
+
+`truthy_type` = positive union of every non-nil value class
+(`ABool ∪ ANum ∪ AStr ∪ BRec[] ∪ (BBot→BTop)`), denoting exactly the non-nil
+values (so it CONTAINS every truthy value). `falsy_type` = `nil ∪ bool`
+(over-approx — see the substrate gap). **The value model has NO singleton-false
+type** (`ABool` denotes both `true` and `false`), so the exact falsy set
+`{nil, false}` is inexpressible as a `BTy`; the two expressible bounds are both
+SOUND (truthy under-approximates the complement of falsy; falsy over-approximates
+falsy), inexact only at the true/false split. Recorded as a substrate gap.
+
+### Operational safety — progress + preservation re-proved (`Qed`)
+
+`preservation`: the three `tifn` step cases. `SIfnTrue`/`SIfnFalse` use
+`inv_ifn` + the bridging lemma + `subst_top` + union-injection subsumption;
+`SIfn1` is the scrutinee congruence (preserves `U`). `progress`: the `TIfn` case
+— if the scrutinee is a value, `value_truthy_or_falsy` selects a branch
+(`SIfnTrue`/`SIfnFalse`); else it steps (`SIfn1`). No canonical-forms lemma needed
+(any value is truthy or falsy). All inversion/weakening/substitution/closed-ness
+lemmas thread the `tifn` (fresh-binder) case.
+
+### `synth`/`check` for `tifn` + re-proved soundness
+
+`synth (tifn c e1 e2)`: synthesize `c` at ANY type (no Bool gate), synthesize each
+branch under its narrowed binder (`truthy_type :: G` / `falsy_type :: G`), return
+`BUnion` of the branch types. No `decide_ssub` obligation is emitted — the binder
+type IS the narrowed type, so the narrowing is discharged by `TIfn` directly (the
+branch projects the narrowed var where it consumes it). `synth_sound`/`check_sound`
+re-proved (`Qed`); `synth_principal` extended (branch principality under the
+narrowed binders); the general `narrowing` lemma threads the `tifn` fresh-binder
+case.
+
+### THE PAYOFF — narrowing-required term types, un-narrowed term rejected (both `Qed`)
+
+The consumer `g := λ(_:truthy_type). 0 : truthy_type → Int` accepts ANY non-nil
+value. The narrowing-required term binds a maybe-nil scrutinee (`Int ∪ Nil`) and,
+in the then-branch, applies `g` to the (now-narrowed-truthy) scrutinee:
+
+- **(a) WITH narrowing it TYPES** — `payoff_types_WITH_narrowing`: in the
+  then-branch the bound var has `truthy_type`, so `g (var)` is well-typed; the
+  whole `tifn` types at `Int ∪ Int`. Operationally it steps (`payoff_steps_then`).
+- **(b) WITHOUT narrowing the SAME use is REJECTED** —
+  `payoff_rejected_WITHOUT_narrowing`: under a context where the scrutinee carries
+  its declared maybe-nil type `Int ∪ Nil`, `g (var)` is ill-typed AT EVERY type,
+  because `Int ∪ Nil` is NOT `ssub`-below `truthy_type` (nil is not truthy —
+  refuted semantically at `VNil` through `ssub_sound`).
+
+At the checker: `compute_ifn_payoff_synth` synthesizes the union, `…_sound` is
+`has_type` via `check_sound`, `…_unnarrowed_None` shows the un-narrowed
+application gives `synth = None`. This is the `and`/`or`-nil narrowing soundness
+made machine-checked — the class of bug that started the effort.
+
+### Scope — covered vs deferred
+
+**Covered:** variable-condition truthiness narrowing (the `tifn` binding form),
+both narrowing directions sound, the payoff. **Deferred (honest substrate gaps,
+in TODO.md):** (1) full occurrence-typing precision `U ∩ truthy_type` (carry the
+declared type into the branch) — needs an intersection-INTRODUCTION rule `TInter`
+whose ARROW inversion is the hard core of intersection types (`(A1→B1)∩(A2→B2)`
+is not `ssub`-below any single arrow); (2) an exact falsy partition (needs a
+singleton-false type — a `subtype.v` change); (3) type-test narrowing
+`type(x)=="number"`; (4) narrowing on non-variable paths (`x.f`, `x[i]`);
+(5) distributive simplification `(T∪nil)∩¬nil <: T` — `dsub`-true, `ssub`-false
+(the N5 non-distributive frontier; the `gdecide` emptiness route).
+
+### Assumption audit
+
+`Print Assumptions` on `progress`, `preservation`, `truthy_narrows`,
+`falsy_narrows`, `payoff_types_WITH_narrowing`, `payoff_rejected_WITHOUT_narrowing`,
+`synth_sound`, `check_sound`, `synth_principal`, `narrowing` (35 audited results
+across the chain): **Closed under the global context** — no axioms, no
+`Admitted`, no `Classical`, no `admit`. `subtype.v` AND `ssub.v` unmodified;
+whole chain compiles (`coqc subtype.v && coqc typing.v && coqc ssub.v && coqc
+check.v`).
+
 ## Staging
 
 - **[done]** mechanized lattice + subtype `refl`/`trans` (Rocq);
@@ -1094,10 +1226,21 @@ compiles (`coqc subtype.v && coqc typing.v && coqc ssub.v && coqc check.v`).
   `Int∪Str`, steps to `3`; `decide_ssub Int (Int∪Str)=true`, `(Int∪Int) Int=true`,
   `(Int∪Str) Num=false`. **DEFERRED: intersection, negation, flow NARROWING.**
   `Print Assumptions` closed under the global context; `subtype.v` unmodified.
-- **[then — flow narrowing + intersection/negation]** the actual flow-typing
-  payoff: narrow a variable's type inside a `tif` branch by the condition; add
-  intersection/negation as `ssub` rules and term forms — where the `and`/`or`-bug
-  class lives. (Union substrate is now in place.)
+- **[done — increment 13: truthiness flow narrowing (value-conditioned)]** sound
+  occurrence typing for the `and`/`or`-nil class. See the Increment 13 section
+  below. The refined diagnosis: value-conditioned op-sem ALONE is insufficient
+  under de Bruijn substitution semantics — narrowing the free context entry of a
+  `tif (tvar n)` is unsound because an enclosing substitution pushes the value
+  into the DEAD branch (carrying a false assumption) before selection. The fix is
+  a BINDING narrowing-conditional `tifn` whose value-conditioned step substitutes
+  the scrutinee into ONLY the selected branch. Payoff typechecks with narrowing,
+  rejected without — both `Qed`.
+- **[then — full occurrence-typing precision + intersection/negation term forms]**
+  carry the scrutinee's declared type INTO the narrowed branch (`U ∩ truthy_type`,
+  not the bound alone) — needs an intersection-introduction rule `TInter` whose
+  arrow inversion is the hard core of intersection-type systems; add a
+  literal-false type for the exact falsy partition; type-test narrowing
+  (`type(x)=="T"`) and narrowing on non-variable paths.
 - **[then — arrow decision procedure + multi-return]** make arrow subtyping
   DEFINITE (lift the `has_arrow`-defer), and generalise to multi-arg / multi-
   return / vararg function types.

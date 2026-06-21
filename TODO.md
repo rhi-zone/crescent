@@ -349,23 +349,47 @@ Still open (DEFERRED — recorded honestly, minimal core only):
   = false` while the subtyping holds. `Print Assumptions` closed under the global
   context. (TERM-position intersection/negation introduction forms still
   deferred; semantic connective decision stays `gdecide`'s job.)
-- [ ] **Flow NARROWING** (truthiness occurrence typing) — ATTEMPTED in increment
-  12, DEFERRED with PROOF. Narrow a variable's type inside a `tif` branch by the
-  condition (then-branch: `T ∩ ¬(nil∪false)`; else-branch: `T ∩ (nil∪false)`).
-  Two GENUINE FORKS block it (not budget/skill):
-  (1) **Operational-soundness fork.** progress/preservation are over CLOSED terms;
-  a `tif (tvar n)` narrowing rule is meaningful only under a binder, and when that
-  binder substitutes the substitution lemma supplies a value at the DECLARED type
-  `U`, not the narrowed `U∩¬falsy` — unsatisfiable for a falsy value (proved
-  concretely: `false ∉ Bool∩¬falsy` via `ssub_inter_tgt_r`+`ssub_sound`+`VBool
-  false`). Narrowing is sound only CONDITIONED ON BRANCH SELECTION, which happens
-  after substitution — so it needs the op-sem restructured to value-conditioned
-  branch steps (not pure context narrowing). (2) **Checker-payoff fork.** the
-  obligation `T∩¬falsy <: T` has intersection on the LEFT — off `decide_ssub`'s
-  `inter_free` completeness fragment (the distributivity frontier), so `check`
-  can't verify it completely without the `gdecide` emptiness route. The `ssub`
-  substrate (intersection GLB; complement as `dsub` fact) is LANDED + sound; the
-  narrowing rule + value-conditioned op-sem is the deferred increment.
+- [x] **Flow NARROWING — variable-condition truthiness (increment 13, DONE).**
+  Sound truthiness occurrence typing — the `and`/`or`-nil class — machine-checked
+  end-to-end (`progress`+`preservation`+`synth_sound`+`check_sound`+the payoff all
+  `Qed`, `Print Assumptions` closed). **The refined diagnosis (correcting
+  increment-12's).** Increment 12 said value-conditioned op-sem alone fixes the
+  unsoundness; that is INCOMPLETE for de Bruijn SUBSTITUTION semantics: a
+  `tif (tvar n)` narrowing the free context entry `n` is still unsound, because an
+  enclosing `SLet`/`SBeta` substitutes the bound value into BOTH branches BEFORE
+  the conditional selects — the DEAD branch then carries a now-false narrowing
+  assumption (a truthy value pushed into the falsy-narrowed else-branch) and
+  becomes an ill-typed residual. Value-conditioning fixes the SELECTED branch but
+  not the blindly-substituted dead one. **The fix that closes:** a BINDING
+  narrowing-conditional `tifn c e1 e2` — the scrutinee is bound FRESH (de Bruijn
+  0) in each branch at the narrowed type, and the value-conditioned step
+  (`SIfnTrue`/`SIfnFalse`, on `truthy_value`/`falsy_value`) substitutes the value
+  into ONLY the selected branch (`subst 0 v e1` / `e2`), discarding the other —
+  so no dead-branch residual ever exists. The bridging lemmas `truthy_narrows` /
+  `falsy_narrows` (a truthy value has type `truthy_type`; falsy → `falsy_type`)
+  are the operational⇒type justification, proved by canonical forms + `ssub`
+  UNION-introduction only (no negation, no `dsub`-in-typing). **Types.** `truthy_type`
+  = positive union of all non-nil value classes (`ABool∪ANum∪AStr∪{table}∪{fn}`);
+  `falsy_type` = `nil∪bool` (over-approx — no singleton-false type exists). **Payoff
+  (both proved):** a non-nil consumer `g : truthy_type→Int` applied to the
+  then-narrowed scrutinee TYPES with narrowing and is REJECTED without it (the
+  un-narrowed `Int∪Nil` is not `≤ truthy_type`).
+- [ ] **Flow narrowing — DEFERRED sub-items (increment 13 scope boundary).**
+  (1) **Full occurrence-typing precision `U ∩ truthy_type`** (carry the scrutinee's
+  declared type INTO the narrowed branch, not just the truthy/falsy bound). Needs
+  an intersection-INTRODUCTION rule `TInter`; its ARROW inversion is the hard core
+  of intersection-type systems — `(A1→B1)∩(A2→B2)` is NOT `ssub`-below any single
+  arrow, so `inv_app` cannot recover a single arrow witness. Intersection-type
+  substrate, deferred. (2) **Exact falsy partition.** The value model (subtype.v)
+  has NO singleton-false type (`ABool` denotes both `true` and `false`), so the
+  exact falsy set `{nil, false}` is inexpressible as a `BTy`; narrowing uses the
+  two expressible bounds (`truthy_type` under-approximates-the-complement,
+  `falsy_type` over-approximates falsy) — both SOUND, both inexact at the
+  true/false split. Exact narrowing needs a literal-false type (a subtype.v change).
+  (3) **Type-test narrowing** `type(x)=="number"` (positive type-test occurrence
+  typing). (4) **Narrowing on non-variable paths** (`x.f`, `x[i]`).
+  (5) **Distributive simplification** `(T∪nil)∩¬nil <: T` — `dsub`-true, `ssub`-false
+  (the N5 non-distributive frontier); routing it needs the `gdecide` emptiness path.
 - [ ] **Statements / control flow** (while/blocks; `tif` done in increment 11) as terms.
 - [ ] **Mutation / references** (assignable cells; the value domain `V` is pure).
 - [ ] **Multi-arg / vararg / multi-return** functions (currently single→single).

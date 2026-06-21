@@ -56,7 +56,30 @@ Inductive tm : Type :=
      declarative type is the UNION of the branch types ([BUnion T1 T2]), so a
      value of either branch inhabits the result and subsumption can widen
      further. Intersection / negation / flow narrowing are DEFERRED. *)
-  | tif   : tm -> tm -> tm -> tm.            (* tif cond then else              *)
+  | tif   : tm -> tm -> tm -> tm             (* tif cond then else              *)
+  (* INCREMENT 13 — TRUTHINESS FLOW NARROWING (occurrence typing, value-
+     conditioned). [tifn c e1 e2] is the NARROWING conditional: the scrutinee [c]
+     is BOUND FRESH (de Bruijn index 0) in BOTH branches, at a NARROWED type —
+     truthy-part [U ∩ truthy_type] in [e1], falsy-part [U ∩ falsy_type] in [e2]
+     (where [U] is the scrutinee's type). Lua truthiness: [c] may be ANY type (not
+     just Bool); falsy = {nil, false}, truthy = everything else.
+
+     WHY A BINDING FORM (the crux of soundness under substitution semantics). A
+     plain [tif (tvar n) e1 e2] narrowing the FREE context entry [n] is UNSOUND
+     under de Bruijn substitution: an enclosing [SLet]/[SBeta] substitutes the
+     bound value into BOTH branches BEFORE the conditional selects, so the DEAD
+     branch — carrying the now-false narrowing assumption (e.g. truthy value
+     pushed into the falsy-narrowed else-branch) — becomes an ill-typed residual.
+     Value-conditioned op-sem fixes the SELECTED branch but NOT the blindly-
+     substituted dead branch. The fix: bind the scrutinee FRESH in each branch and
+     have the value-conditioned step substitute the value into ONLY the selected
+     branch ([SIfnTrue]/[SIfnFalse] reduce to [subst 0 v e1] / [subst 0 v e2]),
+     discarding the other. The narrowing then attaches at the binder, the dead
+     branch is never substituted into, and soundness closes. (See the increment-13
+     note in proof-kernel.md for the full diagnosis: this is the genuine refinement
+     of the prior "value-conditioned op-sem" diagnosis, which was incomplete for
+     substitution semantics.) *)
+  | tifn  : tm -> tm -> tm -> tm.            (* tifn cond then else (narrowing)  *)
 
 (* The base type of a literal. *)
 Definition lit_type (l : lit) : BTy :=
@@ -81,6 +104,7 @@ Section tm_ind_strong.
   Hypothesis Hrec  : forall fs, Pl fs -> P (trec fs).
   Hypothesis Hproj : forall e k, P e -> P (tproj e k).
   Hypothesis Hif   : forall c e1 e2, P c -> P e1 -> P e2 -> P (tif c e1 e2).
+  Hypothesis Hifn  : forall c e1 e2, P c -> P e1 -> P e2 -> P (tifn c e1 e2).
   Hypothesis Hnil  : Pl [].
   Hypothesis Hcons : forall k e rest, P e -> Pl rest -> Pl ((k, e) :: rest).
   Fixpoint tm_rect_strong (e : tm) : P e :=
@@ -99,6 +123,7 @@ Section tm_ind_strong.
               end) fs)
     | tproj e k => Hproj e k (tm_rect_strong e)
     | tif c e1 e2 => Hif c e1 e2 (tm_rect_strong c) (tm_rect_strong e1) (tm_rect_strong e2)
+    | tifn c e1 e2 => Hifn c e1 e2 (tm_rect_strong c) (tm_rect_strong e1) (tm_rect_strong e2)
     end.
 End tm_ind_strong.
 
@@ -311,6 +336,44 @@ Proof. intros C A B H. eapply SsTrans; [ exact H | apply ssub_inter_prl ]. Qed.
 Lemma ssub_inter_tgt_r : forall C A B, ssub C (BInter A B) -> ssub C B.
 Proof. intros C A B H. eapply SsTrans; [ exact H | apply ssub_inter_prr ]. Qed.
 
+(* ===========================================================================
+   INCREMENT 13 — TRUTHINESS TYPES (the falsy / truthy partition of the value
+   space, for flow narrowing).
+
+   Lua falsy = {nil, false}; truthy = everything else. The value model
+   (subtype.v) has NO singleton-false type ([ABool] denotes both [VBool true]
+   and [VBool false] — there is no atom carving out just [false]). So the EXACT
+   falsy set {VNil, VBool false} is NOT expressible as a [BTy]. We pick the two
+   expressible bounds that make the narrowing SOUND in both directions (and prove
+   the bridging lemmas against them):
+
+     - [truthy_type] : the POSITIVE union of every NON-NIL value class
+       (ABool ∪ ANum ∪ AStr ∪ {table} ∪ {function}). It denotes EXACTLY the
+       non-nil values, so it CONTAINS every operationally-truthy value (truthy ⟹
+       non-nil). Narrowing the THEN-branch to [U ∩ truthy_type] is sound: a
+       truthy scrutinee really inhabits [truthy_type]. Crucially [truthy_type] is
+       POSITIVE — its [ssub] memberships are union INTRODUCTIONS ([SsUnionInL/InR]),
+       so the bridge needs NO negation rule (ssub has none) and NO dsub-in-typing.
+     - [falsy_type] : [BUnion (BAtom ANil) (BAtom ABool)] — nil OR bool. An
+       OVER-approximation of falsy: it contains [VNil] (falsy) and [VBool false]
+       (falsy), and also [VBool true] (not falsy — the inexactness). Narrowing the
+       ELSE-branch to [U ∩ falsy_type] is sound because every falsy value (nil or
+       false) inhabits [falsy_type]; the over-approximation only makes the
+       narrowed type WEAKER (still a true upper bound on the else scrutinee).
+
+   The inexactness (no singleton-false) is the precise SUBSTRATE GAP for fully-
+   exact truthiness narrowing; recorded in proof-kernel.md / TODO.md. Both
+   narrowing directions are SOUND against these bounds — proved below. *)
+
+Definition truthy_type : BTy :=
+  BUnion (BAtom ABool)
+    (BUnion (BAtom ANum)
+       (BUnion (BAtom AStr)
+          (BUnion (BRec []) (BArrow BBot BTop)))).
+
+Definition falsy_type : BTy :=
+  BUnion (BAtom ANil) (BAtom ABool).
+
 Inductive has_type : list BTy -> tm -> BTy -> Prop :=
   | TLit  : forall G l,
       has_type G (tlit l) (lit_type l)
@@ -353,6 +416,28 @@ Inductive has_type : list BTy -> tm -> BTy -> Prop :=
       has_type G e1 T1 ->
       has_type G e2 T2 ->
       has_type G (tif c e1 e2) (BUnion T1 T2)
+  (* INCREMENT 13 — NARROWING CONDITIONAL (truthiness occurrence typing). The
+     scrutinee [c] (ANY type [U], Lua-truthy-tested) is BOUND FRESH (de Bruijn 0)
+     in each branch at the NARROWED type: [truthy_type] in the then-branch [e1],
+     [falsy_type] in the else-branch [e2]. Result = union of branch types. The
+     fresh-binding is what makes narrowing sound under substitution semantics (see
+     the [tifn] term-language note): the value-conditioned step substitutes the
+     scrutinee into ONLY the selected branch, so no dead-branch residual carries a
+     contradicted narrowing assumption.
+
+     SCOPE (honest): the bound type is the truthy/falsy BOUND ALONE, not [U ∩
+     truthy_type]. Carrying [U ∩ ...] (full occurrence-typing precision) needs an
+     intersection-INTRODUCTION typing rule [TInter] whose ARROW inversion is the
+     hard core of intersection-type systems ((A1→B1)∩(A2→B2) is NOT ssub-below any
+     single arrow) — DEFERRED as intersection-type substrate (proof-kernel.md /
+     TODO.md). Narrowing to the bound alone is SOUND and delivers the load-bearing
+     payoff (a non-nil consumer applied to a then-narrowed scrutinee), which is the
+     [and]/[or]-nil class that motivated this effort. *)
+  | TIfn  : forall G c e1 e2 U T1 T2,
+      has_type G c U ->
+      has_type (truthy_type :: G) e1 T1 ->
+      has_type (falsy_type :: G) e2 T2 ->
+      has_type G (tifn c e1 e2) (BUnion T1 T2)
 (* key-aligned pointwise typing of record fields; mutual so the generated
    induction principle carries an IH on every field derivation. *)
 with has_fields : list BTy -> list (string * tm) -> list (string * BTy) -> Prop :=
@@ -405,6 +490,10 @@ Fixpoint lift (d k : nat) (e : tm) : tm :=
   | trec fs   => trec (map (fun ke => (fst ke, lift d k (snd ke))) fs)
   | tproj e k0 => tproj (lift d k e) k0
   | tif c e1 e2 => tif (lift d k c) (lift d k e1) (lift d k e2)
+  (* tifn binds the scrutinee fresh (de Bruijn 0) in each branch: lift the
+     branches under one new binder ([S k]); the scrutinee [c] itself is not under
+     the fresh binder, so it lifts at [k]. *)
+  | tifn c e1 e2 => tifn (lift d k c) (lift d (S k) e1) (lift d (S k) e2)
   end.
 
 Fixpoint subst (j : nat) (s : tm) (e : tm) : tm :=
@@ -422,6 +511,10 @@ Fixpoint subst (j : nat) (s : tm) (e : tm) : tm :=
   | trec fs   => trec (map (fun ke => (fst ke, subst j s (snd ke))) fs)
   | tproj e k => tproj (subst j s e) k
   | tif c e1 e2 => tif (subst j s c) (subst j s e1) (subst j s e2)
+  (* tifn branches are under one fresh binder: substitute at [S j] with [s]
+     lifted past that binder; the scrutinee [c] is not under the binder. *)
+  | tifn c e1 e2 =>
+      tifn (subst j s c) (subst (S j) (lift 1 0 s) e1) (subst (S j) (lift 1 0 s) e2)
   end.
 
 (* record-field lookup at the term level (for projection) *)
@@ -430,6 +523,38 @@ Fixpoint field_lookup (k : string) (fs : list (string * tm)) : option tm :=
   | [] => None
   | (k', e) :: rest => if string_dec k k' then Some e else field_lookup k rest
   end.
+
+(* ---- INCREMENT 13 — TRUTHINESS predicates on VALUES (Lua semantics) --------
+   Falsy = nil literal or the boolean [false]; truthy = every other value
+   (numbers, strings, [true], lambdas, records). These drive the value-
+   conditioned narrowing-conditional step: a truthy scrutinee selects the
+   then-branch, a falsy one the else-branch. [truthy_value]/[falsy_value] are
+   defined on TERMS but only meaningful on values; [truthy_or_falsy_value] proves
+   the partition is total on values (used in progress). *)
+Definition falsy_value (v : tm) : Prop :=
+  v = tlit (LBool false) \/ v = tlit LNil.
+
+Definition truthy_value (v : tm) : Prop :=
+  ~ falsy_value v.
+
+(* a value is either truthy or falsy (decidably) — the total partition. *)
+Lemma value_truthy_or_falsy : forall v, value v -> truthy_value v \/ falsy_value v.
+Proof.
+  intros v Hv. unfold truthy_value, falsy_value.
+  destruct Hv as [l | T b | fs Hfs].
+  - destruct l as [n | n | [|] | ].
+    + left. intros [H | H]; discriminate.
+    + left. intros [H | H]; discriminate.
+    + left. intros [H | H]; discriminate.     (* LBool true *)
+    + right. left. reflexivity.                (* LBool false *)
+    + right. right. reflexivity.               (* LNil *)
+  - left. intros [H | H]; discriminate.
+  - left. intros [H | H]; discriminate.
+Qed.
+
+(* truthy and falsy are mutually exclusive (a value is not both). *)
+Lemma truthy_not_falsy : forall v, truthy_value v -> falsy_value v -> False.
+Proof. intros v Ht Hf. exact (Ht Hf). Qed.
 
 Inductive step : tm -> tm -> Prop :=
   (* beta: (\T.b) v  ->  b[0 := v]  *)
@@ -460,7 +585,17 @@ Inductive step : tm -> tm -> Prop :=
      selected (lazy branches — standard for [if]). *)
   | SIfTrue  : forall e1 e2, step (tif (tlit (LBool true)) e1 e2) e1
   | SIfFalse : forall e1 e2, step (tif (tlit (LBool false)) e1 e2) e2
-  | SIf1     : forall c c' e1 e2, step c c' -> step (tif c e1 e2) (tif c' e1 e2).
+  | SIf1     : forall c c' e1 e2, step c c' -> step (tif c e1 e2) (tif c' e1 e2)
+  (* INCREMENT 13 — NARROWING conditional, VALUE-CONDITIONED. The scrutinee is
+     reduced to a value first ([SIfn1] congruence); then its TRUTHINESS selects a
+     branch and the value is substituted into ONLY that branch (de Bruijn 0).
+     The unselected branch is DISCARDED — never substituted into — which is what
+     keeps narrowing sound (no dead-branch residual with a false assumption). *)
+  | SIfnTrue  : forall v e1 e2,
+      value v -> truthy_value v -> step (tifn v e1 e2) (subst 0 v e1)
+  | SIfnFalse : forall v e1 e2,
+      value v -> falsy_value v -> step (tifn v e1 e2) (subst 0 v e2)
+  | SIfn1     : forall c c' e1 e2, step c c' -> step (tifn c e1 e2) (tifn c' e1 e2).
 
 (* ===========================================================================
    4. SUBTYPING INVERSION — the lemmas progress/preservation rest on.
@@ -634,6 +769,25 @@ Proof.
   - subst. destruct (IHhas_type eq_refl) as [U1 [U2 [Hc [H1 [H2 Hd]]]]].
     exists U1, U2. split;[assumption|split;[assumption|split;[assumption|eapply SsTrans; eassumption]]].
   - injection Ee as <- <- <-. do 2 eexists.
+    split;[eassumption|split;[eassumption|split;[eassumption|apply SsRefl]]].
+Qed.
+
+(* INCREMENT 13 — [tifn] inversion, subsumption-transparent. The scrutinee types
+   at some [U]; the then-branch types at [T1] under [truthy_type], the else-branch
+   at [T2] under [falsy_type]; the union is [ssub]-below the ascribed type [T]. *)
+Lemma inv_ifn : forall G c e1 e2 T,
+  has_type G (tifn c e1 e2) T ->
+  exists U T1 T2, has_type G c U /\
+                  has_type (truthy_type :: G) e1 T1 /\
+                  has_type (falsy_type :: G) e2 T2 /\
+                  ssub (BUnion T1 T2) T.
+Proof.
+  intros G c e1 e2 T H. remember (tifn c e1 e2) as e0 eqn:Ee.
+  induction H; try discriminate Ee.
+  - subst. destruct (IHhas_type eq_refl) as [U [T1 [T2 [Hc [H1 [H2 Hd]]]]]].
+    exists U, T1, T2.
+    split;[assumption|split;[assumption|split;[assumption|eapply SsTrans; eassumption]]].
+  - injection Ee as <- <- <-. do 3 eexists.
     split;[eassumption|split;[eassumption|split;[eassumption|apply SsRefl]]].
 Qed.
 
@@ -1267,6 +1421,71 @@ Proof.
 Qed.
 
 (* ===========================================================================
+   INCREMENT 13 — THE TRUTHY/FALSY VALUE-NARROWING BRIDGING LEMMAS.
+
+   The operational justification of flow narrowing: a value's TRUTHINESS, an
+   operational fact, gives it the narrowed TYPE. These are the lemmas preservation
+   uses to retype the selected branch after the value-conditioned step substitutes
+   the scrutinee in.
+
+     truthy_narrows : value v -> truthy_value v -> has_type [] v truthy_type
+     falsy_narrows  : value v -> falsy_value v  -> has_type [] v falsy_type
+
+   PROOF SHAPE (no negation, no dsub-in-typing — the load-bearing soundness move):
+   case on the value's CANONICAL FORM. Each non-nil value class (number/string/
+   true/lambda/record) subsumes into [truthy_type] by a UNION INTRODUCTION [ssub]
+   ([SsUnionInL]/[SsUnionInR] + the atom/arrow/record membership), which [ssub]
+   HAS. So the truthiness→narrowed-type step goes entirely through the existing
+   sound [ssub] union rules. A falsy value is [nil] or [false], each an atom
+   below [falsy_type = nil ∪ bool] by union introduction. *)
+
+Lemma truthy_narrows : forall v U,
+  has_type [] v U -> value v -> truthy_value v -> has_type [] v truthy_type.
+Proof.
+  intros v U Hty Hv Ht. unfold truthy_type.
+  destruct Hv as [l | T b | fs Hfs].
+  - (* literal: truthy ⇒ LInt / LStr / LBool true *)
+    destruct l as [n | n | [|] | ].
+    + (* LInt : AInt ≤ ANum ≤ truthy_type *)
+      eapply TSub; [ apply (TLit [] (LInt n)) | ]. simpl.
+      apply SsUnionInR. apply SsUnionInL. apply SsAtom. apply ALInt.
+    + (* LStr : AStr ≤ truthy_type *)
+      eapply TSub; [ apply (TLit [] (LStr n)) | ]. simpl.
+      apply SsUnionInR. apply SsUnionInR. apply SsUnionInL. apply SsRefl.
+    + (* LBool true : ABool ≤ truthy_type (left disjunct) *)
+      eapply TSub; [ apply (TLit [] (LBool true)) | ]. simpl.
+      apply SsUnionInL. apply SsRefl.
+    + (* LBool false : FALSY — excluded *)
+      exfalso. apply Ht. left. reflexivity.
+    + (* LNil : FALSY — excluded *)
+      exfalso. apply Ht. right. reflexivity.
+  - (* lambda: re-type at its arrow [BArrow T Tb] (TLam from inversion), subsume
+       to [BArrow BBot BTop] (BBot ≤ T contra; Tb ≤ BTop co), inject into union. *)
+    apply inv_lam in Hty. destruct Hty as [Tb [Hb _]].
+    eapply TSub; [ apply TLam; exact Hb | ].
+    apply SsUnionInR. apply SsUnionInR. apply SsUnionInR. apply SsUnionInR.
+    apply SsArrow; [ apply SsBot | apply SsTop ].
+  - (* record: re-type at [BRec Ts] (TRec from inversion), subsume to [BRec []]
+       (srec Ts [] = SrNil), inject into union. *)
+    apply inv_rec in Hty. destruct Hty as [Ts [Hf [Hnd _]]].
+    eapply TSub; [ apply TRec; [ exact Hf | exact Hnd ] | ].
+    apply SsUnionInR. apply SsUnionInR. apply SsUnionInR. apply SsUnionInL.
+    apply SsRec. apply SrNil.
+Qed.
+
+Lemma falsy_narrows : forall v,
+  value v -> falsy_value v -> has_type [] v falsy_type.
+Proof.
+  intros v Hv Hf. unfold falsy_type. destruct Hf as [Ef | En]; subst v.
+  - (* false : ABool ≤ nil ∪ bool (right disjunct) *)
+    eapply TSub; [ apply (TLit [] (LBool false)) | ]. simpl.
+    apply SsUnionInR. apply SsRefl.
+  - (* nil : ANil ≤ nil ∪ bool (left disjunct) *)
+    eapply TSub; [ apply (TLit [] LNil) | ]. simpl.
+    apply SsUnionInL. apply SsRefl.
+Qed.
+
+(* ===========================================================================
    8. WEAKENING + SUBSTITUTION (the de Bruijn metatheory).
    =========================================================================== *)
 
@@ -1339,6 +1558,15 @@ Proof.
   - (* TIf *) eapply TIf;
       match goal with [ IH : forall _ _ _, _ = _ -> has_type _ _ _ |- _ ] =>
         exact (IH G1 G2 U eq_refl) end.
+  - (* TIfn: scrutinee IH at cut G1; branch IHs under their fresh binder, cut
+       (truthy_type::G1) / (falsy_type::G1). *)
+    eapply TIfn.
+    + match goal with [ IH : forall _ _ _, _ = _ -> has_type _ _ _ |- _ ] =>
+        exact (IH G1 G2 U0 eq_refl) end.
+    + match goal with [ IH : forall _ _ _, truthy_type :: _ = _ -> has_type _ _ _ |- _ ] =>
+        exact (IH (truthy_type :: G1) G2 U0 eq_refl) end.
+    + match goal with [ IH : forall _ _ _, falsy_type :: _ = _ -> has_type _ _ _ |- _ ] =>
+        exact (IH (falsy_type :: G1) G2 U0 eq_refl) end.
   - (* HFnil *) apply HFnil.
   - (* HFcons *) apply HFcons.
     + match goal with [ IH : forall _ _ _, _ = _ -> has_type _ _ _ |- _ ] =>
@@ -1371,6 +1599,8 @@ Fixpoint closed_at (k : nat) (e : tm) : Prop :=
                     end) fs
   | tproj e _ => closed_at k e
   | tif c e1 e2 => closed_at k c /\ closed_at k e1 /\ closed_at k e2
+  (* tifn binds the scrutinee fresh in each branch: branches closed at [S k]. *)
+  | tifn c e1 e2 => closed_at k c /\ closed_at (S k) e1 /\ closed_at (S k) e2
   end.
 
 (* Ltac: solve a [closed_at _ x] goal from the subterm-IH for exactly [x]. *)
@@ -1404,6 +1634,12 @@ Proof.
   - (* tif *) apply inv_if in H. destruct H as [U1 [U2 [Hc [H1 [H2 _]]]]].
     split; [ exact (IHe1 G (BAtom ABool) Hc)
            | split; [ exact (IHe2 G U1 H1) | exact (IHe3 G U2 H2) ] ].
+  - (* tifn: branches typed under a fresh binder; closed at S(length G) =
+       length (truthy_type::G) / length (falsy_type::G). *)
+    apply inv_ifn in H. destruct H as [U [T1 [T2 [Hc [H1 [H2 _]]]]]].
+    split; [ exact (IHe1 G U Hc)
+           | split; [ exact (IHe2 (truthy_type :: G) T1 H1)
+                    | exact (IHe3 (falsy_type :: G) T2 H2) ] ].
   - (* Pl nil *) exact I.
   - (* Pl cons *) inversion H; subst. simpl. split.
     + match goal with
@@ -1436,6 +1672,11 @@ Proof.
       [ apply (IHe1 k); [exact Hc | exact H0]
       | apply (IHe2 k); [exact H1 | exact H0]
       | apply (IHe3 k); [exact H2 | exact H0] ].
+  - (* tifn: scrutinee at k; branches at S k (lift cut also rises by one). *)
+    destruct H as [Hc [H1 H2]]. f_equal;
+      [ apply (IHe1 k); [exact Hc | exact H0]
+      | apply (IHe2 (S k)); [exact H1 | lia]
+      | apply (IHe3 (S k)); [exact H2 | lia] ].
   - (* Pl nil *) reflexivity.
   - (* Pl cons *) destruct H as [Hc Hr]. f_equal;
       [ f_equal; apply (IHe k0); [exact Hc | exact H0]
@@ -1522,6 +1763,15 @@ Proof.
     + apply (IHe1 G1 G2 U (BAtom ABool) s); [ exact Hc | exact H0 ].
     + apply (IHe2 G1 G2 U U1 s); [ exact H1 | exact H0 ].
     + apply (IHe3 G1 G2 U U2 s); [ exact H2 | exact H0 ].
+  - (* tifn: scrutinee substituted at cut [length G1]; each branch is under one
+       fresh binder, so its cut is [truthy_type::G1] / [falsy_type::G1] and [s]
+       lifts to itself (closed). *)
+    apply inv_ifn in H. destruct H as [Uc [T1 [T2 [Hc [H1 [H2 Hsub]]]]]]. simpl.
+    rewrite (closed_lift s U H0 1 0).
+    eapply TSub; [ eapply TIfn | exact Hsub ].
+    + apply (IHe1 G1 G2 U Uc s); [ exact Hc | exact H0 ].
+    + apply (IHe2 (truthy_type :: G1) G2 U T1 s); [ exact H1 | exact H0 ].
+    + apply (IHe3 (falsy_type :: G1) G2 U T2 s); [ exact H2 | exact H0 ].
   - (* Pl nil *) inversion H; subst. simpl. apply HFnil.
   - (* Pl cons *) inversion H; subst. simpl. apply HFcons.
     + match goal with [ Hh : has_type (G1 ++ U :: G2) e ?Tk |- _ ] =>
@@ -1697,6 +1947,27 @@ Proof.
   - (* SIf1: congruence — the condition steps, preserving Bool. *)
     apply inv_if in Hty. destruct Hty as [U1 [U2 [Hc [H1 [H2 Hsub]]]]].
     eapply TSub; [ eapply TIf; [ apply IHHstep; exact Hc | exact H1 | exact H2 ] | exact Hsub ].
+  (* INCREMENT 13 — NARROWING conditional preservation. THE CRUX: the value-
+     conditioned step justifies the narrowing. [SIfnTrue] substitutes a TRUTHY
+     value into the then-branch (typed under [truthy_type]); the bridging lemma
+     [truthy_narrows] gives [v : truthy_type] from its operational truthiness, so
+     [subst_top] retypes the branch. The dead else-branch is discarded — never
+     substituted — so no contradicted-assumption residual arises. *)
+  - (* SIfnTrue: tifn v e1 e2 ↦ subst 0 v e1, with v truthy *)
+    apply inv_ifn in Hty. destruct Hty as [U [T1 [T2 [Hc [H1 [H2 Hsub]]]]]].
+    eapply TSub;
+      [ apply (subst_top truthy_type [] e1 T1 v);
+          [ exact H1 | apply (truthy_narrows v U Hc); assumption ]
+      | eapply SsTrans; [ apply ssub_union_inl | exact Hsub ] ].
+  - (* SIfnFalse: tifn v e1 e2 ↦ subst 0 v e2, with v falsy *)
+    apply inv_ifn in Hty. destruct Hty as [U [T1 [T2 [Hc [H1 [H2 Hsub]]]]]].
+    eapply TSub;
+      [ apply (subst_top falsy_type [] e2 T2 v);
+          [ exact H2 | apply falsy_narrows; assumption ]
+      | eapply SsTrans; [ apply ssub_union_inr | exact Hsub ] ].
+  - (* SIfn1: congruence — the scrutinee steps, preserving its type [U]. *)
+    apply inv_ifn in Hty. destruct Hty as [U [T1 [T2 [Hc [H1 [H2 Hsub]]]]]].
+    eapply TSub; [ eapply TIfn; [ apply IHHstep; exact Hc | exact H1 | exact H2 ] | exact Hsub ].
 Qed.
 
 (* ===========================================================================
@@ -1800,6 +2071,19 @@ Proof.
       * eexists. apply SIfTrue.
       * eexists. apply SIfFalse.
     + (* condition steps *) eexists. apply SIf1. exact Hc'.
+  - (* TIfn: the scrutinee has SOME type [U]. If it is a value, its truthiness
+       (value_truthy_or_falsy) selects a branch (SIfnTrue/SIfnFalse); else it
+       steps (SIfn1). No canonical form needed — any value is truthy or falsy. *)
+    right.
+    match goal with
+    | [ IHc : [] = [] -> value c \/ _ |- _ ] =>
+        destruct (IHc eq_refl) as [Hvc | [c' Hc']]
+    end.
+    + (* scrutinee is a value: split on truthiness *)
+      destruct (value_truthy_or_falsy c Hvc) as [Htr | Hfa].
+      * eexists. apply SIfnTrue; assumption.
+      * eexists. apply SIfnFalse; assumption.
+    + (* scrutinee steps *) eexists. apply SIfn1. exact Hc'.
   - (* P0 HFnil *) intros ke [].
   - (* P0 HFcons *) intros ke Hin. simpl in Hin. destruct Hin as [Heq | Hin].
     + subst ke.
@@ -1932,10 +2216,112 @@ Proof.
 Qed.
 
 (* ===========================================================================
+   INCREMENT 13 — THE PAYOFF. A term that typechecks ONLY because of truthiness
+   narrowing, and is REJECTED without it. This is the [and]/[or]-nil narrowing
+   class — the bug class that motivated this whole effort — made machine-checked.
+
+   THE CONSUMER. [g := λ(_ : truthy_type). 0] has type [truthy_type → Int]: it
+   accepts ANY non-nil value. (It ignores its argument; what matters is the
+   DOMAIN requires non-nil.)
+
+   THE SCRUTINEE. A value of type [U := Int ∪ Nil] — the classic "maybe-nil"
+   shape. In the THEN-branch of a truthiness test, the scrutinee is known non-nil,
+   so passing it to [g] is sound. WITHOUT narrowing it carries [Int ∪ Nil], which
+   is NOT [≤ truthy_type] (nil is not truthy), so the SAME application is rejected.
+   =========================================================================== *)
+
+Definition g_consumer : tm := tlam truthy_type (tlit (LInt 0)).
+
+(* [g] really has the non-nil-accepting type. *)
+Example g_consumer_typed : has_type [] g_consumer (BArrow truthy_type (BAtom AInt)).
+Proof. apply TLam. apply (TLit (truthy_type :: []) (LInt 0)). Qed.
+
+(* THE NARROWING-REQUIRED TERM. Bind a maybe-nil scrutinee, then in the
+   then-branch apply the non-nil consumer to it. [g] is closed, so under the
+   [tifn] binder it is [lift 1 0 g_consumer = g_consumer]; we write it via [tvar]
+   into a context where index 1 is [g]'s type. To keep the term closed and
+   self-contained we [tlet]-bind [g] (index goes to 1 under the tifn binder) and
+   the scrutinee separately. The then-branch is [tapp (tvar 1) (tvar 0)]:
+   index 0 = the narrowed scrutinee (truthy_type), index 1 = g. *)
+Definition payoff_term : tm :=
+  tlet g_consumer                                  (* 0 ↦ g : truthy_type→Int *)
+    (tlet (tlit (LInt 5))                          (* 0 ↦ 5 : Int (the maybe-nil scrutinee, here Int) *)
+      (tifn (tvar 0)                               (* scrutinee = the bound value (index 0) *)
+        (tapp (tvar 2) (tvar 0))                   (* then: g (index 2 under tifn binder) applied to NARROWED scrutinee (index 0) *)
+        (tlit (LInt 0)))).                          (* else: any Int *)
+
+(* (a) WITH NARROWING the term typechecks. The let-bound scrutinee is given the
+   maybe-nil type [Int ∪ Nil] (subsumption from [Int]); [tifn] narrows it to
+   [truthy_type] in the then-branch, where [g (var0)] is well-typed. *)
+Example payoff_types_WITH_narrowing :
+  has_type [] payoff_term (BUnion (BAtom AInt) (BAtom AInt)).
+Proof.
+  unfold payoff_term.
+  eapply TLet; [ apply g_consumer_typed | ].
+  (* context: [ g : truthy_type→Int ] *)
+  eapply TLet.
+  - (* the scrutinee: 5 : Int, subsumed to Int ∪ Nil (maybe-nil) *)
+    eapply TSub; [ apply (TLit _ (LInt 5))
+                 | apply (ssub_union_inl (BAtom AInt) (BAtom ANil)) ].
+  - (* context: [ Int∪Nil ; truthy_type→Int ] ; scrutinee at index 0 *)
+    eapply TIfn.
+    + apply TVar. reflexivity.
+    + (* then-branch: index 0 narrowed to truthy_type; index 1 = Int∪Nil; index 2 = g *)
+      eapply TApp.
+      * apply (TVar _ 2). reflexivity.            (* g : truthy_type→Int at index 2 *)
+      * apply (TVar _ 0). reflexivity.            (* var0 : truthy_type (NARROWED) *)
+    + (* else-branch: any Int *)
+      apply (TLit _ (LInt 0)).
+Qed.
+
+(* (b) WITHOUT NARROWING the SAME use is ILL-TYPED. Under a context where the
+   scrutinee carries its maybe-nil type [Int ∪ Nil] (no narrowing), applying [g]
+   (which demands [truthy_type]) to it is REJECTED — because [Int ∪ Nil] is NOT
+   an [ssub]-subtype of [truthy_type] (nil is not truthy). This is the exact
+   unsoundness that narrowing prevents, here proven as a NON-typing. *)
+Example payoff_rejected_WITHOUT_narrowing :
+  forall T, ~ has_type
+    [ BUnion (BAtom AInt) (BAtom ANil) ; BArrow truthy_type (BAtom AInt) ]
+    (tapp (tvar 1) (tvar 0)) T.
+Proof.
+  intros T H. apply inv_app in H.
+  destruct H as [A [B [Hf [Ha _]]]].
+  (* g (index 1) has type truthy_type→Int (up to ssub): A is its domain *)
+  apply inv_var in Hf. destruct Hf as [Sf [Hlf Hsf]]. simpl in Hlf. injection Hlf as <-.
+  apply ssub_arrow_inv in Hsf. destruct Hsf as [Hdom _].
+  (* the argument (index 0) has type Int∪Nil (up to ssub to A) *)
+  apply inv_var in Ha. destruct Ha as [Sa [Hla Hsa]]. simpl in Hla. injection Hla as <-.
+  (* so Int∪Nil ≤ A ≤ truthy_type — but that is FALSE (nil ∉ truthy). Refute
+     semantically at VNil. *)
+  pose proof (SsTrans _ _ _ Hsa Hdom) as Hbad.
+  apply ssub_sound in Hbad. unfold dsub in Hbad.
+  assert (HnilU : denote (BUnion (BAtom AInt) (BAtom ANil)) VNil)
+    by (simpl; right; exact I).
+  pose proof (Hbad VNil HnilU) as Hnil_truthy.
+  unfold truthy_type in Hnil_truthy. simpl in Hnil_truthy.
+  destruct Hnil_truthy as [Hb | [Hn | [Hs | [Hr | Har]]]];
+    simpl in *; try contradiction.
+  destruct Hr as [ents [Hc _]]; discriminate.
+Qed.
+
+(* THE NARROWING STEP, operationally: the payoff term reduces — the scrutinee is
+   truthy (Int 5), so the then-branch is selected with the value substituted in. *)
+Example payoff_steps_then :
+  exists e', step payoff_term e'.
+Proof.
+  eapply ex_intro. unfold payoff_term, g_consumer.
+  apply SLet. apply VLam.
+Qed.
+
+(* ===========================================================================
    ASSUMPTION AUDIT — closed under the global context (no axioms/Admitted).
    =========================================================================== *)
 Print Assumptions progress.
 Print Assumptions preservation.
+Print Assumptions truthy_narrows.
+Print Assumptions falsy_narrows.
+Print Assumptions payoff_types_WITH_narrowing.
+Print Assumptions payoff_rejected_WITHOUT_narrowing.
 Print Assumptions ssub_arrow_inv.
 Print Assumptions ssub_sound.
 Print Assumptions arrow_top_collapse.

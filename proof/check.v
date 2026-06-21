@@ -189,6 +189,23 @@ Fixpoint synth (G : list BTy) (e : tm) {struct e} : option BTy :=
           else None
       | None => None
       end
+  (* INCREMENT 13 — NARROWING conditional. The scrutinee may have ANY type (Lua
+     truthiness — no Bool gate). Each branch is synthesized under its NARROWED
+     binder: [truthy_type] for the then-branch, [falsy_type] for the else-branch
+     (the de Bruijn 0 the [tifn] binds). Result is the union of the branch types.
+     The narrowing here is the [truthy_type]/[falsy_type] BOUND in the context —
+     the soundness obligations are discharged by [TIfn] (no [decide_ssub]
+     obligation is needed: the binder type IS the narrowed type, so the branch
+     uses [SsInterPL]-style projections internally where it consumes the var). *)
+  | tifn c e1 e2 =>
+      match synth G c with
+      | Some _ =>
+          match synth (truthy_type :: G) e1, synth (falsy_type :: G) e2 with
+          | Some U1, Some U2 => Some (BUnion U1 U2)
+          | _, _ => None
+          end
+      | None => None
+      end
   end.
 
 Definition check (G : list BTy) (e : tm) (T : BTy) : bool :=
@@ -260,6 +277,17 @@ Proof.
     destruct (synth G e3) as [ U2 | ] eqn:H2; [ | discriminate ].
     injection H as <-. apply TIf.
     + eapply TSub; [ apply IHe1; exact Hc | apply decide_ssub_sound; exact Hdb ].
+    + apply IHe2; exact H1.
+    + apply IHe3; exact H2.
+  - (* tifn: scrutinee at any type U; branches synthesized under their narrowed
+       binders [truthy_type]/[falsy_type]; result is the union. Discharged by
+       [TIfn] directly — no subtyping obligation. *)
+    simpl in H.
+    destruct (synth G e1) as [ Uc | ] eqn:Hc; [ | discriminate ].
+    destruct (synth (truthy_type :: G) e2) as [ U1 | ] eqn:H1; [ | discriminate ].
+    destruct (synth (falsy_type :: G) e3) as [ U2 | ] eqn:H2; [ | discriminate ].
+    injection H as <-. eapply TIfn.
+    + apply IHe1; exact Hc.
     + apply IHe2; exact H1.
     + apply IHe3; exact H2.
   - (* Pl [] *) simpl in H. injection H as <-. apply HFnil.
@@ -355,6 +383,13 @@ Proof.
       | eapply (IHhas_type2 G1 _ G2 A')
       | eapply (IHhas_type3 G1 _ G2 A') ];
       (reflexivity || eassumption).
+  - (* TIfn: scrutinee narrows at cut G1; each branch is under its fresh narrowing
+       binder, so its cut is (truthy_type::G1) / (falsy_type::G1). *)
+    eapply TIfn;
+      [ eapply (IHhas_type1 G1 _ G2 A')
+      | eapply (IHhas_type2 (truthy_type :: G1) _ G2 A')
+      | eapply (IHhas_type3 (falsy_type :: G1) _ G2 A') ];
+      (reflexivity || eassumption).
   - apply HFnil.
   - apply HFcons;
       [ eapply (IHhas_type G1 _ G2 A') | eapply (IHhas_type0 G1 _ G2 A') ];
@@ -406,6 +441,7 @@ Fixpoint proj_free (e : tm) : Prop :=
                   end) fs
   | tproj _ _ => False
   | tif c e1 e2 => proj_free c /\ proj_free e1 /\ proj_free e2
+  | tifn c e1 e2 => proj_free c /\ proj_free e1 /\ proj_free e2
   end.
 
 (* SYNTHESIS IS PRINCIPAL (projection-free fragment) — the tractable completeness
@@ -469,6 +505,18 @@ Proof.
     pose proof (IHe2 G V1 Sc1 Hp1 HV1 H1e) as Hb1.
     pose proof (IHe3 G V2 Sc2 Hp2 HV2 H2e) as Hb2.
     (* BUnion Sc1 Sc2 ≤ BUnion V1 V2 ≤ T (union is monotone; then Hsub). *)
+    eapply SsTrans; [ | exact Hsub ].
+    apply SsUnionE; [ apply SsUnionInL; exact Hb1 | apply SsUnionInR; exact Hb2 ].
+  - (* tifn: principality of each NARROWED branch; the branch synthesis runs under
+       the narrowed binder, exactly as the declarative [TIfn] types it. *)
+    simpl in H1. simpl in H. destruct H as [Hpc [Hp1 Hp2]].
+    destruct (synth G e1) as [ Sc | ] eqn:Hc; [ | discriminate ].
+    destruct (synth (truthy_type :: G) e2) as [ Sc1 | ] eqn:H1e; [ | discriminate ].
+    destruct (synth (falsy_type :: G) e3) as [ Sc2 | ] eqn:H2e; [ | discriminate ].
+    injection H1 as <-.
+    apply inv_ifn in H0. destruct H0 as [Uc [V1 [V2 [_ [HV1 [HV2 Hsub]]]]]].
+    pose proof (IHe2 (truthy_type :: G) V1 Sc1 Hp1 HV1 H1e) as Hb1.
+    pose proof (IHe3 (falsy_type :: G) V2 Sc2 Hp2 HV2 H2e) as Hb2.
     eapply SsTrans; [ | exact Hsub ].
     apply SsUnionE; [ apply SsUnionInL; exact Hb1 | apply SsUnionInR; exact Hb2 ].
   - (* Pl nil *) simpl in H1. injection H1 as <-.
@@ -564,6 +612,42 @@ Proof. apply check_sound. reflexivity. Qed.
 (* ILL-TYPED: a non-Bool condition ⇒ None (3 is not a boolean). *)
 Example compute_if_badcond_None :
   synth [] (tif (tlit (LInt 0)) (tlit (LInt 3)) (tlit (LStr 0))) = None.
+Proof. reflexivity. Qed.
+
+(* INCREMENT 13 — NARROWING checker. The scrutinee may be ANY type (Lua truthiness,
+   no Bool gate): [tifn 3 then else] synthesizes the union of the branch types, and
+   in the then-branch the de Bruijn-0 var has the NARROWED [truthy_type]. Here the
+   then-branch reads the narrowed var (var0 : truthy_type) and the else-branch reads
+   the falsy-narrowed var (var0 : falsy_type). *)
+Example compute_ifn_narrows :
+  synth [] (tifn (tlit (LInt 3)) (tvar 0) (tvar 0))
+  = Some (BUnion truthy_type falsy_type).
+Proof. reflexivity. Qed.
+
+(* THE CHECKER PAYOFF. A non-nil consumer [g : truthy_type → Int] applied to the
+   then-NARROWED scrutinee CHECKS; the scrutinee's declared type is the maybe-nil
+   [Int ∪ Nil] (passed as a free var of that type). The whole [tifn] checks. *)
+Example compute_ifn_payoff_synth :
+  synth [ BArrow truthy_type (BAtom AInt) ]   (* index 0 : the consumer g *)
+    (tifn (tvar 0)                            (* scrutinee = g itself (truthy: a function) *)
+       (tapp (tvar 1) (tvar 0))               (* then: g (index 1) applied to narrowed var0 *)
+       (tlit (LInt 0)))
+  = Some (BUnion (BAtom AInt) (BAtom AInt)).
+Proof. reflexivity. Qed.
+
+(* and it is SOUND (declaratively well typed via check_sound). *)
+Example compute_ifn_payoff_sound :
+  has_type [ BArrow truthy_type (BAtom AInt) ]
+    (tifn (tvar 0) (tapp (tvar 1) (tvar 0)) (tlit (LInt 0)))
+    (BUnion (BAtom AInt) (BAtom AInt)).
+Proof. apply check_sound. reflexivity. Qed.
+
+(* WITHOUT narrowing the SAME application is REJECTED by the checker: a free var of
+   the maybe-nil type [Int ∪ Nil] passed to the [truthy_type]-demanding consumer
+   fails the domain check (nil is not truthy). *)
+Example compute_ifn_payoff_unnarrowed_None :
+  synth [ BUnion (BAtom AInt) (BAtom ANil) ; BArrow truthy_type (BAtom AInt) ]
+    (tapp (tvar 1) (tvar 0)) = None.
 Proof. reflexivity. Qed.
 
 (* ILL-TYPED: projecting a field off a literal ⇒ None (not a record) *)
