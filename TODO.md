@@ -285,8 +285,16 @@ Op-sem parity must hold at every commit. After the handler deletion, the adversa
   reflexive/pointwise only in `ssub`; semantic tuple subtyping via `gdecide` and a
   top-tuple type are also deferred.)
   Increment 21, `proof/subtype.v` (`BTuple`), `proof/typing.v` (`tret`/`tfst`/`tappspread`).
-- [ ] **[BLOCKING] Metatables / metamethods.** No metatable model in `V` /
-  `denote`. `reality-bridge.md` §4(C) tracks it as an unobserved table axis.
+- [x] **Metatables — `__index` field-lookup fallback (TYPING LAYER).** Static
+  read-only `__index` as a table/record (prototype inheritance / OOP) is DONE at
+  the typing layer (`proof/typing.v` `tmeta`/`TMeta`/dispatch op-sem +
+  `proof/check.v` synth; `progress`/`preservation`/`synth_sound`/`check_sound`
+  re-proved — see the Typing-layer §"Metatables" entry and proof-kernel
+  increment 21). It is modelled by FLATTENING over the existing `BRec` (no new
+  `V`/`denote`-level former). STILL OPEN as a separate axis: a first-class
+  metatable model in `V`/`denote` (for operator metamethods / `__call` / dynamic
+  mutation, which are not record-flattenable). `reality-bridge.md` §4(C) tracks
+  the broader unobserved table axis.
 - [ ] **[nice-to-have] Non-string table keys.** Model `VTable` uses string keys;
   real Lua keys are any non-nil value. `reality-bridge.md` §4(C).
 - [ ] **[nice-to-have] Full stdlib.** No stdlib modelled in the proof value
@@ -733,11 +741,45 @@ Still open (DEFERRED — recorded honestly, minimal core only):
   `Print Assumptions` on `progress`/`preservation`/`synth_sound`/`check_sound`
   closed under the global context. DEFERRED below: mutual recursion, recursive
   TYPES (μ). Lua's `local function f` is the derivable consumer.
+- [x] **Metatables — static read-only `__index` field-lookup fallback / prototype
+  inheritance (increment 21, DONE).** `proof/typing.v` + `proof/check.v` (on
+  UNMODIFIED `subtype.v` + `ssub.v`). `tm` gains `tmeta own proto` (own a literal
+  field-list; proto the `__index` target — record or another `tmeta`, a prototype
+  CHAIN). Modelled by FLATTENING over the existing `BRec` (NO new type-level
+  former): `merge_fields Town Pf` = own fields ∪ inherited fields not shadowed by
+  own (Lua: own wins); `TMeta` ⇒ `tmeta own proto : BRec (merge_fields Town Pf)`.
+  Dispatch op-sem `SMetaProjOwn` (own field) / `SMetaProjProto` (fall through to
+  the prototype, chained). **`progress`/`preservation`/`synth_sound`/`check_sound`
+  re-proved `Qed`** (extended canonical form: a `BRec`-value is `trec` OR `tmeta`).
+  SOUNDNESS FORK surfaced (not fudged): own MUST be a literal field-list — a
+  width-subsumed own term makes preservation FALSE (under-reports own keys ⇒
+  dispatch-to-own but type-via-prototype). PAYOFF machine-checked: a base method
+  resolved through `__index` at the derived object (`oop_inherited_typed`/`_steps`,
+  `oop_inherited_synths`), own-field direct resolution (`oop_own_*`),
+  everywhere-absent field rejected at every type (`oop_absent_rejected`,
+  `oop_absent_synth_None`). `Print Assumptions` closed under the global context.
+  DEFERRED: `__newindex`, operator/`__eq`/`__lt`/`__call` metamethods, `__index`
+  as a FUNCTION, dynamic metatable MUTATION (`setmetatable`), `rawget`/`rawset`.
 - [ ] **Mutual recursion** (`tfix` is single-binding; mutual `local function`
   groups need either a tupled fixpoint or a multi-binding `tfix`). Backlog.
 - [ ] **Recursive TYPES — equirecursive μ** (distinct from the recursive TERM
   `tfix` above; needs the coinductive-`V` fork). See the BLOCKING μ item below.
-- [ ] **Metatables.**
+- [x] **Metatables — static read-only `__index` field-lookup fallback (prototype
+  inheritance / OOP)** (increment 21, `proof/typing.v` + `proof/check.v`,
+  `subtype.v`/`ssub.v` UNMODIFIED). New term `tmeta own proto` (own a literal
+  field-list, prototype the `__index` target); type-level flattening
+  `merge_fields` over the existing `BRec` (no new type former); dispatch op-sem
+  `SMetaProjOwn`/`SMetaProjProto` (own field, else fall through to the prototype,
+  chained). `progress`/`preservation`/`synth_sound`/`check_sound` re-proved `Qed`.
+  SOUNDNESS FORK surfaced (not fudged): own MUST be a literal field-list — a
+  subsumed own term makes preservation false (width-subsumption under-reports own
+  keys, dispatching to own while typing via the prototype). PAYOFF: OOP
+  inheritance machine-checked (`oop_inherited_typed`/`_steps` resolve a base
+  method through `__index`; `oop_absent_rejected` rejects an everywhere-absent
+  field). `Print Assumptions`: Closed under the global context.
+  - DEFERRED (backlog): `__newindex` (write fallback), operator/comparison
+    metamethods (`__add`/`__eq`/`__lt`/…), `__call`, `__index` as a FUNCTION,
+    dynamic metatable MUTATION (`setmetatable`), `rawget`/`rawset`.
 - [ ] **Arrow types as TERM introduction forms** (the type ALGEBRA has arrows via
   `BTy` and `tlam` introduces them; broader arrow-term ergonomics are min-core).
 - [ ] **Duplicate-key record literals** (currently `TRec` requires `NoDup` keys,

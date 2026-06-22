@@ -200,7 +200,27 @@ Inductive tm : Type :=
      [{f()}], multiple-assignment [a,b = f()], and full arity-polymorphic spread. *)
   | tret       : list tm -> tm               (* return e1,…,ek  (multivalue)    *)
   | tfst       : tm -> tm                     (* truncate a multivalue to its 1st *)
-  | tappspread : tm -> tm -> tm.             (* g(f()) — last-position spread    *)
+  | tappspread : tm -> tm -> tm              (* g(f()) — last-position spread    *)
+  (* METATABLES — STATIC, READ-ONLY [__index] FIELD-LOOKUP FALLBACK (prototype
+     inheritance / OOP). [tmeta own proto] is a table whose OWN fields are the
+     record [own] and whose metatable's [__index] target is [proto] (itself a
+     record or another [tmeta] — a prototype CHAIN). Field access [tproj (tmeta
+     own proto) k] resolves: if [k] is a DIRECT (own) field, use it; ELSE fall
+     back to [proto.k] (and recursively through [proto]'s own [__index] chain) —
+     this is the dynamic DISPATCH, realized by the op-sem [SMetaProjOwn] /
+     [SMetaProjProto] below. TYPING flattens the read interface: a [tmeta] of own
+     fields [Town] over a prototype of read-type [BRec Pfields] has type [BRec
+     (merge_fields Town Pfields)] — own fields PLUS inherited fields not shadowed
+     by own (Lua: own wins). So an inherited method's type is visible at the
+     derived table, and an absent-everywhere field is a type error the checker
+     rejects. DEFERRED (backlog): operator/[__eq]/[__lt]/[__call] metamethods,
+     [__newindex] (write fallback), dynamic metatable MUTATION, [rawget]/[rawset],
+     and [__index] as a FUNCTION (here [__index] is a table/record only). The OWN
+     fields are a record-literal field-list directly (not an arbitrary term): an
+     object's own field table is concrete, and this pins the OWN type to exactly
+     its keys — see [TMeta]'s soundness note for why a subsumed own term would
+     break preservation. *)
+  | tmeta      : list (string * tm) -> tm -> tm.   (* tmeta own_fields proto *)
 
 (* The type a tag pins (the THEN-branch narrowed type). TgNum ↦ ANum (all numbers,
    per the 5.1 [type()] model), the other scalars to their atoms, TgTable to the
@@ -294,6 +314,7 @@ Section tm_ind_strong.
   Hypothesis Hret    : forall es, Pt es -> P (tret es).
   Hypothesis Hfst    : forall e, P e -> P (tfst e).
   Hypothesis Hspread : forall g a, P g -> P a -> P (tappspread g a).
+  Hypothesis Hmeta   : forall own proto, Pl own -> P proto -> P (tmeta own proto).
   Hypothesis Hnil  : Pl [].
   Hypothesis Hcons : forall k e rest, P e -> Pl rest -> Pl ((k, e) :: rest).
   Hypothesis Htnil : Pt [].
@@ -333,6 +354,14 @@ Section tm_ind_strong.
               end) es)
     | tfst e => Hfst e (tm_rect_strong e)
     | tappspread g a => Hspread g a (tm_rect_strong g) (tm_rect_strong a)
+    | tmeta own proto =>
+        Hmeta own proto
+          ((fix gom (fs : list (string * tm)) : Pl fs :=
+              match fs with
+              | [] => Hnil
+              | (k, e) :: rest => Hcons k e rest (tm_rect_strong e) (gom rest)
+              end) own)
+          (tm_rect_strong proto)
     end.
 End tm_ind_strong.
 
@@ -641,6 +670,32 @@ Definition truthy_type : BTy :=
 Definition falsy_type : BTy :=
   BUnion (BAtom ANil) (BAtom ABool).
 
+(* ---- METATABLES — the FLATTENED read interface ----------------------------
+   [merge_fields own proto] is the type-level [__index] flatten: own fields are
+   kept, and prototype fields whose key is NOT shadowed by an own key are
+   appended. Lua's resolution order — OWN field wins over inherited — is exactly
+   this: a key present in [own] takes [own]'s type, otherwise [proto]'s. The
+   result is the visible READ interface of [tmeta own proto] (the inherited
+   methods become directly projectable, at their prototype types). *)
+
+Fixpoint key_in (k : string) (fs : list (string * BTy)) : bool :=
+  match fs with
+  | [] => false
+  | (k', _) :: rest => if string_dec k k' then true else key_in k rest
+  end.
+
+(* prototype fields not shadowed by an own key. *)
+Fixpoint drop_shadowed (own proto : list (string * BTy)) : list (string * BTy) :=
+  match proto with
+  | [] => []
+  | (k, T) :: rest =>
+      if key_in k own then drop_shadowed own rest
+      else (k, T) :: drop_shadowed own rest
+  end.
+
+Definition merge_fields (own proto : list (string * BTy)) : list (string * BTy) :=
+  own ++ drop_shadowed own proto.
+
 (* [has_type S G e T] — S : store typing (the type of the value at each store
    location), G : de Bruijn variable context. S is threaded UNCHANGED through every
    non-reference rule (it is a fixed parameter from their perspective); the location
@@ -794,6 +849,33 @@ Inductive has_type : list BTy -> list BTy -> tm -> BTy -> Prop :=
       has_type S G g (BArrow (BTuple Ts) B) ->
       has_type S G a (BTuple Ts) ->
       has_type S G (tappspread g a) B
+  (* METATABLES — STATIC, READ-ONLY [__index] field-lookup fallback. [own] is the
+     OWN-field record [BRec Town]; [proto] is the [__index] target, whose
+     (flattened) READ type is the record [BRec Pfields]. The metatable-table
+     [tmeta own proto] has the MERGED read type [BRec (merge_fields Town Pfields)]
+     — own fields plus inherited (prototype) fields not shadowed by own. The
+     [NoDup] premises on BOTH field lists make the merge [NoDup] (own keys
+     distinct, surviving prototype keys distinct and disjoint from own — proved
+     [merge_fields_nodup]), so projection's first-match agrees with the key's type
+     exactly. Inheritance is thus a structural extension: an inherited method is
+     directly projectable at the derived table (its prototype type), realizing
+     real Lua OOP. (A prototype CHAIN is the case where [proto] is itself a
+     [tmeta]: its flattened type is again a [BRec], so chaining composes.) *)
+  | TMeta : forall S G ofs proto Town Pfields,
+      (* OWN fields are a record-literal field-list typed EXACTLY by [has_fields]
+         (NOT an arbitrary subsumed term): [Town] then faithfully lists own's
+         runtime keys, so the merge resolves an own key to OWN's type and a
+         non-own key to the prototype's — matching the runtime dispatch. Allowing
+         [own] to be a width-SUBSUMED term would let [Town] under-report own's
+         keys; a key present in own's runtime record but dropped from [Town] would
+         be typed via the PROTOTYPE while dispatched to OWN — UNSOUND. Pinning own
+         to its literal field-list (an object's own field table is concrete)
+         closes this. The PROTOTYPE keeps arbitrary subsumption (read at [BRec]). *)
+      has_fields S G ofs Town ->
+      NoDup (map fst Town) ->
+      has_type S G proto (BRec Pfields) ->
+      NoDup (map fst Pfields) ->
+      has_type S G (tmeta ofs proto) (BRec (merge_fields Town Pfields))
 (* key-aligned pointwise typing of record fields; mutual so the generated
    induction principle carries an IH on every field derivation. *)
 with has_fields : list BTy -> list BTy -> list (string * tm) -> list (string * BTy) -> Prop :=
@@ -840,7 +922,13 @@ Inductive value : tm -> Prop :=
   | VLoc  : forall n, value (tloc n)
   (* MULTI-RETURN — a fully-evaluated return-sequence is a VALUE (the multivalue):
      all its components are values. (Models [VTup vs] at the value level.) *)
-  | VRet  : forall es, Forall value es -> value (tret es).
+  | VRet  : forall es, Forall value es -> value (tret es)
+  (* METATABLES — a metatable-table is a VALUE once all its OWN fields are values
+     and its prototype is a value. (Own is a record-literal field-list, exactly
+     like [trec]'s [VRec] requirement.) *)
+  | VMeta : forall own proto,
+      Forall (fun ke => value (snd ke)) own -> value proto ->
+      value (tmeta own proto).
 
 (* ---- de Bruijn lifting and substitution -----------------------------------
    [lift d k e] increments every free variable >= k by d (shifting under d new
@@ -883,6 +971,9 @@ Fixpoint lift (d k : nat) (e : tm) : tm :=
   | tret es => tret (map (lift d k) es)
   | tfst e => tfst (lift d k e)
   | tappspread g a => tappspread (lift d k g) (lift d k a)
+  (* METATABLES: no new binders — own fields and prototype lift at [k]. *)
+  | tmeta own proto =>
+      tmeta (map (fun ke => (fst ke, lift d k (snd ke))) own) (lift d k proto)
   end.
 
 Fixpoint subst (j : nat) (s : tm) (e : tm) : tm :=
@@ -924,6 +1015,9 @@ Fixpoint subst (j : nat) (s : tm) (e : tm) : tm :=
   | tret es => tret (map (subst j s) es)
   | tfst e => tfst (subst j s e)
   | tappspread g a => tappspread (subst j s g) (subst j s a)
+  (* METATABLES: no new binders — substitute into own fields and prototype at [j]. *)
+  | tmeta own proto =>
+      tmeta (map (fun ke => (fst ke, subst j s (snd ke))) own) (subst j s proto)
   end.
 
 (* record-field lookup at the term level (for projection) *)
@@ -963,7 +1057,7 @@ Lemma value_truthy_or_falsy : forall v,
   value v -> truthy_value v \/ falsy_value v \/ is_multi v.
 Proof.
   intros v Hv. unfold truthy_value, falsy_value, is_multi.
-  destruct Hv as [l | T b | fs Hfs | n | es Hes].
+  destruct Hv as [l | T b | fs Hfs | n | es Hes | own proto Hvo Hvp].
   - destruct l as [n | n | [|] | ].
     + left. split; [intros [H | H]; discriminate | intros [es H]; discriminate].
     + left. split; [intros [H | H]; discriminate | intros [es H]; discriminate].
@@ -974,6 +1068,8 @@ Proof.
   - left. split; [intros [H | H]; discriminate | intros [es H]; discriminate].
   - (* tloc: TRUTHY *) left. split; [intros [H | H]; discriminate | intros [es H]; discriminate].
   - (* tret: a MULTIVALUE — the third class *) right. right. exists es. reflexivity.
+  - (* tmeta: a TABLE — TRUTHY *)
+    left. split; [intros [H | H]; discriminate | intros [es H]; discriminate].
 Qed.
 
 (* truthy and falsy are mutually exclusive (a value is not both). *)
@@ -995,6 +1091,7 @@ Definition has_tag (v : tm) (g : tag) : Prop :=
   | TgBool,  tlit (LBool _) => True
   | TgNil,   tlit LNil      => True
   | TgTable, trec _         => True
+  | TgTable, tmeta _ _      => True       (* METATABLES — a metatable-table is a table *)
   | TgFun,   tlam _ _       => True
   | TgRef,   tloc _         => True       (* SPLIT-STEP 3 — a location's tag *)
   | TgMulti, tret _         => True       (* MULTI-RETURN — a multivalue's tag *)
@@ -1004,7 +1101,7 @@ Definition has_tag (v : tm) (g : tag) : Prop :=
 (* every value has SOME tag (the type-test always selects a branch). *)
 Lemma value_has_some_tag : forall v, value v -> exists g, has_tag v g.
 Proof.
-  intros v Hv. destruct Hv as [l | T b | fs Hfs | n | es Hes].
+  intros v Hv. destruct Hv as [l | T b | fs Hfs | n | es Hes | own proto Hvo Hvp].
   - destruct l as [n | n | bb | ].
     + exists TgNum; exact I.
     + exists TgStr; exact I.
@@ -1014,6 +1111,7 @@ Proof.
   - exists TgTable; exact I.
   - exists TgRef; exact I.                (* tloc *)
   - exists TgMulti; exact I.              (* tret — a multivalue *)
+  - exists TgTable; exact I.              (* tmeta — a metatable-table *)
 Qed.
 
 (* a value's tag is unique (it cannot match two distinct tags). *)
@@ -1172,7 +1270,33 @@ Inductive step : tm * store -> tm * store -> Prop :=
   | SAppSpread1 : forall g g' a st st',
       step (g, st) (g', st') -> step (tappspread g a, st) (tappspread g' a, st')
   | SAppSpread2 : forall v a a' st st',
-      value v -> step (a, st) (a', st') -> step (tappspread v a, st) (tappspread v a', st').
+      value v -> step (a, st) (a', st') -> step (tappspread v a, st) (tappspread v a', st')
+  (* METATABLES — congruence: build the table left-to-right. Step the first
+     non-value OWN field (left-to-right, exactly like [SRec]); once all own fields
+     are values, step the prototype. *)
+  | SMeta1 : forall pre k e e' post proto st st',
+      Forall (fun ke => value (snd ke)) pre ->
+      step (e, st) (e', st') ->
+      step (tmeta (pre ++ (k, e) :: post) proto, st)
+           (tmeta (pre ++ (k, e') :: post) proto, st')
+  | SMeta2 : forall own proto proto' st st',
+      Forall (fun ke => value (snd ke)) own ->
+      step (proto, st) (proto', st') ->
+      step (tmeta own proto, st) (tmeta own proto', st')
+  (* METATABLES — the [__index] DISPATCH (the heart of the construct). A
+     projection on a metatable-table VALUE [tmeta own proto] resolves the key: if
+     [k] is a DIRECT (own) field, step to its value ([SMetaProjOwn]); ELSE fall
+     back to projecting the PROTOTYPE ([SMetaProjProto], which then resolves
+     recursively through [proto]'s own [__index] chain). This is the runtime
+     prototype-inheritance lookup. *)
+  | SMetaProjOwn : forall own proto k v st,
+      value (tmeta own proto) ->
+      field_lookup k own = Some v ->
+      step (tproj (tmeta own proto) k, st) (v, st)
+  | SMetaProjProto : forall own proto k st,
+      value (tmeta own proto) ->
+      field_lookup k own = None ->
+      step (tproj (tmeta own proto) k, st) (tproj proto k, st).
 
 (* STORE well-typedness + extension (ported from imp.v). [store_well_typed S st]:
    same length, each stored value has its S-type (closed — stored values are
@@ -1541,6 +1665,28 @@ Proof.
     exists Ts, B. split; [assumption|split;[assumption|eapply RsTrans; eassumption]].
   - injection Ee as <- <-. exists Ts, B.
     split; [assumption|split;[assumption|apply rsub_refl]].
+Qed.
+
+(* METATABLES — inversion of [tmeta own proto]. Reading through subsumption, a
+   metatable-table types at any [T] [rsub]-above the MERGED read record [BRec
+   (merge_fields Town Pfields)], where [own : BRec Town] (NoDup keys) and [proto :
+   BRec Pfields] (NoDup keys). This is what lets the proj cases recover the own /
+   prototype field suppliers and the merge structure. *)
+Lemma inv_meta : forall S G ofs proto T,
+  has_type S G (tmeta ofs proto) T ->
+  exists Town Pfields,
+    has_fields S G ofs Town /\ NoDup (map fst Town) /\
+    has_type S G proto (BRec Pfields) /\ NoDup (map fst Pfields) /\
+    rsub (BRec (merge_fields Town Pfields)) T.
+Proof.
+  intros S G ofs proto T H. remember (tmeta ofs proto) as e0 eqn:Ee.
+  induction H; try discriminate Ee.
+  - subst. destruct (IHhas_type eq_refl)
+      as [Town [Pfields [Ho [Hno [Hp [Hnp Hd]]]]]].
+    exists Town, Pfields.
+    repeat (split; [assumption|]). eapply RsTrans; eassumption.
+  - injection Ee as <- <-. exists Town, Pfields.
+    repeat (split; [assumption|]). apply rsub_refl.
 Qed.
 
 (* ===========================================================================
@@ -2479,7 +2625,7 @@ Proof. intros g H. apply rsub_anyref_super in H. simpl in H. exact H. Qed.
 Lemma canon_arrow : forall S e A B,
   has_type S [] e (BArrow A B) -> value e -> exists T body, e = tlam T body.
 Proof.
-  intros S e A B Hty Hv. destruct Hv as [l | T b | fs Hfs | n | es Hes].
+  intros S e A B Hty Hv. destruct Hv as [l | T b | fs Hfs | n | es Hes | own proto Hvo Hvp].
   - apply inv_lit in Hty. destruct l; simpl in Hty;
       exfalso; eapply rsub_atom_not_arrow; eauto.
   - exists T, b; reflexivity.
@@ -2491,21 +2637,30 @@ Proof.
   - (* tret: a multivalue is not [rsub]-below an arrow *)
     apply inv_ret in Hty. destruct Hty as [Ts [_ Hsub]].
     exfalso. eapply rsub_tuple_not_arrow; eauto.
+  - (* tmeta: a metatable-table (BRec) is not [rsub]-below an arrow *)
+    apply inv_meta in Hty. destruct Hty as [Town [Pf [_ [_ [_ [_ Hsub]]]]]].
+    exfalso. eapply rsub_rec_not_arrow; eauto.
 Qed.
 
+(* METATABLES — canonical form for RECORD type now has TWO table shapes: a plain
+   record [trec fs] OR a metatable-table [tmeta own proto] (also a [BRec]-typed
+   value, since [TMeta]'s result type is a [BRec]). The projection cases dispatch
+   on which one. *)
 Lemma canon_rec : forall S e fields,
-  has_type S [] e (BRec fields) -> value e -> exists fs, e = trec fs.
+  has_type S [] e (BRec fields) -> value e ->
+  (exists fs, e = trec fs) \/ (exists own proto, e = tmeta own proto).
 Proof.
-  intros S e fields Hty Hv. destruct Hv as [l | T b | fs Hfs | n | es Hes].
+  intros S e fields Hty Hv. destruct Hv as [l | T b | fs Hfs | n | es Hes | own proto Hvo Hvp].
   - apply inv_lit in Hty. destruct l; simpl in Hty;
       exfalso; eapply rsub_atom_not_rec; eauto.
   - apply inv_lam in Hty. destruct Hty as [Tb [_ Hsub]].
     exfalso. eapply rsub_arrow_not_rec; eauto.
-  - exists fs; reflexivity.
+  - left. exists fs; reflexivity.
   - apply inv_loc in Hty. destruct Hty as [U [_ Hsub]].
     exfalso. eapply rsub_ref_not_rec; eauto.
   - apply inv_ret in Hty. destruct Hty as [Ts [_ Hsub]].
     exfalso. eapply rsub_tuple_not_rec; eauto.
+  - right. exists own, proto; reflexivity.
 Qed.
 
 (* SPLIT-STEP 3 — canonical form for references: a closed value of [BRef T] is a
@@ -2513,7 +2668,7 @@ Qed.
 Lemma canon_ref : forall S e T,
   has_type S [] e (BRef T) -> value e -> exists n, e = tloc n.
 Proof.
-  intros S e T Hty Hv. destruct Hv as [l | Tl b | fs Hfs | n | es Hes].
+  intros S e T Hty Hv. destruct Hv as [l | Tl b | fs Hfs | n | es Hes | own proto Hvo Hvp].
   - apply inv_lit in Hty. destruct l; simpl in Hty;
       exfalso; eapply rsub_atom_not_ref; eauto.
   - apply inv_lam in Hty. destruct Hty as [Tb [_ Hsub]].
@@ -2523,6 +2678,8 @@ Proof.
   - exists n; reflexivity.
   - apply inv_ret in Hty. destruct Hty as [Ts [_ Hsub]].
     exfalso. eapply rsub_tuple_not_ref; eauto.
+  - apply inv_meta in Hty. destruct Hty as [Town [Pf [_ [_ [_ [_ Hsub]]]]]].
+    exfalso. eapply rsub_rec_not_ref; eauto.
 Qed.
 
 (* INCREMENT 19 — canonical forms for NUMBER: a closed value of type [BAtom ANum]
@@ -2535,7 +2692,7 @@ Qed.
 Lemma canon_num : forall S e,
   has_type S [] e (BAtom ANum) -> value e -> exists n, e = tlit (LInt n).
 Proof.
-  intros S e Hty Hv. destruct Hv as [l | T b | fs Hfs | n | es Hes].
+  intros S e Hty Hv. destruct Hv as [l | T b | fs Hfs | n | es Hes | own proto Hvo Hvp].
   - apply inv_lit in Hty. destruct l; simpl in Hty.
     + exists n; reflexivity.
     + exfalso. apply rsub_sound in Hty. pose proof (Hty (VStr 0) I) as Hbad. exact Hbad.
@@ -2549,6 +2706,8 @@ Proof.
     exfalso. eapply rsub_ref_not_atom; eauto.
   - apply inv_ret in Hty. destruct Hty as [Ts [_ Hsub]].
     exfalso. eapply rsub_tuple_not_atom; eauto.
+  - apply inv_meta in Hty. destruct Hty as [Town [Pf [_ [_ [_ [_ Hsub]]]]]].
+    exfalso. eapply rsub_rec_not_atom; eauto.
 Qed.
 
 (* INCREMENT 11 — canonical forms for Bool: a closed value of type [BAtom ABool]
@@ -2559,7 +2718,7 @@ Qed.
 Lemma canon_bool : forall S e,
   has_type S [] e (BAtom ABool) -> value e -> exists b, e = tlit (LBool b).
 Proof.
-  intros S e Hty Hv. destruct Hv as [l | T b | fs Hfs | n | es Hes].
+  intros S e Hty Hv. destruct Hv as [l | T b | fs Hfs | n | es Hes | own proto Hvo Hvp].
   - apply inv_lit in Hty. destruct l; simpl in Hty.
     + exfalso. apply rsub_sound in Hty. pose proof (Hty (VInt 0) I) as Hbad. exact Hbad.
     + exfalso. apply rsub_sound in Hty. pose proof (Hty (VStr 0) I) as Hbad. exact Hbad.
@@ -2574,6 +2733,8 @@ Proof.
     exfalso. eapply rsub_ref_not_atom; eauto.
   - apply inv_ret in Hty. destruct Hty as [Ts [_ Hsub]].
     exfalso. eapply rsub_tuple_not_atom; eauto.
+  - apply inv_meta in Hty. destruct Hty as [Town [Pf [_ [_ [_ [_ Hsub]]]]]].
+    exfalso. eapply rsub_rec_not_atom; eauto.
 Qed.
 
 (* ===========================================================================
@@ -2599,7 +2760,7 @@ Lemma truthy_narrows : forall S v U,
   has_type S [] v U -> value v -> truthy_value v -> has_type S [] v truthy_type.
 Proof.
   intros S v U Hty Hv [Hnf Hnm]. unfold truthy_type.
-  destruct Hv as [l | T b | fs Hfs | n | es Hes].
+  destruct Hv as [l | T b | fs Hfs | n | es Hes | own proto Hvo Hvp].
   - (* literal: truthy ⇒ LInt / LStr / LBool true *)
     destruct l as [n | n | [|] | ].
     + (* LInt : AInt ≤ ANum ≤ truthy_type *)
@@ -2637,6 +2798,14 @@ Proof.
   - (* tret: EXCLUDED — a multivalue is not [truthy_value] (it takes the
        truncation path [SIfnMulti]), so [Hnm : ~ is_multi (tret es)] is false. *)
     exfalso. apply Hnm. exists es. reflexivity.
+  - (* METATABLES — a metatable-table is a TABLE, hence TRUTHY. Subsume its merged
+       record type to [BRec []] (the table arm), inject into the union — exactly
+       like a plain record. *)
+    apply inv_meta in Hty. destruct Hty as [Town [Pf [Ho [Hno [Hp [Hnp _]]]]]].
+    eapply TSub; [ apply (TMeta S [] own proto Town Pf Ho Hno Hp Hnp) | ].
+    apply RsSsub.
+    apply SsUnionInR. apply SsUnionInR. apply SsUnionInR. apply SsUnionInL.
+    apply SsRec. apply SrNil.
 Qed.
 
 Lemma falsy_narrows : forall S v,
@@ -2673,7 +2842,7 @@ Qed.
 Lemma tag_narrows : forall S v U g,
   has_type S [] v U -> value v -> has_tag v g -> has_type S [] v (tag_type g).
 Proof.
-  intros S v U g Hty Hv Hg. destruct Hv as [l | T b | fs Hfs | n | es Hes].
+  intros S v U g Hty Hv Hg. destruct Hv as [l | T b | fs Hfs | n | es Hes | own proto Hvo Hvp].
   - (* literal: the tag is forced by the literal kind *)
     destruct l as [n | n | bb | ]; destruct g; simpl in Hg; try contradiction;
       simpl tag_type.
@@ -2701,6 +2870,12 @@ Proof.
        value subsumes to [BTop] ([SsTop]) — the sound over-approximation. *)
     destruct g; simpl in Hg; try contradiction. simpl tag_type.
     eapply TSub; [ exact Hty | ]. apply RsSsub. apply SsTop.
+  - (* METATABLES — the only matching tag is TgTable; [tag_type TgTable = BRec []].
+       Subsume the merged record type to [BRec []] (every table). *)
+    destruct g; simpl in Hg; try contradiction. simpl tag_type.
+    apply inv_meta in Hty. destruct Hty as [Town [Pf [Ho [Hno [Hp [Hnp _]]]]]].
+    eapply TSub; [ apply (TMeta S [] own proto Town Pf Ho Hno Hp Hnp) | ].
+    apply RsSsub. apply SsRec. apply SrNil.
 Qed.
 
 (* ===========================================================================
@@ -2835,6 +3010,15 @@ Proof.
     eapply TAppSpread;
       match goal with [ IH : forall _ _ _, _ = _ -> has_type _ _ _ _ |- _ ] =>
         exact (IH G1 G2 U eq_refl) end.
+  - (* METATABLES — TMeta: own fields (has_fields IH) + prototype weaken; the
+       merged type and the [Town]/[Pf] [NoDup] premises are var-context-independent. *)
+    apply TMeta;
+      [ match goal with [ IH : forall _ _ _, _ = _ -> has_fields _ _ _ _ |- _ ] =>
+          exact (IH G1 G2 U eq_refl) end
+      | assumption
+      | match goal with [ IH : forall _ _ _, _ = _ -> has_type _ _ (lift _ _ proto) _ |- _ ] =>
+          exact (IH G1 G2 U eq_refl) end
+      | assumption ].
   - (* HFnil *) apply HFnil.
   - (* HFcons *) apply HFcons.
     + match goal with [ IH : forall _ _ _, _ = _ -> has_type _ _ _ _ |- _ ] =>
@@ -2892,6 +3076,14 @@ Fixpoint closed_at (k : nat) (e : tm) : Prop :=
                   match es with [] => True | e :: rest => closed_at k e /\ allc rest end) es
   | tfst e => closed_at k e
   | tappspread g a => closed_at k g /\ closed_at k a
+  (* METATABLES: no new binders — own fields and prototype closed at [k]. *)
+  | tmeta own proto =>
+      (fix allc (fs : list (string * tm)) : Prop :=
+         match fs with
+         | [] => True
+         | (_, e) :: rest => closed_at k e /\ allc rest
+         end) own
+      /\ closed_at k proto
   end.
 
 (* typing in [G] bounds free vars by [length G]. By term induction + inversion.
@@ -2948,6 +3140,15 @@ Proof.
   - (* tappspread: both the consumer and the multivalue arg are closed. *)
     apply inv_appspread in H. destruct H as [Ts [B [Hg [Ha _]]]].
     split; [ exact (IHe1 Sg G (BArrow (BTuple Ts) B) Hg) | exact (IHe2 Sg G (BTuple Ts) Ha) ].
+  - (* METATABLES — tmeta: all own fields closed (Pl IH) + prototype closed. *)
+    apply inv_meta in H. destruct H as [Town [Pf [Ho [_ [Hp [_ _]]]]]].
+    split.
+    + match goal with
+      | [ IH : forall (_:list BTy)(_:list BTy)(_:list (string*BTy)), has_fields _ _ ?xs _ -> _ |- _ ] =>
+          exact (IH Sg G Town Ho) end.
+    + match goal with
+      | [ IH : forall (_:list BTy)(_:list BTy)(_:BTy), has_type _ _ ?x _ -> _,
+          Hh : has_type ?Sg0 ?G0 ?x ?Tx |- _ ] => exact (IH Sg G (BRec Pf) Hp) end.
   - (* Pl nil *) exact I.
   - (* Pl cons *) inversion H; subst. simpl. split.
     + match goal with
@@ -3016,6 +3217,14 @@ Proof.
   - (* tfst *) f_equal. apply (IHe k); [exact H | exact H0].
   - (* tappspread *) destruct H as [H1 H2]. f_equal;
       [ apply (IHe1 k); [exact H1 | exact H0] | apply (IHe2 k); [exact H2 | exact H0] ].
+  - (* METATABLES — tmeta: own fields (Pl IH) + proto lift-invariant. *)
+    destruct H as [H1 H2]. f_equal.
+    + match goal with
+      | [ IH : forall k, _ -> forall d j, k <= j -> map _ ?xs = ?xs |- _ ] =>
+          apply (IH k); [exact H1 | exact H0] end.
+    + match goal with
+      | [ IH : forall k, closed_at k ?x -> forall d j, k <= j -> lift d j ?x = ?x |- _ ] =>
+          apply (IH k); [exact H2 | exact H0] end.
   - (* Pl nil *) reflexivity.
   - (* Pl cons *) destruct H as [Hc Hr]. f_equal;
       [ f_equal; apply (IHe k0); [exact Hc | exact H0]
@@ -3171,6 +3380,21 @@ Proof.
     eapply TSub; [ eapply TAppSpread | exact Hsub ].
     + apply (IHe1 Sg G1 G2 U (BArrow (BTuple Ts) B) s); [ exact Hg | exact H0 ].
     + apply (IHe2 Sg G1 G2 U (BTuple Ts) s); [ exact Ha | exact H0 ].
+  - (* METATABLES — tmeta: substitute into own fields (the Pl IH, preserving [Town]
+       EXACTLY — no subsumption slack) and the prototype; [Town]/[Pf] and the
+       [NoDup] premises are substitution-invariant, so [TMeta] re-applies and the
+       merged result type [merge_fields Town Pf] is unchanged. *)
+    apply inv_meta in H. destruct H as [Town [Pf [Ho [Hno [Hp [Hnp Hsub]]]]]]. simpl.
+    eapply TSub; [ apply (TMeta Sg (G1 ++ G2) _ _ Town Pf) | exact Hsub ].
+    + match goal with
+      | [ IH : forall _ _ _ _ _ _, has_fields _ _ ?xs _ -> _ |- _ ] =>
+          apply (IH Sg G1 G2 U Town s); [ exact Ho | exact H0 ] end.
+    + exact Hno.
+    + match goal with
+      | [ IH : forall _ _ _ _ _ _, has_type _ _ ?x _ -> _ -> has_type _ _ _ _,
+          Hh : has_type _ _ ?x _ |- _ ] =>
+          apply (IH Sg G1 G2 U (BRec Pf) s); [ exact Hp | exact H0 ] end.
+    + exact Hnp.
   - (* Pl nil *) inversion H; subst. simpl. apply HFnil.
   - (* Pl cons *) inversion H; subst. simpl. apply HFcons.
     + match goal with [ Hh : has_type ?Sg0 (G1 ++ U :: G2) e ?Tk |- _ ] =>
@@ -3234,6 +3458,12 @@ Proof.
   - (* TFst *) eapply TFst; apply IHhas_type; exact Hext.
   - (* TFstNil *) eapply TFstNil; apply IHhas_type; exact Hext.
   - (* TAppSpread *) eapply TAppSpread; [ apply IHhas_type1; exact Hext | apply IHhas_type2; exact Hext ].
+  - (* METATABLES — TMeta: own fields + proto store-weaken; merge type + NoDups stable. *)
+    apply TMeta;
+      [ match goal with [ IH : forall _, extends _ _ -> has_fields _ _ _ _ |- _ ] => apply IH; exact Hext end
+      | assumption
+      | match goal with [ IH : forall _, extends _ _ -> has_type _ _ _ _ |- _ ] => apply IH; exact Hext end
+      | assumption ].
   - apply HFnil.
   - apply HFcons; [ apply IHhas_type; exact Hext | apply IHhas_type0; exact Hext ].
   - (* MULTI-RETURN — HTnil *) apply HTnil.
@@ -3432,6 +3662,95 @@ Proof.
   intros S G es Ts H. induction H; intros S' Hext.
   - apply HTnil.
   - apply HTcons; [ eapply store_weakening; eassumption | apply IHhas_types; exact Hext ].
+Qed.
+
+(* ===========================================================================
+   METATABLES — structural facts about the flattened [merge_fields] read type.
+   These connect the projection-dispatch op-sem to the merged typing: an OWN key
+   keeps own's type in the merge; a non-own key takes the prototype's type; and
+   the merge has [NoDup] keys (so projection's first-match agrees).
+   =========================================================================== *)
+
+(* [key_in] reflects key membership of the field-list. *)
+Lemma key_in_iff : forall k (fs : list (string * BTy)),
+  key_in k fs = true <-> In k (map fst fs).
+Proof.
+  intros k fs. induction fs as [ | [k0 T0] fs IH ]; simpl.
+  - split; [ discriminate | contradiction ].
+  - destruct (string_dec k k0) as [Hk | Hk].
+    + subst k0. split; [ intros _; left; reflexivity | reflexivity ].
+    + split.
+      * intro Hin. right. apply IH; exact Hin.
+      * intros [Hbad | Hin]; [ symmetry in Hbad; contradiction | apply IH; exact Hin ].
+Qed.
+
+(* an OWN field survives into the merge unchanged (own wins). *)
+Lemma merge_in_own : forall k T Town Pf,
+  In (k, T) Town -> In (k, T) (merge_fields Town Pf).
+Proof.
+  intros k T Town Pf Hin. unfold merge_fields. apply in_or_app. left. exact Hin.
+Qed.
+
+(* a PROTOTYPE field whose key is NOT shadowed by own survives into the merge. *)
+Lemma merge_in_proto : forall k T Town Pf,
+  In (k, T) Pf -> key_in k Town = false -> In (k, T) (merge_fields Town Pf).
+Proof.
+  intros k T Town Pf Hin Hns. unfold merge_fields. apply in_or_app. right.
+  induction Pf as [ | [k0 T0] Pf IH ]; simpl in *; [ contradiction | ].
+  destruct (key_in k0 Town) eqn:Ek0.
+  - (* k0 shadowed: it is dropped; (k,T) must be in the tail *)
+    destruct Hin as [E | Hin].
+    + injection E as <- <-. rewrite Hns in Ek0. discriminate.
+    + apply IH; exact Hin.
+  - destruct Hin as [E | Hin].
+    + injection E as <- <-. left; reflexivity.
+    + right. apply IH; exact Hin.
+Qed.
+
+(* every key of [drop_shadowed Town Pf] is a key of [Pf] and is NOT an own key. *)
+Lemma drop_shadowed_key : forall k Town Pf,
+  In k (map fst (drop_shadowed Town Pf)) ->
+  In k (map fst Pf) /\ key_in k Town = false.
+Proof.
+  intros k Town Pf. induction Pf as [ | [k0 T0] Pf IH ]; simpl; [ contradiction | ].
+  destruct (key_in k0 Town) eqn:Ek0; simpl.
+  - intro Hin. destruct (IH Hin) as [Hk Hns]. split; [ right; exact Hk | exact Hns ].
+  - intros [E | Hin].
+    + subst k0. split; [ left; reflexivity | exact Ek0 ].
+    + destruct (IH Hin) as [Hk Hns]. split; [ right; exact Hk | exact Hns ].
+Qed.
+
+(* every key of the merge is an own key or a prototype key (the merge introduces
+   no new keys) — the basis for rejecting a genuinely-absent field. *)
+Lemma merge_fields_key_in : forall k Town Pf,
+  In k (map fst (merge_fields Town Pf)) ->
+  In k (map fst Town) \/ In k (map fst Pf).
+Proof.
+  intros k Town Pf Hin. unfold merge_fields in Hin. rewrite map_app in Hin.
+  apply in_app_or in Hin. destruct Hin as [HT | HD].
+  - left; exact HT.
+  - right. apply (drop_shadowed_key k Town Pf HD).
+Qed.
+
+(* the merge has NoDup keys: own keys are distinct; surviving prototype keys are
+   distinct (sublist of Pf's) and disjoint from own (they were not shadowed). *)
+Lemma merge_fields_nodup : forall Town Pf,
+  NoDup (map fst Town) -> NoDup (map fst Pf) ->
+  NoDup (map fst (merge_fields Town Pf)).
+Proof.
+  intros Town Pf Hno Hnp. unfold merge_fields. rewrite map_app.
+  apply NoDup_app; [ exact Hno | | ].
+  - (* NoDup (map fst (drop_shadowed Town Pf)) — sublist of Pf's keys *)
+    clear Hno. induction Pf as [ | [k0 T0] Pf IH ]; simpl; [ constructor | ].
+    inversion Hnp as [ | x l Hni Hnp' ]; subst.
+    destruct (key_in k0 Town) eqn:Ek0; simpl.
+    + apply IH; exact Hnp'.
+    + constructor; [ | apply IH; exact Hnp' ].
+      intro Hk. apply Hni. apply (drop_shadowed_key k0 Town Pf Hk).
+  - (* disjointness: a surviving prototype key is not an own key *)
+    intros k Hown Hdrop. apply (drop_shadowed_key k Town Pf) in Hdrop.
+    destruct Hdrop as [_ Hns]. apply key_in_iff in Hown.
+    rewrite Hown in Hns. discriminate.
 Qed.
 
 (* PRESERVATION with the store (references formulation). By induction on the STEP
@@ -3779,6 +4098,100 @@ Proof.
     exists S'. split; [ exact Hext | split; [ | exact Hwt' ] ].
     eapply TSub; [ eapply TAppSpread;
       [ eapply store_weakening; [ exact Hg | exact Hext ] | exact Ha' ] | exact Hsub ].
+  - (* METATABLES — SMeta1: step the first non-value OWN field (left-to-right),
+       exactly like [SRec]. The own field-types [Town] (and hence the merged type)
+       are unchanged: the stepped field keeps its type by the IH. *)
+    apply inv_meta in Hty. destruct Hty as [Town [Pf [Hfs [Hno [Hp [Hnp Hsub]]]]]].
+    apply has_fields_split in Hfs.
+    destruct Hfs as [Tpre [Tk [Tpost [ETown [Hpre [Hfe Hpost]]]]]]. subst Town.
+    destruct (IHHstep e st e' st' eq_refl eq_refl Hwt Tk Hfe)
+      as [S' [Hext [Hfe' Hwt']]].
+    exists S'. split; [ exact Hext | split; [ | exact Hwt' ] ].
+    eapply TSub; [ eapply (TMeta S' [] (pre ++ (k, e') :: post) proto
+                            (Tpre ++ (k, Tk) :: Tpost) Pf) | exact Hsub ].
+    + eapply has_fields_app_replace;
+        [ eapply has_fields_store_weaken; [ exact Hpre | exact Hext ]
+        | exact Hfe'
+        | eapply has_fields_store_weaken; [ exact Hpost | exact Hext ] ].
+    + exact Hno.
+    + eapply store_weakening; [ exact Hp | exact Hext ].
+    + exact Hnp.
+  - (* METATABLES — SMeta2: all own fields are values; step the prototype.
+       Preservation: the prototype keeps its type [BRec Pf], so the merge is
+       unchanged. *)
+    apply inv_meta in Hty. destruct Hty as [Town [Pf [Hfs [Hno [Hp [Hnp Hsub]]]]]].
+    destruct (IHHstep proto st proto' st' eq_refl eq_refl Hwt (BRec Pf) Hp)
+      as [S' [Hext [Hp' Hwt']]].
+    exists S'. split; [ exact Hext | split; [ | exact Hwt' ] ].
+    eapply TSub; [ apply (TMeta S' [] own proto' Town Pf);
+      [ eapply has_fields_store_weaken; [ exact Hfs | exact Hext ]
+      | exact Hno | exact Hp' | exact Hnp ]
+      | exact Hsub ].
+  - (* METATABLES — SMetaProjOwn: the key is a DIRECT (own) field; step to its
+       value. SOUNDNESS: [field_lookup k own = Some v] ⇒ [k] is an own key, so the
+       merge resolves [k] to OWN's type [Tk] (own wins, [merge_in_own]); the
+       projected field [(k,W)] in [fields] matches it via the merge⊆fields
+       inversion + [NoDup]; and [field_lookup_typed] gives [v : Tk]. So [v : W]. *)
+    apply inv_proj in Hty. destruct Hty as [fields [W [Hsubj [Hin Hsub]]]].
+    apply inv_meta in Hsubj. destruct Hsubj as [Town [Pf [Hfs [Hno [Hp [Hnp HsubRec]]]]]].
+    pose proof (has_fields_keys S [] own Town Hfs) as Hkeys.
+    assert (Hndown : NoDup (map fst own)) by (rewrite Hkeys; exact Hno).
+    (* the own value's field-type [Tk] for [k] *)
+    destruct (field_lookup_typed S [] own Town k v Hfs Hndown H0) as [Tk [HinTk Hvt]].
+    (* [k:Tk] survives into the merge (own wins) *)
+    pose proof (merge_in_own k Tk Town Pf HinTk) as HinMerge.
+    (* the projected supplier in the merge for the [(k,W)] requirement *)
+    pose proof (merge_fields_nodup Town Pf Hno Hnp) as HndM.
+    destruct (rsub_rec_inv (merge_fields Town Pf) fields k W HsubRec Hin)
+      as [Tg [HinTg HsTg]].
+    (* [NoDup] forces the merge's supplier for [k] to be [Tk] *)
+    pose proof (nodup_unique_type (merge_fields Town Pf) k Tk Tg HndM HinMerge HinTg) as Heq.
+    subst Tg.
+    exists S. split; [ apply extends_refl | split; [ | exact Hwt ] ].
+    eapply TSub; [ exact Hvt | eapply RsTrans; [ apply RsSsub; exact HsTg | exact Hsub ] ].
+  - (* METATABLES — SMetaProjProto: the key is ABSENT from own; fall back to the
+       prototype projection. SOUNDNESS: [field_lookup k own = None] ⇒ [k] is NOT an
+       own key ([key_in k Town = false]), so the merge resolves [k] to the
+       PROTOTYPE's type via [merge_in_proto]; the projected supplier [(k,W)] matches
+       it ([NoDup]); and [tproj proto k] types at that prototype field. *)
+    apply inv_proj in Hty. destruct Hty as [fields [W [Hsubj [Hin Hsub]]]].
+    apply inv_meta in Hsubj. destruct Hsubj as [Town [Pf [Hfs [Hno [Hp [Hnp HsubRec]]]]]].
+    (* [k] is not an own key *)
+    assert (Hnotown : key_in k Town = false).
+    { destruct (key_in k Town) eqn:Ek; [ | reflexivity ].
+      apply key_in_iff in Ek.
+      (* k a Town key ⇒ k an own field key ⇒ field_lookup would succeed *)
+      pose proof (has_fields_keys S [] own Town Hfs) as Hkeys.
+      rewrite <- Hkeys in Ek.
+      (* but field_lookup k own = None contradicts k ∈ own keys *)
+      exfalso. clear -Ek H0.
+      induction own as [ | [k0 e0] own IH ]; simpl in *; [ contradiction | ].
+      destruct (string_dec k k0) as [Hk | Hk]; [ discriminate H0 | ].
+      destruct Ek as [Hbad | Ek]; [ symmetry in Hbad; contradiction | apply IH; assumption ]. }
+    (* the merge supplier for the projected [(k,W)] *)
+    pose proof (merge_fields_nodup Town Pf Hno Hnp) as HndM.
+    destruct (rsub_rec_inv (merge_fields Town Pf) fields k W HsubRec Hin)
+      as [Tg [HinTg HsTg]].
+    (* [Tg] is a PROTOTYPE field type: the merge entry for [k] came from Pf. We need
+       [(k,Tg) ∈ Pf]. From [HinTg : In (k,Tg) (merge Town Pf)] = Town ++ drop... and
+       [k] not an own key, it is in the drop_shadowed part, hence in Pf. *)
+    assert (HinPf : In (k, Tg) Pf).
+    { unfold merge_fields in HinTg. apply in_app_or in HinTg.
+      destruct HinTg as [HinT | HinD].
+      - (* (k,Tg) in Town ⇒ k an own key, contradicting Hnotown *)
+        exfalso. assert (Hkin : In k (map fst Town)) by
+          (replace k with (fst (k, Tg)) by reflexivity; apply in_map; exact HinT).
+        apply key_in_iff in Hkin. rewrite Hkin in Hnotown. discriminate.
+      - (* in drop_shadowed ⇒ in Pf *)
+        clear -HinD. induction Pf as [ | [k0 T0] Pf IH ]; simpl in *; [ contradiction | ].
+        destruct (key_in k0 Town) eqn:Ek0.
+        + right. apply IH; exact HinD.
+        + destruct HinD as [E | HinD]; [ injection E as <- <-; left; reflexivity
+                                       | right; apply IH; exact HinD ]. }
+    exists S. split; [ apply extends_refl | split; [ | exact Hwt ] ].
+    (* [tproj proto k : Tg], then subsume [Tg <: W <: T0] *)
+    eapply TSub; [ eapply TProj; [ exact Hp | exact HinPf ]
+                 | eapply RsTrans; [ apply RsSsub; exact HsTg | exact Hsub ] ].
 Qed.
 
 (* ===========================================================================
@@ -3838,7 +4251,7 @@ Qed.
 Lemma canon_tuple : forall S e Ts,
   has_type S [] e (BTuple Ts) -> value e -> exists es, e = tret es.
 Proof.
-  intros S e Ts Hty Hv. destruct Hv as [l | T b | fs Hfs | n | es Hes].
+  intros S e Ts Hty Hv. destruct Hv as [l | T b | fs Hfs | n | es Hes | own proto Hvo Hvp].
   - apply inv_lit in Hty. destruct l; simpl in Hty;
       exfalso; eapply rsub_atom_not_tuple; eauto.
   - apply inv_lam in Hty. destruct Hty as [Tb [_ Hsub]].
@@ -3848,6 +4261,8 @@ Proof.
   - apply inv_loc in Hty. destruct Hty as [U [_ Hsub]].
     exfalso. eapply rsub_ref_not_tuple; eauto.
   - exists es; reflexivity.
+  - apply inv_meta in Hty. destruct Hty as [Town [Pf [_ [_ [_ [_ Hsub]]]]]].
+    exfalso. eapply rsub_rec_not_tuple; eauto.
 Qed.
 
 (* PROGRESS with the store. The store hypothesis [store_well_typed S st] is used in
@@ -3924,21 +4339,32 @@ Proof.
   - (* TProj *) intros st Hwt. right.
     match goal with [ IHe0 : [] = [] -> forall st, _ -> value e \/ _ |- _ ] =>
       destruct (IHe0 eq_refl st Hwt) as [Hve | [e'' [st'' He'']]] end.
-    + match goal with [ He : has_type S [] e (BRec fields), Hin0 : In (k, T) fields |- _ ] =>
-        destruct (canon_rec S e fields He Hve) as [fs Efs]; subst e;
-        apply inv_rec in He; destruct He as [Ts [Hfs [Hnd HsubRec]]];
-        pose proof (rsub_rec_inv Ts fields k T HsubRec Hin0) as [Tk [HinTk _]];
-        pose proof (has_fields_keys S [] fs Ts Hfs) as Hkeys
-      end.
-      assert (Hink : In k (map fst fs)).
-      { rewrite Hkeys. replace k with (fst (k, Tk)) by reflexivity. apply in_map. exact HinTk. }
-      assert (Hlk : exists v, field_lookup k fs = Some v).
-      { clear -Hink. induction fs as [ | [k0 e0] fs IH ]; simpl in *; [ contradiction | ].
-        destruct (string_dec k k0) as [Hk | Hk].
-        - exists e0; reflexivity.
-        - destruct Hink as [Hbad | Hin]; [ symmetry in Hbad; contradiction | apply IH; exact Hin ]. }
-      destruct Hlk as [v Hv].
-      exists v, st. apply SProj; [ apply VRec; inversion Hve; subst; assumption | exact Hv ].
+    + (* the subject is a value of [BRec] type: either a plain record [trec fs]
+         (SProj) or a metatable-table [tmeta own proto] (the [__index] DISPATCH —
+         SMetaProjOwn if [k] is a direct field, else SMetaProjProto). *)
+      match goal with [ He : has_type S [] e (BRec fields) |- _ ] =>
+        destruct (canon_rec S e fields He Hve) as [[fs Efs] | [own [proto Em]]] end.
+      * (* plain record — original SProj path *)
+        subst e.
+        match goal with [ He : has_type S [] (trec fs) (BRec fields), Hin0 : In (k, T) fields |- _ ] =>
+          apply inv_rec in He; destruct He as [Ts [Hfs [Hnd HsubRec]]];
+          pose proof (rsub_rec_inv Ts fields k T HsubRec Hin0) as [Tk [HinTk _]];
+          pose proof (has_fields_keys S [] fs Ts Hfs) as Hkeys
+        end.
+        assert (Hink : In k (map fst fs)).
+        { rewrite Hkeys. replace k with (fst (k, Tk)) by reflexivity. apply in_map. exact HinTk. }
+        assert (Hlk : exists v, field_lookup k fs = Some v).
+        { clear -Hink. induction fs as [ | [k0 e0] fs IH ]; simpl in *; [ contradiction | ].
+          destruct (string_dec k k0) as [Hk | Hk].
+          - exists e0; reflexivity.
+          - destruct Hink as [Hbad | Hin]; [ symmetry in Hbad; contradiction | apply IH; exact Hin ]. }
+        destruct Hlk as [v Hv].
+        exists v, st. apply SProj; [ apply VRec; inversion Hve; subst; assumption | exact Hv ].
+      * (* METATABLES — the [__index] dispatch always steps. *)
+        subst e.
+        destruct (field_lookup k own) as [v | ] eqn:Hlk.
+        -- exists v, st. apply SMetaProjOwn; [ exact Hve | exact Hlk ].
+        -- exists (tproj proto k), st. apply SMetaProjProto; [ exact Hve | exact Hlk ].
     + exists (tproj e'' k), st''. apply SProj1; exact He''.
   - (* TSub *) intros st Hwt.
     match goal with [ IH : [] = [] -> _ |- _ ] => apply (IH eq_refl st Hwt) end.
@@ -4052,6 +4478,20 @@ Proof.
         exists (subst 0 a body), st. apply SAppSpread. exact Hva.
       * exists (tappspread g a'), sta. apply SAppSpread2; assumption.
     + exists (tappspread g' a), stg. apply SAppSpread1. exact Hg'.
+  - (* METATABLES — TMeta: build the table. If some own field steps, [SMeta1]; else
+       all own fields are values — if the prototype steps, [SMeta2]; else the whole
+       [tmeta own proto] is a VALUE ([VMeta]). *)
+    intros st Hwt.
+    match goal with [ Hfs0 : has_fields S [] ofs Town, IH : [] = [] -> _ |- _ ] =>
+      destruct (fields_progress S ofs Town st Hfs0 (IH eq_refl st Hwt)) as
+        [Hvs | [pre [k [e [post [Efs [Hpre [e' [st' He']]]]]]]]] end.
+    + (* own all values: consult the prototype *)
+      match goal with [ IHp : [] = [] -> forall st, _ -> value proto \/ _ |- _ ] =>
+        destruct (IHp eq_refl st Hwt) as [Hvp | [proto' [stp Hp']]] end.
+      * left. apply VMeta; [ exact Hvs | exact Hvp ].
+      * right. exists (tmeta ofs proto'), stp. apply SMeta2; [ exact Hvs | exact Hp' ].
+    + right. subst ofs. exists (tmeta (pre ++ (k, e') :: post) proto), st'.
+      apply SMeta1; [ exact Hpre | exact He' ].
   - (* P0 HFnil *) intros st Hwt ke [].
   - (* P0 HFcons *) intros st Hwt ke Hin. simpl in Hin. destruct Hin as [Heq | Hin].
     + subst ke.
@@ -4933,6 +5373,8 @@ Proof.
   - (* MULTI-RETURN — tret *) f_equal. apply IHe.
   - (* tfst *) rewrite IHe; reflexivity.
   - (* tappspread *) rewrite IHe1, IHe2; reflexivity.
+  - (* METATABLES — tmeta: own fields (Pl IH) + proto (P IH) cancel. *)
+    rewrite IHe, IHe0; reflexivity.
   - (* Pl cons *) rewrite IHe, IHe0; reflexivity.
   - (* MULTI-RETURN — Pt cons *) rewrite IHe, IHe0; reflexivity.
 Qed.
@@ -5470,9 +5912,140 @@ Example mr_spread_progress :
 Proof. apply (progress [] (tappspread mr_g mr_call) (BAtom AInt) [] mr_spread_typed store_well_typed_nil). Qed.
 
 (* ===========================================================================
+   METATABLES — THE PAYOFF: prototype inheritance / OOP, machine-checked.
+
+   A "base" object carrying a method [greet : nil -> string]; a "derived" object
+   with its OWN field [name : string] and metatable [__index = base]. A field
+   access on the derived object for the INHERITED method [greet] resolves THROUGH
+   [__index] to the base's method (typed + stepped). A field present in NEITHER
+   own nor prototype is REJECTED at every type. This is real Lua single-inheritance
+   OOP, mechanized.
+   =========================================================================== *)
+
+(* the base object: a record with a [greet] method (a [nil -> string] function). *)
+Definition oop_greet : tm := tlam (BAtom ANil) (tlit (LStr 0)).
+Definition oop_base : list (string * tm) := [("greet"%string, oop_greet)].
+(* the derived object: own field [name], prototype [__index] = the base record. *)
+Definition oop_derived : tm := tmeta [("name"%string, tlit (LStr 1))] (trec oop_base).
+
+(* the base's read type and the derived object's FLATTENED (own ++ inherited) type. *)
+Definition oop_base_ty : list (string * BTy) :=
+  [("greet"%string, BArrow (BAtom ANil) (BAtom AStr))].
+Definition oop_derived_ty : BTy :=
+  BRec (merge_fields [("name"%string, BAtom AStr)] oop_base_ty).
+
+(* the derived object is well typed: own [name:Str] PLUS inherited [greet:nil->Str]. *)
+Example oop_derived_typed : has_type [] [] oop_derived oop_derived_ty.
+Proof.
+  unfold oop_derived, oop_derived_ty, oop_base, oop_base_ty, oop_greet.
+  eapply TMeta.
+  - (* own fields: name : Str *)
+    apply HFcons; [ apply (TLit [] [] (LStr 1)) | apply HFnil ].
+  - (* NoDup own keys *) repeat constructor; simpl; intuition discriminate.
+  - (* prototype record: { greet : nil -> Str } *)
+    apply TRec.
+    + apply HFcons; [ apply TLam; apply (TLit [] [(BAtom ANil)] (LStr 0)) | apply HFnil ].
+    + repeat constructor; simpl; intuition discriminate.
+  - (* NoDup prototype keys *) repeat constructor; simpl; intuition discriminate.
+Qed.
+
+(* THE INHERITED METHOD is directly projectable on the derived object, AT ITS BASE
+   TYPE [nil -> Str] — the field [greet] is NOT an own field of the derived object;
+   typing resolves it through [__index] to the base. This is inheritance, typed. *)
+Example oop_inherited_typed :
+  has_type [] [] (tproj oop_derived "greet") (BArrow (BAtom ANil) (BAtom AStr)).
+Proof.
+  eapply TProj.
+  - apply oop_derived_typed.
+  - (* [(greet, nil->Str)] is in the flattened (merged) field set *)
+    unfold oop_derived_ty, oop_base_ty. simpl. right; left; reflexivity.
+Qed.
+
+(* THE DISPATCH, OPERATIONALLY: projecting [greet] on the derived object FALLS
+   THROUGH [__index] (greet is not an own field of the derived object) to the
+   base's [greet] method. Two steps: SMetaProjProto (fall through to the
+   prototype), then SProj (look up [greet] in the base record). *)
+Example oop_inherited_steps : forall st,
+  multistep (tproj oop_derived "greet", st) (oop_greet, st).
+Proof.
+  intro st. unfold oop_derived, oop_base, oop_greet.
+  eapply multistep_trans.
+  - apply multistep_one. apply SMetaProjProto.
+    + apply VMeta;
+        [ repeat constructor | apply VRec; repeat constructor ].
+    + reflexivity.   (* field_lookup "greet" [("name", ...)] = None — greet not own *)
+  - apply multistep_one. apply SProj.
+    + apply VRec. repeat constructor.
+    + reflexivity.   (* field_lookup "greet" base = Some greet *)
+Qed.
+
+(* The OWN field is resolved DIRECTLY (no fallback): [name] is an own field. *)
+Example oop_own_typed :
+  has_type [] [] (tproj oop_derived "name") (BAtom AStr).
+Proof.
+  eapply TProj.
+  - apply oop_derived_typed.
+  - unfold oop_derived_ty, oop_base_ty. simpl. left; reflexivity.
+Qed.
+
+Example oop_own_steps : forall st,
+  multistep (tproj oop_derived "name", st) (tlit (LStr 1), st).
+Proof.
+  intro st. unfold oop_derived, oop_base, oop_greet.
+  apply multistep_one. apply SMetaProjOwn.
+  - apply VMeta; [ repeat constructor | apply VRec; repeat constructor ].
+  - reflexivity.   (* field_lookup "name" own = Some (LStr 1) *)
+Qed.
+
+(* A field present in NEITHER own NOR prototype is REJECTED at every type — the
+   checker prevents a lookup that the dispatch could not resolve. *)
+Example oop_absent_rejected : forall T,
+  ~ has_type [] [] (tproj oop_derived "nonesuch") T.
+Proof.
+  intros T H. apply inv_proj in H. destruct H as [fields [W [Hsubj [Hin _]]]].
+  apply inv_meta in Hsubj.
+  destruct Hsubj as [Town [Pf [Hfs [Hno [Hp [Hnp HsubRec]]]]]].
+  (* A projected key has a supplier in the MERGE (merge⊆fields inversion). *)
+  destruct (rsub_rec_inv (merge_fields Town Pf) fields "nonesuch" W HsubRec Hin)
+    as [Tg [HinTg _]].
+  (* its key is therefore in the merge keys ⇒ an own key OR a prototype key. *)
+  assert (Hk : In "nonesuch"%string (map fst (merge_fields Town Pf)))
+    by (replace "nonesuch"%string with (fst ("nonesuch"%string, Tg)) by reflexivity;
+        apply in_map; exact HinTg).
+  apply merge_fields_key_in in Hk.
+  (* OWN keys = exactly [name] (concrete [has_fields]); PROTOTYPE keys ⊆ base keys
+     = [greet] (the prototype record [trec base] subtypes [BRec Pf], so [srec base
+     Pf] — every Pf key is a base key). "nonesuch" is neither [name] nor [greet]. *)
+  unfold oop_derived, oop_base, oop_greet in *.
+  inversion Hfs as [ | S0 G0 k0 e0 Te0 fs0 Ts0 He0 Hrest E1 E2 E3 E4 ]; subst.
+  inversion Hrest; subst.   (* Town = [("name", Te0)] *)
+  apply inv_rec in Hp. destruct Hp as [Pbase [Hpb [_ HsubP]]].
+  inversion Hpb as [ | Sb Gb kb eb Teb fsb Tsb Heb Hrestb Eb1 Eb2 Eb3 Eb4 ]; subst.
+  inversion Hrestb; subst.   (* base field types = [("greet", Teb)] *)
+  apply rsub_rec_super in HsubP. simpl in HsubP.
+  destruct Hk as [Hown | Hproto].
+  - (* own key: must be "name" *)
+    simpl in Hown. destruct Hown as [E | F]; [ discriminate E | exact F ].
+  - (* prototype key: via [srec base Pf], it is a base key = "greet" *)
+    (* recover (nonesuch, Tg') ∈ Pf, then its supplier in base = only "greet" *)
+    apply in_map_iff in Hproto. destruct Hproto as [[k' T'] [Ek' HinPf]].
+    simpl in Ek'. subst k'.
+    destruct (srec_lookup _ _ HsubP "nonesuch"%string T' HinPf) as [Tf [Hinb _]].
+    simpl in Hinb. destruct Hinb as [E | F];
+      [ injection E; intros _ Ek; discriminate Ek | exact F ].
+Qed.
+
+(* ===========================================================================
    ASSUMPTION AUDIT — closed under the global context.
    =========================================================================== *)
 Print Assumptions progress.
+(* METATABLES — the OOP payoff: prototype inheritance, typed + stepped + rejected. *)
+Print Assumptions oop_derived_typed.
+Print Assumptions oop_inherited_typed.
+Print Assumptions oop_inherited_steps.
+Print Assumptions oop_own_typed.
+Print Assumptions oop_own_steps.
+Print Assumptions oop_absent_rejected.
 Print Assumptions preservation.
 Print Assumptions ex_add_typed.
 Print Assumptions ex_add_steps.

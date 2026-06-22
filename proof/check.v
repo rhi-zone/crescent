@@ -323,6 +323,24 @@ Fixpoint synth (Sig : list BTy) (G : list BTy) (e : tm) {struct e} : option BTy 
           end
       | _ => None
       end
+  (* METATABLES — synthesize the OWN field-list (exactly, via [synth_fields], with
+     a [keys_nodup] gate); synthesize the PROTOTYPE, which must be a record [BRec
+     Pf] (with NoDup keys); return the flattened read interface [BRec (merge_fields
+     Town Pf)]. This is exactly the declarative [TMeta]. *)
+  | tmeta own proto =>
+      if keys_nodup (map fst own) then
+        match synth_fields (synth Sig G) own with
+        | Some Town =>
+            match synth Sig G proto with
+            | Some (BRec Pf) =>
+                if keys_nodup (map fst Pf)
+                then Some (BRec (merge_fields Town Pf))
+                else None
+            | _ => None
+            end
+        | None => None
+        end
+      else None
   end.
 
 (* [check] subsumes along the reference-aware [decide_rsub] (the unified relation),
@@ -486,6 +504,28 @@ Proof.
     injection H as <-. eapply TAppSpread.
     + apply IHe1. exact Hg.
     + eapply TSub; [ apply IHe2; exact Ha | apply RsSsub; apply decide_ssub_sound; exact Hd ].
+  - (* METATABLES — tmeta: own fields synth to [Town] (NoDup gate), prototype to a
+       record [BRec Pf] (NoDup gate); result is [BRec (merge_fields Town Pf)] =
+       the declarative [TMeta]. NoDup of the synthesized [Town]/[Pf] keys follows
+       from the [keys_nodup] gates (synth preserves keys via [has_fields_keys]). *)
+    simpl in H.
+    match goal with [ |- has_type _ _ (tmeta ?o ?p) _ ] => rename o into own0; rename p into proto0 end.
+    destruct (keys_nodup (map fst own0)) eqn:Hndo; [ | discriminate ].
+    destruct (synth_fields (synth Sig G) own0) as [ Town | ] eqn:Hfo; [ | discriminate ].
+    destruct (synth Sig G proto0) as [ Sp | ] eqn:Hp; [ | discriminate ].
+    destruct Sp as [ | | | | | | Pf | | | | ]; try discriminate H.
+    destruct (keys_nodup (map fst Pf)) eqn:Hndp; [ | discriminate ].
+    injection H as <-.
+    assert (Hown : has_fields Sig G own0 Town).
+    { match goal with [ IH : forall _ _ _, synth_fields _ own0 = Some _ -> has_fields _ _ own0 _ |- _ ] =>
+        apply IH; exact Hfo end. }
+    pose proof (has_fields_keys Sig G own0 Town Hown) as Hk.
+    apply TMeta.
+    + exact Hown.
+    + apply keys_nodup_NoDup in Hndo. rewrite Hk in Hndo. exact Hndo.
+    + match goal with [ IH : forall _ _ _, synth _ _ proto0 = Some _ -> has_type _ _ proto0 _ |- _ ] =>
+        apply IH; exact Hp end.
+    + apply keys_nodup_NoDup. exact Hndp.
   - (* Pl [] *) simpl in H. injection H as <-. apply HFnil.
   - (* Pl cons *) simpl in H.
     destruct (synth Sig G e) as [ Te | ] eqn:He; [ | discriminate ].
@@ -631,6 +671,14 @@ Proof.
   - (* TAppSpread *) eapply TAppSpread;
       [ eapply (IHhas_type1 G1 _ G2 A') | eapply (IHhas_type2 G1 _ G2 A') ];
       (reflexivity || eassumption).
+  - (* METATABLES — TMeta: own fields + prototype narrow; [Town]/[Pf] NoDups stable. *)
+    eapply TMeta.
+    + match goal with [ IH : forall _ _ _ _, _ -> _ -> has_fields _ _ _ _ |- _ ] =>
+        eapply (IH G1 _ G2 A'); [ reflexivity | eassumption ] end.
+    + eassumption.
+    + match goal with [ IH : forall _ _ _ _, _ -> _ -> has_type _ _ _ _ |- _ ] =>
+        eapply (IH G1 _ G2 A'); [ reflexivity | eassumption ] end.
+    + eassumption.
   - apply HFnil.
   - apply HFcons;
       [ eapply (IHhas_type G1 _ G2 A') | eapply (IHhas_type0 G1 _ G2 A') ];
@@ -702,6 +750,17 @@ Fixpoint proj_free (e : tm) : Prop :=
                   match xs with [] => True | e0 :: rest => proj_free e0 /\ pt rest end) es
   | tfst e0 => proj_free e0
   | tappspread g a => proj_free g /\ proj_free a
+  (* METATABLES — projection-free iff every own field and the prototype are. (The
+     [__index] DISPATCH is projection-LIKE at run time, but [tmeta] itself contains
+     no syntactic [tproj]; principality of [tmeta] under the unified [rsub] is part
+     of the deferred principality work.) *)
+  | tmeta own proto =>
+      ((fix pl (xs : list (string * tm)) : Prop :=
+          match xs with
+          | [] => True
+          | (_, e0) :: rest => proj_free e0 /\ pl rest
+          end) own)
+      /\ proj_free proto
   end.
 
 (* ===========================================================================
@@ -1079,12 +1138,43 @@ Example mr_spread_sound : has_type [] [] (tappspread mr_g mr_call) (BAtom AInt).
 Proof. apply synth_sound. reflexivity. Qed.
 
 (* ===========================================================================
+   METATABLES — the ALGORITHMIC OOP payoff: [synth] computes the flattened read
+   interface of a metatable-table, and projecting the INHERITED method on the
+   derived object synthesizes its base type — then routes to a real declarative
+   typing via [synth_sound]. (Terms [oop_derived] etc. from typing.v.)
+   =========================================================================== *)
+
+(* [synth] computes the derived object's flattened (own ++ inherited) type. *)
+Example oop_derived_synths : synth [] [] oop_derived = Some oop_derived_ty.
+Proof. reflexivity. Qed.
+
+(* projecting the INHERITED method [greet] on the derived object SYNTHESIZES its
+   base type [nil -> Str] — the checker resolves the field through [__index]. *)
+Example oop_inherited_synths :
+  synth [] [] (tproj oop_derived "greet") = Some (BArrow (BAtom ANil) (BAtom AStr)).
+Proof. reflexivity. Qed.
+
+(* and it routes to a real declarative typing — the algorithmic checker is SOUND. *)
+Example oop_inherited_check_sound :
+  has_type [] [] (tproj oop_derived "greet") (BArrow (BAtom ANil) (BAtom AStr)).
+Proof. apply synth_sound. reflexivity. Qed.
+
+(* a field present in NEITHER own nor prototype is REJECTED by the checker. *)
+Example oop_absent_synth_None : synth [] [] (tproj oop_derived "nonesuch") = None.
+Proof. reflexivity. Qed.
+
+(* ===========================================================================
    ASSUMPTION AUDIT — closed under the global context (no axioms / Admitted /
    Classical). The soundness theorems are the load-bearing point; the
    principality (tractable completeness) theorem is audited alongside.
    =========================================================================== *)
 Print Assumptions synth_sound.
 Print Assumptions check_sound.
+(* METATABLES — algorithmic OOP payoff. *)
+Print Assumptions oop_derived_synths.
+Print Assumptions oop_inherited_synths.
+Print Assumptions oop_inherited_check_sound.
+Print Assumptions oop_absent_synth_None.
 (* MULTI-RETURN — the executable-checker payoff. *)
 Print Assumptions mr_call_synths_tuple.
 Print Assumptions mr_truncate_synths_first.

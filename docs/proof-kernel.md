@@ -2224,3 +2224,118 @@ the tuple substrate (`denote_tuple_iff`, `dtuple_pointwise`, `tuple_disjoint_*`,
 `mr_*_progress`): **Closed under the global context** — no axioms, no `Admitted`,
 no `Classical`. Whole chain compiles (`coqc proof/subtype.v` → `typing.v` →
 `ssub.v` → `check.v`).
+
+## Increment 21 — METATABLES: static read-only `__index` field-lookup fallback (prototype inheritance / OOP)
+
+The biggest missing real-Lua construct: tables whose missing-field accesses fall
+back to a metatable's `__index`. Scoped to the MOST CENTRAL metamethod —
+read-only `__index` as a TABLE/record (single or chained prototypes). Modifies
+`proof/typing.v` and `proof/check.v`; `subtype.v` and `ssub.v` are **unmodified**
+(NO new type-level former — the model lives entirely at the typing layer over the
+existing `BRec`). Build order unchanged.
+
+### The `__index` model — type-level representation + dispatch op-sem
+
+- **Term former.** `tmeta : list (string * tm) -> tm -> tm`. `tmeta own proto` is a
+  metatable-table: `own` is the OWN-field record-literal field-list, `proto` is the
+  `__index` target (itself a record or another `tmeta` — a prototype CHAIN). The
+  own fields are a literal field-list, NOT an arbitrary term (see the soundness
+  fork below). Value: `VMeta` — a value once all own fields are values and `proto`
+  is a value (parallel to `trec`/`VRec`).
+- **Type-level representation — FLATTENING over existing records (no `subtype.v`
+  change).** `merge_fields own proto = own ++ drop_shadowed own proto`: own fields
+  kept, prototype fields whose key is NOT shadowed by an own key appended (Lua: own
+  wins). `TMeta` types `tmeta own proto : BRec (merge_fields Town Pf)` where
+  `own : Town` (exactly, via `has_fields`) and `proto : BRec Pf`. So the derived
+  table's READ interface is exactly its own ∪ inherited fields — inheritance is a
+  structural record extension; an inherited method is directly projectable at the
+  derived table, at its prototype type. The merge has `NoDup` keys
+  (`merge_fields_nodup`) so first-match projection agrees with the key's type.
+- **Dispatch op-sem (the heart).** Field access `tproj (tmeta own proto) k` on a
+  metatable-table VALUE resolves the key: `SMetaProjOwn` — `k` is a direct own
+  field (`field_lookup k own = Some v`) ⇒ step to `v`; `SMetaProjProto` — `k` is
+  absent from own (`= None`) ⇒ step to `tproj proto k`, which then resolves
+  recursively through `proto`'s own `__index` chain. Congruence `SMeta1`/`SMeta2`
+  build the table left-to-right (own fields, then prototype).
+
+### The SOUNDNESS FORK — own must be a LITERAL field-list, not a subsumed term
+
+Driving `TMeta` with `own : BRec Town` for an ARBITRARY (subsumable) term makes
+**preservation FALSE**. Width-subsumption can let `Town` UNDER-report own's runtime
+keys: own value `{k = 5}` (k:Int) subsumed to `BRec []`, prototype `{k = "s"}`
+(k:Str). Then `tmeta own proto : BRec (merge [] [(k,Str)]) = {k:Str}`, so
+`tproj … k : Str` — but the runtime dispatch finds `k` in own and returns the
+Int `5`. A confident WRONG type. The principled resolution (not a hardcode): an
+object's own field TABLE is concrete, so `TMeta` takes `own` as a record-literal
+field-list typed EXACTLY by `has_fields S G own Town` — `Town` then faithfully
+lists own's runtime keys, the merge resolves an own key to OWN's type and a
+non-own key to the prototype's, and the dispatch matches typing. The prototype
+keeps arbitrary subsumption (it is only read at `BRec Pf`). Recorded so the fork
+is surfaced, not fudged.
+
+### Metatheory re-proved
+
+- **`progress` + `preservation` re-proved to `Qed`**, with the four new step rules.
+  - `SMetaProjOwn`: `field_lookup k own = Some v` ⇒ `k` is an own key ⇒ the merge
+    resolves `k` to OWN's type `Tk` (`merge_in_own`); the merge⊆fields inversion +
+    `NoDup` (`nodup_unique_type`) forces the projected field type, and
+    `field_lookup_typed` gives `v : Tk`. Sound.
+  - `SMetaProjProto`: `field_lookup k own = None` ⇒ `key_in k Town = false` ⇒ the
+    merge resolves `k` to the PROTOTYPE's type (`merge_in_proto`); `tproj proto k`
+    types at that prototype field. Sound.
+  - Progress dispatches via the extended canonical form `canon_rec`: a `BRec`-typed
+    value is now `trec fs` OR `tmeta own proto`, and the metatable case always
+    steps (own-or-prototype lookup).
+  - Supporting lemmas all `Qed`: `inv_meta`, `merge_fields_nodup`,
+    `merge_fields_key_in`, `merge_in_own`/`merge_in_proto`, `drop_shadowed_key`,
+    `key_in_iff`; and the de Bruijn metatheory (`weakening`, `subst_lemma`,
+    `closed_at`/`has_type_closed`/`closed_at_lift`/`subst_lift_cancel`,
+    `store_weakening`) extended for the new `tmeta` term shape (own a field-list,
+    so the `tm_rect_strong` `Pl` IH carries the per-own-field recursion).
+
+### synth / check, re-proved sound
+
+`synth (tmeta own proto)`: synthesize the own field-list (via `synth_fields`, with
+a `keys_nodup` gate), synthesize the prototype (must be `BRec Pf`, NoDup keys),
+return `BRec (merge_fields Town Pf)` — exactly the declarative `TMeta`.
+**`synth_sound` / `check_sound` re-proved to `Qed`** (the `tmeta` case folds the
+`Pl` field-IH; `NoDup Town` from the `keys_nodup` gate + `has_fields_keys`).
+`narrowing` extended for the `tmeta` case. `proj_free` gets a `tmeta` arm.
+
+### THE PAYOFF — prototype inheritance / OOP, machine-checked
+
+A base object with a method `greet : nil -> string`; a derived object
+`tmeta [(name, "…")] (trec [(greet, λ. "…")])` with own field `name` and
+`__index = base`:
+- **`oop_derived_typed`** — the derived object types at `BRec {name:Str, greet:nil→Str}`
+  (own PLUS inherited).
+- **`oop_inherited_typed`** — the INHERITED method `greet` is directly projectable
+  on the derived object at its base type `nil → Str` (resolved through `__index`).
+- **`oop_inherited_steps`** — the DISPATCH operationally: `tproj derived "greet"`
+  `⤳ SMetaProjProto` (fall through to the prototype, `greet` not an own field)
+  `⤳ SProj` (look up `greet` in the base) — reaching the base's method.
+- **`oop_own_typed` / `oop_own_steps`** — an OWN field (`name`) resolves directly
+  (`SMetaProjOwn`), no fallback.
+- **`oop_absent_rejected`** — a field present in NEITHER own NOR prototype
+  (`nonesuch`) is REJECTED at every type (the merge introduces no new keys —
+  `merge_fields_key_in` — and own/prototype keys are exactly `{name}`/`{greet}`).
+- Algorithmically (check.v): `oop_derived_synths`, `oop_inherited_synths` (synth
+  computes the inherited method's base type), `oop_inherited_check_sound` (routed
+  to a real declarative typing by `synth_sound`), `oop_absent_synth_None` (the
+  checker rejects the absent field by `reflexivity`).
+
+This is real Lua single-inheritance OOP, mechanized.
+
+### Scope (honest) — DEFERRED (backlog)
+
+Static, read-only `__index` field lookup (single or chained), `__index` as a
+TABLE/record. DEFERRED: `__newindex` (write fallback), operator/comparison
+metamethods (`__add`/`__eq`/`__lt`/…), `__call`, `__index` as a FUNCTION, dynamic
+metatable MUTATION (`setmetatable`), and `rawget`/`rawset`.
+
+`Print Assumptions` on `progress`, `preservation`, `synth_sound`, `check_sound`,
+the OOP payoff (`oop_derived_typed`, `oop_inherited_typed`, `oop_inherited_steps`,
+`oop_own_typed`, `oop_own_steps`, `oop_absent_rejected`) and the algorithmic
+payoff (`oop_*_synths`, `oop_inherited_check_sound`, `oop_absent_synth_None`):
+**Closed under the global context** — no axioms, no `Admitted`, no `Classical`.
+Whole chain compiles (`coqc proof/subtype.v` → `typing.v` → `ssub.v` → `check.v`).
