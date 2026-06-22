@@ -264,9 +264,27 @@ Op-sem parity must hold at every commit. After the handler deletion, the adversa
 
 ### Lua semantics (model faithfulness)
 
-- [ ] **[BLOCKING] Multi-return / vararg.** Arrows are single-arg / single-return
-  (`BArrow A B`). Generalise to multi-arg / multi-return / vararg function types.
-  Deferred at `proof-kernel.md` increment 7, `proof/subtype.v:661`.
+- [x] **Multi-return values — RETURN-side multivalue + contextual adjustment
+  (truncation + last-position spread).** DONE (proof-kernel.md increment 21).
+  `subtype.v` gains the `BTuple` sequence type (`VTup` value, positional/exact-length
+  denotation, pointwise subtyping, disjointness, threaded through the decider as an
+  opaque DEFER leaf like `BArrow`/`BRef`). `typing.v` gains `tret` (return-sequence,
+  the multivalue value `VRet`), `tfst` (TRUNCATION — bind the first value, the "most
+  positions" adjustment) and `tappspread` (LAST-POSITION SPREAD — a known-arity tuple
+  consumer receives all values). Progress + preservation re-proved (`Qed`); synth/
+  check + synth_sound/check_sound re-proved. PAYOFF: a multi-return `f : Int ->
+  (Int,Bool)`, the SAME call `f 3` TRUNCATED (`tfst (f 3) : Int`, ⤳* 3) in one
+  position and SPREAD (`g (f 3) : Int`, ⤳* 0) in another — typed + stepped, the
+  contextual adjustment machine-checked. STILL DEFERRED below.
+- [ ] **[BLOCKING] vararg `...`, multiple-assignment `a,b=f()`, table-collect
+  `{f()}`, arity-polymorphic spread.** The increment-21 multivalue covers the
+  return-side sequence + truncation + last-spread at KNOWN arity (the consumer's
+  tuple parameter pins the arity). The function-side variadic `...`, destructuring
+  multiple-assignment, table-collect-all, and FULL arity-polymorphic spread (a
+  spread whose arity is not fixed by the consumer) are deferred. (Tuple SUBTYPING is
+  reflexive/pointwise only in `ssub`; semantic tuple subtyping via `gdecide` and a
+  top-tuple type are also deferred.)
+  Increment 21, `proof/subtype.v` (`BTuple`), `proof/typing.v` (`tret`/`tfst`/`tappspread`).
 - [ ] **[BLOCKING] Metatables / metamethods.** No metatable model in `V` /
   `denote`. `reality-bridge.md` §4(C) tracks it as an unobserved table axis.
 - [ ] **[nice-to-have] Non-string table keys.** Model `VTable` uses string keys;
@@ -692,7 +710,13 @@ Still open (DEFERRED — recorded honestly, minimal core only):
   (increment M4, above):** Lua's mutable TABLE FIELDS (records-of-refs) and
   reassignable LOCALS + aliasing are proved via the ref-core encoding. Only
   flow-sensitive strong-update precision remains nice-to-have.
-- [ ] **Multi-arg / vararg / multi-return** functions (currently single→single).
+- [x] **Multi-RETURN values + contextual adjustment (increment 21, DONE).**
+  `BTuple` sequence type in `subtype.v`; `tret`/`tfst`/`tappspread` in `typing.v`;
+  truncation (bind-first) + last-position spread (known-arity tuple consumer);
+  progress/preservation/synth/check re-proved `Qed`; the payoff (same call truncated
+  vs spread) machine-checked. Vararg `...`, multiple-assignment, table-collect, and
+  arity-polymorphic spread remain deferred (see the [BLOCKING] item in §"Lua
+  semantics").
 - [x] **General recursion — single fixpoint `tfix` (increment 14, DONE).**
   `proof/typing.v` + `proof/check.v` (on unmodified `subtype.v` + `ssub.v`). `tm`
   gains `tfix : BTy -> tm -> tm`: in `tfix T body`, de Bruijn 0 of `body` is the

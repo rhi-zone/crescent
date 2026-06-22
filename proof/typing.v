@@ -53,7 +53,14 @@ Inductive tag : Type :=
      runtime kind, so it gets its own tag [TgRef]. [type()]-on-a-location pins the
      ANY-REFERENCE type [BAnyRef] (see [tag_type]) — content-blind, exactly the
      narrowing a truthy/tag-tested location supports. *)
-  | TgRef   : tag.           (* a reference/location  *)
+  | TgRef   : tag            (* a reference/location  *)
+  (* MULTI-RETURN — the runtime tag of a value-SEQUENCE (multivalue). Lua's
+     [type()] is never actually applied to a raw multivalue (multivalues are
+     contextually adjusted away first), but our calculus makes [tret] a value, so
+     totality of [value_has_some_tag] needs it a tag. A multivalue's tag pins only
+     [BTop] (see [tag_type]) — the SOUND over-approximation: a tag-tested multivalue
+     narrows to "some value" with no further commitment. *)
+  | TgMulti : tag.           (* a value-sequence (multivalue) *)
 
 Definition tag_eq_dec (g1 g2 : tag) : {g1 = g2} + {g1 <> g2}.
 Proof. decide equality. Defined.
@@ -164,7 +171,36 @@ Inductive tm : Type :=
      value, [SAnnotV]; congruence under it, [SAnnot1]); [tannot T e] is NOT itself a
      value. Declaratively [tannot T e : T] when [e : T] (with subsumption, [e] at a
      subtype of [T] also works — [TAnnot]). *)
-  | tannot  : BTy -> tm -> tm.               (* ascription  (e : T)             *)
+  | tannot  : BTy -> tm -> tm                (* ascription  (e : T)             *)
+  (* MULTI-RETURN VALUES — Lua's distinctive feature: a function returns a
+     SEQUENCE of values, adjusted by the SYNTACTIC CONTEXT of the call.
+
+     [tret es] is the RETURN-SEQUENCE form: [return e1,…,ek]. It evaluates its
+     components left-to-right; when all are values it IS the multivalue VALUE [tret
+     vs] (modelled at the value level by [VTup vs]). Its declarative type is the
+     TUPLE type [BTuple [T1;…;Tk]].
+
+     The CONTEXTUAL ADJUSTMENT (the crux, Lua-faithful) is realized by two
+     adjuster forms, so the SAME multivalue is adjusted differently per position:
+
+     - [tfst e] — TRUNCATION (the "most positions" adjustment): take the FIRST
+       value of the multivalue [e] (or [nil] if empty). This is what [local x =
+       f()] does (bind the first), what an operand position [f() + 1] does, and
+       what a non-last call argument does. Typing: a multivalue [: BTuple (T::Ts)]
+       truncates to its head type [T] (empty tuple ↦ [nil]).
+
+     - [tappspread g e] — LAST-POSITION SPREAD: [g(f())] with [f()] in the LAST
+       argument position SPREADS all of [f()]'s values into [g]. The known-arity
+       consumer [g] takes the whole sequence ([g : BTuple Ts -> B]); the spread
+       delivers the entire multivalue [e : BTuple Ts], yielding [B]. (Single-arg
+       lambdas + a tuple-typed parameter is the faithful known-arity model;
+       arity-polymorphic spread is DEFERRED.)
+
+     DEFERRED (backlog): vararg [...] (the function-side variadic), table-collect
+     [{f()}], multiple-assignment [a,b = f()], and full arity-polymorphic spread. *)
+  | tret       : list tm -> tm               (* return e1,…,ek  (multivalue)    *)
+  | tfst       : tm -> tm                     (* truncate a multivalue to its 1st *)
+  | tappspread : tm -> tm -> tm.             (* g(f()) — last-position spread    *)
 
 (* The type a tag pins (the THEN-branch narrowed type). TgNum ↦ ANum (all numbers,
    per the 5.1 [type()] model), the other scalars to their atoms, TgTable to the
@@ -185,6 +221,9 @@ Definition tag_type (g : tag) : BTy :=
      why [BAnyRef] exists — a truthy / tag-tested location narrows to "is a
      reference" without committing to its content type. *)
   | TgRef   => BAnyRef
+  (* MULTI-RETURN — a tag-tested multivalue narrows only to [BTop] (every value
+     inhabits [BTop] by subsumption, so [tag_narrows] stays sound). *)
+  | TgMulti => BTop
   end.
 
 (* The base type of a literal. *)
@@ -234,6 +273,7 @@ Definition prim_cmp (op : primop) (m n : nat) : bool :=
 Section tm_ind_strong.
   Variable P  : tm -> Prop.
   Variable Pl : list (string * tm) -> Prop.
+  Variable Pt : list tm -> Prop.        (* for the [tret] component list *)
   Hypothesis Hlit  : forall l, P (tlit l).
   Hypothesis Hvar  : forall n, P (tvar n).
   Hypothesis Hprim : forall op a b, P a -> P b -> P (tprim op a b).
@@ -251,8 +291,13 @@ Section tm_ind_strong.
   Hypothesis Hassign : forall r e, P r -> P e -> P (tassign r e).
   Hypothesis Hloc    : forall n, P (tloc n).
   Hypothesis Hannot  : forall T e, P e -> P (tannot T e).
+  Hypothesis Hret    : forall es, Pt es -> P (tret es).
+  Hypothesis Hfst    : forall e, P e -> P (tfst e).
+  Hypothesis Hspread : forall g a, P g -> P a -> P (tappspread g a).
   Hypothesis Hnil  : Pl [].
   Hypothesis Hcons : forall k e rest, P e -> Pl rest -> Pl ((k, e) :: rest).
+  Hypothesis Htnil : Pt [].
+  Hypothesis Htcons : forall e rest, P e -> Pt rest -> Pt (e :: rest).
   Fixpoint tm_rect_strong (e : tm) : P e :=
     match e with
     | tlit l    => Hlit l
@@ -279,6 +324,15 @@ Section tm_ind_strong.
     | tassign r e => Hassign r e (tm_rect_strong r) (tm_rect_strong e)
     | tloc n    => Hloc n
     | tannot T e => Hannot T e (tm_rect_strong e)
+    | tret es =>
+        Hret es
+          ((fix got (es : list tm) : Pt es :=
+              match es with
+              | [] => Htnil
+              | e :: rest => Htcons e rest (tm_rect_strong e) (got rest)
+              end) es)
+    | tfst e => Hfst e (tm_rect_strong e)
+    | tappspread g a => Hspread g a (tm_rect_strong g) (tm_rect_strong a)
     end.
 End tm_ind_strong.
 
@@ -427,7 +481,7 @@ Proof.
   - unfold dsub; intros v Hv;
       match goal with [ Hle : atom_le _ _ |- _ ] => rename Hle into Hle0 end;
       inversion Hle0; subst; simpl in *;
-      destruct v as [r| | | | | |]; try contradiction; try destruct r;
+      destruct v as [r| | | | | | |]; try contradiction; try destruct r;
       simpl; exact I.
   - apply darrow_variance; assumption.
   - (* SsRec: use the P0 fact to transport every demanded field *)
@@ -712,6 +766,34 @@ Inductive has_type : list BTy -> list BTy -> tm -> BTy -> Prop :=
   | TAnnot : forall S G e T,
       has_type S G e T ->
       has_type S G (tannot T e) T
+  (* MULTI-RETURN — the return-sequence has the TUPLE type of its components'
+     types (positional). [has_types] (mutual, below) types the component list
+     pointwise into a type list [Ts]; then [tret es : BTuple Ts]. *)
+  | TRet  : forall S G es Ts,
+      has_types S G es Ts ->
+      has_type S G (tret es) (BTuple Ts)
+  (* MULTI-RETURN — TRUNCATION (the "most positions" contextual adjustment). A
+     multivalue typed [BTuple (T::Ts)] truncates to its FIRST value, of type [T].
+     This is what binds the first return in [local x = f()], what an operand
+     position uses, and what a non-last call argument passes. The NON-empty case
+     ([T::Ts]) gives the head type; the EMPTY multivalue [BTuple []] truncates to
+     [nil] ([TFstNil]) — Lua's "no values ⇒ nil". *)
+  | TFst  : forall S G e T Ts,
+      has_type S G e (BTuple (T :: Ts)) ->
+      has_type S G (tfst e) T
+  | TFstNil : forall S G e,
+      has_type S G e (BTuple []) ->
+      has_type S G (tfst e) (BAtom ANil)
+  (* MULTI-RETURN — LAST-POSITION SPREAD. [g(f())] with [f()] last SPREADS all of
+     [f()]'s values into [g]. The known-arity consumer [g] takes the whole
+     sequence ([g : BTuple Ts -> B]); the spread delivers the entire multivalue
+     ([a : BTuple Ts]); the result is [B]. (Arity-polymorphic spread is DEFERRED;
+     here the consumer's parameter type pins the arity — the faithful known-arity
+     case.) *)
+  | TAppSpread : forall S G g a Ts B,
+      has_type S G g (BArrow (BTuple Ts) B) ->
+      has_type S G a (BTuple Ts) ->
+      has_type S G (tappspread g a) B
 (* key-aligned pointwise typing of record fields; mutual so the generated
    induction principle carries an IH on every field derivation. *)
 with has_fields : list BTy -> list BTy -> list (string * tm) -> list (string * BTy) -> Prop :=
@@ -719,10 +801,19 @@ with has_fields : list BTy -> list BTy -> list (string * tm) -> list (string * B
   | HFcons : forall S G k e T fs Ts,
       has_type S G e T ->
       has_fields S G fs Ts ->
-      has_fields S G ((k, e) :: fs) ((k, T) :: Ts).
+      has_fields S G ((k, e) :: fs) ((k, T) :: Ts)
+(* MULTI-RETURN — positional pointwise typing of a return-sequence's components.
+   Mutual so the generated induction principle carries a per-component IH. *)
+with has_types : list BTy -> list BTy -> list tm -> list BTy -> Prop :=
+  | HTnil  : forall S G, has_types S G [] []
+  | HTcons : forall S G e T es Ts,
+      has_type S G e T ->
+      has_types S G es Ts ->
+      has_types S G (e :: es) (T :: Ts).
 
 Scheme has_type_mind := Induction for has_type Sort Prop
-  with has_fields_mind := Induction for has_fields Sort Prop.
+  with has_fields_mind := Induction for has_fields Sort Prop
+  with has_types_mind := Induction for has_types Sort Prop.
 
 (* The MACHINE-CHECKED finding that motivates [ssub]: the semantic [dsub] arrow
    with a [Top] codomain collapses to "any function", forgetting the domain. *)
@@ -746,7 +837,10 @@ Inductive value : tm -> Prop :=
   | VLam  : forall T b, value (tlam T b)
   | VRec  : forall fs, Forall (fun ke => value (snd ke)) fs -> value (trec fs)
   (* SPLIT-STEP 3 — a location is a value (a store address). *)
-  | VLoc  : forall n, value (tloc n).
+  | VLoc  : forall n, value (tloc n)
+  (* MULTI-RETURN — a fully-evaluated return-sequence is a VALUE (the multivalue):
+     all its components are values. (Models [VTup vs] at the value level.) *)
+  | VRet  : forall es, Forall value es -> value (tret es).
 
 (* ---- de Bruijn lifting and substitution -----------------------------------
    [lift d k e] increments every free variable >= k by d (shifting under d new
@@ -785,6 +879,10 @@ Fixpoint lift (d k : nat) (e : tm) : tm :=
   | tloc n    => tloc n
   (* annotation: the type [T] is closed (no de Bruijn vars); lift the body at [k]. *)
   | tannot T e => tannot T (lift d k e)
+  (* MULTI-RETURN: no new binders — components / adjuster operands lift at [k]. *)
+  | tret es => tret (map (lift d k) es)
+  | tfst e => tfst (lift d k e)
+  | tappspread g a => tappspread (lift d k g) (lift d k a)
   end.
 
 Fixpoint subst (j : nat) (s : tm) (e : tm) : tm :=
@@ -822,6 +920,10 @@ Fixpoint subst (j : nat) (s : tm) (e : tm) : tm :=
   | tloc n    => tloc n
   (* annotation: substitute into the body at [j]; the type is closed. *)
   | tannot T e => tannot T (subst j s e)
+  (* MULTI-RETURN: no new binders — substitute into components / operands at [j]. *)
+  | tret es => tret (map (subst j s) es)
+  | tfst e => tfst (subst j s e)
+  | tappspread g a => tappspread (subst j s g) (subst j s a)
   end.
 
 (* record-field lookup at the term level (for projection) *)
@@ -841,28 +943,42 @@ Fixpoint field_lookup (k : string) (fs : list (string * tm)) : option tm :=
 Definition falsy_value (v : tm) : Prop :=
   v = tlit (LBool false) \/ v = tlit LNil.
 
-Definition truthy_value (v : tm) : Prop :=
-  ~ falsy_value v.
+(* MULTI-RETURN — a multivalue is its OWN classification for truthiness flow
+   narrowing. In Lua a multivalue in a boolean test is TRUNCATED to its first
+   value BEFORE the test; our calculus makes [tret] a value, so we classify it
+   separately ([is_multi]) and the narrowing conditional TRUNCATES it first
+   ([SIfnMulti]) rather than substituting a raw multivalue into a branch (which
+   would carry a contradicted [truthy_type]/[falsy_type] narrowing). This keeps
+   [truthy_narrows]/[falsy_narrows] free of multivalues — the sound, Lua-faithful
+   discipline. *)
+Definition is_multi (v : tm) : Prop := exists es, v = tret es.
 
-(* a value is either truthy or falsy (decidably) — the total partition. *)
-Lemma value_truthy_or_falsy : forall v, value v -> truthy_value v \/ falsy_value v.
+(* [truthy_value] now EXCLUDES multivalues (they take the truncation path): a
+   value is truthy iff it is neither falsy nor a multivalue. *)
+Definition truthy_value (v : tm) : Prop :=
+  ~ falsy_value v /\ ~ is_multi v.
+
+(* a value is truthy, falsy, OR a multivalue — the total 3-way partition. *)
+Lemma value_truthy_or_falsy : forall v,
+  value v -> truthy_value v \/ falsy_value v \/ is_multi v.
 Proof.
-  intros v Hv. unfold truthy_value, falsy_value.
-  destruct Hv as [l | T b | fs Hfs | n].
+  intros v Hv. unfold truthy_value, falsy_value, is_multi.
+  destruct Hv as [l | T b | fs Hfs | n | es Hes].
   - destruct l as [n | n | [|] | ].
-    + left. intros [H | H]; discriminate.
-    + left. intros [H | H]; discriminate.
-    + left. intros [H | H]; discriminate.     (* LBool true *)
-    + right. left. reflexivity.                (* LBool false *)
-    + right. right. reflexivity.               (* LNil *)
-  - left. intros [H | H]; discriminate.
-  - left. intros [H | H]; discriminate.
-  - (* tloc: a location is TRUTHY *) left. intros [H | H]; discriminate.
+    + left. split; [intros [H | H]; discriminate | intros [es H]; discriminate].
+    + left. split; [intros [H | H]; discriminate | intros [es H]; discriminate].
+    + left. split; [intros [H | H]; discriminate | intros [es H]; discriminate]. (* true *)
+    + right. left. left. reflexivity.                (* LBool false *)
+    + right. left. right. reflexivity.               (* LNil *)
+  - left. split; [intros [H | H]; discriminate | intros [es H]; discriminate].
+  - left. split; [intros [H | H]; discriminate | intros [es H]; discriminate].
+  - (* tloc: TRUTHY *) left. split; [intros [H | H]; discriminate | intros [es H]; discriminate].
+  - (* tret: a MULTIVALUE — the third class *) right. right. exists es. reflexivity.
 Qed.
 
 (* truthy and falsy are mutually exclusive (a value is not both). *)
 Lemma truthy_not_falsy : forall v, truthy_value v -> falsy_value v -> False.
-Proof. intros v Ht Hf. exact (Ht Hf). Qed.
+Proof. intros v [Ht _] Hf. exact (Ht Hf). Qed.
 
 (* ---- INCREMENT 15 — the RUNTIME TYPE-TAG of a term (Lua [type()]) ----------
    [has_tag v g] holds iff value [v]'s runtime kind matches tag [g]. Defined on
@@ -881,13 +997,14 @@ Definition has_tag (v : tm) (g : tag) : Prop :=
   | TgTable, trec _         => True
   | TgFun,   tlam _ _       => True
   | TgRef,   tloc _         => True       (* SPLIT-STEP 3 — a location's tag *)
+  | TgMulti, tret _         => True       (* MULTI-RETURN — a multivalue's tag *)
   | _, _ => False
   end.
 
 (* every value has SOME tag (the type-test always selects a branch). *)
 Lemma value_has_some_tag : forall v, value v -> exists g, has_tag v g.
 Proof.
-  intros v Hv. destruct Hv as [l | T b | fs Hfs | n].
+  intros v Hv. destruct Hv as [l | T b | fs Hfs | n | es Hes].
   - destruct l as [n | n | bb | ].
     + exists TgNum; exact I.
     + exists TgStr; exact I.
@@ -896,6 +1013,7 @@ Proof.
   - exists TgFun; exact I.
   - exists TgTable; exact I.
   - exists TgRef; exact I.                (* tloc *)
+  - exists TgMulti; exact I.              (* tret — a multivalue *)
 Qed.
 
 (* a value's tag is unique (it cannot match two distinct tags). *)
@@ -985,6 +1103,15 @@ Inductive step : tm * store -> tm * store -> Prop :=
   | SIfnFalse : forall v e1 e2 st,
       value v -> falsy_value v -> step (tifn v e1 e2, st) (subst 0 v e2, st)
   | SIfn1     : forall c c' e1 e2 st st', step (c, st) (c', st') -> step (tifn c e1 e2, st) (tifn c' e1 e2, st')
+  (* MULTI-RETURN — a MULTIVALUE scrutinee of a narrowing conditional TRUNCATES to
+     its first value (or [nil] if empty) BEFORE the truthiness test, exactly as Lua
+     adjusts [if f() then ...] to test [f()]'s first value. This keeps the raw
+     multivalue out of the branch (which carries a [truthy_type]/[falsy_type]
+     narrowing the multivalue does not satisfy). *)
+  | SIfnMultiCons : forall v rest e1 e2 st,
+      value (tret (v :: rest)) -> step (tifn (tret (v :: rest)) e1 e2, st) (tifn v e1 e2, st)
+  | SIfnMultiNil  : forall e1 e2 st,
+      step (tifn (tret []) e1 e2, st) (tifn (tlit LNil) e1 e2, st)
   (* INCREMENT 14 — RECURSIVE UNFOLD. *)
   | SFix      : forall T body st, step (tfix T body, st) (subst 0 (tfix T body) body, st)
   (* INCREMENT 15 — TYPE-TEST narrowing, VALUE-CONDITIONED. *)
@@ -1019,7 +1146,33 @@ Inductive step : tm * store -> tm * store -> Prop :=
      clean. [tannot T v] is NOT a value (it strips). *)
   | SAnnot1 : forall T e e' st st', step (e, st) (e', st') ->
       step (tannot T e, st) (tannot T e', st')
-  | SAnnotV : forall T v st, value v -> step (tannot T v, st) (v, st).
+  | SAnnotV : forall T v st, value v -> step (tannot T v, st) (v, st)
+  (* MULTI-RETURN — operational rules. *)
+  (* [tret] evaluates its components left-to-right (the first non-value steps);
+     once all are values it IS the multivalue value. *)
+  | SRet  : forall pre e e' post st st',
+      Forall value pre ->
+      step (e, st) (e', st') ->
+      step (tret (pre ++ e :: post), st) (tret (pre ++ e' :: post), st')
+  (* TRUNCATION reduction: [tfst] of a fully-evaluated multivalue takes its HEAD
+     (or [nil] if the sequence is empty). This is the operational adjustment that
+     discards the extra values. *)
+  | SFstCons : forall v rest st,
+      value (tret (v :: rest)) ->
+      step (tfst (tret (v :: rest)), st) (v, st)
+  | SFstNil  : forall st,
+      step (tfst (tret []), st) (tlit LNil, st)
+  | SFst1    : forall e e' st st', step (e, st) (e', st') -> step (tfst e, st) (tfst e', st')
+  (* SPREAD reduction: [tappspread (\(BTuple Ts). body) <multivalue>] SPLICES the
+     whole value-sequence into [g] by substituting the multivalue at the binder.
+     The consumer binds the entire sequence (the known-arity tuple parameter). *)
+  | SAppSpread : forall T body mv st,
+      value mv ->
+      step (tappspread (tlam T body) mv, st) (subst 0 mv body, st)
+  | SAppSpread1 : forall g g' a st st',
+      step (g, st) (g', st') -> step (tappspread g a, st) (tappspread g' a, st')
+  | SAppSpread2 : forall v a a' st st',
+      value v -> step (a, st) (a', st') -> step (tappspread v a, st) (tappspread v a', st').
 
 (* STORE well-typedness + extension (ported from imp.v). [store_well_typed S st]:
    same length, each stored value has its S-type (closed — stored values are
@@ -1343,6 +1496,51 @@ Proof.
   - subst. destruct (IHhas_type eq_refl) as [He Hd].
     split; [assumption | eapply RsTrans; eassumption].
   - injection Ee as <- <-. split; [assumption | apply rsub_refl].
+Qed.
+
+(* MULTI-RETURN — inversion lemmas (subsumption-transparent), mirroring the others.
+   [inv_ret]: the return-sequence types its components into [Ts], and [BTuple Ts]
+   subsumes to [T]. [inv_fst]: the truncated subject is a multivalue, whose head
+   type (or [ANil] for the empty tuple) subsumes to [T]. [inv_appspread]: the
+   spread consumer is an arrow over a tuple and the arg is that tuple. *)
+Lemma inv_ret : forall S G es T,
+  has_type S G (tret es) T ->
+  exists Ts, has_types S G es Ts /\ rsub (BTuple Ts) T.
+Proof.
+  intros S G es T H. remember (tret es) as e0 eqn:Ee.
+  induction H; try discriminate Ee.
+  - subst. destruct (IHhas_type eq_refl) as [Ts [Hes Hd]].
+    exists Ts. split; [assumption | eapply RsTrans; eassumption].
+  - injection Ee as <-. exists Ts. split; [assumption | apply rsub_refl].
+Qed.
+
+Lemma inv_fst : forall S G e T,
+  has_type S G (tfst e) T ->
+  (exists T0 Ts, has_type S G e (BTuple (T0 :: Ts)) /\ rsub T0 T) \/
+  (has_type S G e (BTuple []) /\ rsub (BAtom ANil) T).
+Proof.
+  intros S G e T H. remember (tfst e) as e0 eqn:Ee.
+  induction H; try discriminate Ee.
+  - subst. destruct (IHhas_type eq_refl) as [[T0 [Ts [He Hd]]] | [He Hd]].
+    + left. exists T0, Ts. split; [assumption | eapply RsTrans; eassumption].
+    + right. split; [assumption | eapply RsTrans; eassumption].
+  - (* TFst: hyp is [has_type S G e (BTuple (T :: Ts))], T is the goal's result *)
+    injection Ee as <-. left. exists T, Ts. split; [assumption | apply rsub_refl].
+  - (* TFstNil: result is [ANil] *)
+    injection Ee as <-. right. split; [assumption | apply rsub_refl].
+Qed.
+
+Lemma inv_appspread : forall S G g a T,
+  has_type S G (tappspread g a) T ->
+  exists Ts B, has_type S G g (BArrow (BTuple Ts) B) /\
+               has_type S G a (BTuple Ts) /\ rsub B T.
+Proof.
+  intros S G g a T H. remember (tappspread g a) as e0 eqn:Ee.
+  induction H; try discriminate Ee.
+  - subst. destruct (IHhas_type eq_refl) as [Ts [B [Hg [Ha Hd]]]].
+    exists Ts, B. split; [assumption|split;[assumption|eapply RsTrans; eassumption]].
+  - injection Ee as <- <-. exists Ts, B.
+    split; [assumption|split;[assumption|apply rsub_refl]].
 Qed.
 
 (* ===========================================================================
@@ -1894,7 +2092,7 @@ Proof.
   intros a A B H. apply ssub_sound in H.
   destruct (atom_has_member a) as [v Hv].
   pose proof (H v Hv) as Hav.
-  destruct a; destruct v as [r| | | | | |]; simpl in Hv, Hav; contradiction.
+  destruct a; destruct v as [r| | | | | | |]; simpl in Hv, Hav; contradiction.
 Qed.
 
 (* record SUBTYPE shape (used by ssub.v / ex_bad): below a CONCRETE record, the
@@ -1906,7 +2104,7 @@ Proof.
   destruct (atom_has_member a) as [v Hv].
   pose proof (H v Hv) as Hav. apply denote_rec_iff in Hav.
   destruct Hav as [ents [Hbad _]].
-  destruct a; destruct v as [r| | | | | |]; simpl in Hv; try contradiction;
+  destruct a; destruct v as [r| | | | | | |]; simpl in Hv; try contradiction;
     discriminate Hbad.
 Qed.
 
@@ -2082,7 +2280,7 @@ Lemma rsub_atom_not_arrow : forall a A B, ~ rsub (BAtom a) (BArrow A B).
 Proof.
   intros a A B H. apply rsub_sound in H.
   destruct (atom_has_member a) as [v Hv]. pose proof (H v Hv) as Hav.
-  destruct a; destruct v as [r| | | | | |]; simpl in Hv, Hav; contradiction.
+  destruct a; destruct v as [r| | | | | | |]; simpl in Hv, Hav; contradiction.
 Qed.
 
 (* an atom is not [rsub]-below a record (semantic). *)
@@ -2091,7 +2289,7 @@ Proof.
   intros a g H. apply rsub_sound in H.
   destruct (atom_has_member a) as [v Hv]. pose proof (H v Hv) as Hav.
   apply denote_rec_iff in Hav. destruct Hav as [ents [Hbad _]].
-  destruct a; destruct v as [r| | | | | |]; simpl in Hv; try contradiction; discriminate Hbad.
+  destruct a; destruct v as [r| | | | | | |]; simpl in Hv; try contradiction; discriminate Hbad.
 Qed.
 
 (* an atom is not [rsub]-below a reference (semantic: atom member is not a loc). *)
@@ -2099,13 +2297,13 @@ Lemma rsub_atom_not_ref : forall a S, ~ rsub (BAtom a) (BRef S).
 Proof.
   intros a S H. apply rsub_sound in H.
   destruct (atom_has_member a) as [v Hv]. pose proof (H v Hv) as Hav.
-  destruct a; destruct v as [r| | | | | |]; simpl in Hv, Hav; contradiction.
+  destruct a; destruct v as [r| | | | | | |]; simpl in Hv, Hav; contradiction.
 Qed.
 Lemma rsub_atom_not_anyref : forall a, ~ rsub (BAtom a) BAnyRef.
 Proof.
   intros a H. apply rsub_sound in H.
   destruct (atom_has_member a) as [v Hv]. pose proof (H v Hv) as Hav.
-  destruct a; destruct v as [r| | | | | |]; simpl in Hv, Hav; contradiction.
+  destruct a; destruct v as [r| | | | | | |]; simpl in Hv, Hav; contradiction.
 Qed.
 
 (* an arrow is not [rsub]-below a record / atom / reference (structural via the
@@ -2174,6 +2372,77 @@ Proof. intros f S H. apply rsub_rec_super in H. simpl in H. exact H. Qed.
 Lemma rsub_rec_not_anyref : forall f, ~ rsub (BRec f) BAnyRef.
 Proof. intros f H. apply rsub_rec_super in H. simpl in H. exact H. Qed.
 
+(* MULTI-RETURN — [rsub] TUPLE-source supertypes (reflexive leaf, like records/
+   refs). A [BTuple Ts] relates via [rsub] only via the embedded [ssub] (the ref
+   rules need [BRef]/[BAnyRef] sources), and [ssub] treats tuples reflexively, so
+   [rsub (BTuple Ts) T] is exactly [rsub_tuple_above Ts T]. *)
+Fixpoint rsub_tuple_above (Ts : list BTy) (T : BTy) : Prop :=
+  match T with
+  | BTop          => True
+  | BTuple Ss     => Ss = Ts
+  | BUnion Tl Tr  => rsub_tuple_above Ts Tl \/ rsub_tuple_above Ts Tr
+  | BInter Tl Tr  => rsub_tuple_above Ts Tl /\ rsub_tuple_above Ts Tr
+  | _             => False
+  end.
+
+Lemma rsub_tuple_above_ssub_mono : forall M C, ssub M C ->
+  forall Ts, rsub_tuple_above Ts M -> rsub_tuple_above Ts C.
+Proof.
+  intros M C H. induction H; intros Ts0 Hab; simpl in *;
+    try exact I; try exact Hab; try contradiction.
+  - apply IHssub2. apply IHssub1. exact Hab.
+  - left. apply IHssub; exact Hab.
+  - right. apply IHssub; exact Hab.
+  - destruct Hab as [Ha|Hb]; [ apply IHssub1 | apply IHssub2 ]; assumption.
+  - destruct Hab as [Ha _]. apply IHssub; exact Ha.
+  - destruct Hab as [_ Hb]. apply IHssub; exact Hb.
+  - split; [ apply IHssub1 | apply IHssub2 ]; exact Hab.
+Qed.
+
+Lemma rsub_tuple_above_mono : forall M C, rsub M C ->
+  forall Ts, rsub_tuple_above Ts M -> rsub_tuple_above Ts C.
+Proof.
+  intros M C H. induction H; intros Ts0 Hab; simpl in *.
+  - eapply rsub_tuple_above_ssub_mono; eassumption.
+  - apply IHrsub2. apply IHrsub1. exact Hab.
+  - contradiction.
+  - contradiction.
+Qed.
+
+Lemma rsub_tuple_super : forall Ts T, rsub (BTuple Ts) T -> rsub_tuple_above Ts T.
+Proof.
+  intros Ts T H. apply (rsub_tuple_above_mono (BTuple Ts) T H Ts). simpl. reflexivity.
+Qed.
+
+Lemma rsub_tuple_not_atom : forall Ts a, ~ rsub (BTuple Ts) (BAtom a).
+Proof. intros Ts a H. apply rsub_tuple_super in H. simpl in H. exact H. Qed.
+Lemma rsub_tuple_not_arrow : forall Ts A B, ~ rsub (BTuple Ts) (BArrow A B).
+Proof. intros Ts A B H. apply rsub_tuple_super in H. simpl in H. exact H. Qed.
+Lemma rsub_tuple_not_rec : forall Ts g, ~ rsub (BTuple Ts) (BRec g).
+Proof. intros Ts g H. apply rsub_tuple_super in H. simpl in H. exact H. Qed.
+Lemma rsub_tuple_not_ref : forall Ts S, ~ rsub (BTuple Ts) (BRef S).
+Proof. intros Ts S H. apply rsub_tuple_super in H. simpl in H. exact H. Qed.
+Lemma rsub_tuple_not_anyref : forall Ts, ~ rsub (BTuple Ts) BAnyRef.
+Proof. intros Ts H. apply rsub_tuple_super in H. simpl in H. exact H. Qed.
+
+(* and the reverse: an atom / arrow / record / reference source is NOT [rsub]-below
+   a TUPLE (the [_above] predicates send a [BTuple] target to [False]). *)
+Lemma rsub_atom_not_tuple : forall a Ts, ~ rsub (BAtom a) (BTuple Ts).
+Proof.
+  intros a Ts H. apply rsub_sound in H.
+  destruct (atom_has_member a) as [v Hv]. pose proof (H v Hv) as Hav.
+  apply denote_tuple_iff in Hav. destruct Hav as [vs [Hbad _]].
+  destruct a; destruct v as [r| | | | | | |]; simpl in Hv; try contradiction; discriminate Hbad.
+Qed.
+Lemma rsub_arrow_not_tuple : forall A B Ts, ~ rsub (BArrow A B) (BTuple Ts).
+Proof. intros A B Ts H. apply rsub_arrow_super in H. simpl in H. exact H. Qed.
+Lemma rsub_rec_not_tuple : forall f Ts, ~ rsub (BRec f) (BTuple Ts).
+Proof. intros f Ts H. apply rsub_rec_super in H. simpl in H. exact H. Qed.
+Lemma rsub_ref_not_tuple : forall S Ts, ~ rsub (BRef S) (BTuple Ts).
+Proof. intros S Ts H. apply rsub_ref_super in H. simpl in H. exact H. Qed.
+Lemma rsub_anyref_not_tuple : forall Ts, ~ rsub BAnyRef (BTuple Ts).
+Proof. intros Ts H. apply rsub_anyref_super in H. simpl in H. exact H. Qed.
+
 (* the [rsub] record inversion (demanded field supplied), via [rsub_rec_super]. *)
 Lemma rsub_rec_inv : forall f g k Tg,
   rsub (BRec f) (BRec g) -> In (k, Tg) g ->
@@ -2210,7 +2479,7 @@ Proof. intros g H. apply rsub_anyref_super in H. simpl in H. exact H. Qed.
 Lemma canon_arrow : forall S e A B,
   has_type S [] e (BArrow A B) -> value e -> exists T body, e = tlam T body.
 Proof.
-  intros S e A B Hty Hv. destruct Hv as [l | T b | fs Hfs | n].
+  intros S e A B Hty Hv. destruct Hv as [l | T b | fs Hfs | n | es Hes].
   - apply inv_lit in Hty. destruct l; simpl in Hty;
       exfalso; eapply rsub_atom_not_arrow; eauto.
   - exists T, b; reflexivity.
@@ -2219,12 +2488,15 @@ Proof.
   - (* tloc: a location is not [rsub]-below an arrow *)
     apply inv_loc in Hty. destruct Hty as [U [_ Hsub]].
     exfalso. eapply rsub_ref_not_arrow; eauto.
+  - (* tret: a multivalue is not [rsub]-below an arrow *)
+    apply inv_ret in Hty. destruct Hty as [Ts [_ Hsub]].
+    exfalso. eapply rsub_tuple_not_arrow; eauto.
 Qed.
 
 Lemma canon_rec : forall S e fields,
   has_type S [] e (BRec fields) -> value e -> exists fs, e = trec fs.
 Proof.
-  intros S e fields Hty Hv. destruct Hv as [l | T b | fs Hfs | n].
+  intros S e fields Hty Hv. destruct Hv as [l | T b | fs Hfs | n | es Hes].
   - apply inv_lit in Hty. destruct l; simpl in Hty;
       exfalso; eapply rsub_atom_not_rec; eauto.
   - apply inv_lam in Hty. destruct Hty as [Tb [_ Hsub]].
@@ -2232,6 +2504,8 @@ Proof.
   - exists fs; reflexivity.
   - apply inv_loc in Hty. destruct Hty as [U [_ Hsub]].
     exfalso. eapply rsub_ref_not_rec; eauto.
+  - apply inv_ret in Hty. destruct Hty as [Ts [_ Hsub]].
+    exfalso. eapply rsub_tuple_not_rec; eauto.
 Qed.
 
 (* SPLIT-STEP 3 — canonical form for references: a closed value of [BRef T] is a
@@ -2239,7 +2513,7 @@ Qed.
 Lemma canon_ref : forall S e T,
   has_type S [] e (BRef T) -> value e -> exists n, e = tloc n.
 Proof.
-  intros S e T Hty Hv. destruct Hv as [l | Tl b | fs Hfs | n].
+  intros S e T Hty Hv. destruct Hv as [l | Tl b | fs Hfs | n | es Hes].
   - apply inv_lit in Hty. destruct l; simpl in Hty;
       exfalso; eapply rsub_atom_not_ref; eauto.
   - apply inv_lam in Hty. destruct Hty as [Tb [_ Hsub]].
@@ -2247,6 +2521,8 @@ Proof.
   - apply inv_rec in Hty. destruct Hty as [Ts [_ [_ Hsub]]].
     exfalso. eapply rsub_rec_not_ref; eauto.
   - exists n; reflexivity.
+  - apply inv_ret in Hty. destruct Hty as [Ts [_ Hsub]].
+    exfalso. eapply rsub_tuple_not_ref; eauto.
 Qed.
 
 (* INCREMENT 19 — canonical forms for NUMBER: a closed value of type [BAtom ANum]
@@ -2259,7 +2535,7 @@ Qed.
 Lemma canon_num : forall S e,
   has_type S [] e (BAtom ANum) -> value e -> exists n, e = tlit (LInt n).
 Proof.
-  intros S e Hty Hv. destruct Hv as [l | T b | fs Hfs | n].
+  intros S e Hty Hv. destruct Hv as [l | T b | fs Hfs | n | es Hes].
   - apply inv_lit in Hty. destruct l; simpl in Hty.
     + exists n; reflexivity.
     + exfalso. apply rsub_sound in Hty. pose proof (Hty (VStr 0) I) as Hbad. exact Hbad.
@@ -2271,6 +2547,8 @@ Proof.
     exfalso. eapply rsub_rec_not_atom; eauto.
   - apply inv_loc in Hty. destruct Hty as [U [_ Hsub]].
     exfalso. eapply rsub_ref_not_atom; eauto.
+  - apply inv_ret in Hty. destruct Hty as [Ts [_ Hsub]].
+    exfalso. eapply rsub_tuple_not_atom; eauto.
 Qed.
 
 (* INCREMENT 11 — canonical forms for Bool: a closed value of type [BAtom ABool]
@@ -2281,7 +2559,7 @@ Qed.
 Lemma canon_bool : forall S e,
   has_type S [] e (BAtom ABool) -> value e -> exists b, e = tlit (LBool b).
 Proof.
-  intros S e Hty Hv. destruct Hv as [l | T b | fs Hfs | n].
+  intros S e Hty Hv. destruct Hv as [l | T b | fs Hfs | n | es Hes].
   - apply inv_lit in Hty. destruct l; simpl in Hty.
     + exfalso. apply rsub_sound in Hty. pose proof (Hty (VInt 0) I) as Hbad. exact Hbad.
     + exfalso. apply rsub_sound in Hty. pose proof (Hty (VStr 0) I) as Hbad. exact Hbad.
@@ -2294,6 +2572,8 @@ Proof.
   - (* tloc: a location is not [rsub]-below an atom *)
     apply inv_loc in Hty. destruct Hty as [U [_ Hsub]].
     exfalso. eapply rsub_ref_not_atom; eauto.
+  - apply inv_ret in Hty. destruct Hty as [Ts [_ Hsub]].
+    exfalso. eapply rsub_tuple_not_atom; eauto.
 Qed.
 
 (* ===========================================================================
@@ -2318,8 +2598,8 @@ Qed.
 Lemma truthy_narrows : forall S v U,
   has_type S [] v U -> value v -> truthy_value v -> has_type S [] v truthy_type.
 Proof.
-  intros S v U Hty Hv Ht. unfold truthy_type.
-  destruct Hv as [l | T b | fs Hfs | n].
+  intros S v U Hty Hv [Hnf Hnm]. unfold truthy_type.
+  destruct Hv as [l | T b | fs Hfs | n | es Hes].
   - (* literal: truthy ⇒ LInt / LStr / LBool true *)
     destruct l as [n | n | [|] | ].
     + (* LInt : AInt ≤ ANum ≤ truthy_type *)
@@ -2332,9 +2612,9 @@ Proof.
       eapply TSub; [ apply (TLit S [] (LBool true)) | ]. apply RsSsub. simpl.
       apply SsUnionInL. apply SsRefl.
     + (* LBool false : FALSY — excluded *)
-      exfalso. apply Ht. left. reflexivity.
+      exfalso. apply Hnf. left. reflexivity.
     + (* LNil : FALSY — excluded *)
-      exfalso. apply Ht. right. reflexivity.
+      exfalso. apply Hnf. right. reflexivity.
   - (* lambda: subsume its arrow to [BArrow BBot BTop], inject into the union. *)
     apply inv_lam in Hty. destruct Hty as [Tb [Hb _]].
     eapply TSub; [ apply TLam; exact Hb | ]. apply RsSsub.
@@ -2354,6 +2634,9 @@ Proof.
     eapply RsTrans; [ apply RsAnyRef | ]. apply RsSsub.
     apply SsUnionInR. apply SsUnionInR. apply SsUnionInR. apply SsUnionInR.
     apply SsUnionInR. apply SsRefl.
+  - (* tret: EXCLUDED — a multivalue is not [truthy_value] (it takes the
+       truncation path [SIfnMulti]), so [Hnm : ~ is_multi (tret es)] is false. *)
+    exfalso. apply Hnm. exists es. reflexivity.
 Qed.
 
 Lemma falsy_narrows : forall S v,
@@ -2390,7 +2673,7 @@ Qed.
 Lemma tag_narrows : forall S v U g,
   has_type S [] v U -> value v -> has_tag v g -> has_type S [] v (tag_type g).
 Proof.
-  intros S v U g Hty Hv Hg. destruct Hv as [l | T b | fs Hfs | n].
+  intros S v U g Hty Hv Hg. destruct Hv as [l | T b | fs Hfs | n | es Hes].
   - (* literal: the tag is forced by the literal kind *)
     destruct l as [n | n | bb | ]; destruct g; simpl in Hg; try contradiction;
       simpl tag_type.
@@ -2414,6 +2697,10 @@ Proof.
     destruct g; simpl in Hg; try contradiction. simpl tag_type.
     apply inv_loc in Hty. destruct Hty as [U0 [Hl _]].
     eapply TSub; [ apply (TLoc S [] n U0 Hl) | ]. apply RsAnyRef.
+  - (* tret: the only matching tag is TgMulti; [tag_type TgMulti = BTop], and every
+       value subsumes to [BTop] ([SsTop]) — the sound over-approximation. *)
+    destruct g; simpl in Hg; try contradiction. simpl tag_type.
+    eapply TSub; [ exact Hty | ]. apply RsSsub. apply SsTop.
 Qed.
 
 (* ===========================================================================
@@ -2452,7 +2739,11 @@ Proof.
     (P0 := fun Sg G fs Ts (_ : has_fields Sg G fs Ts) =>
        forall G1 G2 U, G = G1 ++ G2 ->
          has_fields Sg (G1 ++ U :: G2)
-           (map (fun ke => (fst ke, lift 1 (Datatypes.length G1) (snd ke))) fs) Ts);
+           (map (fun ke => (fst ke, lift 1 (Datatypes.length G1) (snd ke))) fs) Ts)
+    (P1 := fun Sg G es Ts (_ : has_types Sg G es Ts) =>
+       forall G1 G2 U, G = G1 ++ G2 ->
+         has_types Sg (G1 ++ U :: G2)
+           (map (lift 1 (Datatypes.length G1)) es) Ts);
     intros; subst; simpl.
   - apply TLit.
   - (* TVar *)
@@ -2529,11 +2820,32 @@ Proof.
   - (* TAnnot *) apply TAnnot.
     match goal with [ IH : forall _ _ _, _ = _ -> has_type _ _ _ _ |- _ ] =>
       exact (IH G1 G2 U eq_refl) end.
+  - (* MULTI-RETURN — TRet: components weaken pointwise (the [P1]/has_types IH). *)
+    apply TRet.
+    match goal with [ IH : forall _ _ _, _ = _ -> has_types _ _ _ _ |- _ ] =>
+      exact (IH G1 G2 U eq_refl) end.
+  - (* TFst: the multivalue subject weakens (head type unchanged). *)
+    eapply TFst.
+    match goal with [ IH : forall _ _ _, _ = _ -> has_type _ _ _ _ |- _ ] =>
+      exact (IH G1 G2 U eq_refl) end.
+  - (* TFstNil *) eapply TFstNil.
+    match goal with [ IH : forall _ _ _, _ = _ -> has_type _ _ _ _ |- _ ] =>
+      exact (IH G1 G2 U eq_refl) end.
+  - (* TAppSpread: both the consumer and the multivalue arg weaken. *)
+    eapply TAppSpread;
+      match goal with [ IH : forall _ _ _, _ = _ -> has_type _ _ _ _ |- _ ] =>
+        exact (IH G1 G2 U eq_refl) end.
   - (* HFnil *) apply HFnil.
   - (* HFcons *) apply HFcons.
     + match goal with [ IH : forall _ _ _, _ = _ -> has_type _ _ _ _ |- _ ] =>
         exact (IH G1 G2 U eq_refl) end.
     + match goal with [ IH : forall _ _ _, _ = _ -> has_fields _ _ _ _ |- _ ] =>
+        exact (IH G1 G2 U eq_refl) end.
+  - (* MULTI-RETURN — HTnil (empty component list) *) apply HTnil.
+  - (* HTcons *) apply HTcons.
+    + match goal with [ IH : forall _ _ _, _ = _ -> has_type _ _ _ _ |- _ ] =>
+        exact (IH G1 G2 U eq_refl) end.
+    + match goal with [ IH : forall _ _ _, _ = _ -> has_types _ _ _ _ |- _ ] =>
         exact (IH G1 G2 U eq_refl) end.
 Qed.
 
@@ -2575,6 +2887,11 @@ Fixpoint closed_at (k : nat) (e : tm) : Prop :=
   | tloc _    => True
   (* annotation: body closed at [k] (the type carries no vars). *)
   | tannot _ e => closed_at k e
+  (* MULTI-RETURN: no new binders — components / operands closed at [k]. *)
+  | tret es => (fix allc (es : list tm) : Prop :=
+                  match es with [] => True | e :: rest => closed_at k e /\ allc rest end) es
+  | tfst e => closed_at k e
+  | tappspread g a => closed_at k g /\ closed_at k a
   end.
 
 (* typing in [G] bounds free vars by [length G]. By term induction + inversion.
@@ -2584,7 +2901,10 @@ Proof.
   intro e. induction e using tm_rect_strong with
     (Pl := fun fs => forall Sg G Ts, has_fields Sg G fs Ts ->
        (fix allc (fs : list (string * tm)) : Prop :=
-          match fs with [] => True | (_, e) :: rest => closed_at (Datatypes.length G) e /\ allc rest end) fs);
+          match fs with [] => True | (_, e) :: rest => closed_at (Datatypes.length G) e /\ allc rest end) fs)
+    (Pt := fun es => forall Sg G Ts, has_types Sg G es Ts ->
+       (fix allc (es : list tm) : Prop :=
+          match es with [] => True | e :: rest => closed_at (Datatypes.length G) e /\ allc rest end) es);
     intros; simpl.
   - exact I.
   - (* tvar *) apply inv_var in H. destruct H as [U [Hl _]].
@@ -2620,6 +2940,14 @@ Proof.
     split; [ exact (IHe1 Sg G (BRef U) Hr) | exact (IHe2 Sg G U He) ].
   - (* tloc *) exact I.
   - (* tannot *) apply inv_annot in H. destruct H as [He _]. exact (IHe Sg G T He).
+  - (* MULTI-RETURN — tret: components closed (the Pt IH over the component list). *)
+    apply inv_ret in H. destruct H as [Ts [Hes _]]. exact (IHe Sg G Ts Hes).
+  - (* tfst: the multivalue subject is closed. *)
+    apply inv_fst in H. destruct H as [[T0 [Ts [He _]]] | [He _]];
+      [ exact (IHe Sg G (BTuple (T0 :: Ts)) He) | exact (IHe Sg G (BTuple []) He) ].
+  - (* tappspread: both the consumer and the multivalue arg are closed. *)
+    apply inv_appspread in H. destruct H as [Ts [B [Hg [Ha _]]]].
+    split; [ exact (IHe1 Sg G (BArrow (BTuple Ts) B) Hg) | exact (IHe2 Sg G (BTuple Ts) Ha) ].
   - (* Pl nil *) exact I.
   - (* Pl cons *) inversion H; subst. simpl. split.
     + match goal with
@@ -2628,6 +2956,14 @@ Proof.
     + match goal with
       | [ IH : forall (_:list BTy)(_:list BTy)(_: list (string*BTy)), has_fields _ _ ?xs _ -> _,
           Hh : has_fields ?Sg0 ?G0 ?xs ?Tsx |- _ ] => exact (IH Sg0 G0 Tsx Hh) end.
+  - (* MULTI-RETURN — Pt nil *) exact I.
+  - (* Pt cons *) inversion H; subst. simpl. split.
+    + match goal with
+      | [ IH : forall (_:list BTy)(_:list BTy)(_:BTy), has_type _ _ ?x _ -> _,
+          Hh : has_type ?Sg0 ?G0 ?x ?Tx |- _ ] => exact (IH Sg0 G0 Tx Hh) end.
+    + match goal with
+      | [ IH : forall (_:list BTy)(_:list BTy)(_: list BTy), has_types _ _ ?xs _ -> _,
+          Hh : has_types ?Sg0 ?G0 ?xs ?Tsx |- _ ] => exact (IH Sg0 G0 Tsx Hh) end.
 Qed.
 
 (* a term closed below [k] is invariant under lifting with cut >= k. *)
@@ -2637,7 +2973,10 @@ Proof.
     (Pl := fun fs => forall k, (fix allc (fs : list (string * tm)) : Prop :=
              match fs with [] => True | (_, e) :: rest => closed_at k e /\ allc rest end) fs ->
            forall d j, k <= j ->
-             map (fun ke => (fst ke, lift d j (snd ke))) fs = fs);
+             map (fun ke => (fst ke, lift d j (snd ke))) fs = fs)
+    (Pt := fun es => forall k, (fix allc (es : list tm) : Prop :=
+             match es with [] => True | e :: rest => closed_at k e /\ allc rest end) es ->
+           forall d j, k <= j -> map (lift d j) es = es);
     intros; simpl in *.
   - reflexivity.
   - (* tvar *) destruct (Nat.ltb_spec n j); [reflexivity | lia].
@@ -2672,10 +3011,19 @@ Proof.
       [ apply (IHe1 k); [exact H1 | exact H0] | apply (IHe2 k); [exact H2 | exact H0] ].
   - (* tloc *) reflexivity.
   - (* tannot *) f_equal. apply (IHe k); [exact H | exact H0].
+  - (* MULTI-RETURN — tret: components lift-invariant (the Pt IH). *)
+    f_equal. apply (IHe k); [exact H | exact H0].
+  - (* tfst *) f_equal. apply (IHe k); [exact H | exact H0].
+  - (* tappspread *) destruct H as [H1 H2]. f_equal;
+      [ apply (IHe1 k); [exact H1 | exact H0] | apply (IHe2 k); [exact H2 | exact H0] ].
   - (* Pl nil *) reflexivity.
   - (* Pl cons *) destruct H as [Hc Hr]. f_equal;
       [ f_equal; apply (IHe k0); [exact Hc | exact H0]
       | apply (IHe0 k0); [exact Hr | exact H0] ].
+  - (* MULTI-RETURN — Pt nil *) reflexivity.
+  - (* Pt cons *) destruct H as [Hc Hr]. f_equal;
+      [ apply (IHe k); [exact Hc | exact H0]
+      | apply (IHe0 k); [exact Hr | exact H0] ].
 Qed.
 
 (* the corollary we use: a CLOSED term is lift-invariant. [S]/[T] implicit so the
@@ -2717,7 +3065,12 @@ Proof.
        has_fields Sg (G1 ++ U :: G2) fs Ts ->
        has_type Sg [] s U ->
        has_fields Sg (G1 ++ G2)
-         (map (fun ke => (fst ke, subst (Datatypes.length G1) s (snd ke))) fs) Ts);
+         (map (fun ke => (fst ke, subst (Datatypes.length G1) s (snd ke))) fs) Ts)
+    (Pt := fun es => forall Sg G1 G2 U Ts s,
+       has_types Sg (G1 ++ U :: G2) es Ts ->
+       has_type Sg [] s U ->
+       has_types Sg (G1 ++ G2)
+         (map (subst (Datatypes.length G1) s) es) Ts);
     intros.
   - (* tlit *) apply inv_lit in H. simpl.
     eapply TSub; [ apply TLit | exact H ].
@@ -2803,11 +3156,32 @@ Proof.
   - (* tannot *) apply inv_annot in H. destruct H as [He Hsub]. simpl.
     eapply TSub; [ apply TAnnot | exact Hsub ].
     apply (IHe Sg G1 G2 U T s); [ exact He | exact H0 ].
+  - (* MULTI-RETURN — tret: substitute into each component (the Pt IH). *)
+    apply inv_ret in H. destruct H as [Ts [Hes Hsub]]. simpl.
+    eapply TSub; [ apply TRet | exact Hsub ].
+    apply (IHe Sg G1 G2 U Ts s); [ exact Hes | exact H0 ].
+  - (* tfst: substitute into the multivalue subject; head/empty type preserved. *)
+    apply inv_fst in H. destruct H as [[T0 [Ts [He Hsub]]] | [He Hsub]]; simpl.
+    + eapply TSub; [ eapply TFst | exact Hsub ].
+      apply (IHe Sg G1 G2 U (BTuple (T0 :: Ts)) s); [ exact He | exact H0 ].
+    + eapply TSub; [ eapply TFstNil | exact Hsub ].
+      apply (IHe Sg G1 G2 U (BTuple []) s); [ exact He | exact H0 ].
+  - (* tappspread: substitute into both consumer and multivalue arg. *)
+    apply inv_appspread in H. destruct H as [Ts [B [Hg [Ha Hsub]]]]. simpl.
+    eapply TSub; [ eapply TAppSpread | exact Hsub ].
+    + apply (IHe1 Sg G1 G2 U (BArrow (BTuple Ts) B) s); [ exact Hg | exact H0 ].
+    + apply (IHe2 Sg G1 G2 U (BTuple Ts) s); [ exact Ha | exact H0 ].
   - (* Pl nil *) inversion H; subst. simpl. apply HFnil.
   - (* Pl cons *) inversion H; subst. simpl. apply HFcons.
     + match goal with [ Hh : has_type ?Sg0 (G1 ++ U :: G2) e ?Tk |- _ ] =>
         apply (IHe Sg0 G1 G2 U Tk s); [ exact Hh | exact H0 ] end.
     + match goal with [ Hh : has_fields ?Sg0 (G1 ++ U :: G2) rest ?Tsk |- _ ] =>
+        apply (IHe0 Sg0 G1 G2 U Tsk s); [ exact Hh | exact H0 ] end.
+  - (* MULTI-RETURN — Pt nil *) inversion H; subst. simpl. apply HTnil.
+  - (* Pt cons *) inversion H; subst. simpl. apply HTcons.
+    + match goal with [ Hh : has_type ?Sg0 (G1 ++ U :: G2) e ?Tk |- _ ] =>
+        apply (IHe Sg0 G1 G2 U Tk s); [ exact Hh | exact H0 ] end.
+    + match goal with [ Hh : has_types ?Sg0 (G1 ++ U :: G2) rest ?Tsk |- _ ] =>
         apply (IHe0 Sg0 G1 G2 U Tsk s); [ exact Hh | exact H0 ] end.
 Qed.
 
@@ -2832,7 +3206,9 @@ Proof.
   intros S G e T H.
   induction H using has_type_mind with
     (P0 := fun S G fs Ts (_ : has_fields S G fs Ts) =>
-       forall S', extends S' S -> has_fields S' G fs Ts);
+       forall S', extends S' S -> has_fields S' G fs Ts)
+    (P1 := fun S G es Ts (_ : has_types S G es Ts) =>
+       forall S', extends S' S -> has_types S' G es Ts);
     intros S' Hext.
   - apply TLit.
   - apply TVar; eassumption.
@@ -2853,8 +3229,15 @@ Proof.
   - eapply TDeref; apply IHhas_type; exact Hext.
   - eapply TAssign; [ apply IHhas_type1; exact Hext | apply IHhas_type2; exact Hext ].
   - apply TAnnot; apply IHhas_type; exact Hext.
+  - (* MULTI-RETURN — TRet *) apply TRet.
+    match goal with [ IH : forall _, extends _ _ -> has_types _ _ _ _ |- _ ] => apply IH; exact Hext end.
+  - (* TFst *) eapply TFst; apply IHhas_type; exact Hext.
+  - (* TFstNil *) eapply TFstNil; apply IHhas_type; exact Hext.
+  - (* TAppSpread *) eapply TAppSpread; [ apply IHhas_type1; exact Hext | apply IHhas_type2; exact Hext ].
   - apply HFnil.
   - apply HFcons; [ apply IHhas_type; exact Hext | apply IHhas_type0; exact Hext ].
+  - (* MULTI-RETURN — HTnil *) apply HTnil.
+  - (* HTcons *) apply HTcons; [ apply IHhas_type; exact Hext | apply IHhas_type0; exact Hext ].
 Qed.
 
 (* has_fields store-weakening — the field-list analogue, via [store_weakening]
@@ -3009,6 +3392,46 @@ Lemma map_fst_app_replace : forall (pre post : list (string * tm)) k e e',
   map fst (pre ++ (k, e) :: post) = map fst (pre ++ (k, e') :: post).
 Proof.
   intros pre post k e e'. rewrite !map_app. reflexivity.
+Qed.
+
+(* MULTI-RETURN — the same split/reassemble for a return-sequence's component list,
+   used by the [SRet] left-to-right reduction case of preservation. *)
+Lemma has_types_split : forall S G pre e post Ts,
+  has_types S G (pre ++ e :: post) Ts ->
+  exists Tpre Te Tpost,
+    Ts = Tpre ++ Te :: Tpost /\
+    has_types S G pre Tpre /\ has_type S G e Te /\ has_types S G post Tpost.
+Proof.
+  intros S G pre. induction pre as [ | e0 pre IH ]; intros e post Ts H; simpl in *.
+  - inversion H; subst. exists [], T, Ts0. simpl.
+    repeat split; [ apply HTnil | assumption | assumption ].
+  - inversion H; subst.
+    match goal with [ Hrec : has_types S G (pre ++ e :: post) ?Tss |- _ ] =>
+      destruct (IH e post Tss Hrec) as [Tpre [Te [Tpost [ETs [Hpre [He Hpost]]]]]] end.
+    exists (T :: Tpre), Te, Tpost. subst. simpl.
+    repeat split; [ apply HTcons; assumption | assumption | assumption ].
+Qed.
+
+Lemma has_types_app_replace : forall S G pre e' post Tpre Te Tpost,
+  has_types S G pre Tpre ->
+  has_type S G e' Te ->
+  has_types S G post Tpost ->
+  has_types S G (pre ++ e' :: post) (Tpre ++ Te :: Tpost).
+Proof.
+  intros S G pre e' post Tpre Te Tpost Hpre He' Hpost.
+  induction Hpre; simpl.
+  - apply HTcons; [ exact He' | exact Hpost ].
+  - apply HTcons; [ exact H | exact (IHHpre He' Hpost) ].
+Qed.
+
+(* store-weakening for a component list (the [SRet] case needs it for the
+   unchanged components after extending the store typing). *)
+Lemma has_types_store_weaken : forall S G es Ts,
+  has_types S G es Ts -> forall S', extends S' S -> has_types S' G es Ts.
+Proof.
+  intros S G es Ts H. induction H; intros S' Hext.
+  - apply HTnil.
+  - apply HTcons; [ eapply store_weakening; eassumption | apply IHhas_types; exact Hext ].
 Qed.
 
 (* PRESERVATION with the store (references formulation). By induction on the STEP
@@ -3166,6 +3589,19 @@ Proof.
                      | eapply store_weakening; [ exact H1 | exact Hext ]
                      | eapply store_weakening; [ exact H2 | exact Hext ] ]
       | exact Hsub ].
+  - (* MULTI-RETURN — SIfnMultiCons: a multivalue scrutinee TRUNCATES to its head
+       before the test. The branches are unchanged; the new scrutinee [v] (the head)
+       is typed via [inv_ret] on the old scrutinee. The result type is preserved
+       (the [tifn] result depends on the branch types, not the scrutinee type). *)
+    apply inv_ifn in Hty. destruct Hty as [U [T1 [T2 [Hc [H1 [H2 Hsub]]]]]].
+    apply inv_ret in Hc. destruct Hc as [Ts [Hts _]].
+    inversion Hts; subst.
+    exists S. split; [ apply extends_refl | split; [ | exact Hwt ] ].
+    eapply TSub; [ eapply TIfn; [ eassumption | exact H1 | exact H2 ] | exact Hsub ].
+  - (* SIfnMultiNil: the empty multivalue truncates to [nil]. *)
+    apply inv_ifn in Hty. destruct Hty as [U [T1 [T2 [Hc [H1 [H2 Hsub]]]]]].
+    exists S. split; [ apply extends_refl | split; [ | exact Hwt ] ].
+    eapply TSub; [ eapply TIfn; [ apply (TLit S [] LNil) | exact H1 | exact H2 ] | exact Hsub ].
   - (* SFix *)
     pose proof (inv_fix S [] T body T0 Hty) as [Hb Hsub].
     exists S. split; [ apply extends_refl | split; [ | exact Hwt ] ].
@@ -3270,6 +3706,79 @@ Proof.
     apply inv_annot in Hty. destruct Hty as [Hv Hsub].
     exists S. split; [ apply extends_refl | split; [ | exact Hwt ] ].
     eapply TSub; [ exact Hv | exact Hsub ].
+  (* MULTI-RETURN — preservation for the new reductions. *)
+  - (* SRet: step one component of the return-sequence (left-to-right). The
+       stepped component keeps its type (IH); the tuple type [BTuple Ts] is
+       preserved, and subsumes to [T0]. *)
+    apply inv_ret in Hty. destruct Hty as [Ts [Hts Hsub]].
+    apply has_types_split in Hts.
+    destruct Hts as [Tpre [Te [Tpost [ETs [Hpre [Hfe Hpost]]]]]]. subst Ts.
+    destruct (IHHstep e st e' st' eq_refl eq_refl Hwt Te Hfe)
+      as [S' [Hext [Hfe' Hwt']]].
+    exists S'. split; [ exact Hext | split; [ | exact Hwt' ] ].
+    eapply TSub; [ apply TRet | exact Hsub ].
+    eapply has_types_app_replace;
+      [ eapply has_types_store_weaken; [ exact Hpre | exact Hext ]
+      | exact Hfe'
+      | eapply has_types_store_weaken; [ exact Hpost | exact Hext ] ].
+  - (* SFstCons: TRUNCATION reduces [tfst (tret (v::rest))] to its head [v]. The
+       head's component type is the tuple's head type, which subsumes to [T0]. *)
+    apply inv_fst in Hty. destruct Hty as [[T0' [Ts [Htup Hsub]]] | [Htup _]].
+    + (* non-empty: the multivalue is at [BTuple (T0'::Ts)]; its head [v : T0']. *)
+      apply inv_ret in Htup. destruct Htup as [Tss [Hts Htsub]].
+      inversion Hts; subst.
+      (* [rsub (BTuple (T::Ts0)) (BTuple (T0'::Ts))] ⇒ head type [T = T0'] *)
+      apply rsub_tuple_super in Htsub. simpl in Htsub. injection Htsub as <- <-.
+      exists S. split; [ apply extends_refl | split; [ | exact Hwt ] ].
+      eapply TSub; [ eassumption | exact Hsub ].
+    + (* the empty-tuple inversion branch cannot apply: [tret (v::rest)] is not
+         [: BTuple []] (its component list is non-empty). *)
+      apply inv_ret in Htup. destruct Htup as [Tss [Hts Htsub]].
+      apply rsub_tuple_super in Htsub. simpl in Htsub. subst Tss.
+      inversion Hts.
+  - (* SFstNil: the empty multivalue truncates to [nil : ANil], subsumed to [T0]. *)
+    apply inv_fst in Hty. destruct Hty as [[T0' [Ts [Htup _]]] | [Htup Hsub]].
+    + (* the non-empty inversion cannot apply to [tret []] *)
+      apply inv_ret in Htup. destruct Htup as [Tss [Hts Htsub]].
+      apply rsub_tuple_super in Htsub. simpl in Htsub. subst Tss.
+      inversion Hts.
+    + exists S. split; [ apply extends_refl | split; [ | exact Hwt ] ].
+      eapply TSub; [ apply (TLit S [] LNil) | exact Hsub ].
+  - (* SFst1: congruence — step the multivalue subject. *)
+    apply inv_fst in Hty. destruct Hty as [[T0' [Ts [He Hsub]]] | [He Hsub]].
+    + destruct (IHHstep e st e' st' eq_refl eq_refl Hwt (BTuple (T0' :: Ts)) He)
+        as [S' [Hext [He' Hwt']]].
+      exists S'. split; [ exact Hext | split; [ | exact Hwt' ] ].
+      eapply TSub; [ eapply TFst; exact He' | exact Hsub ].
+    + destruct (IHHstep e st e' st' eq_refl eq_refl Hwt (BTuple []) He)
+        as [S' [Hext [He' Hwt']]].
+      exists S'. split; [ exact Hext | split; [ | exact Hwt' ] ].
+      eapply TSub; [ eapply TFstNil; exact He' | exact Hsub ].
+  - (* SAppSpread: SPREAD beta — [tappspread (\(BTuple Ts).body) mv] substitutes the
+       whole multivalue [mv] into [body]. Like [SBeta], using arrow inversion to get
+       the contravariant domain ([rsub (BTuple Ts) T] makes [mv : T]) and covariant
+       codomain ([rsub Tb B] then [rsub B T0]). *)
+    apply inv_appspread in Hty. destruct Hty as [Ts [B0 [Hg [Ha Hsub]]]].
+    apply inv_lam in Hg. destruct Hg as [Tb [Hb HsubArr]].
+    apply rsub_arrow_inv in HsubArr. destruct HsubArr as [HsA HsB].
+    exists S. split; [ apply extends_refl | split; [ | exact Hwt ] ].
+    assert (HvTl : has_type S [] mv T) by (eapply TSub; [ exact Ha | exact HsA ]).
+    eapply TSub; [ | eapply RsTrans; [ exact HsB | exact Hsub ] ].
+    apply (subst_top S T [] body Tb mv); [ exact Hb | exact HvTl ].
+  - (* SAppSpread1: congruence — step the consumer. *)
+    apply inv_appspread in Hty. destruct Hty as [Ts [B0 [Hg [Ha Hsub]]]].
+    destruct (IHHstep g st g' st' eq_refl eq_refl Hwt (BArrow (BTuple Ts) B0) Hg)
+      as [S' [Hext [Hg' Hwt']]].
+    exists S'. split; [ exact Hext | split; [ | exact Hwt' ] ].
+    eapply TSub; [ eapply TAppSpread;
+      [ exact Hg' | eapply store_weakening; [ exact Ha | exact Hext ] ] | exact Hsub ].
+  - (* SAppSpread2: congruence — step the multivalue argument. *)
+    apply inv_appspread in Hty. destruct Hty as [Ts [B0 [Hg [Ha Hsub]]]].
+    destruct (IHHstep a st a' st' eq_refl eq_refl Hwt (BTuple Ts) Ha)
+      as [S' [Hext [Ha' Hwt']]].
+    exists S'. split; [ exact Hext | split; [ | exact Hwt' ] ].
+    eapply TSub; [ eapply TAppSpread;
+      [ eapply store_weakening; [ exact Hg | exact Hext ] | exact Ha' ] | exact Hsub ].
 Qed.
 
 (* ===========================================================================
@@ -3301,6 +3810,46 @@ Proof.
       split; [ reflexivity | split; [ apply Forall_nil | exists e', st'; exact He' ] ].
 Qed.
 
+(* MULTI-RETURN — the component-list analogue for a return-sequence: either all
+   components are values (so [tret es] is a value via [VRet]) or the first
+   non-value component steps (so [tret es] steps via [SRet]). *)
+Lemma tret_progress : forall S es Ts st,
+  has_types S [] es Ts ->
+  (forall e, In e es -> value e \/ (exists e' st', step (e, st) (e', st'))) ->
+  Forall value es \/
+  (exists pre e post, es = pre ++ e :: post /\
+     Forall value pre /\ exists e' st', step (e, st) (e', st')).
+Proof.
+  intros S es Ts st Hf. induction Hf; intros Hall.
+  - left. apply Forall_nil.
+  - destruct (Hall e (or_introl eq_refl)) as [Hv | [e' [st' He']]].
+    + destruct IHHf as [Hvs | [pre [e2 [post [Efs [Hpre Hstep]]]]]].
+      * intros e0 Hin. apply Hall. right; exact Hin.
+      * left. apply Forall_cons; [ exact Hv | exact Hvs ].
+      * right. exists (e :: pre), e2, post.
+        simpl. rewrite Efs. split; [ reflexivity | ].
+        split; [ apply Forall_cons; [ exact Hv | exact Hpre ] | exact Hstep ].
+    + right. exists [], e, es. simpl.
+      split; [ reflexivity | split; [ apply Forall_nil | exists e', st'; exact He' ] ].
+Qed.
+
+(* canonical form for a TUPLE-typed value: a value of type [BTuple Ts] is a
+   return-sequence [tret es]. (Needed by [progress]'s [tfst]/[tappspread] cases.) *)
+Lemma canon_tuple : forall S e Ts,
+  has_type S [] e (BTuple Ts) -> value e -> exists es, e = tret es.
+Proof.
+  intros S e Ts Hty Hv. destruct Hv as [l | T b | fs Hfs | n | es Hes].
+  - apply inv_lit in Hty. destruct l; simpl in Hty;
+      exfalso; eapply rsub_atom_not_tuple; eauto.
+  - apply inv_lam in Hty. destruct Hty as [Tb [_ Hsub]].
+    exfalso. eapply rsub_arrow_not_tuple; eauto.
+  - apply inv_rec in Hty. destruct Hty as [Ts0 [_ [_ Hsub]]].
+    exfalso. eapply rsub_rec_not_tuple; eauto.
+  - apply inv_loc in Hty. destruct Hty as [U [_ Hsub]].
+    exfalso. eapply rsub_ref_not_tuple; eauto.
+  - exists es; reflexivity.
+Qed.
+
 (* PROGRESS with the store. The store hypothesis [store_well_typed S st] is used in
    the [tderef]/[tassign] location cases (a well-typed location is IN RANGE, so the
    read/write step fires). [talloc] of a value always steps. *)
@@ -3317,7 +3866,10 @@ Proof.
   induction H using has_type_mind with
     (P0 := fun S G fs Ts (_ : has_fields S G fs Ts) =>
        G = [] -> forall st, store_well_typed S st ->
-         forall ke, In ke fs -> value (snd ke) \/ (exists e' st', step (snd ke, st) (e', st')));
+         forall ke, In ke fs -> value (snd ke) \/ (exists e' st', step (snd ke, st) (e', st')))
+    (P1 := fun S G es Ts (_ : has_types S G es Ts) =>
+       G = [] -> forall st, store_well_typed S st ->
+         forall e, In e es -> value e \/ (exists e' st', step (e, st) (e', st')));
     intros EG; subst; try (intros st Hwt; left; constructor; fail).
   - (* TVar: no closed var *) intros st Hwt. destruct n; simpl in e; discriminate e.
   - (* TPrimArith *) intros st Hwt. right.
@@ -3406,9 +3958,13 @@ Proof.
     | [ IHc : [] = [] -> forall st, _ -> value c \/ _ |- _ ] =>
         destruct (IHc eq_refl st Hwt) as [Hvc | [c' [stc Hc']]]
     end.
-    + destruct (value_truthy_or_falsy c Hvc) as [Htr | Hfa].
+    + destruct (value_truthy_or_falsy c Hvc) as [Htr | [Hfa | [es Hmulti]]].
       * exists (subst 0 c e1), st. apply SIfnTrue; assumption.
       * exists (subst 0 c e2), st. apply SIfnFalse; assumption.
+      * (* MULTI-RETURN — a multivalue scrutinee TRUNCATES first ([SIfnMulti]). *)
+        subst c. destruct es as [ | v rest ].
+        -- exists (tifn (tlit LNil) e1 e2), st. apply SIfnMultiNil.
+        -- exists (tifn v e1 e2), st. apply SIfnMultiCons. exact Hvc.
     + exists (tifn c' e1 e2), stc. apply SIfn1. exact Hc'.
   - (* TFix: always steps *)
     intros st Hwt. right. exists (subst 0 (tfix T body) body), st. apply SFix.
@@ -3451,6 +4007,51 @@ Proof.
       destruct (IH eq_refl st Hwt) as [Hv | [e' [st' He']]] end.
     + exists e, st. apply SAnnotV. exact Hv.
     + exists (tannot T e'), st'. apply SAnnot1. exact He'.
+  - (* MULTI-RETURN — TRet: either all components are values (so the multivalue is
+       a VALUE, [VRet]) or the first non-value steps ([SRet]). *)
+    intros st Hwt.
+    match goal with [ Hts0 : has_types S [] es Ts, IH : [] = [] -> _ |- _ ] =>
+      destruct (tret_progress S es Ts st Hts0 (IH eq_refl st Hwt)) as
+        [Hvs | [pre [e [post [Ees [Hpre [e' [st' He']]]]]]]] end.
+    + left. apply VRet. exact Hvs.
+    + right. subst es. exists (tret (pre ++ e' :: post)), st'.
+      apply SRet; [ exact Hpre | exact He' ].
+  - (* TFst: subject value ⇒ a multivalue (canon_tuple) ⇒ truncate (SFstCons /
+       SFstNil); else congruence (SFst1). *)
+    intros st Hwt. right.
+    match goal with [ IHe0 : [] = [] -> forall st, _ -> value e \/ _ |- _ ] =>
+      destruct (IHe0 eq_refl st Hwt) as [Hve | [e'' [st'' He'']]] end.
+    + match goal with [ He : has_type S [] e (BTuple (T :: Ts)) |- _ ] =>
+        destruct (canon_tuple S e (T :: Ts) He Hve) as [es Ees] end. subst e.
+      destruct es as [ | v rest ].
+      * (* a value [tret []] of type [BTuple (T::Ts)] is impossible (length); but we
+           need only that it steps: an empty multivalue truncates to nil. *)
+        exists (tlit LNil), st. apply SFstNil.
+      * exists v, st. apply SFstCons. exact Hve.
+    + exists (tfst e''), st''. apply SFst1. exact He''.
+  - (* TFstNil: subject value ⇒ a multivalue ⇒ truncate; else congruence. *)
+    intros st Hwt. right.
+    match goal with [ IHe0 : [] = [] -> forall st, _ -> value e \/ _ |- _ ] =>
+      destruct (IHe0 eq_refl st Hwt) as [Hve | [e'' [st'' He'']]] end.
+    + match goal with [ He : has_type S [] e (BTuple []) |- _ ] =>
+        destruct (canon_tuple S e [] He Hve) as [es Ees] end. subst e.
+      destruct es as [ | v rest ].
+      * exists (tlit LNil), st. apply SFstNil.
+      * exists v, st. apply SFstCons. exact Hve.
+    + exists (tfst e''), st''. apply SFst1. exact He''.
+  - (* TAppSpread: consumer value ⇒ a lambda (canon_arrow) ⇒ SPREAD beta
+       (SAppSpread, the arg need not be a value — the whole multivalue is spliced);
+       else congruence (SAppSpread1 / SAppSpread2). *)
+    intros st Hwt. right.
+    match goal with [ IHg : [] = [] -> forall st, _ -> value g \/ _ |- _ ] =>
+      destruct (IHg eq_refl st Hwt) as [Hvg | [g' [stg Hg']]] end.
+    + match goal with [ IHa : [] = [] -> forall st, _ -> value a \/ _ |- _ ] =>
+        destruct (IHa eq_refl st Hwt) as [Hva | [a' [sta Ha']]] end.
+      * match goal with [ Hg : has_type S [] g (BArrow (BTuple Ts) B) |- _ ] =>
+          destruct (canon_arrow S g (BTuple Ts) B Hg Hvg) as [Tl [body Eg]] end. subst g.
+        exists (subst 0 a body), st. apply SAppSpread. exact Hva.
+      * exists (tappspread g a'), sta. apply SAppSpread2; assumption.
+    + exists (tappspread g' a), stg. apply SAppSpread1. exact Hg'.
   - (* P0 HFnil *) intros st Hwt ke [].
   - (* P0 HFcons *) intros st Hwt ke Hin. simpl in Hin. destruct Hin as [Heq | Hin].
     + subst ke.
@@ -3458,6 +4059,13 @@ Proof.
         apply (IH eq_refl st Hwt) end.
     + match goal with [ IH : [] = [] -> forall st, _ -> forall _, In _ ?l -> _ |- _ ] =>
         apply (IH eq_refl st Hwt ke Hin) end.
+  - (* MULTI-RETURN — P1 HTnil *) intros st Hwt e [].
+  - (* P1 HTcons *) intros st Hwt e0 Hin. simpl in Hin. destruct Hin as [Heq | Hin].
+    + subst e0.
+      match goal with [ IH : [] = [] -> forall st, _ -> value e \/ _ |- _ ] =>
+        apply (IH eq_refl st Hwt) end.
+    + match goal with [ IH : [] = [] -> forall st, _ -> forall _, In _ ?l -> _ |- _ ] =>
+        apply (IH eq_refl st Hwt e0 Hin) end.
 Qed.
 
 (* ===========================================================================
@@ -3707,7 +4315,7 @@ Proof.
   apply (truthy_narrows [ BAtom AInt ] (tloc 0) (BRef (BAtom AInt))).
   - apply TLoc. reflexivity.
   - apply VLoc.
-  - intros [Hb | Hn]; discriminate.
+  - split; [ intros [Hb | Hn]; discriminate | intros [es Hm]; discriminate ].
 Qed.
 
 (* and a tag-test on a location narrows it to [BAnyRef] (= tag_type TgRef). *)
@@ -4299,7 +4907,9 @@ Proof.
   induction e using tm_rect_strong with
     (Pl := fun fs => forall ss kk,
        map (fun ke => (fst ke, subst kk ss (snd ke)))
-           (map (fun ke => (fst ke, lift 1 kk (snd ke))) fs) = fs);
+           (map (fun ke => (fst ke, lift 1 kk (snd ke))) fs) = fs)
+    (Pt := fun es => forall ss kk,
+       map (subst kk ss) (map (lift 1 kk) es) = es);
     intros ss kk; simpl; try reflexivity.
   - (* tvar n: case n<k unchanged, n>=k shifted up by 1 then subst at k cancels *)
     destruct (Nat.ltb_spec n kk) as [Hlt | Hge]; simpl.
@@ -4320,7 +4930,11 @@ Proof.
   - (* tderef *) rewrite IHe; reflexivity.
   - (* tassign *) rewrite IHe1, IHe2; reflexivity.
   - (* tannot *) rewrite IHe; reflexivity.
+  - (* MULTI-RETURN — tret *) f_equal. apply IHe.
+  - (* tfst *) rewrite IHe; reflexivity.
+  - (* tappspread *) rewrite IHe1, IHe2; reflexivity.
   - (* Pl cons *) rewrite IHe, IHe0; reflexivity.
+  - (* MULTI-RETURN — Pt cons *) rewrite IHe, IHe0; reflexivity.
 Qed.
 
 (* TYPING the sequencing form: [a : Ta], [b : Tb] ⇒ [tseq a b : Tb]. The discard-
@@ -4737,6 +5351,125 @@ Proof.
 Qed.
 
 (* ===========================================================================
+   MULTI-RETURN — THE PAYOFF.
+
+   A real multi-return function, and the CONTEXTUAL ADJUSTMENT machine-checked:
+   the SAME multi-return call is TRUNCATED to its first value in one position and
+   SPREAD (all values) in another.
+
+   The function:  f := λx:Int. return x, true   :  Int -> (Int, Bool)
+   It returns a SEQUENCE of TWO values — an Int and a Bool — so its result type is
+   the TUPLE [BTuple [AInt; ABool]] (NOT a single value).
+
+   The call:      f 3   :  (Int, Bool)   — a multivalue.
+
+   THE CONTEXTUAL ADJUSTMENT (the crux), on the SAME [f 3]:
+
+   1. TRUNCATION (most positions):  [tfst (f 3)]  binds the FIRST return value.
+      Type:  AInt  (the head — NOT the tuple [(Int,Bool)]).  Steps:  ⤳* 3.
+      This is [local x = f()]: x : Int, the first value, extras discarded.
+
+   2. LAST-POSITION SPREAD:  [g (f 3)]  with  g : (Int, Bool) -> Int  spreads ALL
+      of [f 3]'s values into [g] (the known-arity consumer receives the whole
+      sequence).  Type:  AInt (g's result).  Steps:  ⤳* 0.
+      This is [g(f())] with f() last: g receives BOTH values.
+
+   Same [f 3]; truncated in (1), spread in (2) — the distinctive Lua feature,
+   machine-checked.
+   =========================================================================== *)
+
+(* the multi-return function f := λx:Int. (return x, true) : Int -> (Int, Bool). *)
+Definition mr_f : tm :=
+  tlam (BAtom AInt) (tret [ tvar 0 ; tlit (LBool true) ]).
+
+(* the tuple type [(Int, Bool)] f returns. *)
+Definition mr_tup : BTy := BTuple [ BAtom AInt ; BAtom ABool ].
+
+Example mr_f_typed : has_type [] [] mr_f (BArrow (BAtom AInt) mr_tup).
+Proof.
+  unfold mr_f, mr_tup. apply TLam. apply TRet.
+  apply HTcons; [ apply TVar; reflexivity | ].
+  apply HTcons; [ apply TLit | apply HTnil ].
+Qed.
+
+(* the multi-return CALL [f 3] : (Int, Bool) — a multivalue. *)
+Definition mr_call : tm := tapp mr_f (tlit (LInt 3)).
+
+Example mr_call_typed : has_type [] [] mr_call mr_tup.
+Proof.
+  unfold mr_call, mr_tup. eapply TApp; [ apply mr_f_typed | apply TLit ].
+Qed.
+
+(* ---- (1) TRUNCATION: [tfst (f 3)] binds the FIRST value — type [AInt], NOT the
+   tuple. The contextual adjustment that discards the extra (Bool) return. *)
+Example mr_truncate_typed : has_type [] [] (tfst mr_call) (BAtom AInt).
+Proof.
+  (* [f 3 : (Int, Bool) = BTuple (AInt :: [ABool])], truncates to head [AInt]. *)
+  eapply TFst. apply mr_call_typed.
+Qed.
+
+(* The TRUNCATION step: the call reduces to the multivalue, then [tfst] takes the
+   head [3] — the first return value (the [Bool] return is discarded). *)
+Example mr_truncate_steps : forall st,
+  multistep (tfst mr_call, st) (tlit (LInt 3), st).
+Proof.
+  intro st. unfold mr_call, mr_f.
+  (* beta: (λx:Int. (return x,true)) 3 ⤳ (return 3, true) — a multivalue value *)
+  eapply MSstep. { apply SFst1. apply SBeta. apply VLit. }
+  simpl.
+  (* truncate the multivalue [return 3, true] to its head [3] *)
+  eapply MSstep.
+  { apply SFstCons. apply VRet. apply Forall_cons; [ apply VLit | ].
+    apply Forall_cons; [ apply VLit | apply Forall_nil ]. }
+  apply MSrefl.
+Qed.
+
+(* ---- (2) LAST-POSITION SPREAD: [g (f 3)] with g : (Int,Bool) -> Int spreads ALL
+   of [f 3]'s values into g (the consumer binds the whole sequence). Result [AInt].
+   The SAME [f 3] — spread here, truncated above. *)
+Definition mr_g : tm := tlam mr_tup (tlit (LInt 0)).
+
+Example mr_g_typed : has_type [] [] mr_g (BArrow mr_tup (BAtom AInt)).
+Proof. unfold mr_g. apply TLam. apply TLit. Qed.
+
+Example mr_spread_typed : has_type [] [] (tappspread mr_g mr_call) (BAtom AInt).
+Proof.
+  (* g : (Int,Bool) -> Int ; the multivalue arg [f 3 : (Int,Bool)] spreads whole. *)
+  eapply TAppSpread; [ apply mr_g_typed | apply mr_call_typed ].
+Qed.
+
+(* The SPREAD step: the call reduces to the multivalue [return 3, true], then the
+   whole sequence is spliced into g (g binds the tuple), and g returns 0. *)
+Example mr_spread_steps : forall st,
+  multistep (tappspread mr_g mr_call, st) (tlit (LInt 0), st).
+Proof.
+  intro st. unfold mr_call, mr_f, mr_g.
+  (* reduce the multivalue argument: beta the inner call to [return 3, true] *)
+  eapply MSstep. { apply SAppSpread2; [ apply VLam | apply SBeta; apply VLit ]. }
+  simpl.
+  (* spread: substitute the whole multivalue into g's body (body is the literal 0,
+     ignoring the bound tuple) ⤳ 0 *)
+  eapply MSstep.
+  { apply SAppSpread. apply VRet. apply Forall_cons; [ apply VLit | ].
+    apply Forall_cons; [ apply VLit | apply Forall_nil ]. }
+  simpl. apply MSrefl.
+Qed.
+
+(* (The EXECUTABLE-checker view of the same adjustment — [synth (tfst mr_call) =
+   Some AInt] vs [synth (tappspread mr_g mr_call)] returning g's result — is
+   machine-checked by [Compute]/[reflexivity] in check.v, where [synth] lives.) *)
+
+(* progress + preservation instantiated on the payoff terms (smoke test that the
+   multi-return cases of the soundness theorems actually fire on a real example). *)
+Example mr_truncate_progress :
+  value (tfst mr_call) \/ exists e' st', step (tfst mr_call, []) (e', st').
+Proof. apply (progress [] (tfst mr_call) (BAtom AInt) [] mr_truncate_typed store_well_typed_nil). Qed.
+
+Example mr_spread_progress :
+  value (tappspread mr_g mr_call) \/ exists e' st', step (tappspread mr_g mr_call, []) (e', st').
+Proof. apply (progress [] (tappspread mr_g mr_call) (BAtom AInt) [] mr_spread_typed store_well_typed_nil). Qed.
+
+(* ===========================================================================
    ASSUMPTION AUDIT — closed under the global context.
    =========================================================================== *)
 Print Assumptions progress.
@@ -4791,3 +5524,13 @@ Print Assumptions if_mut_false_steps.
 Print Assumptions while_true_typed.
 Print Assumptions while_true_diverges.
 Print Assumptions while_true_not_stuck.
+(* MULTI-RETURN — the payoff: a multi-return function, truncation-to-first and
+   last-position spread of the SAME call (typed + stepped), and progress on both. *)
+Print Assumptions mr_f_typed.
+Print Assumptions mr_call_typed.
+Print Assumptions mr_truncate_typed.
+Print Assumptions mr_truncate_steps.
+Print Assumptions mr_spread_typed.
+Print Assumptions mr_spread_steps.
+Print Assumptions mr_truncate_progress.
+Print Assumptions mr_spread_progress.

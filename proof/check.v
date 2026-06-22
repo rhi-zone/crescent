@@ -139,6 +139,22 @@ Fixpoint synth_fields (sy : tm -> option BTy) (fs : list (string * tm))
       end
   end.
 
+(* MULTI-RETURN — synthesize a return-sequence's component types positionally,
+   assembling the [BTuple] component list (parallel to [synth_fields]). *)
+Fixpoint synth_seq (sy : tm -> option BTy) (es : list tm) : option (list BTy) :=
+  match es with
+  | [] => Some []
+  | e0 :: rest =>
+      match sy e0 with
+      | Some T =>
+          match synth_seq sy rest with
+          | Some Ts => Some (T :: Ts)
+          | None => None
+          end
+      | None => None
+      end
+  end.
+
 (* [synth] is Sigma-threaded (passed to every recursive call) for a Sigma-general
    soundness statement. Source terms carry no locations ([tloc] arises only at run
    time from [talloc]); a source [tloc] is REJECTED ([None]). The three reference
@@ -284,6 +300,29 @@ Fixpoint synth (Sig : list BTy) (G : list BTy) (e : tm) {struct e} : option BTy 
       end
   (* a source location is rejected (locations are not source syntax). *)
   | tloc _ => None
+  (* MULTI-RETURN — synthesize the component types into a [BTuple]; truncate a
+     multivalue to its head type (empty ⇒ [ANil]); spread checks the arg against
+     the consumer's tuple domain via the mode switch. *)
+  | tret es =>
+      match synth_seq (synth Sig G) es with
+      | Some Ts => Some (BTuple Ts)
+      | None => None
+      end
+  | tfst e0 =>
+      match synth Sig G e0 with
+      | Some (BTuple (T :: _)) => Some T
+      | Some (BTuple []) => Some (BAtom ANil)
+      | _ => None
+      end
+  | tappspread g a =>
+      match synth Sig G g with
+      | Some (BArrow (BTuple Ts) B) =>
+          match synth Sig G a with
+          | Some Sa => if decide_ssub Sa (BTuple Ts) then Some B else None
+          | None => None
+          end
+      | _ => None
+      end
   end.
 
 (* [check] subsumes along the reference-aware [decide_rsub] (the unified relation),
@@ -321,7 +360,8 @@ Theorem synth_sound : forall e Sig G T, synth Sig G e = Some T -> has_type Sig G
 Proof.
   intro e.
   induction e using tm_rect_strong with
-    (Pl := fun fs => forall Sig G Ts, synth_fields (synth Sig G) fs = Some Ts -> has_fields Sig G fs Ts);
+    (Pl := fun fs => forall Sig G Ts, synth_fields (synth Sig G) fs = Some Ts -> has_fields Sig G fs Ts)
+    (Pt := fun es => forall Sig G Ts, synth_seq (synth Sig G) es = Some Ts -> has_types Sig G es Ts);
     intros.
   - (* tlit *) simpl in H. injection H as <-. apply TLit.
   - (* tvar *) simpl in H. apply TVar. exact H.
@@ -344,7 +384,7 @@ Proof.
     injection H as <-. apply TLam. apply IHe. exact Hb.
   - (* tapp *) simpl in H.
     destruct (synth Sig G e1) as [ Sf | ] eqn:Hf; [ | discriminate ].
-    destruct Sf as [ | | | | | | | A B | | ]; try discriminate H.
+    destruct Sf as [ | | | | | | | A B | | | ]; try discriminate H.
     destruct (synth Sig G e2) as [ Sa | ] eqn:Ha; [ | discriminate ].
     destruct (decide_ssub Sa A) eqn:Hd; [ | discriminate ].
     injection H as <-.
@@ -361,7 +401,7 @@ Proof.
     + apply keys_nodup_NoDup. exact Hnd.
   - (* tproj *) simpl in H.
     destruct (synth Sig G e) as [ Se | ] eqn:He; [ | discriminate ].
-    destruct Se as [ | | | | | | fs | | | ]; try discriminate H.
+    destruct Se as [ | | | | | | fs | | | | ]; try discriminate H.
     eapply TProj.
     + apply IHe. exact He.
     + apply flook_In. exact H.
@@ -405,12 +445,12 @@ Proof.
   - (* tderef: synth to BRef U ⇒ U *)
     simpl in H.
     destruct (synth Sig G e) as [ Se | ] eqn:He; [ | discriminate ].
-    destruct Se as [ | | | | | | | | U | ]; try discriminate H.
+    destruct Se as [ | | | | | | | | U | | ]; try discriminate H.
     injection H as <-. eapply TDeref. apply IHe; exact He.
   - (* tassign: cell synth to BRef U, value synth to Sv, gate decide_rsub Sv U ⇒ nil *)
     simpl in H.
     destruct (synth Sig G e1) as [ Sr | ] eqn:Hr; [ | discriminate ].
-    destruct Sr as [ | | | | | | | | U | ]; try discriminate H.
+    destruct Sr as [ | | | | | | | | U | | ]; try discriminate H.
     destruct (synth Sig G e2) as [ Sv | ] eqn:Hv; [ | discriminate ].
     destruct (decide_rsub Sv U) eqn:Hd; [ | discriminate ].
     injection H as <-.
@@ -424,11 +464,40 @@ Proof.
     destruct (decide_rsub Se T) eqn:Hd; [ | discriminate ].
     injection H as <-. apply TAnnot.
     eapply TSub; [ apply IHe; exact He | apply decide_rsub_sound; exact Hd ].
+  - (* MULTI-RETURN — tret: synthesize the components into [BTuple Ts] (Pt IH). *)
+    simpl in H.
+    destruct (synth_seq (synth Sig G) es) as [ Ts | ] eqn:Hes; [ | discriminate ].
+    injection H as <-. apply TRet. apply IHe. exact Hes.
+  - (* tfst: the subject synths to a tuple; head type (or [ANil] for empty). *)
+    simpl in H.
+    destruct (synth Sig G e) as [ Se | ] eqn:He; [ | discriminate ].
+    destruct Se as [ | | | | | | | | | | Ts ]; try discriminate H.
+    destruct Ts as [ | T0 Tr ].
+    + injection H as <-. eapply TFstNil. apply IHe. exact He.
+    + injection H as <-. eapply TFst. apply IHe. exact He.
+  - (* tappspread: consumer synths to [BArrow (BTuple Ts) B]; arg checked against
+       the tuple domain via the mode switch [decide_ssub]. *)
+    simpl in H.
+    destruct (synth Sig G e1) as [ Sg | ] eqn:Hg; [ | discriminate ].
+    destruct Sg as [ | | | | | | | dom B | | | ]; try discriminate H.
+    destruct dom as [ | | | | | | | | | | Ts ]; try discriminate H.
+    destruct (synth Sig G e2) as [ Sa | ] eqn:Ha; [ | discriminate ].
+    destruct (decide_ssub Sa (BTuple Ts)) eqn:Hd; [ | discriminate ].
+    injection H as <-. eapply TAppSpread.
+    + apply IHe1. exact Hg.
+    + eapply TSub; [ apply IHe2; exact Ha | apply RsSsub; apply decide_ssub_sound; exact Hd ].
   - (* Pl [] *) simpl in H. injection H as <-. apply HFnil.
   - (* Pl cons *) simpl in H.
     destruct (synth Sig G e) as [ Te | ] eqn:He; [ | discriminate ].
     destruct (synth_fields (synth Sig G) rest) as [ Tr | ] eqn:Hr; [ | discriminate ].
     injection H as <-. apply HFcons.
+    + apply IHe. exact He.
+    + apply IHe0. exact Hr.
+  - (* MULTI-RETURN — Pt [] *) simpl in H. injection H as <-. apply HTnil.
+  - (* Pt cons *) simpl in H.
+    destruct (synth Sig G e) as [ Te | ] eqn:He; [ | discriminate ].
+    destruct (synth_seq (synth Sig G) rest) as [ Tr | ] eqn:Hr; [ | discriminate ].
+    injection H as <-. apply HTcons.
     + apply IHe. exact He.
     + apply IHe0. exact Hr.
 Qed.
@@ -486,7 +555,10 @@ Proof.
   induction H using has_type_mind with
     (P0 := fun Sig G fs Ts (_ : has_fields Sig G fs Ts) =>
        forall G1 A G2 A', G = G1 ++ A :: G2 -> rsub A' A ->
-         has_fields Sig (G1 ++ A' :: G2) fs Ts);
+         has_fields Sig (G1 ++ A' :: G2) fs Ts)
+    (P1 := fun Sig G es Ts (_ : has_types Sig G es Ts) =>
+       forall G1 A G2 A', G = G1 ++ A :: G2 -> rsub A' A ->
+         has_types Sig (G1 ++ A' :: G2) es Ts);
     intros; subst.
   - apply TLit.
   - (* TVar *)
@@ -550,8 +622,21 @@ Proof.
       (reflexivity || eassumption).
   - (* TAnnot *) apply TAnnot.
     eapply (IHhas_type G1 _ G2 A'); [ reflexivity | eassumption ].
+  - (* MULTI-RETURN — TRet *) apply TRet.
+    eapply (IHhas_type G1 _ G2 A'); [ reflexivity | eassumption ].
+  - (* TFst *) eapply TFst.
+    eapply (IHhas_type G1 _ G2 A'); [ reflexivity | eassumption ].
+  - (* TFstNil *) eapply TFstNil.
+    eapply (IHhas_type G1 _ G2 A'); [ reflexivity | eassumption ].
+  - (* TAppSpread *) eapply TAppSpread;
+      [ eapply (IHhas_type1 G1 _ G2 A') | eapply (IHhas_type2 G1 _ G2 A') ];
+      (reflexivity || eassumption).
   - apply HFnil.
   - apply HFcons;
+      [ eapply (IHhas_type G1 _ G2 A') | eapply (IHhas_type0 G1 _ G2 A') ];
+      (reflexivity || eassumption).
+  - (* MULTI-RETURN — HTnil *) apply HTnil.
+  - (* HTcons *) apply HTcons;
       [ eapply (IHhas_type G1 _ G2 A') | eapply (IHhas_type0 G1 _ G2 A') ];
       (reflexivity || eassumption).
 Qed.
@@ -612,6 +697,11 @@ Fixpoint proj_free (e : tm) : Prop :=
   | tassign r e0 => proj_free r /\ proj_free e0
   | tannot _ e0 => proj_free e0
   | tloc _ => False
+  (* MULTI-RETURN: projection-free iff the components / operands are. *)
+  | tret es => (fix pt (xs : list tm) : Prop :=
+                  match xs with [] => True | e0 :: rest => proj_free e0 /\ pt rest end) es
+  | tfst e0 => proj_free e0
+  | tappspread g a => proj_free g /\ proj_free a
   end.
 
 (* ===========================================================================
@@ -955,12 +1045,52 @@ Example sumloop_ann_sound : forall n,
 Proof. intro n. apply check_sound. reflexivity. Qed.
 
 (* ===========================================================================
+   MULTI-RETURN — THE PAYOFF via the EXECUTABLE CHECKER. The SAME multi-return
+   call synthesizes the TUPLE; under [tfst] it synthesizes the FIRST type
+   (truncation); as the spread argument of a tuple-consuming [g] it synthesizes
+   [g]'s result (spread, the consumer received both values). The contextual
+   adjustment is decided by [Compute]/[reflexivity], and routed back to a real
+   declarative typing by [synth_sound].
+   =========================================================================== *)
+Definition mr_f : tm :=
+  tlam (BAtom AInt) (tret [ tvar 0 ; tlit (LBool true) ]).
+Definition mr_tup : BTy := BTuple [ BAtom AInt ; BAtom ABool ].
+Definition mr_call : tm := tapp mr_f (tlit (LInt 3)).
+Definition mr_g : tm := tlam mr_tup (tlit (LInt 0)).
+
+(* the call synthesizes the 2-tuple [(Int, Bool)] — a multivalue type. *)
+Example mr_call_synths_tuple : synth [] [] mr_call = Some mr_tup.
+Proof. reflexivity. Qed.
+
+(* TRUNCATION: under [tfst] the SAME call synthesizes the FIRST type [AInt]
+   (NOT the tuple) — the contextual adjustment that discards the extra return. *)
+Example mr_truncate_synths_first : synth [] [] (tfst mr_call) = Some (BAtom AInt).
+Proof. reflexivity. Qed.
+
+(* SPREAD: as the spread arg of [g : (Int,Bool) -> Int], the SAME call makes the
+   whole application synthesize [g]'s result [AInt] — g received BOTH values. *)
+Example mr_spread_synths_result : synth [] [] (tappspread mr_g mr_call) = Some (BAtom AInt).
+Proof. reflexivity. Qed.
+
+(* and both adjustments route to REAL declarative typings via [synth_sound]. *)
+Example mr_truncate_sound : has_type [] [] (tfst mr_call) (BAtom AInt).
+Proof. apply synth_sound. reflexivity. Qed.
+Example mr_spread_sound : has_type [] [] (tappspread mr_g mr_call) (BAtom AInt).
+Proof. apply synth_sound. reflexivity. Qed.
+
+(* ===========================================================================
    ASSUMPTION AUDIT — closed under the global context (no axioms / Admitted /
    Classical). The soundness theorems are the load-bearing point; the
    principality (tractable completeness) theorem is audited alongside.
    =========================================================================== *)
 Print Assumptions synth_sound.
 Print Assumptions check_sound.
+(* MULTI-RETURN — the executable-checker payoff. *)
+Print Assumptions mr_call_synths_tuple.
+Print Assumptions mr_truncate_synths_first.
+Print Assumptions mr_spread_synths_result.
+Print Assumptions mr_truncate_sound.
+Print Assumptions mr_spread_sound.
 Print Assumptions narrowing.
 Print Assumptions compute_typetest_payoff_sound.
 Print Assumptions compute_typetest_payoff_synth.

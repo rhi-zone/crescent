@@ -2107,3 +2107,120 @@ axioms, no `Admitted`, no `Classical`. Whole chain compiles
 double-division semantics; the value model abstracts the exact double, so soundness
 needs only "the result is a number", but exact-`/`-faithfulness to real Lua remains
 a deferred reality-bridge gap (NOT closed by this increment).
+
+## Increment 22 — MULTI-RETURN VALUES: value-sequences + contextual adjustment (truncation + last-position spread)
+
+Lua's distinctive feature: a function returns a **sequence** of values, **adjusted
+by the syntactic context of the call**. The hard part is the contextual
+ADJUSTMENT, not the multiple values. This increment lands the **return-side**
+multivalue + the two core adjustments — **truncation** (most positions) and
+**last-position spread** (known arity) — machine-checked, all `Qed`. Modifies
+`proof/subtype.v` (the sequence-type substrate), `proof/typing.v` (term forms,
+op-sem, progress/preservation), `proof/check.v` (synth/check). `proof/ssub.v` is
+threaded (tuples are reflexive-only leaves). Build order unchanged.
+
+### The multivalue MODEL (the standard model)
+
+- **Sequence/tuple TYPE — a new `BTy` former in `subtype.v`.** `BTuple : list BTy
+  -> BTy`. `BTuple [T1;…;Tk]` is the type of a finite **POSITIONAL, EXACT-LENGTH**
+  value-sequence (NOT structural width/depth like records). Value domain gains
+  `VTup : list V -> V` (positive occurrence, well-founded; the hand-rolled
+  `V_rect_strong` extended with a third list-property `Pt`). `denote (BTuple Ts)
+  (VTup vs)` = same length and pointwise `denote (Ts[i]) vs[i]` (structural
+  lockstep fold; the `nth_error` reading recovered as `denote_tuple_iff`).
+- **`BTuple` is an OPAQUE LEAF for the decision procedure**, exactly like `BArrow`
+  / `BRef`: new `LPosTuple`/`LNegTuple` literals; a `has_tuple` clause guard sends
+  any tuple-bearing clause to `DEFER` (`None` / `Deferred`); `atomic`/`no_rec`/
+  `flat`/`neg_atomic`/`cl_rf` all send `BTuple` to `False`; `head`/`head_reps` gain
+  the canonical `VTup []`. The two **unconditional soundness theorems**
+  (`gdecide_DSub_sound`, `gdecide_DNotSub_sound`) and `gdecide_complete` are
+  re-established for the extended `BTy` (tuple ⇒ `DUnknown` ⇒ no claim;
+  `gd_tuple_defers`, `gd_tuple_not_dsub_claim`). The Boolean-algebra laws are
+  untouched (proved generically over `denote`).
+- **Tuple semantic facts (`Qed`):** `denote_tuple_iff` (positional membership),
+  `dtuple_pointwise` (positional/covariant subtyping at equal length),
+  `tuple_disjoint_{atom,rec,arrow,ref}` (a sequence is a distinct value-kind),
+  `tuple_inhabited`, and **`tuple_length_matters`** (`~ dsub (BTuple [Int]) (BTuple
+  [Int;Int])` — exact-length is a GENUINE, non-vacuous edge, not width).
+
+### The ADJUSTMENT (the crux), in `typing.v`
+
+Three term forms make the contextual adjustment explicit, so the SAME multivalue
+is adjusted differently per position:
+
+- **`tret es` — the RETURN-SEQUENCE** (`return e1,…,ek`). Evaluates components
+  left-to-right (`SRet`); all-values ⇒ the multivalue VALUE `VRet`. Typed
+  `BTuple Ts` via a mutual `has_types` judgment (pointwise) — `TRet`.
+- **`tfst e` — TRUNCATION** (the "most positions" adjustment: `local x = f()`,
+  operand position, non-last call arg). Binds the FIRST value. Typing `TFst`: a
+  multivalue `: BTuple (T::Ts)` truncates to its head type `T`; the EMPTY tuple
+  `BTuple []` truncates to `nil` (`TFstNil`). Op-sem `SFstCons` (head) / `SFstNil`
+  (nil) — the extra returns are operationally discarded.
+- **`tappspread g a` — LAST-POSITION SPREAD** (`g(f())`, `f()` last). The
+  known-arity consumer `g : BTuple Ts -> B` receives the WHOLE sequence; the
+  spread delivers `a : BTuple Ts`; result `B` (`TAppSpread`). Op-sem `SAppSpread`
+  splices the whole multivalue into `g` (like `SBeta`).
+
+### The soundness-subtlety surfaced and resolved (honest finding)
+
+A multivalue is a VALUE, so it can reach a **truthiness flow-narrowing scrutinee**
+(`tifn`). But `truthy_type` is the explicit union of the OTHER (non-tuple)
+value-kinds — a multivalue inhabits NONE of them, so `truthy_narrows` is FALSE for
+multivalues, and there is no "top-tuple" type to widen `truthy_type` with without
+collapsing the narrowing payoff. **Faithful Lua resolution (taken):** a multivalue
+in a boolean test is TRUNCATED first. So `truthy_value` is refined to EXCLUDE
+multivalues (`is_multi` is a third classification; `value_truthy_or_falsy` is now a
+3-way partition truthy/falsy/multi), and `SIfnMultiCons`/`SIfnMultiNil` truncate a
+multivalue scrutinee BEFORE the test. `truthy_narrows`/`falsy_narrows` stay
+multivalue-free, and preservation's new `SIfnMulti` cases close. (`ttypetest` needs
+no such fix: `tag_type TgMulti = BTop`, every value subsumes to `BTop`, so
+`tag_narrows` is sound for multivalues directly.)
+
+### Metatheory re-proved (`Qed`)
+
+`weakening`, `subst_lemma`, `has_type_closed`, `closed_at_lift`,
+`subst_lift_cancel`, `store_weakening` all gain the third mutual motive (`P1` /
+`Pt`) and the `tret`/`tfst`/`tappspread`/`has_types` cases. Canonical forms gain
+`canon_tuple` (a tuple-typed value is a `tret`) and the `VRet` refutations
+(`rsub_tuple_not_{atom,arrow,rec,ref,anyref}` + the reverse). **`progress` and
+`preservation` re-proved** for every new step rule (`SRet`, `SFstCons`/`SFstNil`/
+`SFst1`, `SAppSpread`/`_1`/`_2`, `SIfnMulti{Cons,Nil}`), all `Qed`. In `check.v`,
+`synth` gains the three cases (with a `synth_seq` helper); **`synth_sound` /
+`check_sound` re-proved** (third motive); `narrowing` likewise.
+
+### THE PAYOFF (machine-checked contextual adjustment)
+
+`f := λx:Int. return x, true  :  Int -> (Int, Bool)` — a real multi-return
+function (result type `BTuple [AInt; ABool]`, a SEQUENCE, not a single value). The
+call `f 3 : (Int, Bool)`. The SAME `f 3`:
+
+- **TRUNCATION:** `tfst (f 3) : AInt` (`mr_truncate_typed`) — the FIRST value, NOT
+  the tuple; steps `⤳* 3` (`mr_truncate_steps`), discarding the `Bool`.
+- **SPREAD:** `g (f 3) : AInt` with `g : (Int,Bool) -> Int` (`mr_spread_typed`) —
+  `g` receives BOTH values; steps `⤳* 0` (`mr_spread_steps`).
+- The executable checker decides the same adjustment by `reflexivity`
+  (check.v): `synth (f 3) = Some (Int,Bool)`, `synth (tfst (f 3)) = Some Int`
+  (truncation), `synth (g (f 3)) = Some Int` (spread); routed to real typings by
+  `synth_sound` (`mr_truncate_sound`, `mr_spread_sound`). `progress` fires on both
+  (`mr_truncate_progress`, `mr_spread_progress`).
+
+The distinctive Lua feature — same call truncated in one position, spread in
+another — is machine-checked.
+
+### Scope (honest) — DEFERRED
+
+Return-side multivalue + truncation + last-position spread at **known arity** (the
+consumer's tuple parameter pins the arity). DEFERRED (TODO.md backlog): the
+function-side **vararg `...`**, **multiple-assignment `a,b = f()`**,
+**table-collect `{f()}`**, **full arity-polymorphic spread** (a spread whose arity
+is not fixed by the consumer), **semantic tuple subtyping** via `gdecide` and a
+**top-tuple** type (tuple `ssub` is reflexive/pointwise only), and the
+multivalue-as-flow-narrowing-scrutinee precision (currently truncated-first).
+
+`Print Assumptions` on `progress`, `preservation`, `synth_sound`, `check_sound`,
+the tuple substrate (`denote_tuple_iff`, `dtuple_pointwise`, `tuple_disjoint_*`,
+`tuple_length_matters`), and the payoff (`mr_truncate_typed`, `mr_truncate_steps`,
+`mr_spread_typed`, `mr_spread_steps`, `mr_*_synths_*`, `mr_*_sound`,
+`mr_*_progress`): **Closed under the global context** — no axioms, no `Admitted`,
+no `Classical`. Whole chain compiles (`coqc proof/subtype.v` → `typing.v` →
+`ssub.v` → `check.v`).
