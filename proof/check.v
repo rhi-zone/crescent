@@ -148,6 +148,18 @@ Fixpoint synth (Sig : list BTy) (G : list BTy) (e : tm) {struct e} : option BTy 
   match e with
   | tlit l => Some (lit_type l)
   | tvar n => nth_error G n
+  (* INCREMENT 19 — PRIMITIVE operators. CHECK both operands against [ANum] (via
+     the mode switch [decide_ssub]); arithmetic returns [ANum], comparison [ABool]. *)
+  | tprim op a b =>
+      match synth Sig G a, synth Sig G b with
+      | Some Sa, Some Sb =>
+          if andb (decide_ssub Sa (BAtom ANum)) (decide_ssub Sb (BAtom ANum)) then
+            (if arith_op op then Some (BAtom ANum)
+             else if cmp_op op then Some (BAtom ABool)
+             else None)
+          else None
+      | _, _ => None
+      end
   | tlam T body =>
       match synth Sig (T :: G) body with
       | Some Tb => Some (BArrow T Tb)
@@ -300,6 +312,20 @@ Proof.
     intros.
   - (* tlit *) simpl in H. injection H as <-. apply TLit.
   - (* tvar *) simpl in H. apply TVar. exact H.
+  - (* tprim *) simpl in H.
+    destruct (synth Sig G e1) as [ Sa | ] eqn:Ha; [ | discriminate ].
+    destruct (synth Sig G e2) as [ Sb | ] eqn:Hb; [ | discriminate ].
+    destruct (andb (decide_ssub Sa (BAtom ANum)) (decide_ssub Sb (BAtom ANum))) eqn:Hd;
+      [ | discriminate ].
+    apply Bool.andb_true_iff in Hd. destruct Hd as [HdA HdB].
+    assert (HaN : has_type Sig G e1 (BAtom ANum)).
+    { eapply TSub; [ apply IHe1; exact Ha | apply RsSsub; apply decide_ssub_sound; exact HdA ]. }
+    assert (HbN : has_type Sig G e2 (BAtom ANum)).
+    { eapply TSub; [ apply IHe2; exact Hb | apply RsSsub; apply decide_ssub_sound; exact HdB ]. }
+    destruct (arith_op op) eqn:Har.
+    + injection H as <-. apply TPrimArith; assumption.
+    + destruct (cmp_op op) eqn:Hcm; [ | discriminate ].
+      injection H as <-. apply TPrimCmp; assumption.
   - (* tlam *) simpl in H.
     destruct (synth Sig (T :: G) e) as [ Tb | ] eqn:Hb; [ | discriminate ].
     injection H as <-. apply TLam. apply IHe. exact Hb.
@@ -453,6 +479,14 @@ Proof.
       rewrite nth_error_app2 by lia.
       remember (n - Datatypes.length G1) as m eqn:Em.
       destruct m as [ | m' ]; [ lia | simpl in e |- *; exact e ].
+  - (* TPrimArith *) apply TPrimArith;
+      [ assumption
+      | eapply (IHhas_type1 G1 _ G2 A'); [ reflexivity | eassumption ]
+      | eapply (IHhas_type2 G1 _ G2 A'); [ reflexivity | eassumption ] ].
+  - (* TPrimCmp *) apply TPrimCmp;
+      [ assumption
+      | eapply (IHhas_type1 G1 _ G2 A'); [ reflexivity | eassumption ]
+      | eapply (IHhas_type2 G1 _ G2 A'); [ reflexivity | eassumption ] ].
   - (* TLam *) apply TLam.
     eapply (IHhas_type (T::G1) _ G2 A'); [ reflexivity | eassumption ].
   - eapply TApp;
@@ -535,6 +569,7 @@ Fixpoint proj_free (e : tm) : Prop :=
   match e with
   | tlit _ => True
   | tvar _ => True
+  | tprim _ a b => proj_free a /\ proj_free b
   | tlam _ b => proj_free b
   | tapp f a => proj_free f /\ proj_free a
   | tlet e1 e2 => proj_free e1 /\ proj_free e2
@@ -776,6 +811,46 @@ Example compute_fix_badbody_None :
   synth [] [] (tfix (BAtom AInt) (tlam (BAtom AInt) (tvar 0))) = None.
 Proof. reflexivity. Qed.
 
+(* INCREMENT 19 — PRIMITIVE operators in the checker. [3 + 4] synthesizes [ANum];
+   [3 < 4] synthesizes the boolean type; both check + are sound. [ "s" + 1 ] is
+   REJECTED ([synth = None]). An [AInt] operand works (subsumes to [ANum]). *)
+Example compute_add_synth :
+  synth [] [] (tprim PAdd (tlit (LInt 3)) (tlit (LInt 4))) = Some (BAtom ANum).
+Proof. reflexivity. Qed.
+
+Example compute_lt_synth :
+  synth [] [] (tprim PLt (tlit (LInt 3)) (tlit (LInt 4))) = Some (BAtom ABool).
+Proof. reflexivity. Qed.
+
+Example compute_add_checks :
+  check [] [] (tprim PAdd (tlit (LInt 3)) (tlit (LInt 4))) (BAtom ANum) = true.
+Proof. reflexivity. Qed.
+
+Example compute_add_sound :
+  has_type [] [] (tprim PAdd (tlit (LInt 3)) (tlit (LInt 4))) (BAtom ANum).
+Proof. apply check_sound. reflexivity. Qed.
+
+Example compute_lt_sound :
+  has_type [] [] (tprim PLt (tlit (LInt 3)) (tlit (LInt 4))) (BAtom ABool).
+Proof. apply check_sound. reflexivity. Qed.
+
+(* a nested arithmetic chain [(3 + 4) * 2] synthesizes [ANum]. *)
+Example compute_chain_synth :
+  synth [] []
+    (tprim PMul (tprim PAdd (tlit (LInt 3)) (tlit (LInt 4))) (tlit (LInt 2)))
+  = Some (BAtom ANum).
+Proof. reflexivity. Qed.
+
+(* ILL-TYPED: [ "s" + 1 ] ⇒ None (the string operand fails the [ANum] domain check). *)
+Example compute_bad_add_None :
+  synth [] [] (tprim PAdd (tlit (LStr 0)) (tlit (LInt 1))) = None.
+Proof. reflexivity. Qed.
+
+(* and [check] rejects it against every type — here against [ANum]. *)
+Example compute_bad_add_check_false :
+  check [] [] (tprim PAdd (tlit (LStr 0)) (tlit (LInt 1))) (BAtom ANum) = false.
+Proof. reflexivity. Qed.
+
 (* ===========================================================================
    ASSUMPTION AUDIT — closed under the global context (no axioms / Admitted /
    Classical). The soundness theorems are the load-bearing point; the
@@ -786,3 +861,6 @@ Print Assumptions check_sound.
 Print Assumptions narrowing.
 Print Assumptions compute_typetest_payoff_sound.
 Print Assumptions compute_typetest_payoff_synth.
+Print Assumptions compute_add_sound.
+Print Assumptions compute_lt_sound.
+Print Assumptions compute_bad_add_None.

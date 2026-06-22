@@ -1815,3 +1815,86 @@ uniquely-owned cell.
 **Closed under the global context** — no axioms, no `Admitted`, no `Classical`.
 Whole chain compiles (`coqc subtype.v && coqc typing.v && coqc ssub.v && coqc
 check.v`); cores unmodified.
+
+## Increment 20 — PRIMITIVE BINARY OPERATORS: arithmetic + comparison (real computation)
+
+The first **computing** increment: the term core gains binary PRIMITIVE
+operators so programs actually compute. Arithmetic `+ - * /` and comparison
+`< <= ==`, **sound and 5.1-faithful at the type level**. Modifies
+`proof/typing.v` + `proof/check.v`; `proof/subtype.v` and `proof/ssub.v` are
+**byte-unmodified**. Build order unchanged.
+
+- **Term language.** `tm` gains `tprim : primop -> tm -> tm -> tm` where
+  `primop = PAdd | PSub | PMul | PDiv | PLt | PLe | PEq`. (DEFERRED, recorded in
+  the backlog: concat, modulo, floor-div `//`, bitwise, metamethod-dispatch
+  operators.) `tprim` is NOT a value — a fully-evaluated primop computes.
+- **Typing (declarative).** Two rules. `TPrimArith` (op ∈ {`PAdd`,`PSub`,`PMul`,
+  `PDiv`}): operands at `ANum`, result `ANum`. `TPrimCmp` (op ∈ {`PLt`,`PLe`,
+  `PEq`}): operands at `ANum`, result the boolean type `BAtom ABool`. Operands are
+  demanded at `ANum`; with subsumption (`TSub`) an `AInt` operand works since
+  `AInt <: ANum`. **Precise Int-preserving result types (`Int+Int : AInt`) are
+  DEFERRED** — the sound `ANum` result suffices. **`==` is numbers-only here**
+  (general structural equality is DEFERRED). The two rules are gated by boolean
+  classifiers `arith_op`/`cmp_op` (no name-keyed special-casing — the gate is
+  ordinary data, and the two op-classes are provably disjoint, used in the
+  preservation cross-cases).
+- **Operational semantics.** Left-to-right operand congruence (`SPrim1` reduces
+  the left operand; `SPrim2`, left a value, reduces the right), then COMPUTE. The
+  term literal language has a single number literal `LInt nat` (integer-valued —
+  the 5.1 number model has one number value per double), so number VALUES are
+  `tlit (LInt n)`. **Arithmetic** on two number literals `tlit (LInt m)`,
+  `tlit (LInt n)` yields `tlit (LInt (prim_arith op m n))` via NAT arithmetic
+  (`PAdd ↦ m+n`, `PSub ↦ m-n`, `PMul ↦ m*n`) — so `3 + 4` reduces concretely to
+  `7`. **`PDiv` uses `Nat.div`** (a representative integer-valued result): the
+  term literal language has no fractional literal, the value model abstracts the
+  exact double, and soundness needs only "the result is a number" — an
+  integer-valued representative is sound (`AInt <: ANum`). **Comparison** on two
+  number literals yields `tlit (LBool (prim_cmp op m n))` via the real nat
+  comparison (`PLt ↦ Nat.ltb`, `PLe ↦ Nat.leb`, `PEq ↦ Nat.eqb`) — so `3 < 4`
+  reduces concretely to `true`. A `tprim` on a NON-number operand is **STUCK** (a
+  type error the checker prevents — progress only fires on well-typed terms).
+- **Progress + preservation re-proved, both `Qed`.** Progress: a well-typed
+  `tprim` has `ANum`-typed operands; by the new **canonical-forms lemma**
+  `canon_num` (a closed value of type `BAtom ANum` is a number literal
+  `tlit (LInt n)` — non-number literals refuted SEMANTICALLY via the value model,
+  lambdas/records/locations via the not-atom shape facts), if both operands are
+  values they are number literals and the operator COMPUTES (`SPrimArith` /
+  `SPrimCmp`); otherwise an operand steps (`SPrim1` / `SPrim2`). Preservation: the
+  arithmetic result `tlit (LInt _)` types at `AInt <: ANum` (then subsumed to the
+  goal); the comparison result `tlit (LBool _)` types at `ABool`; the congruence
+  cases recurse with store-weakening. `tprim` is threaded through every metatheory
+  lemma — the strong term-induction principle (`tm_rect_strong`), `lift`/`subst`,
+  `closed_at` + `closed_at_lift` + `has_type_closed`, `weakening`, `subst_lemma`,
+  `store_weakening`, and the new subsumption-transparent inversion lemma
+  `inv_prim` (concluding operands at `ANum` plus the arith/cmp result disjunction).
+- **Bidirectional checker (`check.v`).** `synth (tprim op a b)` CHECKS both
+  operands against `ANum` (via `decide_ssub` at the mode switch), returning `ANum`
+  (arithmetic) or `ABool` (comparison). `synth_sound` / `check_sound` re-proved
+  `Qed` (the new case discharges its two domain obligations by `decide_ssub_sound`
+  + `TSub`, then `TPrimArith`/`TPrimCmp`); `narrowing` and `proj_free` threaded.
+- **SANITY (`Compute` + proofs).** `3 + 4` types at `ANum` and steps to
+  `tlit (LInt 7)` (`ex_add_typed`/`ex_add_steps`); `3 < 4` types at the boolean
+  type and steps to `true` (`ex_lt_typed`/`ex_lt_steps`); the chain `(3 + 4) * 2`
+  types at `ANum` and **multi-steps to `14`** (`ex_chain_steps`, exercising the
+  operand congruence); `"s" + 1` is REJECTED at every type
+  (`ex_bad_add_untyped` : `~ has_type …`) and `synth = None`
+  (`compute_bad_add_None`). Checker sanity: `synth (3 + 4) = Some ANum`,
+  `synth (3 < 4) = Some ABool`, both `check` + `check_sound`.
+
+### Honest scope / deferrals
+
+`+ - * /` and `< <= ==` on numbers. DEFERRED (backlog): **precise Int-preserving
+result types** (`Int+Int : AInt` — needs the arithmetic rule to track the
+integer-valued refinement through the operands; the sound `ANum` result is used
+now); **concat / modulo / `//` / bitwise / metamethod-dispatch operators**;
+**general structural `==`** (here equality is numbers-only). `PDiv` produces an
+integer-valued representative (the term literal language has no fractional
+literal); a faithful float result awaits a fractional number literal.
+
+`Print Assumptions` on `progress`, `preservation`, `ex_add_typed`,
+`ex_add_steps`, `ex_lt_typed`, `ex_lt_steps`, `ex_chain_steps`,
+`ex_bad_add_untyped` (typing.v) and `synth_sound`, `check_sound`,
+`compute_add_sound`, `compute_lt_sound`, `compute_bad_add_None` (check.v):
+**Closed under the global context** — no axioms, no `Admitted`, no `Classical`.
+Whole chain compiles (`coqc subtype.v && coqc typing.v && coqc ssub.v && coqc
+check.v`); `subtype.v` + `ssub.v` byte-unmodified.

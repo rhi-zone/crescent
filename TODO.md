@@ -409,6 +409,29 @@ Assumptions` on `progress`, `preservation`, `ssub_arrow_inv`, `ssub_sound`,
   `3`. `Print Assumptions` closed under the global context.
 
 Still open (DEFERRED — recorded honestly, minimal core only):
+- [x] **PRIMITIVE BINARY OPERATORS — arithmetic + comparison** (increment 20,
+  `proof/typing.v` + `proof/check.v`, on **byte-unmodified** `subtype.v` +
+  `ssub.v`). `tm` gains `tprim : primop -> tm -> tm -> tm`,
+  `primop = PAdd|PSub|PMul|PDiv|PLt|PLe|PEq`. Declarative `TPrimArith` (operands
+  `ANum`, result `ANum`) + `TPrimCmp` (operands `ANum`, result `ABool`), gated by
+  boolean classifiers `arith_op`/`cmp_op` (no special-casing; the classes are
+  provably disjoint). Op-sem: left-to-right operand congruence (`SPrim1`/`SPrim2`)
+  then COMPUTE — arithmetic on two `LInt` literals → `LInt (prim_arith op m n)`
+  via nat arithmetic (`3+4=7`); comparison → `LBool (prim_cmp op m n)` via the real
+  nat comparison (`3<4=true`); `PDiv` uses `Nat.div` (integer-valued
+  representative — no fractional literal in the term language; sound since result
+  is a number). `progress`/`preservation` re-proved `Qed` (new `canon_num`: a
+  closed `ANum` value is `tlit (LInt n)`; `inv_prim` subsumption-transparent
+  inversion). Checker: `synth (tprim op a b)` checks both operands `≤ ANum`,
+  returns `ANum`/`ABool`; `synth_sound`/`check_sound` re-proved. Sanity: `3+4 :
+  ANum →* 7`, `3<4 : Bool →* true`, `(3+4)*2 →* 14`, `"s"+1` rejected
+  (`~has_type`, `synth=None`). `Print Assumptions` on `progress`/`preservation`/
+  the sanity lemmas + `synth_sound`/`check_sound`: closed under the global context.
+  **DEFERRED (this increment):** precise Int-preserving result types
+  (`Int+Int : AInt` — sound `ANum` used now); concat / modulo / `//` / bitwise /
+  metamethod-dispatch operators; general structural `==` (numbers-only here);
+  faithful `PDiv` float result (awaits a fractional number literal). Recorded at
+  `proof-kernel.md` increment 20.
 - [x] **INTERSECTION + NEGATION as `ssub` rules** (increment 12, `proof/typing.v`
   + `proof/ssub.v`, on unmodified `subtype.v`). `ssub` gains the composable GLB
   rules `SsInterPL`/`SsInterPR`/`SsInterI` (projections + intro), **proven SOUND

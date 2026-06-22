@@ -64,9 +64,21 @@ Inductive lit : Type :=
   | LBool : bool -> lit         (* boolean literal;                type ABool  *)
   | LNil  : lit.                (* nil literal;                    type ANil   *)
 
+(* INCREMENT 19 — PRIMITIVE BINARY OPERATORS (real computation). [primop] is the
+   operator tag carried by [tprim]. Arithmetic: [PAdd]/[PSub]/[PMul]/[PDiv]
+   (Lua [+ - * /]); comparison: [PLt]/[PLe]/[PEq] (Lua [< <= ==]). DEFERRED
+   (backlog): concat, modulo, floor-div [//], bitwise, and metamethod-dispatch
+   operators; precise Int-preserving arithmetic result types (Int+Int : AInt);
+   general structural [==] (here [==] is numbers-only). *)
+Inductive primop : Type :=
+  | PAdd | PSub | PMul | PDiv      (* arithmetic — result ANum *)
+  | PLt  | PLe  | PEq.             (* comparison — result ABool *)
+
 Inductive tm : Type :=
   | tlit  : lit -> tm
   | tvar  : nat -> tm
+  (* INCREMENT 19 — a binary primitive application [tprim op a b]. *)
+  | tprim : primop -> tm -> tm -> tm
   | tlam  : BTy -> tm -> tm                  (* tlam T body : argument type T   *)
   | tapp  : tm -> tm -> tm
   | tlet  : tm -> tm -> tm                   (* tlet e1 e2 = bind e1, body e2   *)
@@ -174,6 +186,38 @@ Definition lit_type (l : lit) : BTy :=
   | LNil    => BAtom ANil
   end.
 
+(* INCREMENT 19 — primop classification + the (nat-level) computation. Arithmetic
+   ops produce a NUMBER, comparison ops a BOOLEAN. The TERM literal language has a
+   single number literal [LInt nat] (integer-valued), so number VALUES are
+   [tlit (LInt n)]; arithmetic computes via nat arithmetic. [PDiv] uses [Nat.div]
+   (a representative integer-valued result — the term literal language has no
+   fractional literal; the value model abstracts the exact double, and soundness
+   needs only "the result is a number", so an integer-valued representative is
+   sound — its type [AInt <: ANum] is the declared arithmetic result). Comparison
+   computes the real nat comparison so the sanity examples ([3 < 4 = true]) reduce
+   concretely. *)
+Definition arith_op (op : primop) : bool :=
+  match op with PAdd | PSub | PMul | PDiv => true | _ => false end.
+Definition cmp_op (op : primop) : bool :=
+  match op with PLt | PLe | PEq => true | _ => false end.
+
+Definition prim_arith (op : primop) (m n : nat) : nat :=
+  match op with
+  | PAdd => m + n
+  | PSub => m - n
+  | PMul => m * n
+  | PDiv => Nat.div m n
+  | _    => 0
+  end.
+
+Definition prim_cmp (op : primop) (m n : nat) : bool :=
+  match op with
+  | PLt => Nat.ltb m n
+  | PLe => Nat.leb m n
+  | PEq => Nat.eqb m n
+  | _   => false
+  end.
+
 (* ---- A usable induction principle: the auto-generated [tm_ind] gives no IH
    for the subterms inside a [trec] list. Hand-roll the nested scheme (a plain
    Fixpoint, no axiom), mirroring [V_rect_strong] in subtype.v. *)
@@ -182,6 +226,7 @@ Section tm_ind_strong.
   Variable Pl : list (string * tm) -> Prop.
   Hypothesis Hlit  : forall l, P (tlit l).
   Hypothesis Hvar  : forall n, P (tvar n).
+  Hypothesis Hprim : forall op a b, P a -> P b -> P (tprim op a b).
   Hypothesis Hlam  : forall T b, P b -> P (tlam T b).
   Hypothesis Happ  : forall f a, P f -> P a -> P (tapp f a).
   Hypothesis Hlet  : forall e1 e2, P e1 -> P e2 -> P (tlet e1 e2).
@@ -201,6 +246,7 @@ Section tm_ind_strong.
     match e with
     | tlit l    => Hlit l
     | tvar n    => Hvar n
+    | tprim op a b => Hprim op a b (tm_rect_strong a) (tm_rect_strong b)
     | tlam T b  => Hlam T b (tm_rect_strong b)
     | tapp f a  => Happ f a (tm_rect_strong f) (tm_rect_strong a)
     | tlet e1 e2 => Hlet e1 e2 (tm_rect_strong e1) (tm_rect_strong e2)
@@ -540,6 +586,21 @@ Inductive has_type : list BTy -> list BTy -> tm -> BTy -> Prop :=
   | TVar  : forall S G n T,
       nth_error G n = Some T ->
       has_type S G (tvar n) T
+  (* INCREMENT 19 — PRIMITIVE OPERATORS. Operands are typed at [ANum] (with
+     subsumption an [AInt] operand works, [AInt <: ANum]). Arithmetic
+     ([PAdd]/[PSub]/[PMul]/[PDiv]) yields [ANum]; comparison ([PLt]/[PLe]/[PEq])
+     yields the boolean type [ABool]. Precise Int-preserving result types
+     ([Int+Int : AInt]) are DEFERRED — the sound [ANum] result suffices here. *)
+  | TPrimArith : forall S G op a b,
+      arith_op op = true ->
+      has_type S G a (BAtom ANum) ->
+      has_type S G b (BAtom ANum) ->
+      has_type S G (tprim op a b) (BAtom ANum)
+  | TPrimCmp : forall S G op a b,
+      cmp_op op = true ->
+      has_type S G a (BAtom ANum) ->
+      has_type S G b (BAtom ANum) ->
+      has_type S G (tprim op a b) (BAtom ABool)
   | TLam  : forall S G T body Tb,
       has_type S (T :: G) body Tb ->
       has_type S G (tlam T body) (BArrow T Tb)
@@ -679,6 +740,7 @@ Fixpoint lift (d k : nat) (e : tm) : tm :=
   match e with
   | tlit l    => tlit l
   | tvar n    => if Nat.ltb n k then tvar n else tvar (n + d)
+  | tprim op a b => tprim op (lift d k a) (lift d k b)
   | tlam T b  => tlam T (lift d (S k) b)
   | tapp f a  => tapp (lift d k f) (lift d k a)
   | tlet e1 e2 => tlet (lift d k e1) (lift d (S k) e2)
@@ -712,6 +774,7 @@ Fixpoint subst (j : nat) (s : tm) (e : tm) : tm :=
       | Eq => s                 (* the bound variable: replaced by s       *)
       | Gt => tvar (Nat.pred n) (* above: shift down (binder removed)      *)
       end
+  | tprim op a b => tprim op (subst j s a) (subst j s b)
   | tlam T b  => tlam T (subst (S j) (lift 1 0 s) b)
   | tapp f a  => tapp (subst j s f) (subst j s a)
   | tlet e1 e2 => tlet (subst j s e1) (subst (S j) (lift 1 0 s) e2)
@@ -860,6 +923,24 @@ Inductive step : tm * store -> tm * store -> Prop :=
       value (trec fs) ->
       field_lookup k fs = Some v ->
       step (tproj (trec fs) k, st) (v, st)
+  (* INCREMENT 19 — PRIMITIVE operators. Left-to-right congruence reduces the
+     operands to values; then a fully-evaluated primop COMPUTES. Arithmetic on two
+     number values [tlit (LInt m)], [tlit (LInt n)] yields [tlit (LInt (prim_arith
+     op m n))] (nat arithmetic — [3 + 4 = 7]); comparison yields [tlit (LBool
+     (prim_cmp op m n))] (the real nat comparison — [3 < 4 = true]). A [tprim] on a
+     non-number operand is STUCK (a type error the checker prevents). *)
+  | SPrim1 : forall op a a' b st st',
+      step (a, st) (a', st') -> step (tprim op a b, st) (tprim op a' b, st')
+  | SPrim2 : forall op v b b' st st',
+      value v -> step (b, st) (b', st') -> step (tprim op v b, st) (tprim op v b', st')
+  | SPrimArith : forall op m n st,
+      arith_op op = true ->
+      step (tprim op (tlit (LInt m)) (tlit (LInt n)), st)
+           (tlit (LInt (prim_arith op m n)), st)
+  | SPrimCmp : forall op m n st,
+      cmp_op op = true ->
+      step (tprim op (tlit (LInt m)) (tlit (LInt n)), st)
+           (tlit (LBool (prim_cmp op m n)), st)
   (* congruence / evaluation contexts (CBV, left-to-right) — store threaded *)
   | SApp1 : forall f f' a st st', step (f, st) (f', st') -> step (tapp f a, st) (tapp f' a, st')
   | SApp2 : forall v a a' st st', value v -> step (a, st) (a', st') -> step (tapp v a, st) (tapp v a', st')
@@ -1029,6 +1110,26 @@ Proof.
   induction H; try discriminate Ee.
   - injection Ee as <-. apply rsub_refl.
   - subst. eapply RsTrans; [ apply IHhas_type; reflexivity | exact H0 ].
+Qed.
+
+(* INCREMENT 19 — primop inversion (subsumption-transparent). The result type is
+   [ANum] (arithmetic) or [ABool] (comparison); both subsume to [T]. The operands
+   are typed at [ANum]. *)
+Lemma inv_prim : forall S G op a b T,
+  has_type S G (tprim op a b) T ->
+  has_type S G a (BAtom ANum) /\ has_type S G b (BAtom ANum) /\
+  ((arith_op op = true /\ rsub (BAtom ANum) T) \/
+   (cmp_op op = true /\ rsub (BAtom ABool) T)).
+Proof.
+  intros S G op a b T H. remember (tprim op a b) as e eqn:Ee.
+  induction H; try discriminate Ee.
+  - (* TPrimArith *) injection Ee as <- <- <-.
+    split; [assumption|split;[assumption| left; split;[assumption|apply rsub_refl]]].
+  - (* TPrimCmp *) injection Ee as <- <- <-.
+    split; [assumption|split;[assumption| right; split;[assumption|apply rsub_refl]]].
+  - (* TSub *) subst. destruct (IHhas_type eq_refl) as [Ha [Hb [[Har Hd]|[Hcr Hd]]]].
+    + split;[assumption|split;[assumption| left; split;[assumption|eapply RsTrans; eassumption]]].
+    + split;[assumption|split;[assumption| right; split;[assumption|eapply RsTrans; eassumption]]].
 Qed.
 
 Lemma inv_var : forall S G n T,
@@ -2098,6 +2199,30 @@ Proof.
   - exists n; reflexivity.
 Qed.
 
+(* INCREMENT 19 — canonical forms for NUMBER: a closed value of type [BAtom ANum]
+   is an integer-valued number literal [tlit (LInt n)] (the only number literal in
+   the term language; the 5.1 number model has one number value per double).
+   Non-number literals are excluded SEMANTICALLY (their atom has a member outside
+   [ANum]); lambdas/records/locations by the arrow/record/ref-not-atom shape facts.
+   This is the progress crux for [tprim]: a well-typed primop's operands, when
+   values, are number literals, so the operator computes. *)
+Lemma canon_num : forall S e,
+  has_type S [] e (BAtom ANum) -> value e -> exists n, e = tlit (LInt n).
+Proof.
+  intros S e Hty Hv. destruct Hv as [l | T b | fs Hfs | n].
+  - apply inv_lit in Hty. destruct l; simpl in Hty.
+    + exists n; reflexivity.
+    + exfalso. apply rsub_sound in Hty. pose proof (Hty (VStr 0) I) as Hbad. exact Hbad.
+    + exfalso. apply rsub_sound in Hty. pose proof (Hty (VBool b) I) as Hbad. exact Hbad.
+    + exfalso. apply rsub_sound in Hty. pose proof (Hty VNil I) as Hbad. exact Hbad.
+  - apply inv_lam in Hty. destruct Hty as [Tb [_ Hsub]].
+    exfalso. eapply rsub_arrow_not_atom; eauto.
+  - apply inv_rec in Hty. destruct Hty as [Ts [_ [_ Hsub]]].
+    exfalso. eapply rsub_rec_not_atom; eauto.
+  - apply inv_loc in Hty. destruct Hty as [U [_ Hsub]].
+    exfalso. eapply rsub_ref_not_atom; eauto.
+Qed.
+
 (* INCREMENT 11 — canonical forms for Bool: a closed value of type [BAtom ABool]
    is a boolean literal. Needed for [progress]'s [tif] case (the condition is a
    value of Bool type, hence a [LBool]). Non-bool literals are excluded
@@ -2285,6 +2410,10 @@ Proof.
     + apply TVar. rewrite nth_error_insert_lo by assumption. exact e.
     + replace (n + 1) with (Datatypes.S n) by lia. apply TVar.
       rewrite nth_error_insert_hi by assumption. exact e.
+  - (* TPrimArith *) apply TPrimArith;
+      [ assumption | apply (IHhas_type1 G1 G2 U eq_refl) | apply (IHhas_type2 G1 G2 U eq_refl) ].
+  - (* TPrimCmp *) apply TPrimCmp;
+      [ assumption | apply (IHhas_type1 G1 G2 U eq_refl) | apply (IHhas_type2 G1 G2 U eq_refl) ].
   (* IH applicator: pick SOME quantified IH from the context, instantiated at
      cut [G1] or an extension; [exact] failure backtracks to the next match. *)
   - (* TLam *) apply TLam.
@@ -2369,6 +2498,7 @@ Fixpoint closed_at (k : nat) (e : tm) : Prop :=
   match e with
   | tlit _    => True
   | tvar n    => n < k
+  | tprim _ a b => closed_at k a /\ closed_at k b
   | tlam _ b  => closed_at (S k) b
   | tapp f a  => closed_at k f /\ closed_at k a
   | tlet e1 e2 => closed_at k e1 /\ closed_at (S k) e2
@@ -2404,6 +2534,8 @@ Proof.
   - exact I.
   - (* tvar *) apply inv_var in H. destruct H as [U [Hl _]].
     apply nth_error_Some. rewrite Hl. discriminate.
+  - (* tprim *) apply inv_prim in H. destruct H as [Ha [Hb _]].
+    split; [ exact (IHe1 Sg G (BAtom ANum) Ha) | exact (IHe2 Sg G (BAtom ANum) Hb) ].
   - (* tlam *) apply inv_lam in H. destruct H as [Tb [Hb _]].
     exact (IHe Sg (T :: G) Tb Hb).
   - (* tapp *) apply inv_app in H. destruct H as [A [B [Hf [Ha _]]]].
@@ -2453,6 +2585,8 @@ Proof.
     intros; simpl in *.
   - reflexivity.
   - (* tvar *) destruct (Nat.ltb_spec n j); [reflexivity | lia].
+  - (* tprim *) destruct H as [H1 H2]. f_equal;
+      [ apply (IHe1 k); [exact H1 | exact H0] | apply (IHe2 k); [exact H2 | exact H0] ].
   - (* tlam *) f_equal. apply (IHe (S k)); [exact H | lia].
   - (* tapp *) destruct H as [H1 H2]. f_equal;
       [ apply (IHe1 k); [exact H1 | exact H0] | apply (IHe2 k); [exact H2 | exact H0] ].
@@ -2542,6 +2676,12 @@ Proof.
       eapply TSub; [ apply TVar | exact Hs ].
       destruct n as [ | n' ]; [ lia | ]. simpl Nat.pred.
       rewrite (nth_error_insert_hi G1 G2 U n') in Hl by lia. exact Hl.
+  - (* tprim *) apply inv_prim in H. destruct H as [Ha [Hb Hres]]. simpl.
+    pose proof (IHe1 Sg G1 G2 U (BAtom ANum) s Ha H0) as Ha'.
+    pose proof (IHe2 Sg G1 G2 U (BAtom ANum) s Hb H0) as Hb'.
+    destruct Hres as [[Har Hd] | [Hcr Hd]].
+    + eapply TSub; [ apply TPrimArith; [ exact Har | exact Ha' | exact Hb' ] | exact Hd ].
+    + eapply TSub; [ apply TPrimCmp; [ exact Hcr | exact Ha' | exact Hb' ] | exact Hd ].
   - (* tlam *) apply inv_lam in H. destruct H as [Tb [Hb Hsub]]. simpl.
     eapply TSub; [ apply TLam | exact Hsub ].
     rewrite (closed_lift s H0 1 0).
@@ -2636,6 +2776,8 @@ Proof.
     intros S' Hext.
   - apply TLit.
   - apply TVar; eassumption.
+  - apply TPrimArith; [ assumption | apply IHhas_type1; exact Hext | apply IHhas_type2; exact Hext ].
+  - apply TPrimCmp; [ assumption | apply IHhas_type1; exact Hext | apply IHhas_type2; exact Hext ].
   - apply TLam; apply IHhas_type; exact Hext.
   - eapply TApp; [ apply IHhas_type1; exact Hext | apply IHhas_type2; exact Hext ].
   - eapply TLet; [ apply IHhas_type1; exact Hext | apply IHhas_type2; exact Hext ].
@@ -2847,6 +2989,47 @@ Proof.
     pose proof (nodup_unique_type Ts k Tk Tk' Hnd' HinTk HinTk') as Heq. subst Tk'.
     exists S. split; [ apply extends_refl | split; [ | exact Hwt ] ].
     eapply TSub; [ exact Hvt | eapply RsTrans; [ apply RsSsub; exact HsTk' | exact Hsub ] ].
+  - (* SPrim1: reduce the left operand *)
+    apply inv_prim in Hty. destruct Hty as [Ha [Hb Hres]].
+    destruct (IHHstep a st a' st' eq_refl eq_refl Hwt (BAtom ANum) Ha)
+      as [S' [Hext [Ha' Hwt']]].
+    exists S'. split; [ exact Hext | split; [ | exact Hwt' ] ].
+    destruct Hres as [[Har Hd] | [Hcr Hd]].
+    + eapply TSub; [ apply TPrimArith;
+        [ exact Har | exact Ha' | eapply store_weakening; [ exact Hb | exact Hext ] ] | exact Hd ].
+    + eapply TSub; [ apply TPrimCmp;
+        [ exact Hcr | exact Ha' | eapply store_weakening; [ exact Hb | exact Hext ] ] | exact Hd ].
+  - (* SPrim2: left is a value, reduce the right operand *)
+    apply inv_prim in Hty. destruct Hty as [Ha [Hb Hres]].
+    destruct (IHHstep b st b' st' eq_refl eq_refl Hwt (BAtom ANum) Hb)
+      as [S' [Hext [Hb' Hwt']]].
+    exists S'. split; [ exact Hext | split; [ | exact Hwt' ] ].
+    destruct Hres as [[Har Hd] | [Hcr Hd]].
+    + eapply TSub; [ apply TPrimArith;
+        [ exact Har | eapply store_weakening; [ exact Ha | exact Hext ] | exact Hb' ] | exact Hd ].
+    + eapply TSub; [ apply TPrimCmp;
+        [ exact Hcr | eapply store_weakening; [ exact Ha | exact Hext ] | exact Hb' ] | exact Hd ].
+  - (* SPrimArith: both operands are number literals; the result is [LInt _ : AInt
+       <: ANum]. The arithmetic result type is [ANum] (subsumed to [T]). *)
+    apply inv_prim in Hty. destruct Hty as [Ha [Hb Hres]].
+    exists S. split; [ apply extends_refl | split; [ | exact Hwt ] ].
+    destruct Hres as [[_ Hd] | [Hcr _]].
+    + (* arithmetic: result [LInt _] types at [AInt <: ANum], then subsumed to [T] *)
+      eapply TSub;
+        [ eapply TSub; [ apply (TLit S [] (LInt (prim_arith op m n)))
+                       | apply RsSsub; apply SsAtom; apply ALInt ]
+        | exact Hd ].
+    + (* a comparison op cannot also be arithmetic (SPrimArith carries [arith_op
+         op = true], but [cmp_op op = true] is impossible for the same op). *)
+      destruct op; simpl in H, Hcr; discriminate.
+  - (* SPrimCmp: both operands are number literals; the result is [LBool _ : ABool].
+       The comparison result type is [ABool] (subsumed to [T]). *)
+    apply inv_prim in Hty. destruct Hty as [Ha [Hb Hres]].
+    exists S. split; [ apply extends_refl | split; [ | exact Hwt ] ].
+    destruct Hres as [[Har _] | [_ Hd]].
+    + (* an arithmetic op cannot also be a comparison. *)
+      destruct op; simpl in H, Har; discriminate.
+    + eapply TSub; [ apply (TLit S [] (LBool (prim_cmp op m n))) | exact Hd ].
   - (* SApp1 *) apply inv_app in Hty. destruct Hty as [A [B [Hf [Ha Hsub]]]].
     destruct (IHHstep f st f' st' eq_refl eq_refl Hwt (BArrow A B) Hf)
       as [S' [Hext [Hf' Hwt']]].
@@ -3065,6 +3248,33 @@ Proof.
          forall ke, In ke fs -> value (snd ke) \/ (exists e' st', step (snd ke, st) (e', st')));
     intros EG; subst; try (intros st Hwt; left; constructor; fail).
   - (* TVar: no closed var *) intros st Hwt. destruct n; simpl in e; discriminate e.
+  - (* TPrimArith *) intros st Hwt. right.
+    match goal with [ IHa : [] = [] -> forall st, _ -> value a \/ _ |- _ ] =>
+      destruct (IHa eq_refl st Hwt) as [Hva | [a' [sta Ha']]] end.
+    + match goal with [ IHb : [] = [] -> forall st, _ -> value b \/ _ |- _ ] =>
+        destruct (IHb eq_refl st Hwt) as [Hvb | [b' [stb Hb']]] end.
+      * (* both values: canonical-forms ⇒ number literals ⇒ COMPUTE *)
+        match goal with [ Ha : has_type S [] a (BAtom ANum) |- _ ] =>
+          destruct (canon_num S a Ha Hva) as [m Ea] end.
+        match goal with [ Hb : has_type S [] b (BAtom ANum) |- _ ] =>
+          destruct (canon_num S b Hb Hvb) as [nn Eb] end.
+        subst a b. exists (tlit (LInt (prim_arith op m nn))), st.
+        apply SPrimArith; assumption.
+      * exists (tprim op a b'), stb. apply SPrim2; assumption.
+    + exists (tprim op a' b), sta. apply SPrim1; exact Ha'.
+  - (* TPrimCmp *) intros st Hwt. right.
+    match goal with [ IHa : [] = [] -> forall st, _ -> value a \/ _ |- _ ] =>
+      destruct (IHa eq_refl st Hwt) as [Hva | [a' [sta Ha']]] end.
+    + match goal with [ IHb : [] = [] -> forall st, _ -> value b \/ _ |- _ ] =>
+        destruct (IHb eq_refl st Hwt) as [Hvb | [b' [stb Hb']]] end.
+      * match goal with [ Ha : has_type S [] a (BAtom ANum) |- _ ] =>
+          destruct (canon_num S a Ha Hva) as [m Ea] end.
+        match goal with [ Hb : has_type S [] b (BAtom ANum) |- _ ] =>
+          destruct (canon_num S b Hb Hvb) as [nn Eb] end.
+        subst a b. exists (tlit (LBool (prim_cmp op m nn))), st.
+        apply SPrimCmp; assumption.
+      * exists (tprim op a b'), stb. apply SPrim2; assumption.
+    + exists (tprim op a' b), sta. apply SPrim1; exact Ha'.
   - (* TApp *) intros st Hwt. right.
     match goal with [ IHf : [] = [] -> forall st, _ -> value f \/ _ |- _ ] =>
       destruct (IHf eq_refl st Hwt) as [Hvf | [f' [stf Hf']]] end.
@@ -3857,10 +4067,107 @@ Proof.
 Qed.
 
 (* ===========================================================================
+   INCREMENT 19 — PRIMITIVE OPERATOR SANITY (real computation).
+   3 + 4 types at ANum and multi-steps to 7; 3 < 4 types at Bool and steps to
+   true; "s" + 1 is REJECTED (operand not a number); a well-typed arithmetic chain.
+   =========================================================================== *)
+
+(* [3 + 4] is well typed at [ANum] and steps (single step) to [7]. *)
+Definition ex_add : tm := tprim PAdd (tlit (LInt 3)) (tlit (LInt 4)).
+
+Example ex_add_typed : has_type [] [] ex_add (BAtom ANum).
+Proof.
+  unfold ex_add. apply TPrimArith; [ reflexivity | | ];
+    (eapply TSub; [ apply (TLit [] [] (LInt _)) | apply RsSsub; apply SsAtom; apply ALInt ]).
+Qed.
+
+Example ex_add_steps : forall st,
+  step (ex_add, st) (tlit (LInt 7), st).
+Proof.
+  intro st. unfold ex_add.
+  replace (tlit (LInt 7)) with (tlit (LInt (prim_arith PAdd 3 4))) by reflexivity.
+  apply SPrimArith. reflexivity.
+Qed.
+
+(* and via [Compute] the arithmetic genuinely reduces. *)
+Example compute_add : prim_arith PAdd 3 4 = 7. Proof. reflexivity. Qed.
+
+(* [3 < 4] types at the boolean type and steps to [true]. *)
+Definition ex_lt : tm := tprim PLt (tlit (LInt 3)) (tlit (LInt 4)).
+
+Example ex_lt_typed : has_type [] [] ex_lt (BAtom ABool).
+Proof.
+  unfold ex_lt. apply TPrimCmp; [ reflexivity | | ];
+    (eapply TSub; [ apply (TLit [] [] (LInt _)) | apply RsSsub; apply SsAtom; apply ALInt ]).
+Qed.
+
+Example ex_lt_steps : forall st,
+  step (ex_lt, st) (tlit (LBool true), st).
+Proof.
+  intro st. unfold ex_lt.
+  replace (tlit (LBool true)) with (tlit (LBool (prim_cmp PLt 3 4))) by reflexivity.
+  apply SPrimCmp. reflexivity.
+Qed.
+
+Example compute_lt : prim_cmp PLt 3 4 = true. Proof. reflexivity. Qed.
+
+(* a WELL-TYPED arithmetic chain: [(3 + 4) * 2] types at [ANum] and multi-steps to
+   [14]. Exercises the operand congruence (the inner [3+4] reduces first). *)
+Definition ex_chain : tm :=
+  tprim PMul (tprim PAdd (tlit (LInt 3)) (tlit (LInt 4))) (tlit (LInt 2)).
+
+Example ex_chain_typed : has_type [] [] ex_chain (BAtom ANum).
+Proof.
+  unfold ex_chain. apply TPrimArith; [ reflexivity | apply ex_add_typed | ].
+  eapply TSub; [ apply (TLit [] [] (LInt 2)) | apply RsSsub; apply SsAtom; apply ALInt ].
+Qed.
+
+Example ex_chain_steps :
+  multistep (ex_chain, []) (tlit (LInt 14), []).
+Proof.
+  unfold ex_chain.
+  (* reduce the inner [3 + 4] to [7] under the left operand *)
+  eapply MSstep. { apply SPrim1. apply SPrimArith. reflexivity. }
+  (* now [7 * 2] computes to [14] *)
+  eapply MSstep. { apply SPrimArith. reflexivity. }
+  simpl. apply MSrefl.
+Qed.
+
+(* progress + preservation instantiated on [3 + 4] (a sanity smoke-test). *)
+Example ex_add_progress :
+  value ex_add \/ exists e' st', step (ex_add, []) (e', st').
+Proof. apply (progress [] ex_add (BAtom ANum) [] ex_add_typed store_well_typed_nil). Qed.
+
+Example ex_add_preservation :
+  exists S', extends S' [] /\ has_type S' [] (tlit (LInt 7)) (BAtom ANum) /\ store_well_typed S' [].
+Proof.
+  apply (preservation [] ex_add (BAtom ANum) [] (tlit (LInt 7)) []
+           ex_add_typed store_well_typed_nil (ex_add_steps [])).
+Qed.
+
+(* ILL-TYPED: [ "s" + 1 ] is REJECTED — the string operand is not a number. Proved
+   at EVERY type (a string [: AStr] is not [rsub]-below [ANum]). *)
+Definition ex_bad_add : tm := tprim PAdd (tlit (LStr 0)) (tlit (LInt 1)).
+
+Example ex_bad_add_untyped : forall S T, ~ has_type S [] ex_bad_add T.
+Proof.
+  intros S T H. unfold ex_bad_add in H. apply inv_prim in H.
+  destruct H as [Ha [_ _]].
+  apply inv_lit in Ha. simpl in Ha.   (* Ha : rsub AStr ANum *)
+  apply rsub_sound in Ha. pose proof (Ha (VStr 0) I) as Hbad. exact Hbad.
+Qed.
+
+(* ===========================================================================
    ASSUMPTION AUDIT — closed under the global context.
    =========================================================================== *)
 Print Assumptions progress.
 Print Assumptions preservation.
+Print Assumptions ex_add_typed.
+Print Assumptions ex_add_steps.
+Print Assumptions ex_lt_typed.
+Print Assumptions ex_lt_steps.
+Print Assumptions ex_chain_steps.
+Print Assumptions ex_bad_add_untyped.
 Print Assumptions truthy_narrows.
 Print Assumptions falsy_narrows.
 Print Assumptions tag_narrows.
