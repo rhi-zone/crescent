@@ -533,7 +533,37 @@ Still open (DEFERRED — recorded honestly, minimal core only):
   narrowing (`U ∩ ¬tag_type g`, the intersection/negation wall), narrowing on
   non-variable paths, and combined truthiness+type-test are DEFERRED (sub-items 3/4/6
   above).
-- [ ] **Statements / control flow** (while/blocks; `tif` done in increment 11) as terms.
+- [x] **Statements / control flow — DONE (increment 20, ENCODED).** Lua's
+  imperative statement forms encode into the existing core with NO new terms —
+  soundness inherited from the proven `progress`/`preservation`. Encodings (plain
+  `Definition`s in `proof/typing.v`): UNIT (a statement returning nothing) ⇒
+  `tlit LNil` (`Tunit := BAtom ANil`); SEQUENCING `s1 ; s2` ⇒ `tseq s1 s2 := tlet
+  s1 (lift 1 0 s2)` (run `s1` for effect, discard, run `s2`; the lift makes the
+  discard-binder unused so `s2`'s free vars are unchanged — `subst_lift_cancel`);
+  IF-STATEMENT ⇒ `tif` (already core, increment 11); BLOCK/local scope ⇒ `tlet`
+  nesting; WHILE `while c do body end` ⇒ `twhile c body := tfix Tunit (tif c (tseq
+  body (tvar 0)) (tlit LNil))` — the fixpoint re-evaluates `c` against the CURRENT
+  store each unfold, runs the mutating `body`, recurses via the self-ref `tvar 0`,
+  terminates with `nil` when `c` is false. CAPSTONE — a REAL imperative program
+  TYPES: the counting/sum loop `local i=ref 0; local s=ref 0; while (!i<n) do s:=
+  !s+!i; i:=!i+1 end; !s` (`sumloop_prog_typed`, at `ANum`; cells are `BRef ANum`
+  because arithmetic yields `ANum` and `BRef` is invariant — Lua's one number
+  type). The single-cell counter loop is reduced END-TO-END through the store
+  (`cinc_loop_runs`: store `[0]` → `nil` in store `[1]` — unfold, store-read
+  condition `0<1` true, mutate to `1`, re-unfold, `1<1` false, terminate);
+  `cinc_one_iter`/`cinc_terminates` are the two halves, machine-checked.
+  SEQUENCING-WITH-MUTATION `(t.x:=9); t.x` reads 9 (`seq_mutation_typed`/`_steps`);
+  IF-WITH-MUTATION `if cond then r:=1 else r:=2 end; !r` reads the taken branch's
+  value (`if_mut_typed`, `if_mut_true_steps`/`if_mut_false_steps`).
+  DIVERGENCE-TOLERANCE: `while true do () end` is well-typed at `Tunit` and DIVERGES
+  (`while_true_typed`, `while_true_diverges` — one cycle returns the loop to itself;
+  `while_true_not_stuck` — not a value yet always steps) — soundness tolerates
+  non-termination (inherited from `tfix`). `while` termination relies on the body
+  mutating the state the condition reads; general termination is neither provided
+  nor needed. `Print Assumptions` Closed on all; cores (subtype.v/ssub.v/check.v)
+  UNMODIFIED. DEFERRED (backlog): `break`/`return`/`goto` (non-local control —
+  labelled exits/continuations), numeric `for` + generic `for-in` (iterator
+  protocols). See `proof-kernel.md` increment 20.
 - [x] **Mutable TABLE fields (record fields as refs) — DONE (increment M4,
   records-of-refs ENCODING).** A Lua mutable table `{x:T,y:U}` IS a record of
   reference cells `BRec [("x", BRef T); ("y", BRef U)]`: the field SET is fixed

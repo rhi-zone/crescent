@@ -1898,3 +1898,120 @@ literal); a faithful float result awaits a fractional number literal.
 **Closed under the global context** — no axioms, no `Admitted`, no `Classical`.
 Whole chain compiles (`coqc subtype.v && coqc typing.v && coqc ssub.v && coqc
 check.v`); `subtype.v` + `ssub.v` byte-unmodified.
+
+## Increment 21 — IMPERATIVE STATEMENT FORMS + a real while-loop (encoded; end-to-end imperative soundness)
+
+Lua's imperative statement forms are shown to **encode soundly** into the existing
+core with **NO new core terms** — soundness inherited from the already-proven
+`progress` + `preservation` (increment 8, extended through the reference layer in
+increment 16/19). All additions live in `proof/typing.v`; `subtype.v`, `ssub.v`,
+`check.v` are **byte-unmodified** (only their `.vo`s recompile). The capstone is a
+REAL imperative program — a `while`-loop that mutates a reference counter and
+computes a running sum.
+
+### The encodings (plain `Definition`s over existing constructors)
+
+- **UNIT / "returns nothing".** A statement that produces no value yields the unit
+  value `tlit LNil`; its type is `Tunit := BAtom ANil`.
+- **SEQUENCING** `s1 ; s2` ⇒ `tseq s1 s2 := tlet s1 (lift 1 0 s2)`. Evaluate `s1`
+  for its effect, bind-and-discard its value, run `s2`. Lifting `s2` past the
+  discard-binder makes that binder UNUSED, so `s2`'s free de Bruijn variables keep
+  their original meaning — sequencing is transparent to the surrounding scope. The
+  cancellation lemma `subst_lift_cancel : forall e s k, subst k s (lift 1 k e) = e`
+  (proved for ALL terms by the strong induction principle, record case included) is
+  what makes `tseq a b` step to `b` once `a` is a value (`tseq_step_value`).
+  Typing: `tseq_typed` (`a:Ta, b:Tb ⊢ tseq a b : Tb`, via `TLet` + front-weakening).
+- **IF-STATEMENT** `if c then s1 else s2 end` ⇒ `tif c s1 s2` (already core,
+  increment 11). Each branch is a statement; a do-nothing branch is `tlit LNil`.
+- **BLOCK / local scope** ⇒ `tlet` nesting (already core).
+- **WHILE** `while c do body end` ⇒
+  `twhile c body := tfix Tunit (tif c (tseq body (tvar 0)) (tlit LNil))`. The
+  fixpoint's self-reference is de Bruijn 0; one unfold (`twhile_unfold`, derived
+  from `SFix`) re-evaluates `c` against the CURRENT store, and if `c` is true runs
+  `body` (which MUTATES the store) then re-invokes the self-ref `tvar 0` — looping;
+  when `c` becomes false the else-branch `tlit LNil` terminates with the unit
+  value. Because `c`/`body` sit under the self-ref binder, the caller writes them
+  with surrounding locals shifted up by one. Typing: `twhile_typed`
+  (`c : Bool` and `body : Tunit` under `Tunit :: G` ⊢ `twhile c body : Tunit`; the
+  `tif`'s declared `Tunit ∪ Tunit` is subsumed to `Tunit` via `SsUnionE`).
+
+### The REAL imperative program that TYPES (the key correctness result)
+
+`sumloop_prog n` encodes
+
+```
+local i = ref 0;
+local s = ref 0;
+while (!i < n) do  s := !s + !i;  i := !i + 1  end;
+!s
+```
+
+with `talloc`/`tderef`/`tassign`/`tprim PLt`/`tprim PAdd` and the `twhile`
+encoding. **`sumloop_prog_typed : forall n, has_type [] [] (sumloop_prog n) (BAtom
+ANum)`** (`Qed`) — a real imperative Lua program typechecks. The loop body alone is
+`sumloop_loop_typed` (`twhile … : Tunit`, store-typing-agnostic — the cells are
+reached by de Bruijn `tvar`, never a `tloc` literal, so `S` is left universally
+quantified and no `TLoc` is used).
+
+**Number-typing note.** The cells are `BRef ANum`, not `BRef AInt`: arithmetic
+(`tprim PAdd`) produces `ANum` (the declared `TPrimArith` result), and a mutable
+`BRef` cell is INVARIANT, so storing `!s + !i : ANum` back requires a `Num` cell.
+The initial `LInt 0 : AInt` widens to `ANum` at allocation by subsumption. This is
+exactly Lua's single-number-type model.
+
+### It steps correctly (concrete bound, reduced end-to-end)
+
+For a minimal concrete instance — a single-cell counter loop `while (!i<1) do i:=
+!i+1 end` with `i` at `tloc 0` starting at `0` — the reduction is machine-checked
+END-TO-END through the store:
+
+- `cinc_one_iter` : from store `[0]` the loop **unfolds**, the condition reads the
+  CURRENT store (`0 < 1` = true), the body **mutates** the cell (`i ↦ 1`), and
+  control returns to the loop — leaving store `[1]`. (The store-dependent condition
+  gating a store-mutating body is the dynamic crux.)
+- `cinc_terminates` : the SECOND unfold reads the NEW store `[1]`, the condition
+  `1 < 1` is FALSE, and the loop terminates with `nil`.
+- `cinc_loop_runs` (their composition) : from store `[0]` the loop runs to `nil` in
+  store `[1]` — a real imperative loop computed to its end. `cinc_loop_typed`
+  types it at `Tunit`.
+
+The full SUM loop reduces by the SAME mechanism (alloc, unfold, store-read
+condition, mutate, re-unfold, terminate, final read), only with more iterations and
+a second cell; its TYPING is the proved `sumloop_prog_typed`. The single-cell
+instance is reduced fully to keep the reduction trace honest about depth.
+
+### Sequencing- and if-with-mutation
+
+- **Sequencing with mutation** `(t.x := 9) ; t.x` reads `9` —
+  `seq_mutation_typed` (at `AInt`) + `seq_mutation_steps` (store `[7]` → `9` in
+  store `[9]`), the `;` form over the mutable-table encoding.
+- **If-statement with mutation** `if cond then (r:=1) else (r:=2) end ; !r` reads
+  the TAKEN branch's value — `if_mut_typed`, with `if_mut_true_steps` (→ `1`, store
+  `[1]`) and `if_mut_false_steps` (→ `2`, store `[2]`).
+
+### Divergence tolerance (soundness without termination)
+
+`while true do () end` = `twhile (tlit (LBool true)) (tlit LNil)` is **well-typed**
+at `Tunit` (`while_true_typed`) and **DIVERGES**: `while_true_diverges` shows one
+full cycle returns the loop to ITSELF (same config), so it never reaches a value —
+it steps forever; `while_true_not_stuck` shows it is not a value yet always steps.
+Type soundness TOLERATES non-termination (inherited from `tfix`, increment 14): a
+divergent loop is sound because it is never a stuck non-value. `while`'s
+termination relies on the body mutating the state the condition reads; general
+termination is neither provided nor needed for soundness.
+
+### Honest scope / deferrals
+
+The encoded statement forms are sequencing, if-statement, block, and while.
+DEFERRED to the backlog: `break` / `return` / `goto` (non-local control flow —
+needs labelled exits / continuations) and numeric `for` + generic `for-in`
+(iterator protocols).
+
+`Print Assumptions` on `subst_lift_cancel`, `tseq_typed`, `tseq_step_value`,
+`twhile_unfold`, `twhile_typed`, `sumloop_prog_typed`, `sumloop_loop_typed`,
+`cinc_one_iter`, `cinc_terminates`, `cinc_loop_runs`, `cinc_loop_typed`,
+`seq_mutation_typed`, `seq_mutation_steps`, `if_mut_typed`, `if_mut_true_steps`,
+`if_mut_false_steps`, `while_true_typed`, `while_true_diverges`,
+`while_true_not_stuck`: **Closed under the global context** — no axioms, no
+`Admitted`, no `Classical`. Whole chain compiles (`coqc subtype.v && coqc typing.v
+&& coqc ssub.v && coqc check.v`); `subtype.v` + `ssub.v` + `check.v` byte-unmodified.

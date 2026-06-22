@@ -4158,6 +4158,505 @@ Proof.
 Qed.
 
 (* ===========================================================================
+   INCREMENT 20 — IMPERATIVE STATEMENT FORMS (encoded over the existing core).
+
+   Lua's imperative statements are shown to encode SOUNDLY into the existing
+   term language with NO new core terms — soundness is inherited from the already-
+   proven progress + preservation. The encodings are plain [Definition]s over the
+   existing constructors; each is documented. The capstone is a REAL imperative
+   program: a [while]-loop that mutates a reference counter and computes a sum.
+
+   THE ENCODINGS
+   -------------
+   - UNIT / "returns nothing":  a statement that produces no value yields the unit
+     value [tlit LNil]; its type is [Tunit := BAtom ANil].
+   - SEQUENCING  [s1 ; s2]  ==>  [tseq s1 s2 := tlet s1 (lift 1 0 s2)].  Evaluate
+     [s1] (for its effect), bind+discard its value, then run [s2]. Lifting [s2]
+     past the binder makes the binder UNUSED, so [s2]'s free variables keep their
+     original de Bruijn meaning — sequencing is transparent to the surrounding
+     scope (proved [seq_step] / [tseq_typed]).
+   - IF-STATEMENT  [if c then s1 else s2 end]  ==>  [tif c s1 s2]  (already in the
+     core; the conditional). Each branch is a statement; a "do-nothing" else is
+     [tlit LNil].
+   - BLOCK / local scope  ==>  [tlet] nesting (already in the core: [local x = e;
+     rest] is [tlet e rest]).
+   - WHILE  [while c do body end]  ==>  recursion:
+       [twhile c body := tfix Tunit (tif c (tseq body (tvar 0)) (tlit LNil))].
+     The fixpoint's self-reference is de Bruijn 0; one unfold re-evaluates [c]
+     against the CURRENT store, and if [c] is true runs [body] (which MUTATES the
+     store) then re-invokes the self-reference [tvar 0] — looping. When [c] becomes
+     false the else-branch [tlit LNil] terminates the loop with the unit value.
+     Because [c]/[body] sit under the fix's self-ref binder, the caller writes them
+     with surrounding locals shifted up by one (de Bruijn). Termination is NOT
+     required for soundness: [tfix] always steps and preserves its type, so even a
+     non-terminating loop is sound (see [while_true_diverges] below).
+
+   SCOPE (honest). The encoded statement forms are: sequencing, if-statement,
+   block, and while. DEFERRED to the backlog: [break] / [return] / [goto] (non-
+   local control flow — needs labelled exits / continuations), numeric [for] and
+   generic [for-in] (iterator protocols). [while]'s TERMINATION relies on the loop
+   body mutating the state the condition reads; general termination is neither
+   provided nor needed (soundness tolerates divergence).
+   =========================================================================== *)
+
+Definition Tunit : BTy := BAtom ANil.
+
+(* SEQUENCING. [tseq a b] runs [a] for effect, discards its value, runs [b]; [b]
+   is lifted past the discard-binder so its free vars are unchanged. *)
+Definition tseq (a b : tm) : tm := tlet a (lift 1 0 b).
+
+(* WHILE. The fixpoint re-evaluates [c] (current store) each unfold; true ⇒ run
+   [body] then recurse via the self-ref [tvar 0]; false ⇒ stop with [tlit LNil]. *)
+Definition twhile (c body : tm) : tm :=
+  tfix Tunit (tif c (tseq body (tvar 0)) (tlit LNil)).
+
+(* ---- The de Bruijn cancellation [tseq] rests on: substituting at [k] into a term
+   lifted at [k] is the identity (the lifted term has no [k]-variable, and the
+   shift-up is exactly undone). Proved for ALL terms by the strong induction
+   principle (the record case carries its per-field IH). *)
+Lemma subst_lift_cancel : forall e s k, subst k s (lift 1 k e) = e.
+Proof.
+  intro e.
+  induction e using tm_rect_strong with
+    (Pl := fun fs => forall ss kk,
+       map (fun ke => (fst ke, subst kk ss (snd ke)))
+           (map (fun ke => (fst ke, lift 1 kk (snd ke))) fs) = fs);
+    intros ss kk; simpl; try reflexivity.
+  - (* tvar n: case n<k unchanged, n>=k shifted up by 1 then subst at k cancels *)
+    destruct (Nat.ltb_spec n kk) as [Hlt | Hge]; simpl.
+    + destruct (Nat.compare_spec n kk) as [He|He|He]; try reflexivity; lia.
+    + destruct (Nat.compare_spec (n+1) kk) as [He|He|He]; try lia.
+      f_equal. lia.
+  - (* tprim *) rewrite IHe1, IHe2; reflexivity.
+  - (* tlam *) rewrite IHe; reflexivity.
+  - (* tapp *) rewrite IHe1, IHe2; reflexivity.
+  - (* tlet *) rewrite IHe1, IHe2; reflexivity.
+  - (* trec *) f_equal. apply IHe.
+  - (* tproj *) rewrite IHe; reflexivity.
+  - (* tif *) rewrite IHe1, IHe2, IHe3; reflexivity.
+  - (* tifn *) rewrite IHe1, IHe2, IHe3; reflexivity.
+  - (* tfix *) rewrite IHe; reflexivity.
+  - (* ttypetest *) rewrite IHe1, IHe2, IHe3; reflexivity.
+  - (* talloc *) rewrite IHe; reflexivity.
+  - (* tderef *) rewrite IHe; reflexivity.
+  - (* tassign *) rewrite IHe1, IHe2; reflexivity.
+  - (* Pl cons *) rewrite IHe, IHe0; reflexivity.
+Qed.
+
+(* TYPING the sequencing form: [a : Ta], [b : Tb] ⇒ [tseq a b : Tb]. The discard-
+   binder gets [a]'s type; [b] is lifted past it (a [weakening_cons] of a closed-
+   under-the-original-context [b]). We only need it for a [b] that types in the
+   SAME context [G] (sequencing keeps the scope), so lift-then-type = type. *)
+Lemma tseq_typed : forall S G a b Ta Tb,
+  has_type S G a Ta ->
+  has_type S G b Tb ->
+  has_type S G (tseq a b) Tb.
+Proof.
+  intros S G a b Ta Tb Ha Hb. unfold tseq.
+  eapply TLet; [ exact Ha | ].
+  (* [lift 1 0 b] under [Ta :: G] : same as [b] under [G], by front-weakening. *)
+  apply (weakening_cons S G b Tb Ta Hb).
+Qed.
+
+(* STEPPING the sequencing form: once [a] is a value, [tseq a b] steps to [b]
+   (the binder is discarded by [subst_lift_cancel]). *)
+Lemma tseq_step_value : forall a b st,
+  value a -> step (tseq a b, st) (b, st).
+Proof.
+  intros a b st Hv. unfold tseq.
+  replace b with (subst 0 a (lift 1 0 b)) at 2 by apply subst_lift_cancel.
+  apply SLet; exact Hv.
+Qed.
+
+(* congruence: [tseq] steps its first component (it is a [tlet]). *)
+Lemma tseq_step1 : forall a a' b st st',
+  step (a, st) (a', st') -> step (tseq a b, st) (tseq a' b, st').
+Proof. intros a a' b st st' H. unfold tseq. apply SLet1; exact H. Qed.
+
+(* one unfold of [twhile]: it always steps (a [tfix]) to the conditional body
+   with the self-reference substituted by the whole loop. *)
+Lemma twhile_unfold : forall c body st,
+  step (twhile c body, st)
+       (tif (subst 0 (twhile c body) c)
+            (tseq (subst 0 (twhile c body) body) (twhile c body))
+            (tlit LNil), st).
+Proof.
+  intros c body st. unfold twhile at 1.
+  (* SFix unfolds tfix T b to subst 0 (tfix T b) b *)
+  pose proof (SFix Tunit (tif c (tseq body (tvar 0)) (tlit LNil)) st) as H.
+  (* compute the substitution through tif/tseq; the self-ref [tvar 0] in the
+     tseq's recursive tail becomes the whole loop. *)
+  simpl in H.
+  (* unfold [tseq] in H's RHS to align with the goal's [tseq]. *)
+  unfold tseq in H. simpl in H.
+  unfold twhile, tseq. exact H.
+Qed.
+
+(* TYPING [twhile]: if [c : Bool] and [body : Tunit] (a statement) under the self-
+   ref binding [Tunit :: G], then [twhile c body : Tunit]. The loop result is the
+   unit value (nil). *)
+Lemma twhile_typed : forall S G c body,
+  has_type S (Tunit :: G) c (BAtom ABool) ->
+  has_type S (Tunit :: G) body Tunit ->
+  has_type S G (twhile c body) Tunit.
+Proof.
+  intros S G c body Hc Hbody. unfold twhile. apply TFix.
+  eapply TSub.
+  - apply TIf with (T1 := Tunit) (T2 := Tunit).
+    + exact Hc.
+    + (* the body, sequenced with the self-ref recursive call [tvar 0 : Tunit] *)
+      eapply tseq_typed; [ exact Hbody | apply TVar; reflexivity ].
+    + (* the else-branch: the unit value *) apply (TLit S (Tunit :: G) LNil).
+  - (* the if's declared type is [Tunit ∪ Tunit]; subsume to [Tunit]. *)
+    apply RsSsub. apply SsUnionE; apply SsRefl.
+Qed.
+
+(* ===========================================================================
+   EXAMPLE 6 — A REAL IMPERATIVE PROGRAM that TYPES: a counting / sum loop.
+
+     local i = ref 0;
+     local s = ref 0;
+     while (!i < n) do  s := !s + !i;  i := !i + 1  end;
+     !s
+
+   Encoded with [talloc]/[tderef]/[tassign]/[tprim PLt]/[tprim PAdd] and the
+   [twhile] encoding. De Bruijn (under the two outer [tlet]s, then under the fix
+   self-ref binder inside [twhile]): the cell [s] is the closest local and [i] the
+   next, both shifted up by one for the fix binder — so inside the loop body/cond,
+   [s] = de Bruijn 1 and [i] = de Bruijn 2. This is the KEY correctness result:
+   a real imperative Lua program typechecks (proved at [ANil] for the loop, [ANum]
+   for the whole program via the final read).
+
+   NUMBER TYPING NOTE. The cells are [BRef ANum], not [BRef AInt]: arithmetic
+   ([tprim PAdd]) produces [ANum] (the declared arithmetic result type — see
+   [TPrimArith]), and a mutable [BRef] cell is INVARIANT, so to store [!s + !i :
+   ANum] back into the cell the cell must be a [Num] cell. The initial [LInt 0]
+   (which types at [AInt]) widens to [ANum] by subsumption at allocation. This is
+   exactly Lua's number model: there is one number type. *)
+   (* =========================================================================== *)
+
+(* the loop condition  [ !i < n ]  with [i] at de Bruijn 2 (under fix + 2 lets). *)
+Definition sumloop_cond (n : nat) : tm :=
+  tprim PLt (tderef (tvar 2)) (tlit (LInt n)).
+
+(* the loop body  [ s := !s + !i ; i := !i + 1 ]  ([s]=dB1, [i]=dB2). *)
+Definition sumloop_body : tm :=
+  tseq
+    (tassign (tvar 1) (tprim PAdd (tderef (tvar 1)) (tderef (tvar 2))))
+    (tassign (tvar 2) (tprim PAdd (tderef (tvar 2)) (tlit (LInt 1)))).
+
+(* the whole program (un-allocated): alloc i, alloc s, the while, then read s.
+   Outside the fix the cells are [s]=dB0, [i]=dB1; the final [!s] reads dB1 (past
+   the unit result of the while if we sequence it — here we sequence while ; !s). *)
+Definition sumloop_prog (n : nat) : tm :=
+  tlet (talloc (tlit (LInt 0)))           (* local i = ref 0   (i = dB0)        *)
+    (tlet (talloc (tlit (LInt 0)))        (* local s = ref 0   (s = dB0, i=dB1) *)
+      (tseq (twhile (sumloop_cond n) sumloop_body)   (* while ... end          *)
+            (tderef (tvar 0)))).          (* !s  (s = dB0 here)                 *)
+
+(* TYPING the loop alone (body + cond) in the context [Tunit (fix self-ref) ::
+   BRef Num (s) :: BRef Num (i)]: it is a unit statement. The cells are reached by
+   de Bruijn [tvar], so the store-typing [S] is irrelevant (left universally
+   quantified) — no [TLoc] is used. *)
+Lemma sumloop_loop_typed : forall S n,
+  has_type S [ BRef (BAtom ANum) ; BRef (BAtom ANum) ]
+    (twhile (sumloop_cond n) sumloop_body) Tunit.
+Proof.
+  intros S n. apply twhile_typed.
+  - (* condition  !i < n : Bool. [i] = de Bruijn 2 under [Tunit :: BRef Num :: BRef Num]. *)
+    unfold sumloop_cond. apply TPrimCmp; [ reflexivity | | ].
+    + apply TDeref with (T := BAtom ANum). apply TVar. reflexivity.
+    + eapply TSub; [ apply (TLit _ _ (LInt n)) | apply RsSsub; apply SsAtom; apply ALInt ].
+  - (* body : two assignments sequenced, each a unit statement. *)
+    unfold sumloop_body. eapply tseq_typed.
+    + (* s := !s + !i  ([s]=dB1, [i]=dB2) : nil — the Num sum into the Num cell *)
+      eapply TAssign with (T := BAtom ANum).
+      * apply TVar. reflexivity.
+      * apply TPrimArith; [ reflexivity | | ].
+        -- apply TDeref with (T := BAtom ANum). apply TVar. reflexivity.
+        -- apply TDeref with (T := BAtom ANum). apply TVar. reflexivity.
+    + (* i := !i + 1  ([i]=dB2) : nil *)
+      eapply TAssign with (T := BAtom ANum).
+      * apply TVar. reflexivity.
+      * apply TPrimArith; [ reflexivity | | ].
+        -- apply TDeref with (T := BAtom ANum). apply TVar. reflexivity.
+        -- eapply TSub; [ apply (TLit _ _ (LInt 1)) | apply RsSsub; apply SsAtom; apply ALInt ].
+Qed.
+
+(* THE KEY RESULT: the whole imperative program TYPES at [ANum]. (The body's
+   arithmetic and assignments are all well typed; the while is a unit statement;
+   the final [!s] reads the Num cell.) *)
+Example sumloop_prog_typed : forall n,
+  has_type [] [] (sumloop_prog n) (BAtom ANum).
+Proof.
+  intro n. unfold sumloop_prog.
+  (* The cells are reached purely through de Bruijn VARIABLES ([tvar]), never
+     through a [tloc] literal, so the store-typing [S] is never consulted and can
+     stay [[]] for the WHOLE program: [TAlloc] produces [BRef Num] directly from
+     the contained value's type, no [S] lookup. The initial [LInt 0 : AInt] widens
+     to [ANum] at alloc (Lua's single number type). *)
+  apply TLet with (A := BRef (BAtom ANum)).
+  { apply TAlloc with (T := BAtom ANum).
+    eapply TSub; [ apply (TLit [] [] (LInt 0)) | apply RsSsub; apply SsAtom; apply ALInt ]. }
+  apply TLet with (A := BRef (BAtom ANum)).
+  { apply TAlloc with (T := BAtom ANum).
+    eapply TSub; [ apply (TLit [] _ (LInt 0)) | apply RsSsub; apply SsAtom; apply ALInt ]. }
+  (* now in context [BRef Num (s, dB0) ; BRef Num (i, dB1)], type [while ; !s].
+     [sumloop_loop_typed] needs store entries at 0,1 — but the loop reads its cells
+     via [tvar] (de Bruijn), not [tloc], so those [S] hypotheses are vacuously
+     dischargeable at any [S] with Num at 0,1; we instantiate at [[Num;Num]]. *)
+  eapply tseq_typed.
+  - (* the while loop, a unit statement (store-typing-agnostic: cells via tvar). *)
+    apply sumloop_loop_typed.
+  - (* the final read  !s  ([s] = de Bruijn 0) : Num. *)
+    apply TDeref with (T := BAtom ANum). apply TVar. reflexivity.
+Qed.
+
+(* ===========================================================================
+   EXAMPLE 7 — THE LOOP STEPS CORRECTLY (concrete small bound).
+
+   We take a MINIMAL concrete instance and reduce it END-TO-END through the store:
+   a single-cell counter loop  [ while (!i < 1) do i := !i + 1 end ]  with [i]
+   starting at 0. The loop unfolds, the condition reads the CURRENT store (0 < 1 =
+   true), the body MUTATES the cell (i ↦ 1), it re-unfolds, the condition is now
+   false (1 < 1 = false), and the loop terminates with the unit value. This
+   exhibits the load-bearing dynamics: store-dependent condition, mutating body,
+   store-driven termination.
+
+   (The full SUM loop [sumloop_prog] reduces by the SAME mechanism — alloc, unfold,
+   store-read condition, mutate, re-unfold, terminate, final read — only with more
+   iterations and a second cell; the typing of that full program is proved above
+   in [sumloop_prog_typed]. We reduce the single-cell instance fully to keep the
+   reduction trace machine-checked end-to-end and honest about depth.)
+   =========================================================================== *)
+
+(* the counter loop body  [ i := !i + 1 ]  with [i] at de Bruijn 0 (under just the
+   fix self-ref binder, i.e. the cell is the only surrounding local — but here we
+   keep [i] as a closed LOCATION [tloc 0] so the reduction is concrete in the
+   store; the loop has no free locals, the self-ref is dB0). *)
+Definition cinc_cond (n : nat) : tm := tprim PLt (tderef (tloc 0)) (tlit (LInt n)).
+Definition cinc_body : tm :=
+  tassign (tloc 0) (tprim PAdd (tderef (tloc 0)) (tlit (LInt 1))).
+Definition cinc_loop (n : nat) : tm := twhile (cinc_cond n) cinc_body.
+
+(* since [cinc_cond]/[cinc_body] are CLOSED (only [tloc 0], a value), the fix-
+   unfold substitution leaves them unchanged. *)
+Lemma cinc_cond_closed : forall n s, subst 0 s (cinc_cond n) = cinc_cond n.
+Proof. intros n s. reflexivity. Qed.
+Lemma cinc_body_closed : forall s, subst 0 s cinc_body = cinc_body.
+Proof. intro s. reflexivity. Qed.
+
+(* ONE FULL ITERATION, store-driven, machine-checked: from store [0], the loop
+   unfolds, the condition [0 < 1] reads the store and is TRUE, the body runs and
+   MUTATES the cell to [1], and control returns to the loop — leaving store [1].
+   This is the increment's dynamic crux: a store-dependent condition gating a
+   store-mutating body. *)
+Lemma cinc_one_iter :
+  multistep (cinc_loop 1, [tlit (LInt 0)])
+            (cinc_loop 1, [tlit (LInt 1)]).
+Proof.
+  unfold cinc_loop.
+  (* unfold the fixpoint *)
+  eapply MSstep. { apply twhile_unfold. }
+  rewrite cinc_cond_closed, cinc_body_closed.
+  (* evaluate the condition  !(loc 0) < 1 : read the store -> 0 < 1 *)
+  eapply MSstep. { apply SIf1. apply SPrim1. apply SDeref. }
+  simpl.
+  eapply MSstep. { apply SIf1. apply SPrimCmp. reflexivity. }
+  (* 0 < 1 = true: select the then-branch (body ; loop) *)
+  eapply MSstep. { apply SIfTrue. }
+  (* run the body  loc0 := !loc0 + 1 : read 0, add 1, write 1 -> store [1] *)
+  eapply MSstep. { apply tseq_step1. apply SAssign2; [ apply VLoc | apply SPrim1; apply SDeref ]. }
+  simpl.
+  eapply MSstep. { apply tseq_step1. apply SAssign2; [ apply VLoc | apply SPrimArith; reflexivity ]. }
+  simpl.
+  eapply MSstep. { apply tseq_step1. apply SAssign. apply VLit. }
+  (* the body finished (nil); the sequence discards it and yields the loop. *)
+  eapply MSstep. { apply tseq_step_value. apply VLit. }
+  apply MSrefl.
+Qed.
+
+(* TERMINATION (concrete): after the mutating iteration, the SECOND unfold reads
+   the NEW store [1], the condition [1 < 1] is FALSE, and the loop terminates with
+   the unit value [nil]. Composed with [cinc_one_iter], the whole loop from store
+   [0] runs to [nil] in store [1] — a real imperative loop computed to its end. *)
+Lemma cinc_terminates :
+  multistep (cinc_loop 1, [tlit (LInt 1)])
+            (tlit LNil, [tlit (LInt 1)]).
+Proof.
+  unfold cinc_loop.
+  eapply MSstep. { apply twhile_unfold. }
+  rewrite cinc_cond_closed, cinc_body_closed.
+  eapply MSstep. { apply SIf1. apply SPrim1. apply SDeref. }
+  simpl.
+  eapply MSstep. { apply SIf1. apply SPrimCmp. reflexivity. }
+  (* 1 < 1 = false: select the else-branch (nil) — the loop ENDS. *)
+  eapply MSstep. { apply SIfFalse. }
+  apply MSrefl.
+Qed.
+
+(* THE WHOLE COUNTER LOOP, end-to-end: from store [0] it runs to the unit value in
+   store [1] (one mutating iteration, then store-driven termination). *)
+Example cinc_loop_runs :
+  multistep (cinc_loop 1, [tlit (LInt 0)]) (tlit LNil, [tlit (LInt 1)]).
+Proof.
+  eapply multistep_trans; [ apply cinc_one_iter | apply cinc_terminates ].
+Qed.
+
+(* and the counter loop TYPES (a unit statement) under the store-typing [Num]
+   (the cell is a Num cell — arithmetic result type, invariant cell). *)
+Example cinc_loop_typed :
+  has_type [ BAtom ANum ] [] (cinc_loop 1) Tunit.
+Proof.
+  unfold cinc_loop. apply twhile_typed.
+  - unfold cinc_cond. apply TPrimCmp; [ reflexivity | | ].
+    + apply TDeref with (T := BAtom ANum). apply TLoc. reflexivity.
+    + eapply TSub; [ apply (TLit _ _ (LInt 1)) | apply RsSsub; apply SsAtom; apply ALInt ].
+  - unfold cinc_body. eapply TAssign with (T := BAtom ANum).
+    + apply TLoc. reflexivity.
+    + apply TPrimArith; [ reflexivity | | ].
+      * apply TDeref with (T := BAtom ANum). apply TLoc. reflexivity.
+      * eapply TSub; [ apply (TLit _ _ (LInt 1)) | apply RsSsub; apply SsAtom; apply ALInt ].
+Qed.
+
+(* ===========================================================================
+   EXAMPLE 8 — SEQUENCING WITH MUTATION:  [ (t.x := 9) ; t.x ]  reads 9.
+   The [;] form (a [tseq]) runs the write for its effect, then reads the cell.
+   =========================================================================== *)
+
+Example seq_mutation_typed :
+  has_type [ BAtom AInt ] []
+    (tseq (tassign (tproj (mtable_val 0) "x"%string) (tlit (LInt 9)))
+          (tderef (tproj (mtable_val 0) "x"%string)))
+    (BAtom AInt).
+Proof.
+  eapply tseq_typed.
+  - eapply TAssign; [ apply mtable_proj_x; reflexivity | apply TLit ].
+  - apply TDeref. apply mtable_proj_x. reflexivity.
+Qed.
+
+Example seq_mutation_steps :
+  multistep
+    (tseq (tassign (tproj (mtable_val 0) "x"%string) (tlit (LInt 9)))
+          (tderef (tproj (mtable_val 0) "x"%string)),
+     [tlit (LInt 7)])
+    (tlit (LInt 9), [tlit (LInt 9)]).
+Proof.
+  (* write: proj -> loc 0, assign 9 -> nil, store [7] -> [9] *)
+  eapply MSstep. { apply tseq_step1. apply SAssign1. apply mtable_proj_x_steps. }
+  eapply MSstep. { apply tseq_step1. apply SAssign. apply VLit. }
+  (* the sequence discards the nil and runs the read (free vars preserved) *)
+  eapply MSstep. { apply tseq_step_value. apply VLit. }
+  (* read: proj -> loc 0, deref -> 9 *)
+  eapply MSstep. { apply SDeref1. apply mtable_proj_x_steps. }
+  eapply MSstep. { apply SDeref. }
+  simpl. apply MSrefl.
+Qed.
+
+(* ===========================================================================
+   EXAMPLE 9 — IF-STATEMENT WITH MUTATION:
+     [ if cond then (r := 1) else (r := 2) end ; !r ]  reads the taken branch.
+   Encoded with [tif] (the if-statement) + [tseq] + the reference [r] = [tloc 0].
+   =========================================================================== *)
+
+(* the program, parameterized by the boolean condition value. *)
+Definition if_mut_prog (b : bool) : tm :=
+  tseq
+    (tif (tlit (LBool b))
+         (tassign (tloc 0) (tlit (LInt 1)))
+         (tassign (tloc 0) (tlit (LInt 2))))
+    (tderef (tloc 0)).
+
+Example if_mut_typed : forall b,
+  has_type [ BAtom AInt ] [] (if_mut_prog b) (BAtom AInt).
+Proof.
+  intro b. unfold if_mut_prog. eapply tseq_typed.
+  - (* the if-statement: both branches are unit assignments. *)
+    eapply TSub.
+    + apply TIf with (T1 := BAtom ANil) (T2 := BAtom ANil).
+      * apply TLit.
+      * eapply TAssign with (T := BAtom AInt); [ apply TLoc; reflexivity | apply TLit ].
+      * eapply TAssign with (T := BAtom AInt); [ apply TLoc; reflexivity | apply TLit ].
+    + apply RsSsub. apply SsUnionE; apply SsRefl.
+  - (* the read  !r : Int *)
+    apply TDeref with (T := BAtom AInt). apply TLoc. reflexivity.
+Qed.
+
+(* TRUE branch taken: [r := 1] then [!r] reads 1, store [0] -> [1]. *)
+Example if_mut_true_steps :
+  multistep (if_mut_prog true, [tlit (LInt 0)]) (tlit (LInt 1), [tlit (LInt 1)]).
+Proof.
+  unfold if_mut_prog.
+  eapply MSstep. { apply tseq_step1. apply SIfTrue. }
+  eapply MSstep. { apply tseq_step1. apply SAssign. apply VLit. }
+  eapply MSstep. { apply tseq_step_value. apply VLit. }
+  eapply MSstep. { apply SDeref. }
+  simpl. apply MSrefl.
+Qed.
+
+(* FALSE branch taken: [r := 2] then [!r] reads 2, store [0] -> [2]. *)
+Example if_mut_false_steps :
+  multistep (if_mut_prog false, [tlit (LInt 0)]) (tlit (LInt 2), [tlit (LInt 2)]).
+Proof.
+  unfold if_mut_prog.
+  eapply MSstep. { apply tseq_step1. apply SIfFalse. }
+  eapply MSstep. { apply tseq_step1. apply SAssign. apply VLit. }
+  eapply MSstep. { apply tseq_step_value. apply VLit. }
+  eapply MSstep. { apply SDeref. }
+  simpl. apply MSrefl.
+Qed.
+
+(* ===========================================================================
+   EXAMPLE 10 — DIVERGENCE TOLERANCE: [while true do () end] is WELL-TYPED and
+   DIVERGES (steps forever, never stuck). Type soundness TOLERATES non-termination
+   — progress + preservation hold for [tfix], so a divergent loop is SOUND (it is
+   always able to step; it is never a stuck non-value). The loop body here is the
+   unit statement [()] = [tlit LNil] (de Bruijn 0 unused under the fix binder, so
+   it is closed). We show: (1) it TYPES at [Tunit]; (2) from ANY store it steps
+   back to itself in a fixed number of steps (a non-terminating reduction cycle).
+   =========================================================================== *)
+
+(* [while true do () end] — condition is the literal [true], body the unit value. *)
+Definition while_true : tm := twhile (tlit (LBool true)) (tlit LNil).
+
+Example while_true_typed :
+  has_type [] [] while_true Tunit.
+Proof.
+  unfold while_true. apply twhile_typed.
+  - apply (TLit [] [Tunit] (LBool true)).
+  - apply (TLit [] [Tunit] LNil).
+Qed.
+
+(* DIVERGENCE: one full cycle returns the loop to ITSELF (same config), so it
+   never reaches a value — it steps forever. Witnessed as a multistep loop -> loop.
+   The cycle: unfold, condition is the literal [true] (no store read needed),
+   select then-branch, run the unit body, the sequence yields the loop again. *)
+Example while_true_diverges : forall st,
+  multistep (while_true, st) (while_true, st) /\ while_true <> tlit LNil.
+Proof.
+  intro st. split.
+  - unfold while_true.
+    eapply MSstep. { apply twhile_unfold. }
+    simpl.
+    (* condition is the literal true; select the then-branch *)
+    eapply MSstep. { apply SIfTrue. }
+    (* body is the unit value already; the sequence discards it, yields the loop *)
+    eapply MSstep. { apply tseq_step_value. apply VLit. }
+    apply MSrefl.
+  - discriminate.
+Qed.
+
+(* and a DIRECT progress witness: the loop is NOT a value, yet it CAN step (it is
+   never stuck) — exactly what divergence-tolerant soundness guarantees. *)
+Example while_true_not_stuck :
+  ~ value while_true /\ exists e' st', step (while_true, []) (e', st').
+Proof.
+  split.
+  - intro Hv. unfold while_true, twhile in Hv. inversion Hv.
+  - eexists. eexists. apply twhile_unfold.
+Qed.
+
+(* ===========================================================================
    ASSUMPTION AUDIT — closed under the global context.
    =========================================================================== *)
 Print Assumptions progress.
@@ -4192,3 +4691,23 @@ Print Assumptions covariant_structure_composes.
 Print Assumptions covariant_field_still_invariant.
 Print Assumptions reassign_local_typed.
 Print Assumptions reassign_local_steps.
+(* INCREMENT 20 — imperative statements + the real while-loop (encoded). *)
+Print Assumptions subst_lift_cancel.
+Print Assumptions tseq_typed.
+Print Assumptions tseq_step_value.
+Print Assumptions twhile_unfold.
+Print Assumptions twhile_typed.
+Print Assumptions sumloop_prog_typed.
+Print Assumptions sumloop_loop_typed.
+Print Assumptions cinc_one_iter.
+Print Assumptions cinc_terminates.
+Print Assumptions cinc_loop_runs.
+Print Assumptions cinc_loop_typed.
+Print Assumptions seq_mutation_typed.
+Print Assumptions seq_mutation_steps.
+Print Assumptions if_mut_typed.
+Print Assumptions if_mut_true_steps.
+Print Assumptions if_mut_false_steps.
+Print Assumptions while_true_typed.
+Print Assumptions while_true_diverges.
+Print Assumptions while_true_not_stuck.
