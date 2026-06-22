@@ -2015,3 +2015,95 @@ needs labelled exits / continuations) and numeric `for` + generic `for-in`
 `while_true_not_stuck`: **Closed under the global context** — no axioms, no
 `Admitted`, no `Classical`. Whole chain compiles (`coqc subtype.v && coqc typing.v
 && coqc ssub.v && coqc check.v`); `subtype.v` + `ssub.v` + `check.v` byte-unmodified.
+
+## Increment 21 — TYPE ANNOTATIONS / ASCRIPTION (`tannot`): guide inference; the op-sem-bridge synth-gap on the sum-loop closed
+
+The general mechanism for guiding inference where `synth` is incomplete. A new
+term-former `tannot : BTy -> tm -> tm` ascribes a term to a type; it directly
+closes the bridge-surfaced gap where an annotated ref cell makes the sum-loop
+synthesize.
+
+### Term / typing / op-sem
+
+- **Term** `tannot T e` — ascribe `e` to type `T`. NOT a value (it strips).
+- **Typing** `TAnnot : has_type S G e T -> has_type S G (tannot T e) T`. With
+  subsumption (`TSub`), an `e` at a SUBTYPE of `T` also ascribes (synthesize `e`'s
+  least type, subsume to `T`, then ascribe) — this is what an up-ascription
+  `(3 : Num)` relies on (`AInt <: ANum`).
+- **Op-sem — RUNTIME ERASURE (value-strip choice).** `SAnnot1` congruence-reduces
+  under the annotation; `SAnnotV : value v -> step (tannot T v, st) (v, st)` STRIPS
+  it once the body is a value. The value-strip composes cleanly with CBV (an
+  annotation never blocks reduction, never persists into a value), which is why
+  this choice keeps progress + preservation clean: progress — `tannot T v` always
+  steps (strip), `tannot T e` with reducible `e` steps by congruence; preservation
+  — congruence preserves the annotation type, the strip yields `v : T` because the
+  ascribed body was checked (`inv_annot`).
+
+### synth / check — the point (annotation → CHECK mode)
+
+`synth (tannot T e)` = synthesize `e`'s least type `Se`, gate `decide_rsub Se T`,
+and on success return the ANNOTATION `T` (not `Se`). The annotation DRIVES the
+checker into CHECK mode — `e` is checked against `T` rather than synthesized — and
+downstream consumers see `T`, the type the programmer demanded. This is how an
+annotation guides inference: a value whose synthesized type is too specific can be
+ascended to the wider `T` a later use requires. `synth_sound` / `check_sound`
+re-proved (the `tannot` case applies `TAnnot` after a `TSub` discharged by
+`decide_rsub_sound`).
+
+### progress + preservation re-proved
+
+Both re-proved to `Qed` with the `tannot` cases (and `tannot` threaded through
+`tm_rect_strong`, `has_type_mind`, `inv_annot`, `weakening`, `store_weakening`,
+`has_type_closed` / `closed_at` / `closed_at_lift`, `subst_lemma`,
+`subst_lift_cancel`, `narrowing`). Preservation: `tannot T e` steps to
+`tannot T e'` (preserves `T`) or to `v` (which has type `T` since the annotation
+was checked — `inv_annot` gives `e : Ta` with `rsub Ta T`).
+
+### THE FIX — the op-sem-bridge-surfaced synth gap on a real imperative loop
+
+The counting/sum loop (§ increment 20) allocates a counter + accumulator. WITHOUT
+an annotation, `talloc (tlit (LInt 0))` synthesizes `BRef AInt` (an Int cell); the
+body stores an arithmetic result `!s + !i : ANum` back, and a `BRef` cell is
+INVARIANT — `ANum` is NOT storable into a `BRef AInt` — so **`synth` of the whole
+un-annotated loop returns `None`** (`sumloop_unann_None`). This is exactly the
+bridge-surfaced incompleteness: a sound program the synthesizer cannot infer,
+because `talloc` commits the cell to the too-specific initialiser type. (Note: the
+`has_type`-side `sumloop_prog_typed` of increment 20 already typed the loop, by
+manually subsuming `LInt 0` to `ANum` at allocation — it is the SYNTHESIZER that
+could not infer this without guidance.)
+
+WITH the cells annotated — `talloc (tannot (BAtom ANum) (tlit (LInt 0)))` — the
+cell synthesizes `BRef ANum` (the annotation ascends `LInt 0 : AInt` to `ANum`
+before `talloc` reads its type), able to hold the arithmetic result. The whole loop
+then synthesizes **`Some (BAtom ANum)`** (`sumloop_ann_synths`) and is sound
+(`sumloop_ann_sound` via `check_sound`). The annotation GUIDED the inference — the
+contrast (`None` un-annotated vs `Some ANum` annotated) closes the gap.
+
+### Sanity
+
+`(3 : Num)` synthesizes `Num` (`compute_annot_num`), is sound
+(`compute_annot_sound`), and steps runtime-erased to `3` (`compute_annot_steps`). A
+mis-ascription `(3 : Str)` is REJECTED by `synth` (= `None`,
+`compute_annot_mismatch_None`) and is genuinely ill-typed
+(`compute_annot_mismatch_untyped` : `~ has_type … (tannot AStr 3)` — `TAnnot` would
+need `3 : AStr`, false since `AInt ⊄ AStr`).
+
+### Honest scope / building block
+
+Honest scope: type ascription via `tannot`. This is also the building block for
+surface `local x : T = e` (ascribe the bound expression) and function param/return
+type annotations (ascribe at the binder / the body). Those surface forms are not
+themselves built here — only the ascription primitive they rest on.
+
+`Print Assumptions` on `progress`, `preservation`, `synth_sound`, `check_sound`,
+`sumloop_ann_synths` (+ `compute_annot_sound`, `compute_annot_mismatch_untyped`,
+`sumloop_unann_None`, `sumloop_ann_sound`): **Closed under the global context** — no
+axioms, no `Admitted`, no `Classical`. Whole chain compiles
+(`coqc subtype.v && coqc typing.v && coqc ssub.v && coqc check.v`); `subtype.v` +
+`ssub.v` byte-unmodified (only `typing.v` + `check.v` changed).
+
+**Deferred (separate gap, unchanged):** `PDiv` float-faithfulness — `prim_arith`'s
+`PDiv` uses `Nat.div` (a representative integer-valued result), not the exact Lua
+double-division semantics; the value model abstracts the exact double, so soundness
+needs only "the result is a number", but exact-`/`-faithfulness to real Lua remains
+a deferred reality-bridge gap (NOT closed by this increment).

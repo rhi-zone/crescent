@@ -154,7 +154,17 @@ Inductive tm : Type :=
   | talloc  : tm -> tm                       (* allocate, returns a fresh loc   *)
   | tderef  : tm -> tm                       (* read  !r                        *)
   | tassign : tm -> tm -> tm                 (* write r := v  (yields unit/nil) *)
-  | tloc    : nat -> tm.                     (* a store address (a VALUE)       *)
+  | tloc    : nat -> tm                      (* a store address (a VALUE)       *)
+  (* TYPE ANNOTATION / ASCRIPTION. [tannot T e] ascribes [e] to type [T]: it is
+     the general mechanism for GUIDING INFERENCE where [synth] is incomplete. It
+     drives the bidirectional checker into CHECK mode — [synth (tannot T e)] CHECKS
+     [e] against [T] (rather than synthesizing [e]) and returns [T]. This is the
+     building block for surface [local x : T = e] and function param/return type
+     annotations. Operationally an annotation is RUNTIME-ERASED (it strips on a
+     value, [SAnnotV]; congruence under it, [SAnnot1]); [tannot T e] is NOT itself a
+     value. Declaratively [tannot T e : T] when [e : T] (with subsumption, [e] at a
+     subtype of [T] also works — [TAnnot]). *)
+  | tannot  : BTy -> tm -> tm.               (* ascription  (e : T)             *)
 
 (* The type a tag pins (the THEN-branch narrowed type). TgNum ↦ ANum (all numbers,
    per the 5.1 [type()] model), the other scalars to their atoms, TgTable to the
@@ -240,6 +250,7 @@ Section tm_ind_strong.
   Hypothesis Hderef  : forall e, P e -> P (tderef e).
   Hypothesis Hassign : forall r e, P r -> P e -> P (tassign r e).
   Hypothesis Hloc    : forall n, P (tloc n).
+  Hypothesis Hannot  : forall T e, P e -> P (tannot T e).
   Hypothesis Hnil  : Pl [].
   Hypothesis Hcons : forall k e rest, P e -> Pl rest -> Pl ((k, e) :: rest).
   Fixpoint tm_rect_strong (e : tm) : P e :=
@@ -267,6 +278,7 @@ Section tm_ind_strong.
     | tderef e  => Hderef e (tm_rect_strong e)
     | tassign r e => Hassign r e (tm_rect_strong r) (tm_rect_strong e)
     | tloc n    => Hloc n
+    | tannot T e => Hannot T e (tm_rect_strong e)
     end.
 End tm_ind_strong.
 
@@ -692,6 +704,14 @@ Inductive has_type : list BTy -> list BTy -> tm -> BTy -> Prop :=
       has_type S G r (BRef T) ->
       has_type S G e T ->
       has_type S G (tassign r e) (BAtom ANil)
+  (* TYPE ASCRIPTION. [tannot T e] has type [T] when [e] has type [T]. Combined
+     with subsumption [TSub], an [e] at a SUBTYPE of [T] also ascribes to [T]
+     (synthesize [e]'s least type, subsume to [T], then ascribe). The annotation
+     is the inference-guiding seam: it is the declarative counterpart of the
+     checker's CHECK-mode switch (see [synth (tannot T e)] in check.v). *)
+  | TAnnot : forall S G e T,
+      has_type S G e T ->
+      has_type S G (tannot T e) T
 (* key-aligned pointwise typing of record fields; mutual so the generated
    induction principle carries an IH on every field derivation. *)
 with has_fields : list BTy -> list BTy -> list (string * tm) -> list (string * BTy) -> Prop :=
@@ -763,6 +783,8 @@ Fixpoint lift (d k : nat) (e : tm) : tm :=
   | tderef e  => tderef (lift d k e)
   | tassign r e => tassign (lift d k r) (lift d k e)
   | tloc n    => tloc n
+  (* annotation: the type [T] is closed (no de Bruijn vars); lift the body at [k]. *)
+  | tannot T e => tannot T (lift d k e)
   end.
 
 Fixpoint subst (j : nat) (s : tm) (e : tm) : tm :=
@@ -798,6 +820,8 @@ Fixpoint subst (j : nat) (s : tm) (e : tm) : tm :=
   | tderef e  => tderef (subst j s e)
   | tassign r e => tassign (subst j s r) (subst j s e)
   | tloc n    => tloc n
+  (* annotation: substitute into the body at [j]; the type is closed. *)
+  | tannot T e => tannot T (subst j s e)
   end.
 
 (* record-field lookup at the term level (for projection) *)
@@ -984,7 +1008,18 @@ Inductive step : tm * store -> tm * store -> Prop :=
       step (tassign (tloc n) v, st) (tlit LNil, store_update n v st)
   | SAssign1 : forall r r' e st st', step (r, st) (r', st') -> step (tassign r e, st) (tassign r' e, st')
   | SAssign2 : forall v e e' st st', value v -> step (e, st) (e', st') ->
-      step (tassign v e, st) (tassign v e', st').
+      step (tassign v e, st) (tassign v e', st')
+  (* TYPE ANNOTATION — RUNTIME ERASURE. The annotation is congruence-reduced under
+     ([SAnnot1]) until its body is a value, then STRIPPED ([SAnnotV]). This
+     value-strip composes cleanly with CBV evaluation contexts (an annotation never
+     blocks reduction and never persists into a value), which keeps progress (a
+     [tannot T v] always steps — strip — and a [tannot T e] with reducible [e] steps
+     by congruence) and preservation (preserves [T]: congruence keeps the
+     annotation type; the strip yields [v : T] since the annotation was checked)
+     clean. [tannot T v] is NOT a value (it strips). *)
+  | SAnnot1 : forall T e e' st st', step (e, st) (e', st') ->
+      step (tannot T e, st) (tannot T e', st')
+  | SAnnotV : forall T v st, value v -> step (tannot T v, st) (v, st).
 
 (* STORE well-typedness + extension (ported from imp.v). [store_well_typed S st]:
    same length, each stored value has its S-type (closed — stored values are
@@ -1293,6 +1328,21 @@ Proof.
   - subst. destruct (IHhas_type eq_refl) as [U [Hr [He Hd]]].
     exists U. split;[assumption|split;[assumption|eapply RsTrans; eassumption]].
   - injection Ee as <- <-. exists T. split;[assumption|split;[assumption|apply rsub_refl]].
+Qed.
+
+(* TYPE ASCRIPTION inversion (subsumption-transparent). [tannot Ta e : T] means the
+   ascribed type [Ta] is [rsub]-below [T] and [e : Ta]. Preservation's strip case
+   uses this: the stripped value [v] retains type [T] because the annotation was
+   checked ([e : Ta], [Ta <: T]). *)
+Lemma inv_annot : forall S G Ta e T,
+  has_type S G (tannot Ta e) T ->
+  has_type S G e Ta /\ rsub Ta T.
+Proof.
+  intros S G Ta e T H. remember (tannot Ta e) as e0 eqn:Ee.
+  induction H; try discriminate Ee.
+  - subst. destruct (IHhas_type eq_refl) as [He Hd].
+    split; [assumption | eapply RsTrans; eassumption].
+  - injection Ee as <- <-. split; [assumption | apply rsub_refl].
 Qed.
 
 (* ===========================================================================
@@ -2476,6 +2526,9 @@ Proof.
   - (* TAssign *) eapply TAssign;
       match goal with [ IH : forall _ _ _, _ = _ -> has_type _ _ _ _ |- _ ] =>
         exact (IH G1 G2 U eq_refl) end.
+  - (* TAnnot *) apply TAnnot.
+    match goal with [ IH : forall _ _ _, _ = _ -> has_type _ _ _ _ |- _ ] =>
+      exact (IH G1 G2 U eq_refl) end.
   - (* HFnil *) apply HFnil.
   - (* HFcons *) apply HFcons.
     + match goal with [ IH : forall _ _ _, _ = _ -> has_type _ _ _ _ |- _ ] =>
@@ -2520,6 +2573,8 @@ Fixpoint closed_at (k : nat) (e : tm) : Prop :=
   | tderef e  => closed_at k e
   | tassign r e => closed_at k r /\ closed_at k e
   | tloc _    => True
+  (* annotation: body closed at [k] (the type carries no vars). *)
+  | tannot _ e => closed_at k e
   end.
 
 (* typing in [G] bounds free vars by [length G]. By term induction + inversion.
@@ -2564,6 +2619,7 @@ Proof.
   - (* tassign *) apply inv_assign in H. destruct H as [U [Hr [He _]]].
     split; [ exact (IHe1 Sg G (BRef U) Hr) | exact (IHe2 Sg G U He) ].
   - (* tloc *) exact I.
+  - (* tannot *) apply inv_annot in H. destruct H as [He _]. exact (IHe Sg G T He).
   - (* Pl nil *) exact I.
   - (* Pl cons *) inversion H; subst. simpl. split.
     + match goal with
@@ -2615,6 +2671,7 @@ Proof.
   - (* tassign *) destruct H as [H1 H2]. f_equal;
       [ apply (IHe1 k); [exact H1 | exact H0] | apply (IHe2 k); [exact H2 | exact H0] ].
   - (* tloc *) reflexivity.
+  - (* tannot *) f_equal. apply (IHe k); [exact H | exact H0].
   - (* Pl nil *) reflexivity.
   - (* Pl cons *) destruct H as [Hc Hr]. f_equal;
       [ f_equal; apply (IHe k0); [exact Hc | exact H0]
@@ -2743,6 +2800,9 @@ Proof.
   - (* tloc: closed location, substitution is the identity; store lookup unchanged. *)
     apply inv_loc in H. destruct H as [W [Hl Hsub]]. simpl.
     eapply TSub; [ apply TLoc; exact Hl | exact Hsub ].
+  - (* tannot *) apply inv_annot in H. destruct H as [He Hsub]. simpl.
+    eapply TSub; [ apply TAnnot | exact Hsub ].
+    apply (IHe Sg G1 G2 U T s); [ exact He | exact H0 ].
   - (* Pl nil *) inversion H; subst. simpl. apply HFnil.
   - (* Pl cons *) inversion H; subst. simpl. apply HFcons.
     + match goal with [ Hh : has_type ?Sg0 (G1 ++ U :: G2) e ?Tk |- _ ] =>
@@ -2792,6 +2852,7 @@ Proof.
   - apply TAlloc; apply IHhas_type; exact Hext.
   - eapply TDeref; apply IHhas_type; exact Hext.
   - eapply TAssign; [ apply IHhas_type1; exact Hext | apply IHhas_type2; exact Hext ].
+  - apply TAnnot; apply IHhas_type; exact Hext.
   - apply HFnil.
   - apply HFcons; [ apply IHhas_type; exact Hext | apply IHhas_type0; exact Hext ].
 Qed.
@@ -3198,6 +3259,17 @@ Proof.
     destruct (IHHstep e st e' st' eq_refl eq_refl Hwt U He) as [S' [Hext [He' Hwt']]].
     exists S'. split; [ exact Hext | split; [ | exact Hwt' ] ].
     eapply TSub; [ eapply TAssign; [ eapply store_weakening; [ exact Hr | exact Hext ] | exact He' ] | exact Hsub ].
+  - (* SAnnot1: congruence under the annotation — preserves the annotation type. *)
+    apply inv_annot in Hty. destruct Hty as [He Hsub].
+    destruct (IHHstep e st e' st' eq_refl eq_refl Hwt T He) as [S' [Hext [He' Hwt']]].
+    exists S'. split; [ exact Hext | split; [ | exact Hwt' ] ].
+    eapply TSub; [ apply TAnnot; exact He' | exact Hsub ].
+  - (* SAnnotV: strip the annotation off a value — the value retains [T0] because
+       the body was typed at the ascribed type [T] (= [Ta] from inv_annot) which
+       subsumes to [T0]. *)
+    apply inv_annot in Hty. destruct Hty as [Hv Hsub].
+    exists S. split; [ apply extends_refl | split; [ | exact Hwt ] ].
+    eapply TSub; [ exact Hv | exact Hsub ].
 Qed.
 
 (* ===========================================================================
@@ -3372,6 +3444,13 @@ Proof.
         exists (tlit LNil), (store_update n e st). apply SAssign. exact Hve.
       * exists (tassign r e'), ste. apply SAssign2; assumption.
     + exists (tassign r' e), str. apply SAssign1. exact Hr'.
+  - (* TAnnot: never a value — either the body is a value (strip, SAnnotV) or it
+       steps (congruence, SAnnot1). *)
+    intros st Hwt. right.
+    match goal with [ IH : [] = [] -> forall st, _ -> value e \/ _ |- _ ] =>
+      destruct (IH eq_refl st Hwt) as [Hv | [e' [st' He']]] end.
+    + exists e, st. apply SAnnotV. exact Hv.
+    + exists (tannot T e'), st'. apply SAnnot1. exact He'.
   - (* P0 HFnil *) intros st Hwt ke [].
   - (* P0 HFcons *) intros st Hwt ke Hin. simpl in Hin. destruct Hin as [Heq | Hin].
     + subst ke.
@@ -4240,6 +4319,7 @@ Proof.
   - (* talloc *) rewrite IHe; reflexivity.
   - (* tderef *) rewrite IHe; reflexivity.
   - (* tassign *) rewrite IHe1, IHe2; reflexivity.
+  - (* tannot *) rewrite IHe; reflexivity.
   - (* Pl cons *) rewrite IHe, IHe0; reflexivity.
 Qed.
 

@@ -373,7 +373,11 @@ Op-sem parity must hold at every commit. After the handler deletion, the adversa
     synth-acceptable variant (`local i = ref (0+0)`, so the cell synthesizes
     `BRef ANum`). Recorded as a synth-completeness-vs-declarative gap (bidirectional
     inference does not recover every `TSub` the declarative system admits at an
-    invariant `BRef` allocation). `reality-bridge.md` §"Operational axis".
+    invariant `BRef` allocation). `reality-bridge.md` §"Operational axis". **CLOSED
+    (`proof-kernel.md` increment 21):** type annotations (`tannot`) guide inference
+    — `talloc (tannot (BAtom ANum) (tlit (LInt 0)))` synthesizes `BRef ANum`, so the
+    annotated sum-loop now synths to `ANum` (`sumloop_ann_synths`); the un-annotated
+    form still `None` (`sumloop_unann_None`).
 - [ ] **[nice-to-have] Flow-narrowing terms on the operational bridge.** The
   execution bridge's battery covers the computational fragment (literals, primops,
   if/let/record/proj, refs, terminating while, application). `tifn` / `ttypetest`
@@ -381,12 +385,25 @@ Op-sem parity must hold at every commit. After the handler deletion, the adversa
   bridge validates the FINITE-execution fragment (terminating programs to a value).
   Adding narrowing terms needs value-conditioned-step images + a binder-aware
   translation. `reality-bridge.md` §"Operational axis — scope".
-- [ ] **[nice-to-have] Close the synth-vs-declarative gap at invariant-ref alloc.**
-  `synth` rejects `sumloop_prog` (allocates `BRef AInt`, cannot store `ANum` back
-  into the invariant cell) though it is declaratively typed at `ANum`. A bidirectional
-  completeness improvement (propagate an expected cell-content type into `talloc`, or
-  a widening pass at allocation) would recover it. Surfaced by the operational bridge.
-  `reality-bridge.md` §"Operational axis".
+- [x] **Close the synth-vs-declarative gap at invariant-ref alloc — via TYPE
+  ANNOTATIONS (`tannot`).** `proof-kernel.md` increment 21. The general
+  inference-guiding mechanism: a new term-former `tannot : BTy -> tm -> tm`
+  (ascription), typing `TAnnot`, runtime-erased op-sem (congruence `SAnnot1` +
+  value-strip `SAnnotV`; `tannot T v` is not a value), and `synth (tannot T e)` =
+  CHECK `e` against `T` (`decide_rsub`) ⇒ return the ANNOTATION `T`. THE FIX: the
+  annotated sum-loop — cells built `talloc (tannot (BAtom ANum) (tlit (LInt 0)))`
+  ⇒ `BRef ANum`, able to hold the arithmetic result — now SYNTHESIZES
+  (`sumloop_ann_synths : synth [] [] (sumloop_ann n) = Some (BAtom ANum)`),
+  contrasted with the un-annotated `sumloop_unann_None` (= `None`). `synth_sound` /
+  `check_sound` / `progress` / `preservation` re-proved (`Qed`) with the `tannot`
+  cases (`inv_annot` + threading through weakening/subst/closedness/narrowing).
+  Sanity: `(3:Num)` synths+steps (erased) to `3`; mis-ascription `(3:Str)` rejected
+  (`synth = None`) and ill-typed. `Print Assumptions` on
+  progress/preservation/synth_sound/check_sound/sumloop_ann_synths: Closed under the
+  global context. `subtype.v` + `ssub.v` byte-unmodified. Building block for surface
+  `local x : T = e` and function param/return annotations (not themselves built).
+  - **Still deferred (separate axis):** `PDiv` float-faithfulness (the `Nat.div` vs
+    real `/ = 3.5` reality-bridge gap above) — unchanged by this increment.
 
 ### Arrows (laws beyond the closed one)
 

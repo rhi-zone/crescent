@@ -269,6 +269,19 @@ Fixpoint synth (Sig : list BTy) (G : list BTy) (e : tm) {struct e} : option BTy 
           end
       | _ => None
       end
+  (* TYPE ASCRIPTION — the inference-guiding seam. [synth (tannot T e)] drives the
+     checker into CHECK mode: CHECK [e] against [T] (synthesize [e]'s least type and
+     gate it [≤ T] via [decide_rsub], exactly as [check]), and on success return the
+     ANNOTATION [T] (not [e]'s synthesized type). This is HOW an annotation guides
+     inference — downstream consumers see [T], the type the programmer demanded, so
+     a value whose synthesized type is too specific (e.g. [BRef AInt] for an
+     [LInt 0] cell that must hold arithmetic results) can be ascended to the wider
+     [T] the later use requires. *)
+  | tannot T e0 =>
+      match synth Sig G e0 with
+      | Some Se => if decide_rsub Se T then Some T else None
+      | None => None
+      end
   (* a source location is rejected (locations are not source syntax). *)
   | tloc _ => None
   end.
@@ -404,6 +417,13 @@ Proof.
     eapply TAssign; [ apply IHe1; exact Hr | ].
     eapply TSub; [ apply IHe2; exact Hv | apply decide_rsub_sound; exact Hd ].
   - (* tloc: rejected in source *) simpl in H. discriminate H.
+  - (* tannot: CHECK-mode switch — synth the body, gate [≤ T] by decide_rsub,
+       then ascribe via TAnnot. *)
+    simpl in H.
+    destruct (synth Sig G e) as [ Se | ] eqn:He; [ | discriminate ].
+    destruct (decide_rsub Se T) eqn:Hd; [ | discriminate ].
+    injection H as <-. apply TAnnot.
+    eapply TSub; [ apply IHe; exact He | apply decide_rsub_sound; exact Hd ].
   - (* Pl [] *) simpl in H. injection H as <-. apply HFnil.
   - (* Pl cons *) simpl in H.
     destruct (synth Sig G e) as [ Te | ] eqn:He; [ | discriminate ].
@@ -528,6 +548,8 @@ Proof.
   - (* TAssign *) eapply TAssign;
       [ eapply (IHhas_type1 G1 _ G2 A') | eapply (IHhas_type2 G1 _ G2 A') ];
       (reflexivity || eassumption).
+  - (* TAnnot *) apply TAnnot.
+    eapply (IHhas_type G1 _ G2 A'); [ reflexivity | eassumption ].
   - apply HFnil.
   - apply HFcons;
       [ eapply (IHhas_type G1 _ G2 A') | eapply (IHhas_type0 G1 _ G2 A') ];
@@ -588,6 +610,7 @@ Fixpoint proj_free (e : tm) : Prop :=
   | talloc e0 => proj_free e0
   | tderef e0 => proj_free e0
   | tassign r e0 => proj_free r /\ proj_free e0
+  | tannot _ e0 => proj_free e0
   | tloc _ => False
   end.
 
@@ -852,6 +875,86 @@ Example compute_bad_add_check_false :
 Proof. reflexivity. Qed.
 
 (* ===========================================================================
+   TYPE ASCRIPTION ([tannot]) — the inference-guiding seam, and THE FIX it closes.
+   =========================================================================== *)
+
+(* SANITY (ascription works). [(3 : Num)] synthesizes [Num] — the up-ascription
+   [AInt <: ANum] is accepted in CHECK mode (decide_rsub). *)
+Example compute_annot_num :
+  synth [] [] (tannot (BAtom ANum) (tlit (LInt 3))) = Some (BAtom ANum).
+Proof. reflexivity. Qed.
+
+(* the ascription is SOUND: [(3 : Num) : Num] declaratively (via check_sound). *)
+Example compute_annot_sound :
+  has_type [] [] (tannot (BAtom ANum) (tlit (LInt 3))) (BAtom ANum).
+Proof. apply check_sound. reflexivity. Qed.
+
+(* it STEPS, runtime-erased: [(3 : Num)] strips to [3] on a value. *)
+Example compute_annot_steps : forall st,
+  step (tannot (BAtom ANum) (tlit (LInt 3)), st) (tlit (LInt 3), st).
+Proof. intro st. apply SAnnotV. apply VLit. Qed.
+
+(* SANITY (mis-ascription REJECTED). [(3 : Str)] is rejected by synth (None) — [3]
+   synthesizes [AInt], and [AInt] is NOT [rsub]-below [AStr], so the CHECK fails. *)
+Example compute_annot_mismatch_None :
+  synth [] [] (tannot (BAtom AStr) (tlit (LInt 3))) = None.
+Proof. reflexivity. Qed.
+
+(* and the mis-ascription is genuinely ILL-TYPED: [tannot AStr 3] has no type,
+   because [TAnnot] would need [3 : AStr] which is false ([AInt ⊄ AStr]). *)
+Example compute_annot_mismatch_untyped :
+  forall S T, ~ has_type S [] (tannot (BAtom AStr) (tlit (LInt 3))) T.
+Proof.
+  intros S T H. apply inv_annot in H. destruct H as [He _].
+  apply inv_lit in He. simpl in He.   (* He : rsub AInt AStr *)
+  apply rsub_sound in He. pose proof (He (VInt 0) I) as Hbad. exact Hbad.
+Qed.
+
+(* ---- THE FIX: the OP-SEM-BRIDGE-SURFACED SYNTH GAP on a real imperative loop.
+   The counting/sum loop (sumloop_cond / sumloop_body / twhile, from typing.v)
+   allocates its counter + accumulator cells. WITHOUT an annotation, [talloc (LInt
+   0)] synthesizes [BRef AInt] (the cell is an Int cell); but the loop body stores
+   an arithmetic result [!s + !i : ANum] back into the cell, and a [BRef] cell is
+   INVARIANT — [ANum] is NOT storable into a [BRef AInt] cell — so [synth] of the
+   whole loop returns NONE. (This is exactly the bridge-surfaced incompleteness: a
+   sound program the synthesizer cannot infer, because [talloc] commits the cell to
+   the too-specific initialiser type.)
+
+   WITH the cells ANNOTATED — [talloc (tannot (BAtom ANum) (tlit (LInt 0)))] — the
+   cell synthesizes [BRef ANum] (the annotation ascends the [LInt 0 : AInt] to
+   [ANum] before [talloc] reads its type), able to hold the arithmetic result. The
+   whole loop then SYNTHESIZES [Some ANum]. The annotation GUIDED the inference. *)
+
+(* the ANNOTATED sum-loop counter/accumulator initialiser. *)
+Definition ann_zero : tm := tannot (BAtom ANum) (tlit (LInt 0)).
+
+(* the un-annotated whole program (alloc Int cells; arith result can't store back). *)
+Definition sumloop_unann (n : nat) : tm :=
+  tlet (talloc (tlit (LInt 0)))
+    (tlet (talloc (tlit (LInt 0)))
+      (tseq (twhile (sumloop_cond n) sumloop_body) (tderef (tvar 0)))).
+
+(* the ANNOTATED whole program (alloc Num cells via ascription). *)
+Definition sumloop_ann (n : nat) : tm :=
+  tlet (talloc ann_zero)
+    (tlet (talloc ann_zero)
+      (tseq (twhile (sumloop_cond n) sumloop_body) (tderef (tvar 0)))).
+
+(* THE CONTRAST. Un-annotated: synth = None (the bridge-surfaced gap). *)
+Example sumloop_unann_None : forall n, synth [] [] (sumloop_unann n) = None.
+Proof. intro n. reflexivity. Qed.
+
+(* THE FIX. Annotated: synth = Some ANum — the loop now checks. *)
+Example sumloop_ann_synths : forall n, synth [] [] (sumloop_ann n) = Some (BAtom ANum).
+Proof. intro n. reflexivity. Qed.
+
+(* and the synthesized annotated loop is SOUND (declaratively well typed at ANum,
+   via check_sound) — the annotation-guided inference produced a real typing. *)
+Example sumloop_ann_sound : forall n,
+  has_type [] [] (sumloop_ann n) (BAtom ANum).
+Proof. intro n. apply check_sound. reflexivity. Qed.
+
+(* ===========================================================================
    ASSUMPTION AUDIT — closed under the global context (no axioms / Admitted /
    Classical). The soundness theorems are the load-bearing point; the
    principality (tractable completeness) theorem is audited alongside.
@@ -864,3 +967,9 @@ Print Assumptions compute_typetest_payoff_synth.
 Print Assumptions compute_add_sound.
 Print Assumptions compute_lt_sound.
 Print Assumptions compute_bad_add_None.
+(* TYPE ASCRIPTION ([tannot]) — sanity + THE FIX (annotated sum-loop synthesizes). *)
+Print Assumptions compute_annot_sound.
+Print Assumptions compute_annot_mismatch_untyped.
+Print Assumptions sumloop_unann_None.
+Print Assumptions sumloop_ann_synths.
+Print Assumptions sumloop_ann_sound.
