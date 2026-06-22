@@ -340,6 +340,53 @@ Op-sem parity must hold at every commit. After the handler deletion, the adversa
 - [ ] **[nice-to-have] Table richness bridge.** Any-key, array part, metatables,
   `nil`-hole semantics, iteration-order non-determinism — bridging beyond
   string-keyed scalar records. `reality-bridge.md` §4(C) "Scoped".
+- [x] **Operational-semantics reality bridge (the EXECUTION axis).** The prior
+  bridges (atom/rec/fun) validate the VALUE-MEMBERSHIP axis only; this one
+  validates the REDUCTION axis: a WELL-TYPED term, executed on REAL LuaJIT,
+  produces a value INHABITING its inferred type (`synth [] term`) — the checker's
+  soundness claim (synth + progress/preservation) tested against reality.
+  `lib/sem/bridge/exec.lua` ports the proof's `tm` and translates closed terms to
+  runnable Lua (de Bruijn → fresh-name stack; refs → single-field mutable cells
+  `{v=…}`; `tif`/`tlet`/`tseq`/`tassign` → IIFEs; `twhile` → a real `while` loop;
+  primops → Lua binops). `exec_test.lua` runs a battery of **17** well-typed
+  programs (arithmetic, comparison, conditional, let, record+proj, ref
+  alloc/deref, ref mutation, counting while-loop, function application, literals)
+  and asserts each real result inhabits its inferred type, REUSING the atom
+  bridge's real predicates (records via per-field open/width). Result:
+  **17/17 inhabit** their inferred type. Inferred types pinned from
+  `proof/bridge_exec_oracle.v` `Compute (synth [] term)`. Caps-first
+  (popen-injected LuaJIT, bare-clone skip). `reality-bridge.md` §"Operational /
+  execution axis".
+  - **SURFACED faithfulness gap — `PDiv`.** The proof's `PDiv` is `Nat.div`
+    (INTEGER division: `7/2 = 3`) but real Lua `/` is FLOAT division (`7/2 = 3.5`).
+    Both `3` and `3.5` inhabit the inferred type `ANum`, so soundness is PRESERVED
+    (the result still inhabits the type) — but the VALUES disagree. This is a
+    sound-but-UNFAITHFUL model choice. Recommendation (recorded in the doc): drop
+    `PDiv` from the faithful computational subset, OR add a fractional number
+    literal + faithful float division (`NRfrac`/`VFloat` already exist on the
+    value side). Concrete witness: `proof Nat.div 7/2 = 3 vs real 7/2 = 3.5`.
+  - **SURFACED synth-vs-declarative gap — the sum `while`-loop.** `sumloop_prog n`
+    is declaratively typed at `ANum` (`sumloop_prog_typed`, via `TSub`-widening the
+    `AInt` initialiser to a `Num` cell) but the ALGORITHMIC `synth` REJECTS it
+    (`None`): it allocates `BRef AInt` from `LInt 0` and then cannot store the
+    `ANum` arithmetic result back into the INVARIANT cell. The battery uses a
+    synth-acceptable variant (`local i = ref (0+0)`, so the cell synthesizes
+    `BRef ANum`). Recorded as a synth-completeness-vs-declarative gap (bidirectional
+    inference does not recover every `TSub` the declarative system admits at an
+    invariant `BRef` allocation). `reality-bridge.md` §"Operational axis".
+- [ ] **[nice-to-have] Flow-narrowing terms on the operational bridge.** The
+  execution bridge's battery covers the computational fragment (literals, primops,
+  if/let/record/proj, refs, terminating while, application). `tifn` / `ttypetest`
+  (flow narrowing) and higher-order / divergent programs are NOT executed — the
+  bridge validates the FINITE-execution fragment (terminating programs to a value).
+  Adding narrowing terms needs value-conditioned-step images + a binder-aware
+  translation. `reality-bridge.md` §"Operational axis — scope".
+- [ ] **[nice-to-have] Close the synth-vs-declarative gap at invariant-ref alloc.**
+  `synth` rejects `sumloop_prog` (allocates `BRef AInt`, cannot store `ANum` back
+  into the invariant cell) though it is declaratively typed at `ANum`. A bidirectional
+  completeness improvement (propagate an expected cell-content type into `talloc`, or
+  a widening pass at allocation) would recover it. Surfaced by the operational bridge.
+  `reality-bridge.md` §"Operational axis".
 
 ### Arrows (laws beyond the closed one)
 

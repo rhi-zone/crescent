@@ -385,6 +385,146 @@ metatables, nil-holes) tracked as known unobserved/deferred axes. Bridging beyon
 string-keyed records requires deciding key-type scope and the
 open/closed/index-signature reading first.
 
+## 5. Operational / execution axis — well-typed term ⇒ real result inhabits its inferred type
+
+Forks (A)–(C) above bridge the **value-membership** axis: a model *value*
+inhabits a model *type*, faithfully against real LuaJIT. They say nothing about
+**reduction**. This section adds the **operational axis** — the checker's
+soundness claim against reality:
+
+> a **well-typed term**, executed on **real LuaJIT**, produces a value that
+> **inhabits its inferred type** (`synth [] term`).
+
+This is the operational/reduction counterpart of progress + preservation
+(proved syntactically in `proof/typing.v`): the proofs guarantee a well-typed
+term doesn't get stuck and keeps its type as it steps; this bridge checks that
+the *real interpreter's* result for that term lands inside the *inferred* type —
+empirically, against the external artifact the proofs cannot reach.
+
+Harness: `lib/sem/bridge/exec.lua` (the term→Lua translator + inferred-type
+model) and `exec_test.lua` (the battery + the result-inhabits-type assertion).
+Inferred types are pinned from `proof/bridge_exec_oracle.v`
+(`Compute (synth [] term)`, a scratch `.v`, not part of the build). Caps-first:
+the real interpreter is the popen-injected vendored LuaJIT; absent ⇒ skip
+(bare-clone safe). **REUSES the value-membership bridge**: inhabitance is decided
+with `atom.lua`'s real atom predicates (`atom_real_predicate`, textually rebound
+from `x` to the result access), records via a per-field open/width conjunction
+(the same shape as `rec.lua`'s field predicate), a reference cell `{v=…}` by
+recursing into `.v`.
+
+### 5.1 The term → real-Lua translator (`exec.term_to_lua`)
+
+The proof's `tm` is ported as tagged tables (`exec.lua` constructors). The
+translator carries a **de Bruijn name stack** (innermost last; `tvar i` reads
+`stack[#stack - i]`), emitting a self-contained Lua **expression** per term so
+terms compose by nesting. Lua lacks expression-`if`, `let`, and references, so:
+
+| proof term | Lua image |
+|------------|-----------|
+| `tlit (LInt n)` | `n` |
+| `tlit (LBool b)` | `true` / `false` |
+| `tlit LNil` | `nil` |
+| `tprim PAdd a b` … | `((a) + (b))`, `-`, `*`, `/`, `<`, `<=`, `==` |
+| `tlam body` / `tapp f a` | `(function(v) return (body) end)` / `((f)(a))` |
+| `tlet e1 e2` | `(function() local v = (e1); return (e2) end)()` |
+| `trec [(k,e)…]` | `{ ["k"] = (e), … }` |
+| `tproj e k` | `((e)["k"])` |
+| `tif c a b` | `(function() if (c) then return (a) else return (b) end end)()` |
+| `talloc e` | `{ v = (e) }` — a **single-field mutable cell** (Lua has no refs) |
+| `tderef r` | `((r).v)` |
+| `tassign r v` | `(function() local _r=(r); _r.v=(v); return nil end)()` (yields `nil` = unit) |
+| `tseq a b` | `(function() local _=(a); return (b) end)()` (mirrors `tseq := tlet a (lift 1 0 b)`) |
+| `twhile c body` | `(function() while (c) do local _=(body) end return nil end)()` |
+
+**`tif` wrapping.** Lua has no `if`-expression, so `tif` becomes an IIFE whose
+`if`-statement returns the selected branch. Lua's `if` already tests
+truthiness, which matches the proof's value-conditioned `tif` (a `Bool`
+condition here). **References as cells.** Lua has no reference type; a `talloc`
+is a fresh one-field table `{v=…}`, `tderef` reads `.v`, `tassign` writes `.v`
+and yields `nil` (the proof's unit value). A cell value inhabits `BRef T` iff it
+is a table whose `.v` inhabits `T` — exactly how the inhabitance predicate
+recurses. **`twhile`** is translated as a real `while` loop (the
+finite-execution image of the proof's `tfix`-unfold encoding) — same operational
+behaviour for terminating loops, which is the bridge's scope.
+
+### 5.2 The result-inhabits-type assertion (reusing the value bridge)
+
+For each battery term: translate it, then emit one chunk that (a) binds the
+result `__r = (translated term)` and (b) evaluates a Lua boolean
+`inhabit_expr(inferred_type, "__r")` — the **value-membership** predicate for the
+inferred type, built from the SAME real predicates the atom/rec bridges use
+(atoms via `atom_real_predicate`, a union via `or`, a record via per-field
+`real[k] ~= nil and (real[k] ∈ T)`, a ref via `type(__r)=="table" and (__r.v ∈
+inner)`). The chunk prints `INHABITS`/`OUTSIDE` + the result shape. So
+inhabitance is decided **in real LuaJIT on the real result**, by the proven
+value model's real-side counterpart — this is checker-soundness-against-reality,
+not a re-derivation in Lua.
+
+### 5.3 The battery + agreement
+
+17 representative well-typed programs (term + its `synth`'d type, verbatim from
+`bridge_exec_oracle.v`): `3+4 : ANum`, `10-4 : ANum`, `6*7 : ANum`, `3<4 : Bool`,
+`5<=5 : Bool`, `4==4 : Bool`, `if 3<4 then 1 else 0 : AInt∪AInt`, `let x=6+1 in
+x*2 : ANum`, `{x=3+4,y=5} : {x:ANum,y:AInt}`, `{x=3+4,y=5}.x : ANum`,
+`!(ref(2+3)) : ANum`, `ref(2+3) : BRef ANum`, `let r=ref 0 in (r:=9 ; !r) : AInt`,
+`(\x. x+1) 5 : ANum`, the counting `while`-loop
+`let i=ref(0+0) in (while !i<3 do i:=!i+1 end ; !i) : ANum`, `nil : ANil`,
+`true : ABool`.
+
+```
+[bridge] exec translator:       17/17 battery terms translated
+[bridge] result-inhabits-type:  17/17 well-typed programs executed to a value INHABITING their inferred type
+[bridge] PDiv FAITHFULNESS GAP: proof Nat.div 7/2 = 3  vs  real Lua 7/2 = 3.5  (both inhabit ANum; the VALUE disagrees)
+```
+
+**17/17** well-typed programs executed on real LuaJIT to a value inhabiting their
+inferred type — the checker's soundness claim holds against reality across the
+computational fragment.
+
+### 5.4 Surfaced gaps (the bridge's job)
+
+**(I) `PDiv` faithfulness gap — sound but unfaithful.** The proof's `PDiv` is
+`Nat.div` (INTEGER division: `prim_arith PDiv 7 2 = 3`); real Lua `/` is FLOAT
+division (`7/2 = 3.5`). **Both `3` and `3.5` inhabit the inferred type `ANum`**,
+so the result-inhabits-type assertion HOLDS for a division term — *soundness is
+preserved*. But the **values disagree**: the proof computes `3`, reality `3.5`.
+This is a **sound-but-unfaithful** model choice — the proof's `PDiv` semantics
+(integer division) is not Lua's `/` (float division). The bridge surfaces this
+with the concrete witness `3 vs 3.5`. **Recommendation:** either (a) **drop
+`PDiv`** from the *faithful* computational subset (keep it as a sound arithmetic
+op whose value is unfaithful, documented), or (b) **add a fractional number
+literal + faithful float division** — the value side already has `NRfrac`/
+`VFloat` (a genuinely non-integer double), so a `PDiv` that produces an `NRfrac`
+result matching Lua's `/` is expressible; only the term-level `prim_arith` choice
+(`Nat.div`) is the unfaithful part. (Lua's integer division is `//`, which the
+proof does not yet have — see the `primop` backlog note in `typing.v`: floor-div
+`//` is deferred. So the faithful mapping is `PDiv ↦ //` once `//` exists, with
+`/ ↦` a future float-div op.)
+
+**(II) synth-vs-declarative gap at an invariant `BRef` allocation.** The proof's
+full sum-loop `sumloop_prog n` is **declaratively** typed at `ANum`
+(`sumloop_prog_typed`), using `TSub` to widen the `AInt` initialiser (`LInt 0`)
+to a `Num` cell at allocation. But the **algorithmic** `synth` **rejects** it
+(`synth [] (sumloop_prog 5) = None`): it allocates `BRef AInt` from `LInt 0 :
+AInt`, and then cannot store the `ANum` arithmetic result (`!s + !i`) back into
+the **invariant** cell. This is a **completeness** gap of bidirectional inference
+vs the declarative system (not a soundness gap — everything `synth` accepts is
+still sound). The battery therefore uses a **synth-acceptable** counter loop
+(`local i = ref (0+0)`, so the initialiser's type is the arithmetic result `ANum`
+and the cell synthesizes `BRef ANum`). Recorded in `TODO.md`; closing it needs an
+expected-type-propagating `talloc` or a widening pass at allocation. No other
+disagreements were found across the battery.
+
+### 5.5 Scope (honest)
+
+The bridge validates the **finite-execution fragment**: terminating closed terms
+that reduce to a value — literals, arithmetic/comparison primops, conditional,
+let, record + projection, references (alloc/deref/assign), a terminating
+`while`-loop, and function application. **Out of scope** (noted, not hidden):
+flow-narrowing terms (`tifn` / `ttypetest`) and higher-order / divergent
+programs are not executed; `tfix` is exercised only through the terminating
+`twhile` encoding, not as open-ended recursion. These are deferred in `TODO.md`.
+
 ## Status
 
 - **Done (increment 1):** unambiguous atoms AStr/ABool/ANil — port validated
@@ -424,6 +564,28 @@ open/closed/index-signature reading first.
   field type; a scalar is not a record). STRING-keyed SCALAR records only; nested/
   function-valued fields, non-string keys, array part, metatables, iteration order,
   nil-valued fields deferred (TODO.md proof-dev backlog).
+- **Done (increment 6, this one): OPERATIONAL / EXECUTION axis bridged.** The
+  prior increments bridge the value-membership axis; this one bridges the
+  REDUCTION axis — a WELL-TYPED term, executed on REAL LuaJIT, produces a value
+  INHABITING its inferred type (`synth [] term`), the checker's
+  soundness-against-reality (§5). `lib/sem/bridge/exec.lua` ports the proof's `tm`
+  and translates closed terms to runnable Lua (de Bruijn → fresh-name stack; refs
+  → single-field cells `{v=…}`; `tif`/`tlet`/`tseq`/`tassign` → IIFEs; `twhile` →
+  a real `while` loop; primops → Lua binops). `exec_test.lua` runs a **17-term**
+  battery and asserts each real result inhabits its inferred type, REUSING the
+  atom bridge's real predicates (records via per-field open/width, refs via `.v`).
+  **17/17 inhabit** their inferred type. Inferred types pinned from
+  `proof/bridge_exec_oracle.v` `Compute (synth [] term)`. **Surfaced gaps:** (I)
+  the **`PDiv` faithfulness gap** — proof `Nat.div` (`7/2=3`) vs real float `/`
+  (`7/2=3.5`); both inhabit `ANum` (soundness preserved) but the VALUES disagree
+  (sound-but-unfaithful; recommend drop `PDiv` from the faithful subset or add
+  fractional-literal float division — `NRfrac`/`VFloat` already exist); (II) a
+  **synth-vs-declarative completeness gap** — `synth` rejects `sumloop_prog`
+  (allocates `BRef AInt`, can't store `ANum` back into the invariant cell) though
+  it is declaratively `ANum`; the battery uses a synth-acceptable `ref (0+0)`
+  counter loop. No other disagreements. SCOPE: the finite-execution fragment
+  (terminating terms to a value); `tifn`/`ttypetest` + higher-order/divergent
+  programs out of scope (TODO.md).
 - **Resolved:** fork (A) = **REFINE** (type-level `AInt <: ANum`); fork (A′) =
   **collapse to one double** (`int <: float`); fork (B) = **functions bridged via
   the operational I/O check** (scalar graphs); fork (C) = **string-keyed scalar
