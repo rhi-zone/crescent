@@ -1722,3 +1722,96 @@ unified store language).
   clauses); the named CONSUMERS of the ref core — Lua's mutable TABLE FIELDS and
   reassignable LOCALS, aliasing / strong-update precision; precise reference
   narrowing (truthy location → `BAnyRef` is sound-but-imprecise).
+
+## Increment M4 — MUTABLE TABLES + REASSIGNABLE LOCALS, via the reference core (records-of-refs)
+
+The named CONSUMERS of the unified store layer (deferred at increments 16/19):
+Lua's mutable tables and reassignable locals. Modifies **only** `proof/typing.v`
+(additive — new section M4 after the increment-19 examples); `subtype.v`,
+`ssub.v`, `check.v` are **unmodified**, and `typing.v`'s core inductives (`tm`,
+`has_type`, `step`, `ssub`/`rsub`) are **untouched** (`git diff`: 392 insertions,
+0 deletions). Build order unchanged.
+
+### Approach — PROVEN ENCODING, not first-class forms (and why)
+
+The brief offered two routes; the **encoding** route is strictly cleaner here and
+was taken. The reference + record machinery is already fully proved (increment 19
+even ships ref-of-record examples), so Lua's mutation needs **no new core terms**:
+it desugars into `talloc`/`tderef`/`tassign`/`trec`/`tproj`, and soundness is
+**inherited** — `progress`/`preservation` (both still `Qed`, unmodified) already
+cover those term-formers, so every encoded operation is automatically sound. There
+was no awkwardness forcing first-class table-mutation terms, so adding them (and
+re-proving their progress/preservation cases) would be pure redundancy. The cores
+staying byte-for-byte unmodified is the evidence the encoding is faithful.
+
+### The encoding (the key insight)
+
+A Lua mutable table of type `{x:T, y:U}` is a **record of reference cells**
+`BRec [("x", BRef T); ("y", BRef U)]`:
+
+- the **field SET is FIXED** — the record STRUCTURE is immutable and
+  width/depth-**covariant** (inherited from `BRec`, subtype.v);
+- each **field is a mutable `BRef` cell** — so per-field mutation is **INVARIANT**,
+  the sound rule, inherited from `BRef`'s invariance (`rsub` `RsRefInv`).
+
+Operations desugar with no new term-formers:
+
+| Lua surface | desugaring |
+|---|---|
+| mutable table literal `{x = e}` | `trec [("x", talloc e)]` (a ref per field) |
+| field read `t.x` | `tderef (tproj t "x")` |
+| field write `t.x := v` | `tassign (tproj t "x") v` |
+| reassignable `local x = e` | `talloc e` (a ref cell) |
+| local reassign `x := v` | `tassign x v` |
+
+**Aliasing** — the defining Lua-table property — is **shared cells**: two bindings
+to the SAME record value `trec [("x", tloc l)]` share store location `l`, so a
+write through one is observed through the other (it is literally the same cell).
+
+### What is proved (all `Qed`, all `Print Assumptions` Closed under the global context)
+
+A small reflexive-transitive closure `multistep` (of `step` over configurations,
+a plain inductive) sequences the read-after-write / aliasing reductions. Then the
+five required examples:
+
+1. **Mutation reads the NEW value.** `mutation_typed` / `mutation_steps`: build
+   `{x=7}` (backed by a cell), `tlet (t.x := 9) (t.x)` types at `Int` and, from
+   store `[7]`, **multi-steps to the literal `9`** in store `[9]` — the read
+   observes the written value, not the old.
+2. **Aliasing through shared cells.** `aliasing_typed` / `aliasing_steps`:
+   `let a = <table> in let b = a in (a.x := 9); b.x` — `a` and `b` are the same
+   closed table value (shared location 0); it types at `Int` and **multi-steps to
+   `9`**, the mutation through `a` observed by the read through `b`.
+3. **Field invariance (soundness).** `field_invariance_rejected`: writing a STRING
+   into a `BRef Int` field is **rejected at EVERY type** — proved via the existing
+   `rsub_ref_inv` (`BRef` invariance) composing the cell's true type `BRef Int`
+   through the projection and refuting semantically at `VStr 0`.
+   `field_invariance_accepted`: the well-typed `Int`-into-`Int` write IS accepted
+   (yields `nil`). `field_cell_invariant`: `~ rsub (BRef Int) (BRef Num)` — a
+   `BRef Int` field cannot be covariantly used as `BRef Num` even though
+   `Int <: Num` at the value level.
+4. **Covariant structure composes with invariant cells.**
+   `covariant_width_over_cells`: `{x:BRef Int; y:BRef Str} <: {x:BRef Int}` (drop a
+   field is supertyping on the immutable field set), the surviving `x` cell kept at
+   the EXACT same invariant `BRef Int`. `covariant_structure_composes`: the
+   two-cell table VALUE types at the one-field mutable-table type by subsumption.
+   `covariant_field_still_invariant`: the projected `x` of the wider table is still
+   an invariant `BRef Int` — covariant structure does NOT relax per-field invariance.
+5. **Reassignable local.** `reassign_local_typed` / `reassign_local_steps`:
+   `local x = 7; x := 9; x` (encoded `talloc`/`tassign`/`tderef`) types at `Int`
+   and, from the empty store, **multi-steps to `9`** in store `[9]`.
+
+### Honest scope / deferrals
+
+Tables as records-of-refs, **FIXED string-keyed field set**. DEFERRED (backlog):
+dynamic field add/remove, metatables, non-string keys, array part,
+nil-assignment-deletes-key, and flow-sensitive **strong-update** precision on a
+uniquely-owned cell.
+
+`Print Assumptions` on `mutation_typed`/`mutation_steps`/`aliasing_typed`/
+`aliasing_steps`/`field_invariance_rejected`/`field_invariance_accepted`/
+`field_cell_invariant`/`covariant_structure_composes`/
+`covariant_field_still_invariant`/`reassign_local_typed`/`reassign_local_steps`:
+**Closed under the global context** — no axioms, no `Admitted`, no `Classical`.
+Whole chain compiles (`coqc subtype.v && coqc typing.v && coqc ssub.v && coqc
+check.v`); cores unmodified.

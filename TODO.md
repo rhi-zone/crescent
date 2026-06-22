@@ -511,17 +511,32 @@ Still open (DEFERRED — recorded honestly, minimal core only):
   non-variable paths, and combined truthiness+type-test are DEFERRED (sub-items 3/4/6
   above).
 - [ ] **Statements / control flow** (while/blocks; `tif` done in increment 11) as terms.
-- [ ] **[BLOCKING] Mutable TABLE fields (record fields as refs).** The next
-  consumer of the unified ref core (increment 16 + the references unification):
-  record fields that are mutable cells, so `t.f = v` type-checks and mutates.
-  Built on `BRef`/store-typing; needs records re-expressed with ref-typed fields.
-  Deferred at `proof-kernel.md` increment 16 ("noteworthy CONSUMERS").
-- [ ] **[BLOCKING] Reassignable locals.** A `local x` whose binding is reassigned
-  (`x = v`) — modelled as a ref cell over the ref core; the other named consumer of
-  the unified store layer. Deferred at `proof-kernel.md` increment 16.
-- [ ] **[nice-to-have] Aliasing / strong-update precision.** Two names bound to the
-  same cell; flow-sensitive strong update on a uniquely-owned cell. Deferred at
-  `proof-kernel.md` increment 16 ("aliasing / strong-update precision").
+- [x] **Mutable TABLE fields (record fields as refs) — DONE (increment M4,
+  records-of-refs ENCODING).** A Lua mutable table `{x:T,y:U}` IS a record of
+  reference cells `BRec [("x", BRef T); ("y", BRef U)]`: the field SET is fixed
+  (immutable, width/depth-covariant — inherited from `BRec`), each field is a
+  mutable `BRef` cell (per-field mutation is INVARIANT — inherited from `BRef`).
+  ENCODED into the existing core (NO new terms): table literal `{x=e}` ⇒
+  `trec [("x", talloc e)]`; read `t.x` ⇒ `tderef (tproj t "x")`; write `t.x := v`
+  ⇒ `tassign (tproj t "x") v`. Soundness is INHERITED — `progress`/`preservation`
+  already cover `talloc`/`tderef`/`tassign`/`trec`/`tproj`, so the cores are
+  UNMODIFIED. Proved (`Qed`, all `Print Assumptions` Closed): `mutation_*` (build,
+  assign a field, read back the NEW value 9), `field_invariance_*` (string into a
+  `BRef Int` field REJECTED at every type; well-typed assign accepted;
+  `field_cell_invariant`: `BRef Int` NOT usable as `BRef Num`), `covariant_*`
+  (record-of-refs width-subtypes on the immutable field set, composing with the
+  invariant cells). See `proof-kernel.md` increment M4.
+- [x] **Reassignable locals — DONE (increment M4).** A `local x` whose binding is
+  reassigned is a ref cell over the SAME ref core: `local x = e` ⇒ `talloc e`,
+  `x := v` ⇒ `tassign x v`, read `x` ⇒ `tderef x`. Proved `reassign_local_*`
+  (`local x=7; x:=9; x` types at Int and multi-steps to 9 — the read observes the
+  reassigned value). `Print Assumptions` Closed; cores unmodified.
+- [x] **Aliasing — DONE (increment M4), strong-update precision still nice-to-have.**
+  Two bindings to the SAME table value share its store cells; a write through one
+  is observed through the other. Proved `aliasing_*` (`let a=<table> in let b=a in
+  (a.x:=9); b.x` types at Int and multi-steps to 9 — mutation through `a` seen via
+  `b`, both touching the same location). Flow-sensitive STRONG update on a
+  uniquely-owned cell remains DEFERRED (nice-to-have). `proof-kernel.md` M4.
 - [x] **Mutation / references — store-based soundness (increment 16, DONE).**
   NEW file `proof/imp.v` (on unmodified `subtype.v`+`typing.v`; `ssub.v`+`check.v`
   untouched). Own type syntax `RTy` (atoms + `RArrow` + `RRef`, since `subtype.v`'s
@@ -556,9 +571,10 @@ Still open (DEFERRED — recorded honestly, minimal core only):
   (`tifn`/`ttypetest`), and recursion (`tfix`) now all coexist with Σ in ONE
   language (progress + preservation re-proved `Qed` over the unified judgment;
   `synth_sound`/`check_sound` survive). Cost: algorithmic principality is fenced
-  (see the `rsub` union-elim substrate item above). **STILL DEFERRED — the
-  noteworthy CONSUMERS built on this ref core:** Lua's mutable TABLE FIELDS (record
-  fields as refs) and reassignable LOCALS; aliasing / strong-update precision.
+  (see the `rsub` union-elim substrate item above). **CONSUMERS NOW BUILT
+  (increment M4, above):** Lua's mutable TABLE FIELDS (records-of-refs) and
+  reassignable LOCALS + aliasing are proved via the ref-core encoding. Only
+  flow-sensitive strong-update precision remains nice-to-have.
 - [ ] **Multi-arg / vararg / multi-return** functions (currently single→single).
 - [x] **General recursion — single fixpoint `tfix` (increment 14, DONE).**
   `proof/typing.v` + `proof/check.v` (on unmodified `subtype.v` + `ssub.v`). `tm`

@@ -3477,6 +3477,386 @@ Example well_typed_assign_steps :
 Proof. apply SAssign. apply VLit. Qed.
 
 (* ===========================================================================
+   M4 — MUTABLE TABLES + REASSIGNABLE LOCALS, via the PROVEN reference core
+   (records-of-refs). NO new core terms: Lua's mutation is ENCODED into the
+   existing reference + record machinery, so soundness is LARGELY INHERITED —
+   [progress] / [preservation] already cover [talloc]/[tderef]/[tassign]/[trec]/
+   [tproj], so every encoded operation is automatically sound.
+
+   THE ENCODING (the key insight). A Lua mutable table of type [{x:T, y:U}] is a
+   RECORD OF REFERENCE CELLS [BRec [("x", BRef T); ("y", BRef U)]]:
+
+     - the FIELD SET is FIXED — the record STRUCTURE is immutable and
+       width/depth-COVARIANT (inherited from [BRec], subtype.v);
+     - each FIELD is a mutable [BRef] CELL — so per-field mutation is INVARIANT,
+       the sound rule, inherited from [BRef]'s invariance (subtype.v / [rsub]).
+
+   The OPERATIONS desugar (no new term-formers):
+
+     - mutable table literal [{x = e}]   ⇒  [trec [("x", talloc e)]]   (a ref per field)
+     - field READ      [t.x]             ⇒  [tderef (tproj t "x")]
+     - field WRITE     [t.x := v]        ⇒  [tassign (tproj t "x") v]
+     - reassignable local [local x = e]  ⇒  a ref cell [talloc e]
+     - local reassign  [x := v]          ⇒  [tassign x v]
+
+   ALIASING — the defining Lua-table property — is SHARED CELLS: two bindings to
+   the SAME record VALUE [trec [("x", tloc l)]] share location [l], so a write
+   through one is observed through the other (it is the same store cell [l]).
+
+   HONEST SCOPE: tables as records-of-refs, FIXED string-keyed field set. Dynamic
+   field add/remove, metatables, non-string keys, array part, and nil-assignment-
+   deletes-key are DEFERRED (TODO.md / proof-kernel.md backlog).
+   =========================================================================== *)
+
+(* ---- multi-step (reflexive-transitive closure of [step]) — the sequential
+   read-after-write / aliasing examples chain several reductions, so we need the
+   transitive closure of the single-step relation over configurations. A plain
+   inductive, no axiom. *)
+Inductive multistep : tm * store -> tm * store -> Prop :=
+  | MSrefl : forall c, multistep c c
+  | MSstep : forall c1 c2 c3, step c1 c2 -> multistep c2 c3 -> multistep c1 c3.
+
+Lemma multistep_trans : forall a b c, multistep a b -> multistep b c -> multistep a c.
+Proof.
+  intros a b c Hab Hbc. induction Hab; [ exact Hbc | ].
+  eapply MSstep; [ eassumption | apply IHHab; exact Hbc ].
+Qed.
+
+(* one-step lift, for readability. *)
+Lemma multistep_one : forall a b, step a b -> multistep a b.
+Proof. intros a b H. eapply MSstep; [ exact H | apply MSrefl ]. Qed.
+
+(* ---- The mutable-table TYPE (a record of reference cells) and its VALUE form.
+   [mtable_ty] = the type [{x : BRef Int}] — a one-field mutable table whose [x]
+   field is an Int cell. [mtable_val l] = the runtime table VALUE backed by the
+   store location [l] (a record holding the location [tloc l]). *)
+Definition mtable_ty : BTy := BRec [("x"%string, BRef (BAtom AInt))].
+Definition mtable_val (l : nat) : tm := trec [("x"%string, tloc l)].
+
+(* a table value is a [value] (a record whose only field is a location value). *)
+Lemma mtable_val_value : forall l, value (mtable_val l).
+Proof.
+  intro l. unfold mtable_val. apply VRec. apply Forall_cons; [ apply VLoc | apply Forall_nil ].
+Qed.
+
+(* the table value types at [mtable_ty] under any store-typing whose entry [l] is
+   Int — the encoding's central typing fact (a record of [BRef Int] cells). *)
+Lemma mtable_val_typed : forall S l,
+  nth_error S l = Some (BAtom AInt) ->
+  has_type S [] (mtable_val l) mtable_ty.
+Proof.
+  intros S l Hl. unfold mtable_val, mtable_ty. apply TRec.
+  - apply HFcons; [ apply TLoc; exact Hl | apply HFnil ].
+  - simpl. apply NoDup_cons; [ simpl; tauto | apply NoDup_nil ].
+Qed.
+
+(* projecting the [x] field of the table value yields the LOCATION (a [BRef Int]).
+   This is the shared mechanism behind both read and write. *)
+Lemma mtable_proj_x : forall S l,
+  nth_error S l = Some (BAtom AInt) ->
+  has_type S [] (tproj (mtable_val l) "x"%string) (BRef (BAtom AInt)).
+Proof.
+  intros S l Hl. eapply TProj; [ apply mtable_val_typed; exact Hl | simpl; left; reflexivity ].
+Qed.
+
+(* projection STEPS to the field's location (a record-value projection). *)
+Lemma mtable_proj_x_steps : forall l st,
+  step (tproj (mtable_val l) "x"%string, st) (tloc l, st).
+Proof.
+  intros l st. unfold mtable_val. apply SProj.
+  - apply mtable_val_value.
+  - simpl. reflexivity.
+Qed.
+
+(* ===========================================================================
+   EXAMPLE 1 — MUTATION reads the NEW value.
+   Build a mutable table {x = 7}, assign t.x := 9, then read t.x back as 9.
+   Encoded: read = [tderef (tproj t "x")], write = [tassign (tproj t "x") 9].
+   We run the WHOLE program in the store: alloc the cell, then a [tlet]
+   sequences "write 9" before "read x", and the read observes 9.
+   =========================================================================== *)
+
+(* The desugared mutable-table program built from a literal {x = 7}: allocate the
+   field cell, bind the table, then (assign 9; read x). We work at the already-
+   allocated VALUE form (the table backed by location 0 in store [7]) since the
+   literal {x=7} reduces to that (alloc appends the cell). *)
+
+(* TYPING: with the cell at location 0 holding Int, the read-after-write program
+   [tlet (t.x := 9) (t.x)] is well typed at Int. *)
+Example mutation_typed :
+  has_type [ BAtom AInt ] []
+    (tlet (tassign (tproj (mtable_val 0) "x"%string) (tlit (LInt 9)))
+          (tderef (tproj (mtable_val 0) "x"%string)))
+    (BAtom AInt).
+Proof.
+  eapply TLet.
+  - (* the write: tassign (proj t x : BRef Int) (9 : Int) : nil *)
+    eapply TAssign; [ apply mtable_proj_x; reflexivity | apply TLit ].
+  - (* the read, in the EXTENDED context (the let binds the nil result, unused):
+       the table value is closed, so it types under any context via store-only. *)
+    apply has_type_closed_any.
+    apply TDeref. apply mtable_proj_x. reflexivity.
+Qed.
+
+(* STEPS: starting from store [7], the program multi-steps to the literal 9.
+   (1) the write: proj ⇒ loc 0, then assign 9 ⇒ nil, store becomes [9];
+   (2) let binds nil (the body is closed, unaffected);
+   (3) the read: proj ⇒ loc 0, then deref ⇒ 9. *)
+Example mutation_steps :
+  multistep
+    (tlet (tassign (tproj (mtable_val 0) "x"%string) (tlit (LInt 9)))
+          (tderef (tproj (mtable_val 0) "x"%string)),
+     [tlit (LInt 7)])
+    (tlit (LInt 9), [tlit (LInt 9)]).
+Proof.
+  (* write: project the field to its location 0 (store unchanged) *)
+  eapply MSstep.
+  { apply SLet1. apply SAssign1. apply mtable_proj_x_steps. }
+  (* assign 9 to location 0: store [7] -> [9], yields nil *)
+  eapply MSstep.
+  { apply SLet1. apply SAssign. apply VLit. }
+  (* let binds the nil value; body is closed so subst is identity *)
+  eapply MSstep.
+  { apply SLet. apply VLit. }
+  (* read: project to location 0 *)
+  eapply MSstep.
+  { simpl. apply SDeref1. apply mtable_proj_x_steps. }
+  (* deref location 0 in store [9] reads 9 *)
+  eapply MSstep.
+  { apply SDeref. }
+  simpl. apply MSrefl.
+Qed.
+
+(* ===========================================================================
+   EXAMPLE 2 — ALIASING (the defining Lua-table property).
+   Two bindings [a], [b] to the SAME table value (shared cell, location 0).
+   A field mutation through [a] is observed through [b]: [let a = <table> in
+   let b = a in (a.x := 9); b.x] reads 9.
+   Both [a] and [b] are the SAME closed table value [mtable_val 0], so they share
+   store location 0 — a write via [a] mutates the cell [b] reads.
+   =========================================================================== *)
+
+(* The aliasing program, fully desugared. After the two lets bind the (closed)
+   table value, [a] and [b] are both [mtable_val 0]; we sequence the write via
+   the first alias and the read via the second with a [tlet]. *)
+Definition alias_prog : tm :=
+  tlet (mtable_val 0)                                    (* a := <table>           *)
+    (tlet (tvar 0)                                       (* b := a                 *)
+      (tlet (tassign (tproj (tvar 1) "x"%string) (tlit (LInt 9)))  (* a.x := 9     *)
+            (tderef (tproj (tvar 1) "x"%string)))).      (* b.x  (reads via alias) *)
+
+(* In this program, after the binders, de Bruijn [tvar 1] in the innermost body
+   refers to [b] (which equals [a] = the table value): the write and the read go
+   through the SAME location. TYPING at Int. *)
+Example aliasing_typed :
+  has_type [ BAtom AInt ] [] alias_prog (BAtom AInt).
+Proof.
+  unfold alias_prog.
+  eapply TLet; [ apply mtable_val_typed; reflexivity | ].
+  eapply TLet; [ apply TVar; reflexivity | ].
+  eapply TLet.
+  - (* a.x := 9 : the cell at [b]/[a] is BRef Int; 9 : Int *)
+    eapply TAssign.
+    + eapply TProj; [ apply TVar; reflexivity | simpl; left; reflexivity ].
+    + apply TLit.
+  - (* b.x : read the SAME cell, : Int *)
+    eapply TDeref. eapply TProj; [ apply TVar; reflexivity | simpl; left; reflexivity ].
+Qed.
+
+(* STEPS: from store [7], the aliasing program multi-steps to 9 — the write
+   through [a] is observed by the read through [b] (both touch location 0). *)
+Example aliasing_steps :
+  multistep (alias_prog, [tlit (LInt 7)]) (tlit (LInt 9), [tlit (LInt 9)]).
+Proof.
+  unfold alias_prog.
+  (* bind a := <table value> (a value already) *)
+  eapply MSstep. { apply SLet. apply mtable_val_value. }
+  (* the body, with [a] substituted: tlet (tvar 0 -> table) ... ; subst 0 (table) (tvar 0) = table *)
+  simpl.
+  (* bind b := a (= the table value) *)
+  eapply MSstep. { apply SLet. apply mtable_val_value. }
+  simpl.
+  (* write a.x := 9: project -> loc 0, then assign -> nil, store [7] -> [9] *)
+  eapply MSstep. { apply SLet1. apply SAssign1. apply mtable_proj_x_steps. }
+  eapply MSstep. { apply SLet1. apply SAssign. apply VLit. }
+  (* let binds nil; body (closed read through the shared cell) survives *)
+  eapply MSstep. { apply SLet. apply VLit. }
+  simpl.
+  (* read b.x: project -> loc 0, deref -> 9 (the value written via a) *)
+  eapply MSstep. { apply SDeref1. apply mtable_proj_x_steps. }
+  eapply MSstep. { apply SDeref. }
+  simpl. apply MSrefl.
+Qed.
+
+(* ===========================================================================
+   EXAMPLE 3 — FIELD INVARIANCE (soundness). Assigning a WRONG-typed value to a
+   field is REJECTED: [t.x := "str"] where [x : Int] is untypeable, because the
+   field is a [BRef Int] cell and [BRef] is INVARIANT (a [BRef Int] is NOT usable
+   as a [BRef Num], let alone a string sink). The WELL-typed assign IS accepted.
+   =========================================================================== *)
+
+(* the ILL-typed write — a string into an Int field cell — is rejected at EVERY
+   type. Reuses the proven [rsub_ref_inv] (BRef invariance) + semantic refutation. *)
+Example field_invariance_rejected :
+  forall T, ~ has_type [ BAtom AInt ] []
+              (tassign (tproj (mtable_val 0) "x"%string) (tlit (LStr 0))) T.
+Proof.
+  intros T H. apply inv_assign in H. destruct H as [U [Hr [He _]]].
+  (* the field projection has type [BRef U]; invert it to the field's true type. *)
+  apply inv_proj in Hr. destruct Hr as [fields [W [Htab [Hin Href]]]].
+  (* the table value's field-set is exactly [("x", BRef Int)]. *)
+  apply inv_rec in Htab. destruct Htab as [Ts [Hfs [_ Hrec]]].
+  unfold mtable_val in Hfs. inversion Hfs as [ | S0 G0 k0 e0 T0 fs0 Ts0 Hloc Hrest Hke ]; subst.
+  inversion Hrest; subst. clear Hrest.
+  (* Ts = [("x", BRef Int)] (the loc 0 has store entry Int). *)
+  apply inv_loc in Hloc. destruct Hloc as [W0 [Hn Hlsub]]. simpl in Hn. injection Hn as <-.
+  apply rsub_rec_super in Hrec. simpl in Hrec.
+  (* [W] (the projected field type as BRef) supplies the demanded field; relate to BRef Int. *)
+  destruct (srec_lookup _ _ Hrec "x"%string W Hin) as [Tf [HinTf HsubTf]].
+  simpl in HinTf. destruct HinTf as [Heq | []]. injection Heq as <-.
+  (* The cell's synthesized type [Tf] satisfies [BRef Int <: Tf] (Hlsub, the loc's
+     store entry is Int) and supplies the demanded [W] ([HsubTf : ssub Tf W]);
+     [Href : rsub W (BRef U)]. Compose the chain: BRef Int <: Tf <: W <: BRef U,
+     so by INVARIANCE U ≡ Int. The value [He : rsub AStr U]: a string would inhabit
+     Int — refute at [VStr 0]. *)
+  pose proof (RsTrans _ _ _ Hlsub
+                (RsTrans _ _ _ (RsSsub _ _ HsubTf) Href)) as HrefInt.  (* rsub (BRef Int) (BRef U) *)
+  apply rsub_ref_inv in HrefInt. destruct HrefInt as [HIntU HUInt].
+  apply inv_lit in He. simpl in He.  (* He : rsub AStr U *)
+  apply rsub_sound in He.            (* dsub AStr U *)
+  apply rsub_sound in HUInt.         (* dsub U Int *)
+  pose proof (He (VStr 0) I) as HUstr.
+  pose proof (HUInt (VStr 0) HUstr) as Hbad.
+  simpl in Hbad. exact Hbad.
+Qed.
+
+(* the WELL-typed write — an Int into the Int field cell — IS accepted, yielding
+   the unit/nil result type. *)
+Example field_invariance_accepted :
+  has_type [ BAtom AInt ] []
+    (tassign (tproj (mtable_val 0) "x"%string) (tlit (LInt 9))) (BAtom ANil).
+Proof.
+  eapply TAssign; [ apply mtable_proj_x; reflexivity | apply TLit ].
+Qed.
+
+(* and a DIRECT statement of the cell's invariance: a [BRef Int] field cannot be
+   used as a [BRef Num] (the invariant rule — covariant use is REJECTED), even
+   though [Int <: Num] holds at the value level. *)
+Example field_cell_invariant :
+  ~ rsub (BRef (BAtom AInt)) (BRef (BAtom ANum)).
+Proof.
+  intro H. apply rsub_ref_inv in H. destruct H as [_ HNumInt].
+  (* HNumInt : rsub Num Int — would make every number an Int; refute at VFloat 0. *)
+  apply rsub_sound in HNumInt.
+  pose proof (HNumInt (VFloat 0) I) as Hbad. simpl in Hbad. exact Hbad.
+Qed.
+
+(* ===========================================================================
+   EXAMPLE 4 — COVARIANT STRUCTURE still works, composing with invariant cells.
+   The record-of-refs is width-subtypeable on its IMMUTABLE field set: a table
+   with an EXTRA field is a subtype on the smaller field set — and this composes
+   with the per-field invariant [BRef] cells (the field types match exactly).
+   =========================================================================== *)
+
+(* a two-field mutable table [{x : BRef Int; y : BRef Str}] WIDTH-subtypes to the
+   one-field [{x : BRef Int}] — dropping a field is supertyping (covariant
+   structure), while the surviving [x] cell stays the SAME invariant [BRef Int]. *)
+Example covariant_width_over_cells :
+  rsub (BRec [("x"%string, BRef (BAtom AInt)); ("y"%string, BRef (BAtom AStr))])
+       (BRec [("x"%string, BRef (BAtom AInt))]).
+Proof.
+  apply RsSsub. apply SsRec.
+  (* demanded field [x : BRef Int] is supplied by the wider record's [x], same type. *)
+  eapply SrCons; [ simpl; left; reflexivity | apply SsRefl | apply SrNil ].
+Qed.
+
+(* the wider table VALUE (backed by two cells, locations 0 and 1) types at the
+   NARROWER mutable-table type by subsumption — covariant width composing with the
+   invariant cells (the [x] cell's [BRef Int] is preserved EXACTLY). *)
+Definition mtable2_val : tm :=
+  trec [("x"%string, tloc 0); ("y"%string, tloc 1)].
+
+Example covariant_structure_composes :
+  has_type [ BAtom AInt ; BAtom AStr ] [] mtable2_val mtable_ty.
+Proof.
+  unfold mtable2_val, mtable_ty.
+  eapply TSub.
+  - (* the wide record types at its full field set *)
+    apply TRec.
+    + apply HFcons; [ apply TLoc; reflexivity | ].
+      apply HFcons; [ apply TLoc; reflexivity | apply HFnil ].
+    + simpl. apply NoDup_cons;
+        [ simpl; intros [H|[]]; discriminate | apply NoDup_cons; [ simpl; tauto | apply NoDup_nil ] ].
+  - (* subsume WIDTH-wise to the one-field mutable-table type (invariant x cell kept) *)
+    apply covariant_width_over_cells.
+Qed.
+
+(* and the projected [x] of the WIDER table is STILL an invariant [BRef Int] cell —
+   confirming covariant structure does NOT relax the per-field invariance. *)
+Example covariant_field_still_invariant :
+  has_type [ BAtom AInt ; BAtom AStr ] []
+    (tproj mtable2_val "x"%string) (BRef (BAtom AInt)).
+Proof.
+  unfold mtable2_val.
+  eapply TProj.
+  - apply TRec.
+    + apply HFcons; [ apply TLoc; reflexivity | ].
+      apply HFcons; [ apply TLoc; reflexivity | apply HFnil ].
+    + simpl. apply NoDup_cons;
+        [ simpl; intros [H|[]]; discriminate | apply NoDup_cons; [ simpl; tauto | apply NoDup_nil ] ].
+  - simpl. left; reflexivity.
+Qed.
+
+(* ===========================================================================
+   EXAMPLE 5 — REASSIGNABLE LOCAL: a local as a ref cell, reassigned, reads the
+   NEW value. [local x = 7; x := 9; x] reads 9. Encoded: the local is a ref cell
+   [talloc 7]; reassignment is [tassign x 9]; reading is [tderef x].
+   =========================================================================== *)
+
+(* The full reassignable-local program (un-allocated form): allocate the cell, bind
+   it as [x] (de Bruijn 0), reassign 9, then read. Built with [tlet]s. *)
+Definition reassign_local_prog : tm :=
+  tlet (talloc (tlit (LInt 7)))                 (* local x = 7  (x : BRef Int)        *)
+    (tlet (tassign (tvar 0) (tlit (LInt 9)))    (* x := 9                             *)
+          (tderef (tvar 1))).                   (* read x  (de Bruijn 1 past the nil) *)
+
+(* TYPING at Int: the local cell is [BRef Int]; reassigning 9 is well typed
+   (invariant, exact match); reading yields Int. *)
+Example reassign_local_typed :
+  has_type [] [] reassign_local_prog (BAtom AInt).
+Proof.
+  unfold reassign_local_prog.
+  apply TLet with (A := BRef (BAtom AInt)).
+  { apply TAlloc. apply TLit. }
+  apply TLet with (A := BAtom ANil).
+  { eapply TAssign with (T := BAtom AInt); [ apply TVar; reflexivity | apply TLit ]. }
+  (* read: de Bruijn 1 (past the nil binding) is the cell : BRef Int *)
+  apply TDeref. apply TVar. reflexivity.
+Qed.
+
+(* STEPS: from the EMPTY store, the program multi-steps to 9 — the reassignment
+   wrote the cell, the read observes the NEW value. *)
+Example reassign_local_steps :
+  multistep (reassign_local_prog, []) (tlit (LInt 9), [tlit (LInt 9)]).
+Proof.
+  unfold reassign_local_prog.
+  (* alloc 7: append the cell, location 0, store [] -> [7] *)
+  eapply MSstep. { apply SLet1. apply SAlloc. apply VLit. }
+  simpl.
+  (* bind x := loc 0 *)
+  eapply MSstep. { apply SLet. apply VLoc. }
+  simpl.
+  (* reassign x := 9: write location 0, store [7] -> [9], yields nil *)
+  eapply MSstep. { apply SLet1. apply SAssign. apply VLit. }
+  (* bind the nil result *)
+  eapply MSstep. { apply SLet. apply VLit. }
+  simpl.
+  (* read x: deref location 0 in store [9] reads 9 *)
+  eapply MSstep. { apply SDeref. }
+  simpl. apply MSrefl.
+Qed.
+
+(* ===========================================================================
    ASSUMPTION AUDIT — closed under the global context.
    =========================================================================== *)
 Print Assumptions progress.
@@ -3493,3 +3873,15 @@ Print Assumptions deref_proj_typed.
 Print Assumptions rec_over_ref_typed.
 Print Assumptions ill_typed_assign_rejected.
 Print Assumptions arrow_top_collapse.
+(* M4 — mutable tables + reassignable locals (records-of-refs encoding). *)
+Print Assumptions mutation_typed.
+Print Assumptions mutation_steps.
+Print Assumptions aliasing_typed.
+Print Assumptions aliasing_steps.
+Print Assumptions field_invariance_rejected.
+Print Assumptions field_invariance_accepted.
+Print Assumptions field_cell_invariant.
+Print Assumptions covariant_structure_composes.
+Print Assumptions covariant_field_still_invariant.
+Print Assumptions reassign_local_typed.
+Print Assumptions reassign_local_steps.
