@@ -2776,3 +2776,118 @@ unaffected (untouched, per `docs/decisions/metatable-representation.md`).
 every vararg payoff: **Closed under the global context** — no axioms, no `Admitted`,
 no `Classical`. `subtype.v` + `ssub.v` byte-unmodified (confirmed `git diff --stat`);
 whole chain compiles (`coqc proof/subtype.v` → `typing.v` → `ssub.v` → `check.v`).
+
+## Increment 27 — MULTIPLE-ASSIGNMENT `a,b,…=e1,e2,…` / `a,b=f()`: the LHS-side consumer of the multivalue substrate
+
+Lua's multiple-assignment is the LHS-side CONSUMER of the SAME multivalue substrate
+that multi-return (increment 21) and vararg `...` (increment 26) PRODUCE. The RHS is a
+sequence of values (packed as one multivalue) that is ADJUSTED to EXACTLY the LHS
+arity N, then each adjusted value is assigned to its target. This increment lands that
+adjustment — the GENERALIZATION of multi-return's truncation to arbitrary arity, plus
+the one direction truncation does not cover: NIL-PADDING. It reuses the increment-21
+tuple substrate (`BTuple`, `tret`/`VRet`) and the reassignable-locals machinery
+(`tloc`/`BRef`/`tassign`/store-update); it adds NO new subtyping and NO index
+signatures.
+
+### The model — N target cells + a packed-multivalue RHS, adjusted to arity N
+
+```
+tmassign rs rhs        (* N target ref cells rs ; RHS packed as one multivalue rhs *)
+```
+
+The targets `rs` are reference cells (each a `tloc`/`BRef T` — the reassignable-local
+shape); `rhs` is the RHS packed as a single `BTuple`-typed term (e.g. a call's result,
+a `tret …`). The arity adjustment is the pure normalizer `pad_tm` (values) / `pad_ty`
+(types): adjust a list to EXACTLY length N — TRUNCATE when longer (Lua DROPS the extra
+RHS values — the `tfst` direction at arbitrary arity) and PAD with `tlit LNil :
+BAtom ANil` when shorter (Lua fills missing targets with `nil` — the adjust-UP
+direction). Both directions are the SAME function; padding adds only `nil`, no new
+substrate. The last-position spread `a,b=f()` needs nothing new: the RHS is whatever
+`f()` evaluates to — a `tret` multivalue — already covered by packing the RHS as one
+`BTuple`-typed term.
+
+```
+TMAssign :  has_types rs (map BRef Tgts)
+            rhs : BTuple Ss
+            Forall2 rsub (pad_ty Ss (length Tgts)) Tgts
+            ──────────────────────────────────────────────
+            tmassign rs rhs : BAtom ANil
+```
+
+Targets type pointwise as ref cells `BRef Tgt_i`; the RHS at its tuple type
+`BTuple Ss`; the RHS adjusted to N = `length Tgts` must be `rsub`-below the target
+cells pointwise (`Forall2 rsub`) — exactly the per-assignment obligation `tassign`
+imposes, lifted pointwise. A `nil`-padded slot supplies `ANil`, so a target survives
+padding only when its cell type admits `nil` (`rsub ANil Tgt_i`) — faithful to Lua.
+
+### Operational semantics — compute everything, then assign (`SMAssign` reuses the `tassign` store-update)
+
+```
+SMAssign :  Forall value rs   Forall value vs
+            ────────────────────────────────────────────────────────────────────
+            tmassign rs (tret vs)  ⤳  ( nil , store_massign rs (pad_tm vs |rs|) st )
+```
+
+Evaluation order is Lua-faithful "compute everything, then assign": congruences
+`SMAssign1` (step targets left-to-right) and `SMAssign2` (then the RHS multivalue)
+evaluate every target to a location value and the RHS to a value multivalue `tret vs`;
+THEN `SMAssign` adjusts `vs` to the target arity (`pad_tm`) and applies ALL the writes
+at once (`store_massign`, reusing `tassign`'s `store_update`), yielding `nil`. (This is
+a faithful modelling choice, not a simplification: the writes commit together, so
+ordering among them is unobservable; the per-target / RHS evaluation that PRECEDES the
+writes is the observable left-to-right order, and it is the existing CBV discipline.)
+
+### Metatheory re-proved (`Qed`)
+
+`tmassign` is threaded through the ENTIRE de Bruijn metatheory exactly as the existing
+forms: `tm_rect_strong` (reusing the `Pt` list-IH of `tret` for the target list),
+`lift` / `subst` / `closed_at` / `closed_at_lift` / `subst_lift_cancel`, front/cut
+weakening, `subst_lemma`, `store_weakening`, `has_type_closed`, the inversion lemma
+`inv_massign`, and **progress + preservation** re-proved for every new step rule.
+The crux is `store_massign_preserves`: the multi-write preserves `store_well_typed`
+under a FIXED store typing `S` (no allocation) — the `SAssign` cell-type argument
+(`inv_loc` + `rsub_ref_inv`) iterated over all N targets, with the adjusted values
+typed at the cells via `pad_commute` (`pad_tm`/`pad_ty` commute under typing) +
+`has_types_subsume` (pointwise `TSub` along `Forall2 rsub`). The congruences reuse
+`has_types_split` / `has_types_app_replace` / `has_types_store_weaken`; progress reuses
+`tret_progress` on the target list and `canon_tuple` on the RHS. `check.v`: `synth`
+gains a type-first `tmassign` arm — targets `synth_seq` to ref types `unref_seq`-unwrapped
+to cell types `Tgts`; RHS synths to `BTuple Ss`; `pad_ty Ss (length Tgts)` gated
+pointwise `decide_rsub`-below `Tgts` (`decide_rsub_seq`) ⇒ `nil`; `proj_free`,
+`synth_sound`, and `narrowing` extended; `synth_sound` / `check_sound` re-proved.
+
+### Payoffs
+
+Three forms covering the three adjustment regimes, on real reference cells:
+
+1. **`a, b = f()` (exact arity)** — `f` multi-returns `(Int, Bool)`; the call
+   `tmassign [tloc 0; tloc 1] (f 3)` steps (RHS to `return 3, true` via `SMAssign2`,
+   then the multi-write) to `nil` with store `[3; true]` — BOTH values bound.
+2. **`a, b, c = e1, e2` (NIL-PAD)** — three targets, two RHS values ⇒ `c` is
+   nil-padded (`pad_tm [5;false] 3 = [5; false; nil]`); typed + stepped, `c`'s cell
+   admits `nil`.
+3. **`a, b = e1, e2, e3` (DROP)** — two targets, three RHS values ⇒ `e3` is dropped
+   (`pad_tm [7;true;99] 2 = [7; true]`); typed + stepped, store `[7; true]`.
+
+Algorithmic mirror in `check.v` (targets are context-bound ref variables — source
+`tloc` is rejected): `ma_exact_synths` / `ma_pad_synths` / `ma_drop_synths`
+(= `Some ANil`), the type-mismatch rejection `ma_mismatch_None` (a `Bool` into an
+`Int` cell fails the `decide_rsub` gate ⇒ `None`), and `_check_sound` routing back to
+real declarative typings (all by `reflexivity` / `synth_sound`).
+
+### Honest scope / deferrals
+
+Multiple-assignment here is at KNOWN arity (the target count pins N; truncation and
+nil-pad are total at that N). Table-collect-all `{f()}` and FULL arity-polymorphic
+spread (a spread whose arity is not fixed) remain deferred. Tuple SUBTYPING is
+reflexive/pointwise only (`ssub` — `rsub (BTuple Ss') (BTuple Ss)` forces `Ss' = Ss`,
+which the preservation of `SMAssign` relies on to type the RHS components exactly);
+semantic tuple subtyping via `gdecide` and a top-tuple type are deferred. The
+dynamic-metatable frontier is unaffected (untouched, per
+`docs/decisions/metatable-representation.md`).
+
+`Print Assumptions` on `progress`, `preservation`, `synth_sound`, `check_sound`, and
+every multiple-assignment payoff: **Closed under the global context** — no axioms, no
+`Admitted`, no `Classical`. `subtype.v` + `ssub.v` byte-unmodified (confirmed
+`git diff --stat`); whole chain compiles (`coqc proof/subtype.v` → `typing.v` →
+`ssub.v` → `check.v`).

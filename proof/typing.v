@@ -322,8 +322,29 @@ Inductive tm : Type :=
      rest (see [SVApp]). No new arrow type, no new binder kind — the rest type is
      the EXISTING [BTuple Ts]; index signatures are NOT involved (deferred
      substrate, and orthogonal). *)
-  | tvapp      : tm -> tm -> list tm -> tm.
+  | tvapp      : tm -> tm -> list tm -> tm
        (* tvapp f a rs : variadic call — f's fixed arg a, trailing args rs packed *)
+  (* MULTIPLE-ASSIGNMENT [a, b, ... = e1, e2, ...] — the LHS-side CONSUMER of the
+     SAME multi-value substrate that multi-return and vararg PRODUCE. [tmassign rs
+     rhs]: [rs] is the list of N TARGET reference expressions (each a [tloc] / [BRef
+     T] cell, exactly the reassignable-local machinery), and [rhs] is the RHS PACKED
+     as a single MULTIVALUE ([tret …] / any [BTuple]-typed term — e.g. a call's
+     result). Multiple-assignment is the GENERALIZATION of the multi-return
+     adjustments: the RHS multivalue is adjusted to EXACTLY the LHS arity N. Lua 5.1
+     semantics: extra RHS values are DROPPED (truncation — the [tfst] direction) and
+     MISSING RHS values are PADDED WITH NIL ([= nil], the adjust-UP direction that
+     truncation alone does not cover). BOTH directions are the SAME pure normalizer
+     [pad_tm] / [pad_ty] (truncate-or-pad-with-[nil] to length N) — no new substrate,
+     no new subtyping, no index signatures: padding is just [tlit LNil : BAtom ANil].
+     The last-position spread [a, b = f()] needs nothing new: the RHS is whatever
+     [f()] evaluates to — a [tret] multivalue — so it is already covered by packing
+     the RHS as one [BTuple]-typed term. Evaluation order: ALL targets and the RHS
+     are evaluated to values (left-to-right via congruences), THEN every assignment
+     is performed at once ([SMAssign]) — faithful to Lua's "compute everything, then
+     assign". Each adjusted value is written via the EXISTING store-update used by
+     [tassign]; the whole form yields the unit value [nil]. *)
+  | tmassign   : list tm -> tm -> tm.
+       (* tmassign rs rhs : a,b,…(N targets) = rhs (packed multivalue) *)
 
 (* The type a tag pins (the THEN-branch narrowed type). TgNum ↦ ANum (all numbers,
    per the 5.1 [type()] model), the other scalars to their atoms, TgTable to the
@@ -428,6 +449,32 @@ Definition mm_unop (uop : unop) : string :=
   | ULen => "__len"
   end.
 
+(* MULTIPLE-ASSIGNMENT — the ARITY NORMALIZER (the SAME adjustment in both
+   directions). [pad_tm vs n] adjusts a value/term list to EXACTLY length [n]:
+   it TRUNCATES when [vs] is longer (Lua DROPS the extra RHS values — the [tfst]
+   direction) and PADS with [tlit LNil] when [vs] is shorter (Lua fills missing
+   targets with [nil] — the adjust-UP direction). [pad_ty] is the TYPE-level mirror,
+   padding with [BAtom ANil] — so [pad_ty] commutes with [pad_tm] under typing
+   ([has_types vs Ss ⇒ has_types (pad_tm vs n) (pad_ty Ss n)], proved below). No new
+   substrate: the pad value is just [nil]. *)
+Fixpoint pad_tm (vs : list tm) (n : nat) : list tm :=
+  match n with
+  | 0 => []
+  | S k => match vs with
+           | [] => tlit LNil :: pad_tm [] k
+           | v :: rest => v :: pad_tm rest k
+           end
+  end.
+
+Fixpoint pad_ty (Ts : list BTy) (n : nat) : list BTy :=
+  match n with
+  | 0 => []
+  | S k => match Ts with
+           | [] => BAtom ANil :: pad_ty [] k
+           | T :: rest => T :: pad_ty rest k
+           end
+  end.
+
 
 (* ---- A usable induction principle: the auto-generated [tm_ind] gives no IH
    for the subterms inside a [trec] list. Hand-roll the nested scheme (a plain
@@ -466,6 +513,9 @@ Section tm_ind_strong.
   (* VARARG — the trailing-argument list uses the SAME [Pt] IH as [tret]'s
      component list (both are positional term sequences). *)
   Hypothesis Hvapp   : forall f a rs, P f -> P a -> Pt rs -> P (tvapp f a rs).
+  (* MULTIPLE-ASSIGNMENT — the target list uses the SAME [Pt] IH (a positional term
+     sequence, exactly like [tret]'s components); the RHS uses [P]. *)
+  Hypothesis Hmassign : forall rs rhs, Pt rs -> P rhs -> P (tmassign rs rhs).
   Hypothesis Hnil  : Pl [].
   Hypothesis Hcons : forall k e rest, P e -> Pl rest -> Pl ((k, e) :: rest).
   Hypothesis Htnil : Pt [].
@@ -545,6 +595,14 @@ Section tm_ind_strong.
               | [] => Htnil
               | e :: rest => Htcons e rest (tm_rect_strong e) (gova rest)
               end) rs)
+    | tmassign rs rhs =>
+        Hmassign rs rhs
+          ((fix goma (rs : list tm) : Pt rs :=
+              match rs with
+              | [] => Htnil
+              | e :: rest => Htcons e rest (tm_rect_strong e) (goma rest)
+              end) rs)
+          (tm_rect_strong rhs)
     end.
 End tm_ind_strong.
 
@@ -1200,6 +1258,23 @@ Inductive has_type : list BTy -> list BTy -> tm -> BTy -> Prop :=
       has_type S G a T ->
       has_types S G rs Ts ->
       has_type S G (tvapp f a rs) B
+  (* MULTIPLE-ASSIGNMENT — [a, b, … = rhs]. The [N] TARGETS [rs] are typed pointwise
+     as reference cells [BRef Tgt_i] ([has_types rs (map BRef Tgts)]); the RHS is the
+     PACKED multivalue at its TUPLE type [BTuple Ss]. The RHS is ADJUSTED to arity
+     [N = length Tgts] by [pad_ty] (truncate or [nil]-pad) and each adjusted source
+     type must be [rsub]-below the corresponding target CELL type ([Forall2 rsub]) —
+     exactly the per-assignment obligation [tassign] imposes, lifted pointwise. A
+     [nil]-padded slot supplies [BAtom ANil], so a target survives padding only when
+     its cell type ADMITS nil ([rsub (BAtom ANil) Tgt_i]) — faithful to Lua. Result:
+     the unit value [nil]. The adjustment REUSES the multi-value substrate: no new
+     subtyping, no index signatures; [pad_ty]/[pad_tm] are the generalization of
+     [tfst]-truncation to arbitrary arity, adding only [nil]-pad in the other
+     direction. *)
+  | TMAssign : forall S G rs rhs Tgts Ss,
+      has_types S G rs (map BRef Tgts) ->
+      has_type S G rhs (BTuple Ss) ->
+      Forall2 rsub (pad_ty Ss (Datatypes.length Tgts)) Tgts ->
+      has_type S G (tmassign rs rhs) (BAtom ANil)
 (* key-aligned pointwise typing of record fields; mutual so the generated
    induction principle carries an IH on every field derivation. *)
 with has_fields : list BTy -> list BTy -> list (string * tm) -> list (string * BTy) -> Prop :=
@@ -1311,6 +1386,8 @@ Fixpoint lift (d k : nat) (e : tm) : tm :=
   (* VARARG: no new binders at the CALL — function, fixed arg, and each trailing
      arg lift at [k]. *)
   | tvapp f a rs => tvapp (lift d k f) (lift d k a) (map (lift d k) rs)
+  (* MULTIPLE-ASSIGNMENT: no new binders — each target and the RHS lift at [k]. *)
+  | tmassign rs rhs => tmassign (map (lift d k) rs) (lift d k rhs)
   end.
 
 Fixpoint subst (j : nat) (s : tm) (e : tm) : tm :=
@@ -1368,6 +1445,8 @@ Fixpoint subst (j : nat) (s : tm) (e : tm) : tm :=
   (* VARARG: no new binders at the CALL — substitute into function, fixed arg, and
      each trailing arg at [j]. *)
   | tvapp f a rs => tvapp (subst j s f) (subst j s a) (map (subst j s) rs)
+  (* MULTIPLE-ASSIGNMENT: no new binders — substitute into each target + the RHS. *)
+  | tmassign rs rhs => tmassign (map (subst j s) rs) (subst j s rhs)
   end.
 
 (* record-field lookup at the term level (for projection) *)
@@ -1498,6 +1577,19 @@ Fixpoint store_update (n : nat) (v : tm) (st : store) : store :=
   end.
 
 Definition store_lookup (n : nat) (st : store) : tm := nth n st (tlit LNil).
+
+(* MULTIPLE-ASSIGNMENT — perform N writes at once. [rs] are the TARGET terms
+   (location values [tloc n_i]); [vs] are the ALREADY-ADJUSTED values to write
+   (length [N], from [pad_tm]). Each pair writes [v_i] into the cell [n_i] via the
+   EXISTING [store_update]; a non-location target (impossible for a well-typed
+   reduction, where every target is a [tloc] value) is skipped. This is the "compute
+   everything, then assign" model — all writes applied together in [SMAssign]. *)
+Fixpoint store_massign (rs : list tm) (vs : list tm) (st : store) : store :=
+  match rs, vs with
+  | (tloc n) :: rs', v :: vs' => store_massign rs' vs' (store_update n v st)
+  | _ :: rs', _ :: vs' => store_massign rs' vs' st
+  | _, _ => st
+  end.
 
 Inductive step : tm * store -> tm * store -> Prop :=
   (* beta: (\T.b) v  ->  b[0 := v]  *)
@@ -1794,7 +1886,30 @@ Inductive step : tm * store -> tm * store -> Prop :=
   | SVApp3 : forall vf va pre e e' post st st',
       value vf -> value va -> Forall value pre ->
       step (e, st) (e', st') ->
-      step (tvapp vf va (pre ++ e :: post), st) (tvapp vf va (pre ++ e' :: post), st').
+      step (tvapp vf va (pre ++ e :: post), st) (tvapp vf va (pre ++ e' :: post), st')
+  (* MULTIPLE-ASSIGNMENT — operational rules. The main reduction [SMAssign]: once
+     every TARGET [rs] is a value (a location [tloc n]) and the RHS is a fully
+     evaluated multivalue [tret vs], the RHS is ADJUSTED to the target arity by
+     [pad_tm] (truncate the extra values / pad the missing slots with [nil]) and ALL
+     the adjusted values are written at once ([store_massign]) — "compute
+     everything, then assign". The form yields the unit value [nil]. This REUSES the
+     [tassign] store-update; the [tret] multivalue is the SAME one a call / vararg
+     produces. *)
+  | SMAssign : forall rs vs st,
+      Forall value rs -> Forall value vs ->
+      step (tmassign rs (tret vs), st)
+           (tlit LNil, store_massign rs (pad_tm vs (List.length rs)) st)
+  (* congruences — evaluate the targets left-to-right (so each is a location value),
+     THEN the RHS multivalue (the same left-to-right discipline as [SRet]/[SVApp]). *)
+  | SMAssign1 : forall pre r r' post rhs st st',
+      Forall value pre ->
+      step (r, st) (r', st') ->
+      step (tmassign (pre ++ r :: post) rhs, st)
+           (tmassign (pre ++ r' :: post) rhs, st')
+  | SMAssign2 : forall rs rhs rhs' st st',
+      Forall value rs ->
+      step (rhs, st) (rhs', st') ->
+      step (tmassign rs rhs, st) (tmassign rs rhs', st').
 
 (* STORE well-typedness + extension (ported from imp.v). [store_well_typed S st]:
    same length, each stored value has its S-type (closed — stored values are
@@ -2348,6 +2463,27 @@ Proof.
     exists Tf, Ts, B.
     split; [assumption|split;[assumption|split;[assumption|eapply RsTrans; eassumption]]].
   - injection Ee as <- <- <-. exists T, Ts, B.
+    split; [assumption|split;[assumption|split;[assumption|apply rsub_refl]]].
+Qed.
+
+(* MULTIPLE-ASSIGNMENT — inversion of [tmassign rs rhs] (subsumption-transparent,
+   mirroring [inv_vapp]). The result is always [BAtom ANil]; the targets type
+   pointwise as [map BRef Tgts]; the RHS at [BTuple Ss]; and the adjusted source
+   types [pad_ty]-subtype the target cells. The subsumed result subsumes from
+   [BAtom ANil]. *)
+Lemma inv_massign : forall S G rs rhs R,
+  has_type S G (tmassign rs rhs) R ->
+  exists Tgts Ss, has_types S G rs (map BRef Tgts) /\
+                  has_type S G rhs (BTuple Ss) /\
+                  Forall2 rsub (pad_ty Ss (Datatypes.length Tgts)) Tgts /\
+                  rsub (BAtom ANil) R.
+Proof.
+  intros S G rs rhs R H. remember (tmassign rs rhs) as e0 eqn:Ee.
+  induction H; try discriminate Ee.
+  - subst. destruct (IHhas_type eq_refl) as [Tgts [Ss [Hrs [Hrhs [Hadj Hd]]]]].
+    exists Tgts, Ss.
+    split; [assumption|split;[assumption|split;[assumption|eapply RsTrans; eassumption]]].
+  - injection Ee as <- <-. exists Tgts, Ss.
     split; [assumption|split;[assumption|split;[assumption|apply rsub_refl]]].
 Qed.
 
@@ -3792,6 +3928,14 @@ Proof.
           exact (IH G1 G2 U eq_refl) end
       | match goal with [ IH : forall _ _ _, _ = _ -> has_types _ _ _ _ |- _ ] =>
           exact (IH G1 G2 U eq_refl) end ].
+  - (* MULTIPLE-ASSIGNMENT — TMAssign: targets + RHS weaken; [Forall2 rsub] is
+       type-level (lift-stable), so it carries unchanged. *)
+    eapply TMAssign;
+      [ match goal with [ IH : forall _ _ _, _ = _ -> has_types _ _ _ _ |- _ ] =>
+          exact (IH G1 G2 U eq_refl) end
+      | match goal with [ IH : forall _ _ _, _ = _ -> has_type _ _ (lift _ _ rhs) _ |- _ ] =>
+          exact (IH G1 G2 U eq_refl) end
+      | eassumption ].
   - (* HFnil *) apply HFnil.
   - (* HFcons *) apply HFcons.
     + match goal with [ IH : forall _ _ _, _ = _ -> has_type _ _ _ _ |- _ ] =>
@@ -3888,6 +4032,11 @@ Fixpoint closed_at (k : nat) (e : tm) : Prop :=
       closed_at k f /\ closed_at k a /\
       (fix allc (rs : list tm) : Prop :=
          match rs with [] => True | e :: rest => closed_at k e /\ allc rest end) rs
+  (* MULTIPLE-ASSIGNMENT: no new binders — each target and the RHS closed at [k]. *)
+  | tmassign rs rhs =>
+      (fix allc (rs : list tm) : Prop :=
+         match rs with [] => True | e :: rest => closed_at k e /\ allc rest end) rs
+      /\ closed_at k rhs
   end.
 
 (* typing in [G] bounds free vars by [length G]. By term induction + inversion.
@@ -4020,6 +4169,15 @@ Proof.
     + match goal with [ IH : forall (_:list BTy)(_:list BTy)(_:list BTy),
           has_types _ _ ?xs _ -> _, Hh : has_types _ _ ?xs Ts |- _ ] =>
           exact (IH Sg G Ts Hh) end.
+  - (* MULTIPLE-ASSIGNMENT — tmassign: target list (Pt IH) + RHS (P IH) closed. *)
+    apply inv_massign in H. destruct H as [Tgts [Ss [Hrs [Hrhs [_ _]]]]].
+    split.
+    + match goal with [ IH : forall (_:list BTy)(_:list BTy)(_:list BTy),
+          has_types _ _ ?xs _ -> _, Hh : has_types _ _ ?xs (map BRef Tgts) |- _ ] =>
+          exact (IH Sg G (map BRef Tgts) Hh) end.
+    + match goal with [ IH : forall (_:list BTy)(_:list BTy)(_:BTy),
+          has_type _ _ ?x _ -> _, Hh : has_type _ _ ?x (BTuple Ss) |- _ ] =>
+          exact (IH Sg G (BTuple Ss) Hh) end.
   - (* Pl nil *) exact I.
   - (* Pl cons *) inversion H; subst. simpl. split.
     + match goal with
@@ -4142,6 +4300,14 @@ Proof.
       | match goal with
         | [ IH : forall k0, _ -> forall d j, k0 <= j -> map _ ?xs = ?xs |- map _ ?xs = ?xs ] =>
             eapply IH; [exact H3 | exact H0] end ].
+  - (* MULTIPLE-ASSIGNMENT — tmassign: target list + RHS lift-invariant. *)
+    destruct H as [H1 H2]. f_equal;
+      [ match goal with
+        | [ IH : forall k0, _ -> forall d j, k0 <= j -> map _ ?xs = ?xs |- map _ ?xs = ?xs ] =>
+            eapply IH; [exact H1 | exact H0] end
+      | match goal with
+        | [ IH : forall k0, closed_at k0 ?x -> forall d j, k0 <= j -> lift d j ?x = ?x
+            |- lift _ _ ?x = ?x ] => eapply IH; [exact H2 | exact H0] end ].
   - (* Pl nil *) reflexivity.
   - (* Pl cons *) destruct H as [Hc Hr]. f_equal;
       [ f_equal; apply (IHe k0); [exact Hc | exact H0]
@@ -4431,6 +4597,20 @@ Proof.
     + match goal with
       | [ IH : forall _ _ _ _ _ _, has_types _ _ rs _ -> _ |- _ ] =>
           apply (IH Sg G1 G2 U Ts s); [ exact Hrs | exact H0 ] end.
+  - (* MULTIPLE-ASSIGNMENT — tmassign: substitute into each target + the RHS; the
+       target ref-types / RHS tuple type / [Forall2 rsub] are all preserved, so
+       [TMAssign] re-applies (subsumed by [rsub (BAtom ANil) T] from inv). *)
+    apply inv_massign in H. destruct H as [Tgts [Ss [Hrs [Hrhs [Hadj Hsub]]]]]. simpl.
+    eapply TSub; [ eapply TMAssign | exact Hsub ].
+    + match goal with
+      | [ IH : forall _ _ _ _ _ _, has_types _ _ ?xs _ -> _ -> has_types _ _ _ _,
+          Hh : has_types _ _ ?xs (map BRef Tgts) |- _ ] =>
+          apply (IH Sg G1 G2 U (map BRef Tgts) s); [ exact Hh | exact H0 ] end.
+    + match goal with
+      | [ IH : forall _ _ _ _ _ _, has_type _ _ ?x _ -> _ -> has_type _ _ _ _,
+          Hh : has_type _ _ ?x (BTuple Ss) |- _ ] =>
+          apply (IH Sg G1 G2 U (BTuple Ss) s); [ exact Hh | exact H0 ] end.
+    + exact Hadj.
   - (* Pl nil *) inversion H; subst. simpl. apply HFnil.
   - (* Pl cons *) inversion H; subst. simpl. apply HFcons.
     + match goal with [ Hh : has_type ?Sg0 (G1 ++ U :: G2) e ?Tk |- _ ] =>
@@ -4542,6 +4722,14 @@ Proof.
   - (* VARARG — TVApp: function, fixed arg, and trailing-arg list store-weaken. *)
     eapply TVApp; [ apply IHhas_type1; exact Hext | apply IHhas_type2; exact Hext
                   | apply IHhas_type3; exact Hext ].
+  - (* MULTIPLE-ASSIGNMENT — TMAssign: targets + RHS store-weaken; [Forall2 rsub]
+       is type-level (store-independent). *)
+    eapply TMAssign;
+      [ match goal with [ IH : forall _, extends _ _ -> has_types _ _ _ _ |- _ ] =>
+          apply IH; exact Hext end
+      | match goal with [ IH : forall _, extends _ _ -> has_type _ _ rhs _ |- _ ] =>
+          apply IH; exact Hext end
+      | eassumption ].
   - apply HFnil.
   - apply HFcons; [ apply IHhas_type; exact Hext | apply IHhas_type0; exact Hext ].
   - (* MULTI-RETURN — HTnil *) apply HTnil.
@@ -4847,6 +5035,88 @@ Lemma tmeta_step_shape : forall own proto st e' st',
 Proof.
   intros own proto st e' st' Hstep.
   inversion Hstep; subst; eauto.
+Qed.
+
+(* MULTIPLE-ASSIGNMENT — the arity normalizer COMMUTES with typing: if the RHS
+   component values [vs] type pointwise into [Ss], then the ADJUSTED values [pad_tm
+   vs n] type pointwise into the ADJUSTED types [pad_ty Ss n]. Truncation drops a
+   typed pair from both lists; nil-padding adds [tlit LNil : BAtom ANil] on the term
+   side and [BAtom ANil] on the type side (the SAME [TLit] witness). This is exactly
+   the producer/consumer symmetry: the adjustment is the SAME on values and types. *)
+Lemma pad_commute : forall n S G vs Ss,
+  has_types S G vs Ss -> has_types S G (pad_tm vs n) (pad_ty Ss n).
+Proof.
+  induction n; intros S G vs Ss Hts; simpl.
+  - apply HTnil.
+  - inversion Hts; subst; simpl.
+    + (* vs = [], Ss = [] : pad both with nil *)
+      apply HTcons; [ apply (TLit S G LNil) | apply IHn; apply HTnil ].
+    + (* vs = e :: es, Ss = T :: Ts : keep the head pair, recurse *)
+      apply HTcons; [ assumption | apply IHn; assumption ].
+Qed.
+
+(* MULTIPLE-ASSIGNMENT — a pointwise typing pins the list lengths equal. *)
+Lemma has_types_length : forall S G es Ts,
+  has_types S G es Ts -> List.length es = List.length Ts.
+Proof. intros S G es Ts H. induction H; simpl; [ reflexivity | f_equal; assumption ]. Qed.
+
+(* MULTIPLE-ASSIGNMENT — pointwise subsumption of a value list: [vs : As] and [As]
+   pointwise [rsub]-below [Bs] gives [vs : Bs] (apply [TSub] at each position). The
+   per-assignment subsumption [tassign] allows, lifted to the whole tuple. *)
+Lemma has_types_subsume : forall S G vs As Bs,
+  has_types S G vs As -> Forall2 rsub As Bs -> has_types S G vs Bs.
+Proof.
+  intros S G vs As Bs Hts. revert Bs.
+  induction Hts; intros Bs Hf2; inversion Hf2; subst.
+  - apply HTnil.
+  - apply HTcons; [ eapply TSub; eassumption | apply IHHts; assumption ].
+Qed.
+
+(* MULTIPLE-ASSIGNMENT — the MULTI-WRITE preserves store well-typedness. Targets
+   [rs] are reference cells typed [map BRef Tgts] and are all VALUES (so each is a
+   location [tloc n] by [canon_ref]); the adjusted values [vs] type at the CELL types
+   [Tgts]. Writing every [v_i] into its cell [n_i] ([store_massign]) preserves
+   [store_well_typed S] — the store typing [S] is FIXED (no allocation): this is
+   exactly the [SAssign] preservation argument (cell type matches via [inv_loc] +
+   [rsub_ref_inv]) iterated over all N targets. *)
+Lemma store_massign_preserves : forall S rs Tgts vs st,
+  has_types S [] rs (map BRef Tgts) ->
+  Forall value rs ->
+  has_types S [] vs Tgts ->
+  store_well_typed S st ->
+  store_well_typed S (store_massign rs vs st).
+Proof.
+  intros S rs. induction rs as [ | r rs' IH ];
+    intros Tgts vs st Hrs Hval Hvs Hwt.
+  - (* no targets *) simpl. destruct vs; simpl; exact Hwt.
+  - (* rs = r :: rs', so map BRef Tgts = BRef Tgt0 :: ... ⇒ Tgts = Tgt0 :: Tgts' *)
+    destruct Tgts as [ | Tgt0 Tgts' ]; simpl in Hrs; inversion Hrs; subst.
+    inversion Hval; subst.
+    (* the head target is a location value *)
+    match goal with [ Hr : has_type S [] r (BRef Tgt0) |- _ ] =>
+      destruct (canon_ref S r Tgt0 Hr ltac:(assumption)) as [n En] end. subst r.
+    (* the adjusted value list: vs = v :: vs', v : Tgt0 *)
+    inversion Hvs; subst.
+    simpl.
+    (* write v into cell n, preserving well-typedness, then recurse *)
+    eapply IH; [ eassumption | assumption | eassumption | ].
+    (* store_update n v st is well-typed: cell n has type Tgt0 (inv_loc) and v : Tgt0 *)
+    match goal with [ Hr : has_type S [] (tloc n) (BRef Tgt0) |- _ ] =>
+      apply inv_loc in Hr; destruct Hr as [W [Hn Href]] end.
+    apply rsub_ref_inv in Href. destruct Href as [HWU HUW].
+    destruct Hwt as [Hlen Hcells].
+    assert (Hnlt : n < List.length st).
+    { rewrite <- Hlen. apply nth_error_Some. rewrite Hn. discriminate. }
+    split.
+    + rewrite store_update_length. exact Hlen.
+    + intros m Tm Hm.
+      destruct (Nat.eq_dec m n) as [Heq | Hne].
+      * subst m. rewrite Hn in Hm. injection Hm as <-.
+        rewrite store_lookup_update_eq by assumption.
+        (* v : Tgt0; cell typed at W; [rsub Tgt0 W] from [HUW] *)
+        eapply TSub; [ eassumption | exact HUW ].
+      * rewrite store_lookup_update_neq by (intro Hc; apply Hne; symmetry; exact Hc).
+        apply Hcells; exact Hm.
 Qed.
 
 Theorem preservation : forall S e T st e' st',
@@ -5678,6 +5948,54 @@ Proof.
           | exact Hfe'
           | eapply has_types_store_weaken; [ exact Hpost | exact Hext ] ] ]
       | exact Hsub ].
+  (* MULTIPLE-ASSIGNMENT — preservation for the new reductions. *)
+  - (* SMAssign: the multi-write. [tmassign rs (tret vs)] ⤳ [nil] with all writes
+       applied. The result [nil : BAtom ANil <: T0]; the store stays well-typed under
+       the FIXED [S] ([store_massign_preserves]): the RHS components [vs : Ss] are
+       adjusted ([pad_commute]) to [pad_ty Ss (length rs)] then subsumed
+       ([has_types_subsume] via [Hadj]) to the target cell types [Tgts]. *)
+    apply inv_massign in Hty. destruct Hty as [Tgts [Ss [Hrs [Hrhs [Hadj Hsub]]]]].
+    exists S. split; [ apply extends_refl | split ].
+    + eapply TSub; [ apply (TLit S [] LNil) | exact Hsub ].
+    + (* the RHS multivalue [tret vs] types its components EXACTLY at [Ss] *)
+      apply inv_ret in Hrhs. destruct Hrhs as [Ss' [Hvs Htsub]].
+      apply rsub_tuple_super in Htsub. simpl in Htsub. subst Ss'.
+      (* lengths: [length rs = length Tgts] (targets typed [map BRef Tgts]) *)
+      pose proof (has_types_length S [] rs (map BRef Tgts) Hrs) as Hlrs.
+      rewrite length_map in Hlrs.
+      (* adjusted values type at [Tgts] *)
+      assert (Hpad : has_types S [] (pad_tm vs (List.length rs)) Tgts).
+      { eapply has_types_subsume;
+          [ rewrite Hlrs; apply (pad_commute (List.length Tgts) S [] vs Ss Hvs)
+          | exact Hadj ]. }
+      eapply store_massign_preserves; [ exact Hrs | exact H | exact Hpad | exact Hwt ].
+  - (* SMAssign1: a TARGET steps (left-to-right). Split the target list, step the
+       focused target (IH), reassemble at the SAME ref-types; [TMAssign] re-applies. *)
+    apply inv_massign in Hty. destruct Hty as [Tgts [Ss [Hrs [Hrhs [Hadj Hsub]]]]].
+    apply has_types_split in Hrs.
+    destruct Hrs as [Tpre [Tr [Tpost [ETs [Hpre [Hfr Hpost]]]]]].
+    destruct (IHHstep r st r' st' eq_refl eq_refl Hwt Tr Hfr)
+      as [S' [Hext [Hfr' Hwt']]].
+    exists S'. split; [ exact Hext | split; [ | exact Hwt' ] ].
+    eapply TSub; [ eapply TMAssign;
+      [ rewrite ETs; eapply has_types_app_replace;
+          [ eapply has_types_store_weaken; [ exact Hpre | exact Hext ]
+          | exact Hfr'
+          | eapply has_types_store_weaken; [ exact Hpost | exact Hext ] ]
+      | eapply store_weakening; [ exact Hrhs | exact Hext ]
+      | exact Hadj ]
+      | exact Hsub ].
+  - (* SMAssign2: the RHS multivalue steps. The RHS keeps [BTuple Ss] (IH); the
+       targets store-weaken; [Hadj] is type-level (stable); [TMAssign] re-applies. *)
+    apply inv_massign in Hty. destruct Hty as [Tgts [Ss [Hrs [Hrhs [Hadj Hsub]]]]].
+    destruct (IHHstep rhs st rhs' st' eq_refl eq_refl Hwt (BTuple Ss) Hrhs)
+      as [S' [Hext [Hrhs' Hwt']]].
+    exists S'. split; [ exact Hext | split; [ | exact Hwt' ] ].
+    eapply TSub; [ eapply TMAssign;
+      [ eapply has_types_store_weaken; [ exact Hrs | exact Hext ]
+      | exact Hrhs'
+      | exact Hadj ]
+      | exact Hsub ].
 Qed.
 
 (* ===========================================================================
@@ -6126,6 +6444,27 @@ Proof.
            apply SVApp3; [ exact Hvf | exact Hva | exact Hpre | exact He' ].
       * exists (tvapp f a' rs), sta. apply SVApp2; [ exact Hvf | exact Ha' ].
     + exists (tvapp f' a rs), stf. apply SVApp1. exact Hf'.
+  - (* MULTIPLE-ASSIGNMENT — TMAssign: the assignment always STEPS. If some target
+       is non-value, step the first one (left-to-right, via [tret_progress] on the
+       target list), [SMAssign1]; else if the RHS multivalue steps, [SMAssign2];
+       else every target is a value and the RHS is a value multivalue ([canon_tuple]
+       ⇒ [tret vs]), so the multi-write [SMAssign] fires. *)
+    intros st Hwt. right.
+    match goal with [ Hts0 : has_types S [] rs (map BRef Tgts), IH : [] = [] -> _ |- _ ] =>
+      destruct (tret_progress S rs (map BRef Tgts) st Hts0 (IH eq_refl st Hwt)) as
+        [Hvrs | [pre [r [post [Ers [Hpre [r' [str Hr']]]]]]]] end.
+    + (* all targets are values; examine the RHS *)
+      match goal with [ IHr : [] = [] -> forall st, _ -> value rhs \/ _ |- _ ] =>
+        destruct (IHr eq_refl st Hwt) as [Hvrhs | [rhs' [strhs Hrhs']]] end.
+      * (* RHS is a value of tuple type ⇒ a multivalue [tret vs] ⇒ multi-write *)
+        match goal with [ Hrhs : has_type S [] rhs (BTuple Ss) |- _ ] =>
+          destruct (canon_tuple S rhs Ss Hrhs Hvrhs) as [vs Evs] end. subst rhs.
+        inversion Hvrhs; subst.
+        exists (tlit LNil), (store_massign rs (pad_tm vs (List.length rs)) st).
+        apply SMAssign; [ exact Hvrs | assumption ].
+      * exists (tmassign rs rhs'), strhs. apply SMAssign2; [ exact Hvrs | exact Hrhs' ].
+    + subst rs. exists (tmassign (pre ++ r' :: post) rhs), str.
+      apply SMAssign1; [ exact Hpre | exact Hr' ].
   - (* P0 HFnil *) intros st Hwt ke [].
   - (* P0 HFcons *) intros st Hwt ke Hin. simpl in Hin. destruct Hin as [Heq | Hin].
     + subst ke.
@@ -7028,6 +7367,9 @@ Proof.
   - (* VARARG — tvapp: function + fixed arg + trailing-arg list cancel. *)
     repeat match goal with [ IH : forall ss kk, _ = _ |- _ ] => rewrite IH end;
       reflexivity.
+  - (* MULTIPLE-ASSIGNMENT — tmassign: target list + RHS cancel. *)
+    repeat match goal with [ IH : forall ss kk, _ = _ |- _ ] => rewrite IH end;
+      reflexivity.
   - (* Pl cons *) rewrite IHe, IHe0; reflexivity.
   - (* MULTI-RETURN — Pt cons *) rewrite IHe, IHe0; reflexivity.
 Qed.
@@ -7713,6 +8055,170 @@ Proof. apply (progress [] va_first_call (BAtom AInt) [] va_first_call_typed stor
 Example va_fwd_progress :
   value va_fwd_call \/ exists e' st', step (va_fwd_call, []) (e', st').
 Proof. apply (progress [] va_fwd_call (BAtom AInt) [] va_fwd_call_typed store_well_typed_nil). Qed.
+
+(* ===========================================================================
+   MULTIPLE-ASSIGNMENT [a, b, … = e1, e2, …] — THE PAYOFF, machine-checked.
+
+   The LHS-side CONSUMER of the SAME multi-value substrate the producers
+   (multi-return / vararg) feed. A multiple-assignment adjusts its RHS multivalue to
+   EXACTLY the LHS arity N — TRUNCATING extras (the [tfst] direction) and PADDING
+   missing slots with [nil] (the adjust-UP direction) — then writes each adjusted
+   value to its target cell ([tassign]'s store-update). Three payoffs cover the three
+   adjustment regimes, on real reference cells (the reassignable-locals machinery):
+
+   (1) [a, b = f()]   — f MULTI-RETURNS two values; both land (exact arity).
+   (2) [a, b, c = e1, e2] — three targets, two RHS values ⇒ [c] is NIL-PADDED.
+   (3) [a, b = e1, e2, e3] — two targets, three RHS values ⇒ [e3] is DROPPED.
+
+   Evaluation order: all targets + the RHS evaluate to values (left-to-right), then
+   every write fires at once ([SMAssign]) — Lua's "compute everything, then assign".
+   =========================================================================== *)
+
+(* ---- (1) [a, b = f()] : f multi-returns (Int, Bool); BOTH values bound.
+   Targets are two cells [a : BRef Int], [b : BRef Bool] (store addresses 0, 1); the
+   RHS is the multi-return call [mr_call = f 3], typed [(Int, Bool)]. Arity matches
+   (2 = 2), so no truncation or padding — the producer/consumer symmetry exactly. *)
+Definition ma_S : list BTy := [ BAtom AInt ; BAtom ABool ].
+Definition ma_st : store := [ tlit (LInt 0) ; tlit (LBool false) ].
+
+Lemma ma_store_wt : store_well_typed ma_S ma_st.
+Proof.
+  unfold ma_S, ma_st. split; [ reflexivity | ].
+  intros n T Hn. destruct n as [ | [ | n']]; simpl in Hn;
+    [ injection Hn as <-; apply TLit
+    | injection Hn as <-; apply TLit
+    | destruct n'; discriminate Hn ].
+Qed.
+
+Definition ma_call : tm := tmassign [ tloc 0 ; tloc 1 ] mr_call.
+
+Example ma_call_typed : has_type ma_S [] ma_call (BAtom ANil).
+Proof.
+  unfold ma_call, ma_S.
+  eapply (TMAssign ma_S [] [ tloc 0 ; tloc 1 ] mr_call
+            [ BAtom AInt ; BAtom ABool ] [ BAtom AInt ; BAtom ABool ]).
+  - apply HTcons; [ eapply TLoc; reflexivity
+    | apply HTcons; [ eapply TLoc; reflexivity | apply HTnil ] ].
+  - (* mr_call : (Int, Bool) — the multi-return result, in store typing [ma_S] *)
+    unfold mr_call, mr_f. eapply TApp; [ apply TLam; apply TRet | apply TLit ].
+    apply HTcons; [ apply TVar; reflexivity | apply HTcons; [ apply TLit | apply HTnil ] ].
+  - (* pad_ty [Int;Bool] 2 = [Int;Bool], pointwise rsub-refl to the targets *)
+    simpl. apply Forall2_cons; [ apply rsub_refl
+    | apply Forall2_cons; [ apply rsub_refl | apply Forall2_nil ] ].
+Qed.
+
+(* The step: the RHS call evaluates to the multivalue [return 3, true] ([SMAssign2]),
+   then the multi-write assigns 3 to [a] and true to [b] at once ([SMAssign]); the
+   store becomes [3; true] and the form yields [nil]. *)
+Example ma_call_steps :
+  multistep (ma_call, ma_st)
+            (tlit LNil, [ tlit (LInt 3) ; tlit (LBool true) ]).
+Proof.
+  unfold ma_call, ma_st, mr_call, mr_f.
+  (* step the RHS: (λx:Int. return x,true) 3 ⤳ return 3, true *)
+  eapply MSstep.
+  { apply SMAssign2; [ apply Forall_cons; [ apply VLoc | apply Forall_cons; [ apply VLoc | apply Forall_nil ] ] | ].
+    apply SBeta. apply VLit. } simpl.
+  (* the multi-write: both targets are locations, RHS is a value multivalue *)
+  eapply MSstep.
+  { apply SMAssign;
+      [ apply Forall_cons; [ apply VLoc | apply Forall_cons; [ apply VLoc | apply Forall_nil ] ]
+      | apply Forall_cons; [ apply VLit | apply Forall_cons; [ apply VLit | apply Forall_nil ] ] ]. }
+  simpl. apply MSrefl.
+Qed.
+
+(* progress fires on the assignment (smoke test of the [tmassign] progress arm). *)
+Example ma_call_progress :
+  value ma_call \/ exists e' st', step (ma_call, ma_st) (e', st').
+Proof. apply (progress ma_S ma_call (BAtom ANil) ma_st ma_call_typed ma_store_wt). Qed.
+
+(* ---- (2) [a, b, c = e1, e2] : THREE targets, TWO RHS values ⇒ [c] is NIL-PADDED.
+   Targets [a : BRef Int], [b : BRef Bool], [c : BRef Nil] (the padded slot's cell
+   admits [nil]). RHS [tret [5; false]] has arity 2; [pad_ty [Int;Bool] 3 =
+   [Int;Bool;Nil]], pointwise rsub-below the targets — the [nil]-pad direction. *)
+Definition mp_S : list BTy := [ BAtom AInt ; BAtom ABool ; BAtom ANil ].
+Definition mp_st : store := [ tlit (LInt 0) ; tlit (LBool false) ; tlit LNil ].
+
+Lemma mp_store_wt : store_well_typed mp_S mp_st.
+Proof.
+  unfold mp_S, mp_st. split; [ reflexivity | ].
+  intros n T Hn. destruct n as [ | [ | [ | n']]]; simpl in Hn;
+    [ injection Hn as <-; apply TLit
+    | injection Hn as <-; apply TLit
+    | injection Hn as <-; apply TLit
+    | destruct n'; discriminate Hn ].
+Qed.
+
+Definition mp_assign : tm :=
+  tmassign [ tloc 0 ; tloc 1 ; tloc 2 ] (tret [ tlit (LInt 5) ; tlit (LBool false) ]).
+
+Example mp_assign_typed : has_type mp_S [] mp_assign (BAtom ANil).
+Proof.
+  unfold mp_assign, mp_S.
+  eapply (TMAssign mp_S [] _ _ [ BAtom AInt ; BAtom ABool ; BAtom ANil ]
+            [ BAtom AInt ; BAtom ABool ]).
+  - apply HTcons; [ eapply TLoc; reflexivity
+    | apply HTcons; [ eapply TLoc; reflexivity
+    | apply HTcons; [ eapply TLoc; reflexivity | apply HTnil ] ] ].
+  - apply TRet. apply HTcons; [ apply TLit | apply HTcons; [ apply TLit | apply HTnil ] ].
+  - (* pad_ty [Int;Bool] 3 = [Int;Bool;Nil]: c gets the [nil] pad, rsub-refl *)
+    simpl. apply Forall2_cons; [ apply rsub_refl
+    | apply Forall2_cons; [ apply rsub_refl
+    | apply Forall2_cons; [ apply rsub_refl | apply Forall2_nil ] ] ].
+Qed.
+
+(* The step: RHS is already a value multivalue (arity 2); the multi-write adjusts it
+   UP to arity 3 — [a := 5], [b := false], and the missing [c := nil] (the pad). The
+   store's third cell becomes [nil] (here unchanged from its [nil] initial value, but
+   it is the PADDED write, not a no-op: [pad_tm [5;false] 3 = [5; false; nil]]). *)
+Example mp_assign_steps :
+  multistep (mp_assign, mp_st)
+            (tlit LNil, [ tlit (LInt 5) ; tlit (LBool false) ; tlit LNil ]).
+Proof.
+  unfold mp_assign, mp_st.
+  eapply MSstep.
+  { apply SMAssign;
+      [ apply Forall_cons; [ apply VLoc | apply Forall_cons; [ apply VLoc
+        | apply Forall_cons; [ apply VLoc | apply Forall_nil ] ] ]
+      | apply Forall_cons; [ apply VLit | apply Forall_cons; [ apply VLit | apply Forall_nil ] ] ]. }
+  simpl. apply MSrefl.
+Qed.
+
+(* ---- (3) [a, b = e1, e2, e3] : TWO targets, THREE RHS values ⇒ [e3] is DROPPED.
+   RHS [tret [7; true; 99]] has arity 3; [pad_tm [7;true;99] 2 = [7; true]] —
+   the truncation direction (the extra [99] is discarded, exactly as [tfst]). *)
+Definition md_assign : tm :=
+  tmassign [ tloc 0 ; tloc 1 ]
+    (tret [ tlit (LInt 7) ; tlit (LBool true) ; tlit (LInt 99) ]).
+
+Example md_assign_typed : has_type ma_S [] md_assign (BAtom ANil).
+Proof.
+  unfold md_assign, ma_S.
+  eapply (TMAssign ma_S [] _ _ [ BAtom AInt ; BAtom ABool ]
+            [ BAtom AInt ; BAtom ABool ; BAtom AInt ]).
+  - apply HTcons; [ eapply TLoc; reflexivity
+    | apply HTcons; [ eapply TLoc; reflexivity | apply HTnil ] ].
+  - apply TRet. apply HTcons; [ apply TLit | apply HTcons; [ apply TLit
+    | apply HTcons; [ apply TLit | apply HTnil ] ] ].
+  - (* pad_ty [Int;Bool;Int] 2 = [Int;Bool]: the third source type is DROPPED *)
+    simpl. apply Forall2_cons; [ apply rsub_refl
+    | apply Forall2_cons; [ apply rsub_refl | apply Forall2_nil ] ].
+Qed.
+
+(* The step: the multi-write adjusts the arity-3 RHS DOWN to arity 2 — [a := 7],
+   [b := true]; the extra [99] is discarded. Store becomes [7; true]. *)
+Example md_assign_steps :
+  multistep (md_assign, ma_st)
+            (tlit LNil, [ tlit (LInt 7) ; tlit (LBool true) ]).
+Proof.
+  unfold md_assign, ma_st.
+  eapply MSstep.
+  { apply SMAssign;
+      [ apply Forall_cons; [ apply VLoc | apply Forall_cons; [ apply VLoc | apply Forall_nil ] ]
+      | apply Forall_cons; [ apply VLit | apply Forall_cons; [ apply VLit
+        | apply Forall_cons; [ apply VLit | apply Forall_nil ] ] ] ]. }
+  simpl. apply MSrefl.
+Qed.
 
 (* ===========================================================================
    METATABLES — THE PAYOFF: prototype inheritance / OOP, machine-checked.
@@ -8516,3 +9022,12 @@ Print Assumptions va_fwd_call_typed.
 Print Assumptions va_fwd_call_steps.
 Print Assumptions va_first_progress.
 Print Assumptions va_fwd_progress.
+(* MULTIPLE-ASSIGNMENT — the payoff: [a,b=f()] (exact arity, both bound), nil-pad
+   ([a,b,c=e1,e2]), and drop ([a,b=e1,e2,e3]) — typed + stepped, plus progress. *)
+Print Assumptions ma_call_typed.
+Print Assumptions ma_call_steps.
+Print Assumptions ma_call_progress.
+Print Assumptions mp_assign_typed.
+Print Assumptions mp_assign_steps.
+Print Assumptions md_assign_typed.
+Print Assumptions md_assign_steps.

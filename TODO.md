@@ -295,14 +295,31 @@ Op-sem parity must hold at every commit. After the handler deletion, the adversa
   value (`tvapp f 7 [3;true]` ⤳* 3) and one that FORWARDS `...` via last-position
   spread (⤳* 0) — typed + stepped + synth-decided, plus an arity-mismatch synth =
   None. Increment 22, `proof/typing.v` (`tvapp`/`TVApp`/`SVApp`), `proof/check.v`.
-- [ ] **[BLOCKING] multiple-assignment `a,b=f()`, table-collect `{f()}`,
-  arity-polymorphic spread.** The increment-21 multivalue covers the return-side
-  sequence + truncation + last-spread at KNOWN arity, and increment-22 covers the
-  function-side variadic `...` (also at known arity — the consumer/rest tuple pins
-  the arity). Destructuring multiple-assignment, table-collect-all, and FULL
-  arity-polymorphic spread (a spread whose arity is not fixed by the consumer) are
-  deferred. (Tuple SUBTYPING is reflexive/pointwise only in `ssub`; semantic tuple
-  subtyping via `gdecide` and a top-tuple type are also deferred.)
+- [x] **multiple-assignment `a,b,…=e1,e2,…` / `a,b=f()` — arity adjustment
+  (truncate + nil-pad + last spread).** DONE: the LHS-side CONSUMER of the multivalue
+  substrate. `tmassign rs rhs` (N target ref cells + a packed-multivalue RHS); typing
+  `TMAssign` ADJUSTS the RHS tuple to the target arity via the pure normalizer
+  `pad_ty`/`pad_tm` (TRUNCATE extras — the `tfst` direction — and NIL-PAD missing
+  slots with `tlit LNil : ANil`, the adjust-UP direction truncation doesn't cover),
+  each adjusted source type gated `Forall2 rsub` below its target cell; op-sem
+  `SMAssign` evaluates all targets + RHS to values, then writes every adjusted value
+  at once (`store_massign`, reusing the `tassign` store-update) — Lua's "compute
+  everything, then assign". Last-position spread `a,b=f()` needs nothing new: the RHS
+  is whatever `f()` evaluates to (a `tret` multivalue). No new subtyping, no index
+  signatures. Threaded through the whole de Bruijn metatheory; `progress` +
+  `preservation` + `synth_sound` + `check_sound` re-proved (all `Qed`, axiom-free).
+  PAYOFF: `a,b=f()` (f multi-returns two, both bound, ⤳* store `[3;true]`), nil-pad
+  `a,b,c=e1,e2` (c gets `nil`), drop `a,b=e1,e2,e3` (e3 discarded) — typed + stepped +
+  synth-decided, plus a type-mismatch synth = None. Increment 27, `proof/typing.v`
+  (`tmassign`/`TMAssign`/`SMAssign`), `proof/check.v` (`unref_seq`/`decide_rsub_seq`).
+- [ ] **[BLOCKING] table-collect `{f()}`, arity-polymorphic spread.** The
+  increment-21 multivalue covers the return-side sequence + truncation + last-spread
+  at KNOWN arity, increment-22 the function-side variadic `...`, and increment-27 the
+  LHS-side multiple-assignment (all at known arity — the consumer/targets pin it).
+  Table-collect-all `{f()}` and FULL arity-polymorphic spread (a spread whose arity is
+  not fixed by the consumer) remain deferred. (Tuple SUBTYPING is reflexive/pointwise
+  only in `ssub`; semantic tuple subtyping via `gdecide` and a top-tuple type are also
+  deferred.)
   Increment 21, `proof/subtype.v` (`BTuple`), `proof/typing.v` (`tret`/`tfst`/`tappspread`).
 - [x] **Metatables — `__index` field-lookup fallback (TYPING LAYER).** Static
   read-only `__index` as a table/record (prototype inheritance / OOP) is DONE at

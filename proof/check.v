@@ -155,6 +155,30 @@ Fixpoint synth_seq (sy : tm -> option BTy) (es : list tm) : option (list BTy) :=
       end
   end.
 
+(* MULTIPLE-ASSIGNMENT — unwrap a list of reference types [BRef T_i] to the content
+   types [T_i] (the target CELL types); fails ([None]) on any non-reference target.
+   The algorithmic counterpart of the [map BRef Tgts] premise of [TMAssign]. *)
+Fixpoint unref_seq (Ts : list BTy) : option (list BTy) :=
+  match Ts with
+  | [] => Some []
+  | BRef T :: rest =>
+      match unref_seq rest with
+      | Some Cs => Some (T :: Cs)
+      | None => None
+      end
+  | _ :: _ => None
+  end.
+
+(* MULTIPLE-ASSIGNMENT — pointwise [decide_rsub] gate: every adjusted source type is
+   [rsub]-below the corresponding target cell type. The algorithmic [Forall2 rsub]
+   premise of [TMAssign]. (Lengths must match; mismatched lengths ⇒ [false].) *)
+Fixpoint decide_rsub_seq (As Bs : list BTy) : bool :=
+  match As, Bs with
+  | [], [] => true
+  | A :: As', B :: Bs' => andb (decide_rsub A B) (decide_rsub_seq As' Bs')
+  | _, _ => false
+  end.
+
 (* [synth] is Sigma-threaded (passed to every recursive call) for a Sigma-general
    soundness statement. Source terms carry no locations ([tloc] arises only at run
    time from [talloc]); a source [tloc] is REJECTED ([None]). The three reference
@@ -531,6 +555,27 @@ Fixpoint synth (Sig : list BTy) (G : list BTy) (e : tm) {struct e} : option BTy 
           end
       | _ => None
       end
+  (* MULTIPLE-ASSIGNMENT — [a, b, … = rhs]. Synthesize the TARGET list ([synth_seq])
+     into reference types and UNWRAP them to the cell types [Tgts] ([unref_seq] —
+     every target must be a [BRef]); synthesize the RHS to a TUPLE [BTuple Ss]; ADJUST
+     [Ss] to the target arity ([pad_ty Ss (length Tgts)] — truncate / nil-pad) and
+     gate it pointwise [rsub]-below the cells ([decide_rsub_seq]). Result [nil].
+     Dispatch is TYPE-FIRST (on the synthesized target / RHS types). *)
+  | tmassign rs rhs =>
+      match synth_seq (synth Sig G) rs with
+      | Some Srs =>
+          match unref_seq Srs with
+          | Some Tgts =>
+              match synth Sig G rhs with
+              | Some (BTuple Ss) =>
+                  if decide_rsub_seq (pad_ty Ss (Datatypes.length Tgts)) Tgts
+                  then Some (BAtom ANil) else None
+              | _ => None
+              end
+          | None => None
+          end
+      | None => None
+      end
   end.
 
 (* [check] subsumes along the reference-aware [decide_rsub] (the unified relation),
@@ -562,6 +607,29 @@ Proof.
   - destruct (string_dec k k') as [Hk | Hk].
     + subst k'. injection H as <-. left; reflexivity.
     + right. apply IH. exact H.
+Qed.
+
+(* MULTIPLE-ASSIGNMENT — [unref_seq] succeeds exactly when the input is a list of
+   reference types, and recovers it as [map BRef] of the cell types. *)
+Lemma unref_seq_map : forall Ts Cs, unref_seq Ts = Some Cs -> Ts = map BRef Cs.
+Proof.
+  induction Ts as [ | T rest IH ]; intros Cs H; simpl in H.
+  - injection H as <-. reflexivity.
+  - destruct T; try discriminate H.
+    destruct (unref_seq rest) as [ Cs' | ]; [ | discriminate H ].
+    injection H as <-. simpl. f_equal. apply IH. reflexivity.
+Qed.
+
+(* MULTIPLE-ASSIGNMENT — the pointwise [decide_rsub] gate is sound: it implies the
+   declarative pointwise [Forall2 rsub] (each entry via [decide_rsub_sound]). *)
+Lemma decide_rsub_seq_sound : forall As Bs,
+  decide_rsub_seq As Bs = true -> Forall2 rsub As Bs.
+Proof.
+  induction As as [ | A As' IH ]; intros Bs H; destruct Bs as [ | B Bs' ];
+    simpl in H; try discriminate.
+  - apply Forall2_nil.
+  - apply andb_prop in H. destruct H as [HA HAs].
+    apply Forall2_cons; [ apply decide_rsub_sound; exact HA | apply IH; exact HAs ].
 Qed.
 
 Theorem synth_sound : forall e Sig G T, synth Sig G e = Some T -> has_type Sig G e T.
@@ -930,6 +998,31 @@ Proof.
     + eapply TSub; [ apply IHe2; exact Ha | apply RsSsub; apply decide_ssub_sound; exact Hda ].
     + match goal with [ IH : forall _ _ _, synth_seq _ rs = Some _ -> has_types _ _ rs _ |- _ ] =>
         apply IH; exact Hrs end.
+  - (* MULTIPLE-ASSIGNMENT — tmassign: the TARGETS synth (via [synth_seq]) to ref
+       types [Srs] which [unref_seq] unwraps to cell types [Tgts] (so [Srs = map BRef
+       Tgts]); the RHS synths to a tuple [BTuple Ss]; the adjusted [pad_ty Ss (length
+       Tgts)] is gated pointwise [rsub]-below [Tgts] ([decide_rsub_seq] ⇒ [Forall2
+       rsub]); result [nil] = [TMAssign]. Dispatch is TYPE-FIRST (on the synthesized
+       target / RHS types), keeping the proof fast. *)
+    simpl in H.
+    destruct (synth_seq (synth Sig G) rs) as [ Srs | ] eqn:Hrs; [ | discriminate ].
+    destruct (unref_seq Srs) as [ Tgts | ] eqn:Hur; [ | discriminate ].
+    match goal with [ |- has_type _ _ (tmassign _ ?t) _ ] =>
+      destruct (synth Sig G t) as [ Srhs | ] eqn:Hrhs; [ | discriminate H ] end.
+    destruct Srhs as [ | | | | | | | | | | Ss ]; try discriminate H.
+    destruct (decide_rsub_seq (pad_ty Ss (Datatypes.length Tgts)) Tgts) eqn:Hgate;
+      [ | discriminate ].
+    injection H as <-.
+    pose proof (unref_seq_map Srs Tgts Hur) as ESrs.
+    eapply TMAssign.
+    + (* targets : map BRef Tgts (the synth_seq result IS [Srs = map BRef Tgts]) *)
+      rewrite <- ESrs.
+      match goal with [ IH : forall _ _ _, synth_seq _ rs = Some _ -> has_types _ _ rs _ |- _ ] =>
+        apply IH; exact Hrs end.
+    + (* RHS : BTuple Ss *)
+      match goal with [ IH : forall _ _ _, synth _ _ ?t = Some _ -> has_type _ _ ?t _ |- _ ] =>
+        apply IH; exact Hrhs end.
+    + apply decide_rsub_seq_sound. exact Hgate.
   - (* Pl [] *) simpl in H. injection H as <-. apply HFnil.
   - (* Pl cons *) simpl in H.
     destruct (synth Sig G e) as [ Te | ] eqn:He; [ | discriminate ].
@@ -1154,6 +1247,15 @@ Proof.
       | eapply (IHhas_type2 G1 _ G2 A')
       | eapply (IHhas_type3 G1 _ G2 A') ];
       (reflexivity || eassumption).
+  - (* MULTIPLE-ASSIGNMENT — TMAssign: targets + RHS narrow; [Forall2 rsub] is
+       context-independent. *)
+    eapply TMAssign;
+      [ match goal with [ IH : forall _ _ _ _, _ = _ -> _ -> has_types _ _ _ _ |- _ ] =>
+          eapply (IH G1 _ G2 A') end
+      | match goal with [ IH : forall _ _ _ _, _ = _ -> _ -> has_type _ _ rhs _ |- _ ] =>
+          eapply (IH G1 _ G2 A') end
+      | eassumption ];
+      (reflexivity || eassumption).
   - apply HFnil.
   - apply HFcons;
       [ eapply (IHhas_type G1 _ G2 A') | eapply (IHhas_type0 G1 _ G2 A') ];
@@ -1269,6 +1371,11 @@ Fixpoint proj_free (e : tm) : Prop :=
       proj_free f /\ proj_free a /\
       (fix pt (xs : list tm) : Prop :=
           match xs with [] => True | e0 :: rest => proj_free e0 /\ pt rest end) rs
+  (* MULTIPLE-ASSIGNMENT — projection-free iff every target and the RHS are. *)
+  | tmassign rs rhs =>
+      (fix pt (xs : list tm) : Prop :=
+          match xs with [] => True | e0 :: rest => proj_free e0 /\ pt rest end) rs
+      /\ proj_free rhs
   end.
 
 (* ===========================================================================
@@ -1684,6 +1791,65 @@ Example va_fwd_call_check_sound : has_type [] [] va_fwd_call (BAtom AInt).
 Proof. apply synth_sound. reflexivity. Qed.
 
 (* ===========================================================================
+   MULTIPLE-ASSIGNMENT [a, b, … = …] — THE PAYOFF via the EXECUTABLE CHECKER. The
+   checker synthesizes the TARGET cells ([map BRef Tgts] via [unref_seq]), the RHS
+   tuple, ADJUSTS the RHS to the target arity ([pad_ty] — truncate / nil-pad), gates
+   it pointwise [rsub]-below the cells, and synthesizes [nil]. The targets are
+   context-bound reference variables (the reassignable-locals shape; source [tloc] is
+   rejected). Three forms — exact / nil-pad / drop — are decided by [reflexivity] and
+   routed to real declarative typings by [synth_sound]; a TYPE-MISMATCH is rejected.
+   =========================================================================== *)
+
+(* a context of two reference cells: [a : BRef Int] at de Bruijn 1, [b : BRef Bool]
+   at 0 (so [tvar 1] = a, [tvar 0] = b). *)
+Definition ma_ctx : list BTy := [ BRef (BAtom AInt) ; BRef (BAtom ABool) ].
+
+(* (1) EXACT arity [a, b = e1, e2] : synthesizes [nil] (2 = 2, no adjustment). *)
+Example ma_exact_synths :
+  synth [] ma_ctx
+    (tmassign [ tvar 0 ; tvar 1 ] (tret [ tlit (LInt 5) ; tlit (LBool false) ]))
+  = Some (BAtom ANil).
+Proof. reflexivity. Qed.
+
+(* (2) NIL-PAD [a, b, c = e1, e2] : THREE targets (the third cell [BRef Nil] admits
+   the pad), TWO RHS values ⇒ [pad_ty [Int;Bool] 3 = [Int;Bool;Nil]] gates true. *)
+Example ma_pad_synths :
+  synth [] [ BRef (BAtom AInt) ; BRef (BAtom ABool) ; BRef (BAtom ANil) ]
+    (tmassign [ tvar 0 ; tvar 1 ; tvar 2 ] (tret [ tlit (LInt 5) ; tlit (LBool false) ]))
+  = Some (BAtom ANil).
+Proof. reflexivity. Qed.
+
+(* (3) DROP [a, b = e1, e2, e3] : TWO targets, THREE RHS values ⇒ [pad_ty
+   [Int;Bool;Int] 2 = [Int;Bool]] drops the third (truncation). *)
+Example ma_drop_synths :
+  synth [] ma_ctx
+    (tmassign [ tvar 0 ; tvar 1 ]
+       (tret [ tlit (LInt 5) ; tlit (LBool false) ; tlit (LInt 9) ]))
+  = Some (BAtom ANil).
+Proof. reflexivity. Qed.
+
+(* a TYPE MISMATCH is REJECTED: assigning a [Bool] into the [Int] cell [a] fails the
+   pointwise [decide_rsub] gate ⇒ None. *)
+Example ma_mismatch_None :
+  synth [] ma_ctx
+    (tmassign [ tvar 0 ; tvar 1 ] (tret [ tlit (LBool true) ; tlit (LBool false) ]))
+  = None.
+Proof. reflexivity. Qed.
+
+(* all three adjustment regimes route to REAL declarative typings via [synth_sound]. *)
+Example ma_exact_check_sound :
+  has_type [] ma_ctx
+    (tmassign [ tvar 0 ; tvar 1 ] (tret [ tlit (LInt 5) ; tlit (LBool false) ]))
+    (BAtom ANil).
+Proof. apply synth_sound. reflexivity. Qed.
+Example ma_drop_check_sound :
+  has_type [] ma_ctx
+    (tmassign [ tvar 0 ; tvar 1 ]
+       (tret [ tlit (LInt 5) ; tlit (LBool false) ; tlit (LInt 9) ]))
+    (BAtom ANil).
+Proof. apply synth_sound. reflexivity. Qed.
+
+(* ===========================================================================
    METATABLES — the ALGORITHMIC OOP payoff: [synth] computes the flattened read
    interface of a metatable-table, and projecting the INHERITED method on the
    derived object synthesizes its base type — then routes to a real declarative
@@ -1835,6 +2001,14 @@ Print Assumptions va_fwd_call_synths.
 Print Assumptions va_arity_mismatch_None.
 Print Assumptions va_first_call_check_sound.
 Print Assumptions va_fwd_call_check_sound.
+(* MULTIPLE-ASSIGNMENT — algorithmic payoff: exact / nil-pad / drop synth-decided,
+   type-mismatch rejected, all routed to declarative typings. *)
+Print Assumptions ma_exact_synths.
+Print Assumptions ma_pad_synths.
+Print Assumptions ma_drop_synths.
+Print Assumptions ma_mismatch_None.
+Print Assumptions ma_exact_check_sound.
+Print Assumptions ma_drop_check_sound.
 (* METATABLES — algorithmic OOP payoff. *)
 Print Assumptions oop_derived_synths.
 Print Assumptions oop_inherited_synths.
