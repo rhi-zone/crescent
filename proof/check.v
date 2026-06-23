@@ -509,6 +509,28 @@ Fixpoint synth (Sig : list BTy) (G : list BTy) (e : tm) {struct e} : option BTy 
           end
       | _ => None
       end
+  (* VARARG — the variadic CALL. Synthesize the function; it must be a two-binder
+     curried arrow [BArrow Tf (BArrow (BTuple Ts) B)] (fixed param then the rest
+     tuple). CHECK the fixed argument against [Tf] and the PACKED trailing args
+     against the rest tuple [BTuple Ts] (the trailing args are synthesized into
+     [BTuple Srs] via [synth_seq], then gated by the mode switch [decide_ssub] —
+     the known-arity match, exactly mirroring [tappspread]'s domain check); result
+     [B]. Dispatch is TYPE-FIRST on [synth f] — linear in type constructors. *)
+  | tvapp f a rs =>
+      match synth Sig G f with
+      | Some (BArrow Tf (BArrow (BTuple Ts) B)) =>
+          match synth Sig G a with
+          | Some Sa =>
+              if decide_ssub Sa Tf then
+                match synth_seq (synth Sig G) rs with
+                | Some Srs => if decide_ssub (BTuple Srs) (BTuple Ts) then Some B else None
+                | None => None
+                end
+              else None
+          | None => None
+          end
+      | _ => None
+      end
   end.
 
 (* [check] subsumes along the reference-aware [decide_rsub] (the unified relation),
@@ -885,6 +907,29 @@ Proof.
     + eapply TSub; [ | apply decide_rsub_sound; exact Hd ].
       match goal with [ IH : forall _ _ _, synth _ _ v0 = Some _ -> has_type _ _ v0 _ |- _ ] =>
         apply IH; exact Hv end.
+  - (* VARARG — tvapp: the function synths to the two-binder curried arrow [BArrow
+       Tf (BArrow (BTuple Ts) B)]; the fixed arg is checked against [Tf]; the
+       trailing args synth (via [synth_seq]) to [BTuple Srs] gated against [BTuple
+       Ts] — the reflexive tuple-leaf [ssub] forces [Srs = Ts] (known arity), so the
+       packed args type at [Ts]; result [B] = [TVApp]. *)
+    simpl in H.
+    destruct (synth Sig G e1) as [ Sf | ] eqn:Hf; [ | discriminate ].
+    destruct Sf as [ | | | | | | | Tf cod | | | ]; try discriminate H.
+    destruct cod as [ | | | | | | | dom B | | | ]; try discriminate H.
+    destruct dom as [ | | | | | | | | | | Ts ]; try discriminate H.
+    destruct (synth Sig G e2) as [ Sa | ] eqn:Ha; [ | discriminate ].
+    destruct (decide_ssub Sa Tf) eqn:Hda; [ | discriminate ].
+    destruct (synth_seq (synth Sig G) rs) as [ Srs | ] eqn:Hrs; [ | discriminate ].
+    destruct (decide_ssub (BTuple Srs) (BTuple Ts)) eqn:Hdt; [ | discriminate ].
+    injection H as <-.
+    (* [Srs = Ts] from the reflexive tuple leaf of [ssub]. *)
+    apply decide_ssub_sound in Hdt. apply ssub_tuple_super in Hdt.
+    simpl in Hdt. injection Hdt as ETs. subst Srs.
+    eapply TVApp.
+    + apply IHe1. exact Hf.
+    + eapply TSub; [ apply IHe2; exact Ha | apply RsSsub; apply decide_ssub_sound; exact Hda ].
+    + match goal with [ IH : forall _ _ _, synth_seq _ rs = Some _ -> has_types _ _ rs _ |- _ ] =>
+        apply IH; exact Hrs end.
   - (* Pl [] *) simpl in H. injection H as <-. apply HFnil.
   - (* Pl cons *) simpl in H.
     destruct (synth Sig G e) as [ Te | ] eqn:He; [ | discriminate ].
@@ -1103,6 +1148,12 @@ Proof.
     + eassumption.
     + match goal with [ IH : forall _ _ _ _, _ -> _ -> has_type _ _ ?x _, Hh : has_type _ _ ?x ?TT |- has_type _ _ ?x ?TT ] =>
         eapply (IH G1 _ G2 A'); [ reflexivity | eassumption ] end.
+  - (* VARARG — TVApp: function, fixed arg, and trailing-arg list narrow. *)
+    eapply TVApp;
+      [ eapply (IHhas_type1 G1 _ G2 A')
+      | eapply (IHhas_type2 G1 _ G2 A')
+      | eapply (IHhas_type3 G1 _ G2 A') ];
+      (reflexivity || eassumption).
   - apply HFnil.
   - apply HFcons;
       [ eapply (IHhas_type G1 _ G2 A') | eapply (IHhas_type0 G1 _ G2 A') ];
@@ -1212,6 +1263,12 @@ Fixpoint proj_free (e : tm) : Prop :=
           | (_, e0) :: rest => proj_free e0 /\ pl rest
           end) own)
       /\ proj_free proto /\ proj_free v
+  (* VARARG — projection-free iff the function, the fixed arg, and every trailing
+     arg are. *)
+  | tvapp f a rs =>
+      proj_free f /\ proj_free a /\
+      (fix pt (xs : list tm) : Prop :=
+          match xs with [] => True | e0 :: rest => proj_free e0 /\ pt rest end) rs
   end.
 
 (* ===========================================================================
@@ -1589,6 +1646,44 @@ Example mr_spread_sound : has_type [] [] (tappspread mr_g mr_call) (BAtom AInt).
 Proof. apply synth_sound. reflexivity. Qed.
 
 (* ===========================================================================
+   VARARG [...] — THE PAYOFF via the EXECUTABLE CHECKER. The variadic call PACKS
+   its trailing actuals against the rest tuple [(Int,Bool)] — the SAME tuple type a
+   two-value multi-return produces — and synthesizes the function's result. A
+   variadic body that TRUNCATES [...] (via [tfst]) and one that FORWARDS [...] (via
+   [tappspread]) both synthesize [Int]; the arity match is decided by [reflexivity]
+   and routed to a real declarative typing by [synth_sound]. (Terms [va_first],
+   [va_first_call], [va_fwd], [va_fwd_call] from typing.v.)
+   =========================================================================== *)
+
+(* the variadic functions synthesize the two-binder curried arrow. *)
+Example va_first_synths :
+  synth [] [] va_first = Some (BArrow (BAtom AInt) (BArrow va_rest (BAtom AInt))).
+Proof. reflexivity. Qed.
+Example va_fwd_synths :
+  synth [] [] va_fwd = Some (BArrow (BAtom AInt) (BArrow va_rest (BAtom AInt))).
+Proof. reflexivity. Qed.
+
+(* the variadic CALLS synthesize the result [Int] — the trailing actuals were
+   PACKED against the rest tuple (the known-arity match decided by [reflexivity]). *)
+Example va_first_call_synths : synth [] [] va_first_call = Some (BAtom AInt).
+Proof. reflexivity. Qed.
+Example va_fwd_call_synths : synth [] [] va_fwd_call = Some (BAtom AInt).
+Proof. reflexivity. Qed.
+
+(* a variadic call whose trailing actuals MISMATCH the rest arity is REJECTED:
+   passing only ONE trailing arg where the rest is [(Int,Bool)] synths to None
+   (the [decide_ssub (BTuple [Int]) (BTuple [Int;Bool])] gate fails). *)
+Example va_arity_mismatch_None :
+  synth [] [] (tvapp va_first (tlit (LInt 7)) [ tlit (LInt 3) ]) = None.
+Proof. reflexivity. Qed.
+
+(* and both adjustments route to REAL declarative typings via [synth_sound]. *)
+Example va_first_call_check_sound : has_type [] [] va_first_call (BAtom AInt).
+Proof. apply synth_sound. reflexivity. Qed.
+Example va_fwd_call_check_sound : has_type [] [] va_fwd_call (BAtom AInt).
+Proof. apply synth_sound. reflexivity. Qed.
+
+(* ===========================================================================
    METATABLES — the ALGORITHMIC OOP payoff: [synth] computes the flattened read
    interface of a metatable-table, and projecting the INHERITED method on the
    derived object synthesizes its base type — then routes to a real declarative
@@ -1730,6 +1825,16 @@ Proof. reflexivity. Qed.
    =========================================================================== *)
 Print Assumptions synth_sound.
 Print Assumptions check_sound.
+(* VARARG — algorithmic variadic payoff: truncate-[...] and forward-[...] calls
+   synthesize their result; an arity-mismatched call is rejected; both route to a
+   real declarative typing via [synth_sound]. *)
+Print Assumptions va_first_synths.
+Print Assumptions va_fwd_synths.
+Print Assumptions va_first_call_synths.
+Print Assumptions va_fwd_call_synths.
+Print Assumptions va_arity_mismatch_None.
+Print Assumptions va_first_call_check_sound.
+Print Assumptions va_fwd_call_check_sound.
 (* METATABLES — algorithmic OOP payoff. *)
 Print Assumptions oop_derived_synths.
 Print Assumptions oop_inherited_synths.

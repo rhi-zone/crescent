@@ -2672,3 +2672,107 @@ and every raw-access payoff: **Closed under the global context** — no axioms, 
 `Admitted`, no `Classical`. `subtype.v` + `ssub.v` byte-unmodified (confirmed
 `git diff --stat`); whole chain compiles (`coqc proof/subtype.v` → `typing.v` →
 `ssub.v` → `check.v`).
+
+## Increment 26 — VARARG `...` (function-side variadic): the parameter-side mirror of multi-return
+
+Lua's `...` is the PARAMETER-side dual of multi-return. Inside a variadic function
+the trailing actual arguments are bound as a single MULTIVALUE — the rest — and that
+rest is adjusted by the SAME contextual rules as a multi-return result: TRUNCATED to
+one value in expression position, SPREAD in last position. The increment-21 tuple /
+truncation / spread substrate (`BTuple`, `tret`/`VRet`, `tfst`, `tappspread`) is
+therefore exactly the substrate this increment needs, and it is REUSED, not
+duplicated.
+
+### The model — a variadic function is a two-binder curried shape; `...` is the rest binding
+
+A variadic function `function(x, ...) body end` is modelled by the curried shape
+`tlam T (tlam (BTuple Ts) body)` — the fixed parameter `x` at de Bruijn index 1, the
+rest `...` at index 0. The rest type is the EXISTING `BTuple Ts` (the SAME tuple type
+a `Ts`-arity multi-return produces — the producer/consumer symmetry); no new arrow
+type, no new binder kind, and crucially NO index signature (index signatures `{[K]:V}`
+are the deferred metatable substrate and are orthogonal — the rest is positional, a
+tuple, not a keyed map). `...` inside the body is the de Bruijn reference to the rest
+binding; truncation `tfst ...` and spread `tappspread g ...` are the increment-21
+forms applied to that binding (NOT re-implemented).
+
+The one genuinely new construct is PACKING at a call site: the variadic-call term
+
+```
+tvapp f a rs        (* variadic function f, fixed arg a, trailing args rs *)
+```
+
+with typing rule (the parameter-side mirror of `TRet`'s pointwise component typing):
+
+```
+TVApp :  f : BArrow Tf (BArrow (BTuple Ts) B)    a : Tf    has_types rs Ts
+         ──────────────────────────────────────────────────────────────────
+                            tvapp f a rs : B
+```
+
+The trailing actuals `rs` are typed pointwise into `Ts` (`has_types`, exactly as a
+`tret`'s components are) — i.e. PACKED into the rest multivalue.
+
+### Operational semantics — PACK reuses `tapp`/`tret`/`SBeta`
+
+```
+SVApp :  value vf   value va   Forall value rs
+         ───────────────────────────────────────────────────────────
+         tvapp vf va rs  ⤳  tapp (tapp vf va) (tret rs)
+```
+
+The PACK reduction collects the trailing args into the rest multivalue `tret rs` and
+applies the curried function to `va` then to that packed rest — desugaring to the
+EXISTING `tapp`/`tret`/`SBeta` machinery, no new binding form. Congruences
+`SVApp1/2/3` evaluate the function, the fixed arg, then the trailing args
+left-to-right (the same discipline as `SApp1`/`SApp2` and `SRet`). `SVApp` is the
+parameter-side mirror of `tret`: `tret` PRODUCES a multivalue at return; `SVApp`
+CONSTRUCTS the rest multivalue at the binding site.
+
+### Metatheory re-proved (`Qed`)
+
+`tvapp` is threaded through the ENTIRE de Bruijn metatheory exactly as the existing
+forms: `tm_rect_strong` (reusing the `Pt` list-IH of `tret`), `lift` / `subst` /
+`closed_at` / `closed_at_lift` / `subst_lift_cancel`, front/cut weakening,
+`subst_lemma`, `store_weakening`, `has_type_closed`, the inversion lemma `inv_vapp`,
+and **progress + preservation** re-proved for every new step rule. Preservation of
+`SVApp` follows from `inv_vapp` + rebuilding the `tapp`/`tret` typing (the packed
+rest types at `BTuple Ts` via `TRet`); the congruences reuse the existing
+`has_types_split` / `has_types_app_replace` / `has_types_store_weaken` helpers.
+Progress reuses `tret_progress` on the trailing-arg list. `check.v`: `synth` gains a
+type-first `tvapp` arm (function synths to the curried arrow; fixed arg checked
+against `Tf`; trailing args synth via `synth_seq` and gated against `BTuple Ts` — the
+reflexive tuple leaf of `ssub` forces the known-arity match `Srs = Ts`); `proj_free`,
+`synth_sound`, and `narrowing` extended; `synth_sound` / `check_sound` re-proved.
+
+### Payoffs
+
+Two variadic functions over the SAME rest type `(Int, Bool)`, on the SAME `...`:
+
+1. **Truncate `...` to one value** — `va_first := λx:Int.λ(...:(Int,Bool)).tfst ...`,
+   `: Int -> (Int,Bool) -> Int`. The call `tvapp va_first 7 [3; true]` PACKS the
+   trailing args, binds them as `...`, and the body truncates the rest to its head:
+   typed at `Int`, `⤳* 3` (the extra `true` discarded).
+2. **Forward `...` (last-position spread)** — `va_fwd := λx:Int.λ(...:(Int,Bool)).g(...)`
+   with `g : (Int,Bool) -> Int`. The body SPREADS the whole rest into `g`: typed at
+   `Int`, `⤳* 0`.
+
+Algorithmic mirror in `check.v`: `va_first_synths` / `va_fwd_synths`,
+`va_first_call_synths` / `va_fwd_call_synths` (= `Some AInt`), the arity-mismatch
+rejection `va_arity_mismatch_None` (one trailing arg where the rest is two values ⇒
+`synth = None`, the `decide_ssub` tuple gate failing), and `_check_sound` routing
+both back to real declarative typings (all by `reflexivity` / `synth_sound`).
+
+### Honest scope / deferrals
+
+Variadics here are at KNOWN arity (the rest-tuple type pins the arity, as the
+consumer's tuple parameter does for last-position spread in increment 21).
+Destructuring multiple-assignment `a,b = f()`, table-collect-all `{f()}`, and FULL
+arity-polymorphic spread (a spread whose arity is not fixed) remain deferred. Tuple
+SUBTYPING is reflexive/pointwise only (`ssub`); semantic tuple subtyping via
+`gdecide` and a top-tuple type are deferred. The dynamic-metatable frontier is
+unaffected (untouched, per `docs/decisions/metatable-representation.md`).
+
+`Print Assumptions` on `progress`, `preservation`, `synth_sound`, `check_sound`, and
+every vararg payoff: **Closed under the global context** — no axioms, no `Admitted`,
+no `Classical`. `subtype.v` + `ssub.v` byte-unmodified (confirmed `git diff --stat`);
+whole chain compiles (`coqc proof/subtype.v` → `typing.v` → `ssub.v` → `check.v`).

@@ -276,14 +276,33 @@ Op-sem parity must hold at every commit. After the handler deletion, the adversa
   (Int,Bool)`, the SAME call `f 3` TRUNCATED (`tfst (f 3) : Int`, ⤳* 3) in one
   position and SPREAD (`g (f 3) : Int`, ⤳* 0) in another — typed + stepped, the
   contextual adjustment machine-checked. STILL DEFERRED below.
-- [ ] **[BLOCKING] vararg `...`, multiple-assignment `a,b=f()`, table-collect
-  `{f()}`, arity-polymorphic spread.** The increment-21 multivalue covers the
-  return-side sequence + truncation + last-spread at KNOWN arity (the consumer's
-  tuple parameter pins the arity). The function-side variadic `...`, destructuring
-  multiple-assignment, table-collect-all, and FULL arity-polymorphic spread (a
-  spread whose arity is not fixed by the consumer) are deferred. (Tuple SUBTYPING is
-  reflexive/pointwise only in `ssub`; semantic tuple subtyping via `gdecide` and a
-  top-tuple type are also deferred.)
+- [x] **vararg `...` (function-side variadic) — DONE.** The PARAMETER-side mirror
+  of multi-return: a variadic function binds its trailing actuals as a single
+  multivalue (the rest), typed as the EXISTING `BTuple Ts`; the rest behaves exactly
+  like a multi-return result — TRUNCATED to one value (`tfst`) in expression
+  position and SPREAD (`tappspread`) in last position, REUSING the increment-21
+  substrate (no duplication). `typing.v` gains the variadic-call term `tvapp f a rs`
+  (variadic function `f`, fixed arg `a`, trailing args `rs`) with typing rule
+  `TVApp` (function `: BArrow Tf (BArrow (BTuple Ts) B)`, `a : Tf`, `rs : Ts`
+  pointwise ⇒ result `B`) and op-sem `SVApp` (PACKS `rs` into `tret rs` and applies
+  via existing `tapp`/`tret`/`SBeta`) + congruences `SVApp1/2/3`. Threaded through
+  the whole de Bruijn metatheory (tm_rect_strong, lift/subst/closed_at, weakening,
+  subst_lemma, store_weakening, has_type_closed, closed_at_lift, subst_lift_cancel,
+  progress, preservation) plus `check.v` (synth/proj_free/synth_sound/narrowing).
+  `subtype.v`/`ssub.v` BYTE-UNMODIFIED (the rest type is the existing `BTuple`; the
+  arity match is the reflexive tuple leaf of `ssub`). All `Qed`, axiom-free.
+  PAYOFF: a variadic `λx:Int.λ(...:(Int,Bool)).…` that TRUNCATES `...` to its first
+  value (`tvapp f 7 [3;true]` ⤳* 3) and one that FORWARDS `...` via last-position
+  spread (⤳* 0) — typed + stepped + synth-decided, plus an arity-mismatch synth =
+  None. Increment 22, `proof/typing.v` (`tvapp`/`TVApp`/`SVApp`), `proof/check.v`.
+- [ ] **[BLOCKING] multiple-assignment `a,b=f()`, table-collect `{f()}`,
+  arity-polymorphic spread.** The increment-21 multivalue covers the return-side
+  sequence + truncation + last-spread at KNOWN arity, and increment-22 covers the
+  function-side variadic `...` (also at known arity — the consumer/rest tuple pins
+  the arity). Destructuring multiple-assignment, table-collect-all, and FULL
+  arity-polymorphic spread (a spread whose arity is not fixed by the consumer) are
+  deferred. (Tuple SUBTYPING is reflexive/pointwise only in `ssub`; semantic tuple
+  subtyping via `gdecide` and a top-tuple type are also deferred.)
   Increment 21, `proof/subtype.v` (`BTuple`), `proof/typing.v` (`tret`/`tfst`/`tappspread`).
 - [x] **Metatables — `__index` field-lookup fallback (TYPING LAYER).** Static
   read-only `__index` as a table/record (prototype inheritance / OOP) is DONE at

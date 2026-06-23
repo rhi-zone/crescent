@@ -301,8 +301,29 @@ Inductive tm : Type :=
      returning [nil] (needs the static fragment to model absent-key reads). *)
   | trawget    : list (string * tm) -> tm -> string -> tm
        (* trawget own proto k : [rawget((tmeta own proto), k)] — raw own read *)
-  | trawset    : list (string * tm) -> tm -> string -> tm -> tm.
+  | trawset    : list (string * tm) -> tm -> string -> tm -> tm
        (* trawset own proto k v : [rawset((tmeta own proto), k, v)] — raw own write *)
+  (* VARARG [...] — the FUNCTION-SIDE variadic, the PARAMETER-side mirror of
+     multi-return. A variadic function [function(x, ...) body end] binds, in
+     ADDITION to its fixed parameter [x], the TRAILING actual arguments as a
+     single MULTIVALUE — the rest — which behaves EXACTLY like a multi-return
+     result: TRUNCATED to one value in expression position ([tfst]) and SPREAD in
+     last position ([tappspread]). So the rest is just a [BTuple]-typed binding and
+     [...] inside the body is the de Bruijn reference to it; the existing
+     [tret]/[tfst]/[tappspread] substrate carries truncation and spread — they are
+     NOT duplicated here.
+     The one genuinely NEW piece is PACKING: at a variadic CALL the trailing
+     actuals beyond the fixed parameter are collected INTO the rest multivalue.
+     [tvapp f a rs] is that call: variadic function [f], fixed argument [a], and
+     the trailing-argument list [rs]. A variadic function is modelled by its
+     two-binder curried shape [tlam T (tlam (BTuple Ts) body)] — fixed param at de
+     Bruijn index 1, the rest [...] at index 0 — so [tvapp] reuses [tapp]/[tret]:
+     it PACKS [rs] into [tret rs] and applies [f] to [a] and then to that packed
+     rest (see [SVApp]). No new arrow type, no new binder kind — the rest type is
+     the EXISTING [BTuple Ts]; index signatures are NOT involved (deferred
+     substrate, and orthogonal). *)
+  | tvapp      : tm -> tm -> list tm -> tm.
+       (* tvapp f a rs : variadic call — f's fixed arg a, trailing args rs packed *)
 
 (* The type a tag pins (the THEN-branch narrowed type). TgNum ↦ ANum (all numbers,
    per the 5.1 [type()] model), the other scalars to their atoms, TgTable to the
@@ -442,6 +463,9 @@ Section tm_ind_strong.
   Hypothesis Hrawget : forall own proto k, Pl own -> P proto -> P (trawget own proto k).
   Hypothesis Hrawset : forall own proto k v, Pl own -> P proto -> P v ->
                        P (trawset own proto k v).
+  (* VARARG — the trailing-argument list uses the SAME [Pt] IH as [tret]'s
+     component list (both are positional term sequences). *)
+  Hypothesis Hvapp   : forall f a rs, P f -> P a -> Pt rs -> P (tvapp f a rs).
   Hypothesis Hnil  : Pl [].
   Hypothesis Hcons : forall k e rest, P e -> Pl rest -> Pl ((k, e) :: rest).
   Hypothesis Htnil : Pt [].
@@ -514,6 +538,13 @@ Section tm_ind_strong.
               | (k0, e) :: rest => Hcons k0 e rest (tm_rect_strong e) (gors rest)
               end) own)
           (tm_rect_strong proto) (tm_rect_strong v)
+    | tvapp f a rs =>
+        Hvapp f a rs (tm_rect_strong f) (tm_rect_strong a)
+          ((fix gova (rs : list tm) : Pt rs :=
+              match rs with
+              | [] => Htnil
+              | e :: rest => Htcons e rest (tm_rect_strong e) (gova rest)
+              end) rs)
     end.
 End tm_ind_strong.
 
@@ -1157,6 +1188,18 @@ Inductive has_type : list BTy -> list BTy -> tm -> BTy -> Prop :=
       NoDup (map fst Pf) ->
       has_type S G v T ->
       has_type S G (trawset ofs proto k v) (BAtom ANil)
+  (* VARARG — the variadic CALL. The variadic function [f] has the two-binder
+     curried type [BArrow T (BArrow (BTuple Ts) B)] — a fixed parameter of type
+     [T] then the REST of type [BTuple Ts]. The fixed actual [a : T]; the TRAILING
+     actuals [rs] are typed pointwise into [Ts] ([has_types], exactly as a
+     [tret]'s components are) — i.e. they are PACKED into the rest multivalue. The
+     result is [B]. Operationally [SVApp] packs [rs] into [tret rs] and applies
+     [f] to [a] and then to that packed rest; this rule types that exactly. *)
+  | TVApp : forall S G f a rs T Ts B,
+      has_type S G f (BArrow T (BArrow (BTuple Ts) B)) ->
+      has_type S G a T ->
+      has_types S G rs Ts ->
+      has_type S G (tvapp f a rs) B
 (* key-aligned pointwise typing of record fields; mutual so the generated
    induction principle carries an IH on every field derivation. *)
 with has_fields : list BTy -> list BTy -> list (string * tm) -> list (string * BTy) -> Prop :=
@@ -1265,6 +1308,9 @@ Fixpoint lift (d k : nat) (e : tm) : tm :=
       trawget (map (fun ke => (fst ke, lift d k (snd ke))) own) (lift d k proto) k0
   | trawset own proto k0 v =>
       trawset (map (fun ke => (fst ke, lift d k (snd ke))) own) (lift d k proto) k0 (lift d k v)
+  (* VARARG: no new binders at the CALL — function, fixed arg, and each trailing
+     arg lift at [k]. *)
+  | tvapp f a rs => tvapp (lift d k f) (lift d k a) (map (lift d k) rs)
   end.
 
 Fixpoint subst (j : nat) (s : tm) (e : tm) : tm :=
@@ -1319,6 +1365,9 @@ Fixpoint subst (j : nat) (s : tm) (e : tm) : tm :=
       trawget (map (fun ke => (fst ke, subst j s (snd ke))) own) (subst j s proto) k0
   | trawset own proto k0 v =>
       trawset (map (fun ke => (fst ke, subst j s (snd ke))) own) (subst j s proto) k0 (subst j s v)
+  (* VARARG: no new binders at the CALL — substitute into function, fixed arg, and
+     each trailing arg at [j]. *)
+  | tvapp f a rs => tvapp (subst j s f) (subst j s a) (map (subst j s) rs)
   end.
 
 (* record-field lookup at the term level (for projection) *)
@@ -1723,7 +1772,29 @@ Inductive step : tm * store -> tm * store -> Prop :=
   | SRawSet3 : forall own proto k v v' st st',
       Forall (fun ke => value (snd ke)) own -> value proto ->
       step (v, st) (v', st') ->
-      step (trawset own proto k v, st) (trawset own proto k v', st').
+      step (trawset own proto k v, st) (trawset own proto k v', st')
+  (* VARARG — operational rules. The PACK reduction: once the variadic function
+     [vf], the fixed argument [va], and ALL trailing arguments [rs] are values, the
+     trailing arguments are COLLECTED into the rest multivalue [tret rs] and the
+     two-binder curried function is applied to [va] and then to that packed rest —
+     reusing the EXISTING [tapp]/[tret]/[SBeta] machinery (no new binding form).
+     This is the PARAMETER-side mirror of [tret]: [tret] PRODUCES a multivalue at
+     return; [SVApp] CONSTRUCTS the rest multivalue at the binding site. *)
+  | SVApp  : forall vf va rs st,
+      value vf -> value va -> Forall value rs ->
+      step (tvapp vf va rs, st) (tapp (tapp vf va) (tret rs), st)
+  (* congruences — evaluate the function, then the fixed argument, then the
+     trailing arguments left-to-right (the same discipline as [SApp1]/[SApp2] and
+     [SRet]). *)
+  | SVApp1 : forall f f' a rs st st',
+      step (f, st) (f', st') -> step (tvapp f a rs, st) (tvapp f' a rs, st')
+  | SVApp2 : forall vf a a' rs st st',
+      value vf -> step (a, st) (a', st') ->
+      step (tvapp vf a rs, st) (tvapp vf a' rs, st')
+  | SVApp3 : forall vf va pre e e' post st st',
+      value vf -> value va -> Forall value pre ->
+      step (e, st) (e', st') ->
+      step (tvapp vf va (pre ++ e :: post), st) (tvapp vf va (pre ++ e' :: post), st').
 
 (* STORE well-typedness + extension (ported from imp.v). [store_well_typed S st]:
    same length, each stored value has its S-type (closed — stored values are
@@ -2260,6 +2331,24 @@ Proof.
     exists Ts, B. split; [assumption|split;[assumption|eapply RsTrans; eassumption]].
   - injection Ee as <- <-. exists Ts, B.
     split; [assumption|split;[assumption|apply rsub_refl]].
+Qed.
+
+(* VARARG — inversion of the variadic call [tvapp f a rs] (subsumption-transparent,
+   mirroring [inv_app] / [inv_appspread]). The variadic function is a two-binder
+   curried arrow [BArrow T (BArrow (BTuple Ts) B)]; the fixed arg is [: T]; the
+   trailing args are [: Ts] pointwise; and [B] subsumes to the result. *)
+Lemma inv_vapp : forall S G f a rs R,
+  has_type S G (tvapp f a rs) R ->
+  exists Tf Ts B, has_type S G f (BArrow Tf (BArrow (BTuple Ts) B)) /\
+                  has_type S G a Tf /\ has_types S G rs Ts /\ rsub B R.
+Proof.
+  intros S G f a rs R H. remember (tvapp f a rs) as e0 eqn:Ee.
+  induction H; try discriminate Ee.
+  - subst. destruct (IHhas_type eq_refl) as [Tf [Ts [B [Hf [Ha [Hrs Hd]]]]]].
+    exists Tf, Ts, B.
+    split; [assumption|split;[assumption|split;[assumption|eapply RsTrans; eassumption]]].
+  - injection Ee as <- <- <-. exists T, Ts, B.
+    split; [assumption|split;[assumption|split;[assumption|apply rsub_refl]]].
 Qed.
 
 (* METATABLES — inversion of [tmeta own proto]. Reading through subsumption, a
@@ -3695,6 +3784,14 @@ Proof.
       | assumption
       | match goal with [ IH : forall _ _ _, _ = _ -> has_type _ _ (lift _ _ v) _ |- _ ] =>
           exact (IH G1 G2 U eq_refl) end ].
+  - (* VARARG — TVApp: function, fixed arg, and trailing-arg list all weaken. *)
+    eapply TVApp;
+      [ match goal with [ IH : forall _ _ _, _ = _ -> has_type _ _ (lift _ _ f) _ |- _ ] =>
+          exact (IH G1 G2 U eq_refl) end
+      | match goal with [ IH : forall _ _ _, _ = _ -> has_type _ _ (lift _ _ a) _ |- _ ] =>
+          exact (IH G1 G2 U eq_refl) end
+      | match goal with [ IH : forall _ _ _, _ = _ -> has_types _ _ _ _ |- _ ] =>
+          exact (IH G1 G2 U eq_refl) end ].
   - (* HFnil *) apply HFnil.
   - (* HFcons *) apply HFcons.
     + match goal with [ IH : forall _ _ _, _ = _ -> has_type _ _ _ _ |- _ ] =>
@@ -3785,6 +3882,12 @@ Fixpoint closed_at (k : nat) (e : tm) : Prop :=
          | (_, e) :: rest => closed_at k e /\ allc rest
          end) own
       /\ closed_at k proto /\ closed_at k v
+  (* VARARG: no new binders at the CALL — function, fixed arg, and each trailing
+     arg closed at [k]. *)
+  | tvapp f a rs =>
+      closed_at k f /\ closed_at k a /\
+      (fix allc (rs : list tm) : Prop :=
+         match rs with [] => True | e :: rest => closed_at k e /\ allc rest end) rs
   end.
 
 (* typing in [G] bounds free vars by [length G]. By term induction + inversion.
@@ -3905,6 +4008,18 @@ Proof.
     + match goal with [ IH : forall (_:list BTy)(_:list BTy)(_:BTy),
           has_type _ _ ?x _ -> closed_at _ ?x, Hh : has_type _ _ ?x U |- _ ] =>
         exact (IH Sg G U Hv) end.
+  - (* VARARG — tvapp: function, fixed arg, and trailing-arg list (Pt IH) closed. *)
+    apply inv_vapp in H. destruct H as [Tf [Ts [B [Hf [Ha [Hrs _]]]]]].
+    split; [ | split ].
+    + match goal with [ IH : forall (_:list BTy)(_:list BTy)(_:BTy),
+          has_type _ _ ?x _ -> _, Hh : has_type _ _ ?x (BArrow Tf _) |- _ ] =>
+          exact (IH Sg G (BArrow Tf (BArrow (BTuple Ts) B)) Hh) end.
+    + match goal with [ IH : forall (_:list BTy)(_:list BTy)(_:BTy),
+          has_type _ _ ?x _ -> _, Hh : has_type _ _ ?x Tf |- _ ] =>
+          exact (IH Sg G Tf Hh) end.
+    + match goal with [ IH : forall (_:list BTy)(_:list BTy)(_:list BTy),
+          has_types _ _ ?xs _ -> _, Hh : has_types _ _ ?xs Ts |- _ ] =>
+          exact (IH Sg G Ts Hh) end.
   - (* Pl nil *) exact I.
   - (* Pl cons *) inversion H; subst. simpl. split.
     + match goal with
@@ -4016,6 +4131,17 @@ Proof.
       | match goal with
         | [ IH : forall k0, closed_at k0 ?x -> forall d j, k0 <= j -> lift d j ?x = ?x
             |- lift _ _ ?x = ?x ] => eapply IH; [exact H3 | exact H0] end ].
+  - (* VARARG — tvapp: function, fixed arg, and trailing-arg list lift-invariant. *)
+    destruct H as [H1 [H2 H3]]. f_equal;
+      [ match goal with
+        | [ IH : forall k0, closed_at k0 ?x -> forall d j, k0 <= j -> lift d j ?x = ?x
+            |- lift _ _ ?x = ?x ] => eapply IH; [exact H1 | exact H0] end
+      | match goal with
+        | [ IH : forall k0, closed_at k0 ?x -> forall d j, k0 <= j -> lift d j ?x = ?x
+            |- lift _ _ ?x = ?x ] => eapply IH; [exact H2 | exact H0] end
+      | match goal with
+        | [ IH : forall k0, _ -> forall d j, k0 <= j -> map _ ?xs = ?xs |- map _ ?xs = ?xs ] =>
+            eapply IH; [exact H3 | exact H0] end ].
   - (* Pl nil *) reflexivity.
   - (* Pl cons *) destruct H as [Hc Hr]. f_equal;
       [ f_equal; apply (IHe k0); [exact Hc | exact H0]
@@ -4295,6 +4421,16 @@ Proof.
       | [ IH : forall _ _ _ _ _ _, has_type _ _ ?x _ -> _ -> has_type _ _ _ _,
           Hh : has_type _ _ ?x W |- _ ] =>
           apply (IH Sg G1 G2 U W s); [ exact Hv | exact H0 ] end.
+  - (* VARARG — tvapp: substitute into the function, the fixed arg, and each
+       trailing arg; the curried arrow / tuple types are preserved, so [TVApp]
+       re-applies. *)
+    apply inv_vapp in H. destruct H as [Tf [Ts [B [Hf [Ha [Hrs Hsub]]]]]]. simpl.
+    eapply TSub; [ eapply TVApp | exact Hsub ].
+    + apply (IHe1 Sg G1 G2 U (BArrow Tf (BArrow (BTuple Ts) B)) s); [ exact Hf | exact H0 ].
+    + apply (IHe2 Sg G1 G2 U Tf s); [ exact Ha | exact H0 ].
+    + match goal with
+      | [ IH : forall _ _ _ _ _ _, has_types _ _ rs _ -> _ |- _ ] =>
+          apply (IH Sg G1 G2 U Ts s); [ exact Hrs | exact H0 ] end.
   - (* Pl nil *) inversion H; subst. simpl. apply HFnil.
   - (* Pl cons *) inversion H; subst. simpl. apply HFcons.
     + match goal with [ Hh : has_type ?Sg0 (G1 ++ U :: G2) e ?Tk |- _ ] =>
@@ -4403,6 +4539,9 @@ Proof.
       | match goal with [ IH : forall _, extends _ _ -> has_type _ _ ?x _, Hh : has_type _ _ ?x (BRec _) |- has_type _ _ ?x _ ] => apply IH; exact Hext end
       | assumption
       | match goal with [ IH : forall _, extends _ _ -> has_type _ _ ?x _, Hh : has_type _ _ ?x ?TT |- has_type _ _ ?x ?TT ] => apply IH; exact Hext end ].
+  - (* VARARG — TVApp: function, fixed arg, and trailing-arg list store-weaken. *)
+    eapply TVApp; [ apply IHhas_type1; exact Hext | apply IHhas_type2; exact Hext
+                  | apply IHhas_type3; exact Hext ].
   - apply HFnil.
   - apply HFcons; [ apply IHhas_type; exact Hext | apply IHhas_type0; exact Hext ].
   - (* MULTI-RETURN — HTnil *) apply HTnil.
@@ -5497,6 +5636,48 @@ Proof.
     + eapply store_weakening; [ exact Hp | exact Hext ].
     + exact Hnp.
     + exact Hv'.
+  (* VARARG — preservation for the new reductions. *)
+  - (* SVApp: the PACK reduction. [tvapp vf va rs] ⤳ [tapp (tapp vf va) (tret rs)].
+       The trailing args [rs : Ts] are packed into [tret rs : BTuple Ts] ([TRet]);
+       the curried function applied to [va : Tf] then to that rest yields [B], which
+       subsumes to the result. No store change. *)
+    apply inv_vapp in Hty. destruct Hty as [Tf [Ts [B [Hf [Ha [Hrs Hsub]]]]]].
+    exists S. split; [ apply extends_refl | split; [ | exact Hwt ] ].
+    eapply TSub; [ | exact Hsub ].
+    eapply TApp; [ eapply TApp; [ exact Hf | exact Ha ] | apply TRet; exact Hrs ].
+  - (* SVApp1: congruence — step the function. *)
+    apply inv_vapp in Hty. destruct Hty as [Tf [Ts [B [Hf [Ha [Hrs Hsub]]]]]].
+    destruct (IHHstep f st f' st' eq_refl eq_refl Hwt
+                (BArrow Tf (BArrow (BTuple Ts) B)) Hf) as [S' [Hext [Hf' Hwt']]].
+    exists S'. split; [ exact Hext | split; [ | exact Hwt' ] ].
+    eapply TSub; [ eapply TVApp;
+      [ exact Hf'
+      | eapply store_weakening; [ exact Ha | exact Hext ]
+      | eapply has_types_store_weaken; [ exact Hrs | exact Hext ] ] | exact Hsub ].
+  - (* SVApp2: congruence — step the fixed argument. *)
+    apply inv_vapp in Hty. destruct Hty as [Tf [Ts [B [Hf [Ha [Hrs Hsub]]]]]].
+    destruct (IHHstep a st a' st' eq_refl eq_refl Hwt Tf Ha) as [S' [Hext [Ha' Hwt']]].
+    exists S'. split; [ exact Hext | split; [ | exact Hwt' ] ].
+    eapply TSub; [ eapply TVApp;
+      [ eapply store_weakening; [ exact Hf | exact Hext ]
+      | exact Ha'
+      | eapply has_types_store_weaken; [ exact Hrs | exact Hext ] ] | exact Hsub ].
+  - (* SVApp3: congruence — step the first non-value trailing arg (left-to-right).
+       Mirrors [SRet]: split the rest list, step the focused component, reassemble. *)
+    apply inv_vapp in Hty. destruct Hty as [Tf [Ts [B [Hf [Ha [Hrs Hsub]]]]]].
+    apply has_types_split in Hrs.
+    destruct Hrs as [Tpre [Te [Tpost [ETs [Hpre [Hfe Hpost]]]]]]. subst Ts.
+    destruct (IHHstep e st e' st' eq_refl eq_refl Hwt Te Hfe)
+      as [S' [Hext [Hfe' Hwt']]].
+    exists S'. split; [ exact Hext | split; [ | exact Hwt' ] ].
+    eapply TSub; [ eapply TVApp;
+      [ eapply store_weakening; [ exact Hf | exact Hext ]
+      | eapply store_weakening; [ exact Ha | exact Hext ]
+      | eapply has_types_app_replace;
+          [ eapply has_types_store_weaken; [ exact Hpre | exact Hext ]
+          | exact Hfe'
+          | eapply has_types_store_weaken; [ exact Hpost | exact Hext ] ] ]
+      | exact Hsub ].
 Qed.
 
 (* ===========================================================================
@@ -5927,6 +6108,24 @@ Proof.
       * exists (trawset ofs proto' k v), stp. apply SRawSet2; [ exact Hvs | exact Hp' ].
     + subst ofs. exists (trawset (pre ++ (k0, e0') :: post) proto k v), st0'.
       apply SRawSet1; [ exact Hpre | exact He0' ].
+  - (* VARARG — TVApp: the variadic call always STEPS. If the function steps,
+       [SVApp1]; else if the fixed arg steps, [SVApp2]; else if some trailing arg
+       steps (first non-value, via [tret_progress] on the rest list), [SVApp3];
+       else everything is a value and the PACK fires, [SVApp]. *)
+    intros st Hwt. right.
+    match goal with [ IHf : [] = [] -> forall st, _ -> value f \/ _ |- _ ] =>
+      destruct (IHf eq_refl st Hwt) as [Hvf | [f' [stf Hf']]] end.
+    + match goal with [ IHa : [] = [] -> forall st, _ -> value a \/ _ |- _ ] =>
+        destruct (IHa eq_refl st Hwt) as [Hva | [a' [sta Ha']]] end.
+      * match goal with [ Hts0 : has_types S [] rs Ts, IH : [] = [] -> _ |- _ ] =>
+          destruct (tret_progress S rs Ts st Hts0 (IH eq_refl st Hwt)) as
+            [Hvs | [pre [e [post [Ers [Hpre [e' [st' He']]]]]]]] end.
+        -- exists (tapp (tapp f a) (tret rs)), st.
+           apply SVApp; [ exact Hvf | exact Hva | exact Hvs ].
+        -- subst rs. exists (tvapp f a (pre ++ e' :: post)), st'.
+           apply SVApp3; [ exact Hvf | exact Hva | exact Hpre | exact He' ].
+      * exists (tvapp f a' rs), sta. apply SVApp2; [ exact Hvf | exact Ha' ].
+    + exists (tvapp f' a rs), stf. apply SVApp1. exact Hf'.
   - (* P0 HFnil *) intros st Hwt ke [].
   - (* P0 HFcons *) intros st Hwt ke Hin. simpl in Hin. destruct Hin as [Heq | Hin].
     + subst ke.
@@ -6826,6 +7025,9 @@ Proof.
   - (* RAW WRITE — trawset: own fields (Pl IH) + proto + value cancel. *)
     repeat match goal with [ IH : forall ss kk, _ = _ |- _ ] => rewrite IH end;
       reflexivity.
+  - (* VARARG — tvapp: function + fixed arg + trailing-arg list cancel. *)
+    repeat match goal with [ IH : forall ss kk, _ = _ |- _ ] => rewrite IH end;
+      reflexivity.
   - (* Pl cons *) rewrite IHe, IHe0; reflexivity.
   - (* MULTI-RETURN — Pt cons *) rewrite IHe, IHe0; reflexivity.
 Qed.
@@ -7361,6 +7563,156 @@ Proof. apply (progress [] (tfst mr_call) (BAtom AInt) [] mr_truncate_typed store
 Example mr_spread_progress :
   value (tappspread mr_g mr_call) \/ exists e' st', step (tappspread mr_g mr_call, []) (e', st').
 Proof. apply (progress [] (tappspread mr_g mr_call) (BAtom AInt) [] mr_spread_typed store_well_typed_nil). Qed.
+
+(* ===========================================================================
+   VARARG [...] — THE PAYOFF: function-side variadics, machine-checked.
+
+   The PARAMETER-side mirror of multi-return. A variadic function binds, beyond
+   its fixed parameter [x], the TRAILING actual arguments as a single MULTIVALUE —
+   the rest [...] — and that rest behaves EXACTLY like a multi-return result: it is
+   TRUNCATED to one value in expression position and SPREAD in last position,
+   reusing the SAME [tfst]/[tappspread] substrate.
+
+   A variadic function is the two-binder curried shape [tlam T (tlam (BTuple Ts)
+   body)] — fixed param [x] at de Bruijn index 1, the rest [...] at index 0. A
+   variadic CALL [tvapp f a rs] PACKS the trailing actuals [rs] into the rest
+   multivalue and applies [f] to [a] then to that packed rest (reusing
+   [tapp]/[tret]/[SBeta]).
+
+   The rest type here is [(Int, Bool) = BTuple [AInt; ABool]] — the SAME tuple type
+   a two-value multi-return produces (the producer/consumer symmetry).
+
+   TWO payoffs, on the SAME rest [...]:
+
+   1. TRUNCATE [...] to one value:  [function(x, ...) return (...) end] in an
+      expression position truncates the rest to its FIRST value.  Body [tfst (tvar
+      0)] : Int.  Call [tvapp f 7 [3; true]] ⤳* 3.
+
+   2. FORWARD [...] (last-position spread):  [function(x, ...) return g(...) end]
+      spreads the WHOLE rest into [g].  Body [tappspread g (tvar 0)] : Int.  Call
+      [tvapp f 7 [3; true]] ⤳* 0 (g ignores the bound tuple, returns 0).
+   =========================================================================== *)
+
+(* the rest type [(Int, Bool)] — the trailing arguments packed as a tuple. *)
+Definition va_rest : BTy := BTuple [ BAtom AInt ; BAtom ABool ].
+
+(* ---- (1) a variadic function that TRUNCATES [...] to its first value.
+   [va_first := λx:Int. λ(... : (Int,Bool)). tfst ...]  :  Int -> (Int,Bool) -> Int.
+   [...] is the inner binding [tvar 0]; [tfst] truncates it to its head [Int]. *)
+Definition va_first : tm :=
+  tlam (BAtom AInt) (tlam va_rest (tfst (tvar 0))).
+
+Example va_first_typed :
+  has_type [] [] va_first (BArrow (BAtom AInt) (BArrow va_rest (BAtom AInt))).
+Proof.
+  unfold va_first, va_rest. apply TLam. apply TLam.
+  eapply TFst. apply TVar. reflexivity.
+Qed.
+
+(* the variadic CALL: fixed arg [7], trailing actuals [3, true] packed into [...]. *)
+Definition va_first_call : tm :=
+  tvapp va_first (tlit (LInt 7)) [ tlit (LInt 3) ; tlit (LBool true) ].
+
+Example va_first_call_typed : has_type [] [] va_first_call (BAtom AInt).
+Proof.
+  unfold va_first_call, va_rest.
+  eapply TVApp.
+  - apply va_first_typed.
+  - apply TLit.
+  - apply HTcons; [ apply TLit | apply HTcons; [ apply TLit | apply HTnil ] ].
+Qed.
+
+(* The TRUNCATION step: the call PACKS the trailing args into the rest multivalue
+   [return 3, true], binds it as [...], and the body truncates it to its head [3]
+   (the extra [true] is discarded). *)
+Example va_first_call_steps :
+  multistep (va_first_call, []) (tlit (LInt 3), []).
+Proof.
+  unfold va_first_call, va_first, va_rest.
+  (* PACK: trailing args collected into [tret [3; true]], applied to fixed arg 7 *)
+  eapply MSstep.
+  { apply SVApp; [ apply VLam | apply VLit | ].
+    apply Forall_cons; [ apply VLit | apply Forall_cons; [ apply VLit | apply Forall_nil ] ]. }
+  (* beta the fixed parameter [x := 7] (under the outer congruence) *)
+  eapply MSstep. { apply SApp1. apply SBeta. apply VLit. } simpl.
+  (* bind the rest [... := return 3, true] *)
+  eapply MSstep.
+  { apply SBeta. apply VRet.
+    apply Forall_cons; [ apply VLit | apply Forall_cons; [ apply VLit | apply Forall_nil ] ]. }
+  simpl.
+  (* truncate the rest to its head [3] *)
+  eapply MSstep.
+  { apply SFstCons. apply VRet.
+    apply Forall_cons; [ apply VLit | apply Forall_cons; [ apply VLit | apply Forall_nil ] ]. }
+  apply MSrefl.
+Qed.
+
+(* ---- (2) a variadic function that FORWARDS [...] (last-position spread) into a
+   known-arity consumer [g : (Int,Bool) -> Int].
+   [va_fwd := λx:Int. λ(... : (Int,Bool)). (λ(t:(Int,Bool)). 0) (...)]  :
+     Int -> (Int,Bool) -> Int.
+   The body SPREADS the whole rest [...] into [g] — the parameter-side mirror of
+   last-position spread. [g] is embedded as an inner lambda (kept closed); the
+   spread argument [tvar 0] is the outer rest binding (it sits OUTSIDE [g]'s own
+   binder, so the index is correct). *)
+Definition va_fwd : tm :=
+  tlam (BAtom AInt)
+    (tlam va_rest
+      (tappspread (tlam va_rest (tlit (LInt 0))) (tvar 0))).
+
+Example va_fwd_typed :
+  has_type [] [] va_fwd (BArrow (BAtom AInt) (BArrow va_rest (BAtom AInt))).
+Proof.
+  unfold va_fwd, va_rest. apply TLam. apply TLam.
+  eapply TAppSpread.
+  - apply TLam. apply TLit.
+  - apply TVar. reflexivity.
+Qed.
+
+Definition va_fwd_call : tm :=
+  tvapp va_fwd (tlit (LInt 7)) [ tlit (LInt 3) ; tlit (LBool true) ].
+
+Example va_fwd_call_typed : has_type [] [] va_fwd_call (BAtom AInt).
+Proof.
+  unfold va_fwd_call, va_rest.
+  eapply TVApp.
+  - apply va_fwd_typed.
+  - apply TLit.
+  - apply HTcons; [ apply TLit | apply HTcons; [ apply TLit | apply HTnil ] ].
+Qed.
+
+(* The SPREAD/FORWARD step: the call packs the trailing args, binds them as [...],
+   and the body spreads the WHOLE rest into [g], which returns 0. *)
+Example va_fwd_call_steps :
+  multistep (va_fwd_call, []) (tlit (LInt 0), []).
+Proof.
+  unfold va_fwd_call, va_fwd, va_rest.
+  (* PACK trailing args, apply to fixed arg 7 *)
+  eapply MSstep.
+  { apply SVApp; [ apply VLam | apply VLit | ].
+    apply Forall_cons; [ apply VLit | apply Forall_cons; [ apply VLit | apply Forall_nil ] ]. }
+  eapply MSstep. { apply SApp1. apply SBeta. apply VLit. } simpl.
+  (* bind the rest [... := return 3, true] *)
+  eapply MSstep.
+  { apply SBeta. apply VRet.
+    apply Forall_cons; [ apply VLit | apply Forall_cons; [ apply VLit | apply Forall_nil ] ]. }
+  simpl.
+  (* spread the whole rest into [g] (binds the tuple, ignores it) ⤳ 0 *)
+  eapply MSstep.
+  { apply SAppSpread. apply VRet.
+    apply Forall_cons; [ apply VLit | apply Forall_cons; [ apply VLit | apply Forall_nil ] ]. }
+  simpl. apply MSrefl.
+Qed.
+
+(* progress instantiated on the variadic payoff terms (smoke test that the vararg
+   case of progress actually fires on a real variadic call). *)
+Example va_first_progress :
+  value va_first_call \/ exists e' st', step (va_first_call, []) (e', st').
+Proof. apply (progress [] va_first_call (BAtom AInt) [] va_first_call_typed store_well_typed_nil). Qed.
+
+Example va_fwd_progress :
+  value va_fwd_call \/ exists e' st', step (va_fwd_call, []) (e', st').
+Proof. apply (progress [] va_fwd_call (BAtom AInt) [] va_fwd_call_typed store_well_typed_nil). Qed.
 
 (* ===========================================================================
    METATABLES — THE PAYOFF: prototype inheritance / OOP, machine-checked.
@@ -8154,3 +8506,13 @@ Print Assumptions mr_spread_typed.
 Print Assumptions mr_spread_steps.
 Print Assumptions mr_truncate_progress.
 Print Assumptions mr_spread_progress.
+(* VARARG — the payoff: a variadic function truncating [...] to one value and one
+   forwarding [...] (last-position spread), typed + stepped, and progress on both. *)
+Print Assumptions va_first_typed.
+Print Assumptions va_first_call_typed.
+Print Assumptions va_first_call_steps.
+Print Assumptions va_fwd_typed.
+Print Assumptions va_fwd_call_typed.
+Print Assumptions va_fwd_call_steps.
+Print Assumptions va_first_progress.
+Print Assumptions va_fwd_progress.
