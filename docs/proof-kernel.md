@@ -2339,3 +2339,109 @@ the OOP payoff (`oop_derived_typed`, `oop_inherited_typed`, `oop_inherited_steps
 payoff (`oop_*_synths`, `oop_inherited_check_sound`, `oop_absent_synth_None`):
 **Closed under the global context** — no axioms, no `Admitted`, no `Classical`.
 Whole chain compiles (`coqc proof/subtype.v` → `typing.v` → `ssub.v` → `check.v`).
+
+## Increment 22 — METATABLE METAMETHODS: `__newindex`, `__call`, binary operators
+
+Completes the core metamethod protocol begun with read-`__index`. Three pieces, all
+landed soundly. Modifies `proof/typing.v` + `proof/check.v`; `subtype.v` and
+`ssub.v` are **byte-unmodified** (NO new type-level former — the whole protocol
+lives at the typing layer over the existing `BRec`/`BArrow`/`BRef`). Build order
+unchanged.
+
+### The model — metamethods as own fields, dispatch through the `__index` chain
+
+A faithful-yet-honest model decision (recorded, not fudged): the metamethods
+(`__call`, `__add`, …) are carried as **OWN fields of the table** under their
+reserved keys, so the table's flattened read interface `BRec M` lists them, and the
+metamethod is **resolved by the SAME `tproj` `__index` dispatch** that resolves any
+field (own field, else inherited through the prototype chain). This is a
+simplification of Lua's separate-metatable-object — sound and faithful for the
+static fragment, and it is what keeps the typing rules clean (membership is in `M`,
+the merged read type) and the op-sem uniform (no new lookup machinery — the
+metamethod term is `tproj table mm_key`, reusing `SMetaProjOwn`/`SMetaProjProto`).
+The **metamethod-name table** (`mm_call`, `mm_newindex`, `mm_binop : primop ->
+string`) is ORDINARY DATA selecting the key; dispatch is one general field lookup,
+NOT a name-keyed handler (no special-casing).
+
+### `__call` — callable tables (reuse the arrow/`tapp` machinery)
+
+- **Typing** `TCallMeta`: a metatable-table `tmeta ofs proto : BRec M` whose `M`
+  carries `__call : Self -> Arg -> R`, with `rsub (BRec M) Self` (the table is a
+  valid `self`) and `arg : Arg`, types `tapp (tmeta ofs proto) arg : R`. Curried
+  self-passing reuses single-arg arrows verbatim. (No overlap with `TApp`: a
+  `tmeta` is `BRec`, never an arrow.)
+- **Op-sem** `SCallMeta`: `tapp (tmeta own proto) arg` (both values) ⤳
+  `tapp (tapp (tproj (tmeta own proto) mm_call) (tmeta own proto)) arg` — the
+  metamethod resolved through the `__index` chain, applied to the table as `self`
+  then `arg` (two `SBeta`s).
+- **Payoff** `call_payoff_typed` (callable `cobj 3 : Int`) + `call_payoff_steps`
+  (computes `3`); algorithmic `call_synths`/`call_check_sound`.
+
+### Binary operators — `__add`/`__sub`/`__mul` + `__eq`/`__lt`/`__le` (LEFT-operand dispatch)
+
+- **Typing** `TPrimMetaL`: `tprim op (tmeta ofs proto) b` where `M` carries
+  `mm_binop op : Self -> Other -> R`, `rsub (BRec M) Self`, `b : Other`, types at
+  `R`. The plain-number path (`TPrimArith`/`TPrimCmp`) is kept for numbers — the two
+  coexist (a number left operand is not a `tmeta`).
+- **Op-sem** `SPrimMetaL`: `tprim op (tmeta own proto) b` (table a value) ⤳
+  `tapp (tapp (tproj (tmeta own proto) (mm_binop op)) (tmeta own proto)) b`. (Lua:
+  try the LEFT operand's metamethod first.)
+- **Payoff** `add_payoff_typed` (vector-like `vobj + vobj : Int`) + `add_payoff_steps`
+  (⤳ `7`); `sub_absent_rejected` (`vobj` has `__add` but not `__sub` — rejected at
+  every type); algorithmic `add_synths`/`add_check_sound`, `sub_synth_None`.
+- **The ONE deferral (a clean follow-up, not a fork):** RIGHT-operand fallback
+  (when only the right operand has the metamethod). Lua tries left then right;
+  left-operand dispatch is landed as the representative, the right-operand branch is
+  a straightforward addition.
+
+### `__newindex` — write fallback (the records-of-refs assignment side)
+
+- **New term** `tnewidx own proto k v` — the field-write `(tmeta own proto).k = v`.
+  Carries `own`/`proto` DIRECTLY (not a nested `tmeta` subterm) so `own` is typed
+  EXACTLY by `has_fields` — the same own-exactness discipline the `__index` fork
+  required, and what makes the substitution metatheory go through (field-level IHs).
+- **Typing** `TNewIdx`: with `k` ABSENT from own (`key_in k Town = false`) and the
+  `__newindex` target `proto : BRec Pf` holding a writable cell `(k, BRef U) ∈ Pf`
+  and `v : U`, types `tnewidx own proto k v : nil`.
+- **Op-sem** `SNewIdx`: when `k` is absent from own (and all operands values),
+  `tnewidx own proto k v` ⤳ `tassign (tproj proto k) v` — project the cell and
+  assign into it (the records-of-refs write-through). Mirrors the `__index` read
+  fallback on the assignment side, reusing `tassign`/`BRef`. (`__newindex` as a
+  TABLE of refs; own-present rawset on the immutable own record is the DEFERRED
+  dynamic-mutation fork.)
+- **Payoff** `newindex_payoff_typed` (write `: nil` under store typing `[Int]`) +
+  `newindex_payoff_steps` (writes `5` through cell `loc0`; store `[0]` → `[5]`,
+  end-to-end); `newindex_absent_cell_rejected` (no target cell ⇒ rejected);
+  algorithmic `newindex_synths`/`newindex_check_sound` (target a context var of
+  record-of-refs type — a `tloc` is runtime-only) + `newindex_absent_synth_None`.
+
+### Metatheory re-proved (`Qed`)
+
+`progress` + `preservation` re-proved for every new step rule (`SCallMeta`,
+`SPrimMetaL`, `SNewIdx`/`SNewIdx1`/`SNewIdx2`/`SNewIdx3`). The application/primop
+inversions (`inv_app`, `inv_prim`) become DISJUNCTIONS (ordinary arrow/numeric OR
+metamethod dispatch); a new `inv_newidx`. New helper **`tmeta_step_shape`** (a
+`tmeta` reduces only to a `tmeta`, via `SMeta1`/`SMeta2`) lets the `SApp1`/`SPrim1`
+congruence cases re-apply `TCallMeta`/`TPrimMetaL` after the table steps. The
+de Bruijn metatheory (`tm_rect_strong`, `lift`/`subst`/`closed_at`,
+`closed_at_lift`, `subst_lift_cancel`, `weakening`, `subst_lemma`,
+`store_weakening`, `has_type_closed`, `narrowing`, `proj_free`) all threaded for the
+new `tnewidx` term and the new typing rules. In `check.v`, `synth` gains the
+`__call` / operator / `__newindex` dispatch (the operand-record synthesized once,
+then a syntactic-`tmeta` guard selects the metamethod branch — a plain record is
+rejected, preserving soundness); `synth_sound` / `check_sound` re-proved `Qed`.
+
+### Honest scope / deferrals
+
+DONE: static `__call`, the six listed binary operators (LEFT-operand dispatch),
+`__newindex` as a table-of-refs write-through. DEFERRED (backlog, framed as
+substrate where applicable): `setmetatable` / dynamic metatables;
+`__index`/`__newindex` as FUNCTIONS; `__concat`/`__len`/`__unm`/`__tostring` and
+other metamethods; `__call` multi-arg/multi-return; binary-operator RIGHT-operand
+fallback; own-present rawset on the immutable own record; `rawget`/`rawset`.
+
+`Print Assumptions` on `progress`, `preservation`, `synth_sound`, `check_sound`,
+the three payoff families (`call_*`, `add_*`/`sub_*`, `newindex_*`): **Closed under
+the global context** — no axioms, no `Admitted`, no `Classical`. `subtype.v` +
+`ssub.v` byte-unmodified; whole chain compiles (`coqc proof/subtype.v` →
+`typing.v` → `ssub.v` → `check.v`).

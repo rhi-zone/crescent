@@ -167,14 +167,39 @@ Fixpoint synth (Sig : list BTy) (G : list BTy) (e : tm) {struct e} : option BTy 
   (* INCREMENT 19 — PRIMITIVE operators. CHECK both operands against [ANum] (via
      the mode switch [decide_ssub]); arithmetic returns [ANum], comparison [ABool]. *)
   | tprim op a b =>
-      match synth Sig G a, synth Sig G b with
-      | Some Sa, Some Sb =>
-          if andb (decide_ssub Sa (BAtom ANum)) (decide_ssub Sb (BAtom ANum)) then
-            (if arith_op op then Some (BAtom ANum)
-             else if cmp_op op then Some (BAtom ABool)
-             else None)
-          else None
-      | _, _ => None
+      (* synth the LEFT operand once; a record-typed left operand that is
+         SYNTACTICALLY a [tmeta] takes the operator-metamethod branch ([mm_binop op]
+         in its read interface), a record that is NOT a [tmeta] is rejected (a plain
+         record is not arithmetic-able and does not dispatch), and any other left
+         type takes the NUMERIC path. The outer single match on [synth a] keeps the
+         soundness proof clean. *)
+      match synth Sig G a with
+      | Some (BRec M) =>
+          match a with
+          | tmeta _ _ =>
+              match flook (mm_binop op) M with
+              | Some (BArrow Self (BArrow Other R)) =>
+                  match synth Sig G b with
+                  | Some Sb =>
+                      if andb (decide_rsub (BRec M) Self) (decide_ssub Sb Other)
+                      then Some R else None
+                  | None => None
+                  end
+              | _ => None
+              end
+          | _ => None
+          end
+      | Some Sa =>
+          match synth Sig G b with
+          | Some Sb =>
+              if andb (decide_ssub Sa (BAtom ANum)) (decide_ssub Sb (BAtom ANum)) then
+                (if arith_op op then Some (BAtom ANum)
+                 else if cmp_op op then Some (BAtom ABool)
+                 else None)
+              else None
+          | None => None
+          end
+      | None => None
       end
   | tlam T body =>
       match synth Sig (T :: G) body with
@@ -182,12 +207,30 @@ Fixpoint synth (Sig : list BTy) (G : list BTy) (e : tm) {struct e} : option BTy 
       | None => None
       end
   | tapp f a =>
+      (* synth the function once. A record-typed function that is SYNTACTICALLY a
+         [tmeta] with a [__call] metamethod is APPLICABLE (the [__call] branch); a
+         record that is NOT a [tmeta] is rejected; an arrow function takes the
+         ordinary application branch. The outer single match keeps the proof clean. *)
       match synth Sig G f with
       | Some (BArrow A B) =>
-          (* check the argument against the domain via the mode switch *)
           match synth Sig G a with
           | Some Sa => if decide_ssub Sa A then Some B else None
           | None => None
+          end
+      | Some (BRec M) =>
+          match f with
+          | tmeta _ _ =>
+              match flook mm_call M with
+              | Some (BArrow Self (BArrow A R)) =>
+                  match synth Sig G a with
+                  | Some Sa =>
+                      if andb (decide_rsub (BRec M) Self) (decide_ssub Sa A)
+                      then Some R else None
+                  | None => None
+                  end
+              | _ => None
+              end
+          | _ => None
           end
       | _ => None
       end
@@ -341,6 +384,33 @@ Fixpoint synth (Sig : list BTy) (G : list BTy) (e : tm) {struct e} : option BTy 
         | None => None
         end
       else None
+  (* METATABLE [__newindex] — WRITE FALLBACK. Synthesize the own field-list [Town]
+     (keys_nodup gate), require [k] ABSENT from [Town] ([key_in k Town = false]);
+     synthesize the [__newindex] target [proto : BRec Pf] (keys_nodup gate) with a
+     writable cell [(k, BRef U)] ([flook k Pf = Some (BRef U)]); check the value
+     against [U] ([decide_rsub]); result is [nil]. *)
+  | tnewidx own proto k v =>
+      if keys_nodup (map fst own) then
+        match synth_fields (synth Sig G) own with
+        | Some Town =>
+            if key_in k Town then None
+            else match synth Sig G proto with
+                 | Some (BRec Pf) =>
+                     if keys_nodup (map fst Pf) then
+                       match flook k Pf with
+                       | Some (BRef U) =>
+                           match synth Sig G v with
+                           | Some Sv => if decide_rsub Sv U then Some (BAtom ANil) else None
+                           | None => None
+                           end
+                       | _ => None
+                       end
+                     else None
+                 | _ => None
+                 end
+        | None => None
+        end
+      else None
   end.
 
 (* [check] subsumes along the reference-aware [decide_rsub] (the unified relation),
@@ -383,31 +453,71 @@ Proof.
     intros.
   - (* tlit *) simpl in H. injection H as <-. apply TLit.
   - (* tvar *) simpl in H. apply TVar. exact H.
-  - (* tprim *) simpl in H.
+  - (* tprim — synth the left operand; a [BRec M] left operand that is a [tmeta]
+       takes the operator-metamethod branch, else NUMERIC. *)
+    simpl in H.
     destruct (synth Sig G e1) as [ Sa | ] eqn:Ha; [ | discriminate ].
+    destruct Sa as [ | | | | | | M | | | | ];
+      (* every NON-[BRec] left type: NUMERIC path *)
+      try (
+        destruct (synth Sig G e2) as [ Sb | ] eqn:Hb; [ | discriminate ];
+        match goal with [ H : (if andb (decide_ssub ?LT (BAtom ANum)) _ then _ else _) = _ |- _ ] =>
+          destruct (andb (decide_ssub LT (BAtom ANum)) (decide_ssub Sb (BAtom ANum))) eqn:Hd;
+            [ | discriminate ];
+          apply Bool.andb_true_iff in Hd; destruct Hd as [HdA HdB];
+          assert (HaN : has_type Sig G e1 (BAtom ANum)) by
+            (eapply TSub; [ apply IHe1; exact Ha | apply RsSsub; apply decide_ssub_sound; exact HdA ]) end;
+        assert (HbN : has_type Sig G e2 (BAtom ANum)) by
+          (eapply TSub; [ apply IHe2; exact Hb | apply RsSsub; apply decide_ssub_sound; exact HdB ]);
+        destruct (arith_op op) eqn:Har;
+          [ injection H as <-; apply TPrimArith; assumption
+          | destruct (cmp_op op) eqn:Hcm; [ | discriminate ];
+            injection H as <-; apply TPrimCmp; assumption ];
+        fail).
+    (* the [BRec M] left type: only a [tmeta] dispatches the operator metamethod. *)
+    destruct e1; try discriminate H.
+    destruct (flook (mm_binop op) M) as [ Tm | ] eqn:Hfm; [ | discriminate ].
+    destruct Tm as [ | | | | | | | Self Tco | | | ]; try discriminate H.
+    destruct Tco as [ | | | | | | | Other R | | | ]; try discriminate H.
     destruct (synth Sig G e2) as [ Sb | ] eqn:Hb; [ | discriminate ].
-    destruct (andb (decide_ssub Sa (BAtom ANum)) (decide_ssub Sb (BAtom ANum))) eqn:Hd;
+    destruct (andb (decide_rsub (BRec M) Self) (decide_ssub Sb Other)) eqn:Hd;
       [ | discriminate ].
-    apply Bool.andb_true_iff in Hd. destruct Hd as [HdA HdB].
-    assert (HaN : has_type Sig G e1 (BAtom ANum)).
-    { eapply TSub; [ apply IHe1; exact Ha | apply RsSsub; apply decide_ssub_sound; exact HdA ]. }
-    assert (HbN : has_type Sig G e2 (BAtom ANum)).
-    { eapply TSub; [ apply IHe2; exact Hb | apply RsSsub; apply decide_ssub_sound; exact HdB ]. }
-    destruct (arith_op op) eqn:Har.
-    + injection H as <-. apply TPrimArith; assumption.
-    + destruct (cmp_op op) eqn:Hcm; [ | discriminate ].
-      injection H as <-. apply TPrimCmp; assumption.
+    apply Bool.andb_true_iff in Hd. destruct Hd as [HdS HdO].
+    injection H as <-.
+    eapply TPrimMetaL.
+    + apply IHe1. exact Ha.
+    + apply flook_In. exact Hfm.
+    + apply decide_rsub_sound. exact HdS.
+    + eapply TSub; [ apply IHe2; exact Hb | apply RsSsub; apply decide_ssub_sound; exact HdO ].
   - (* tlam *) simpl in H.
     destruct (synth Sig (T :: G) e) as [ Tb | ] eqn:Hb; [ | discriminate ].
     injection H as <-. apply TLam. apply IHe. exact Hb.
-  - (* tapp *) simpl in H.
+  - (* tapp — synth the function; an arrow function takes the ordinary application
+       branch, a [BRec M] function that is a [tmeta] takes the [__call] branch. *)
+    simpl in H.
     destruct (synth Sig G e1) as [ Sf | ] eqn:Hf; [ | discriminate ].
-    destruct Sf as [ | | | | | | | A B | | | ]; try discriminate H.
-    destruct (synth Sig G e2) as [ Sa | ] eqn:Ha; [ | discriminate ].
-    destruct (decide_ssub Sa A) eqn:Hd; [ | discriminate ].
-    injection H as <-.
-    eapply TApp; [ apply IHe1; exact Hf | ].
-    eapply TSub; [ apply IHe2; exact Ha | apply RsSsub; apply decide_ssub_sound; exact Hd ].
+    destruct Sf as [ | | | | | | M | A B | | | ]; try discriminate H.
+    + (* BRec M: only a [tmeta] function dispatches [__call]; else rejected *)
+      destruct e1; try discriminate H.
+      destruct (flook mm_call M) as [ Tm | ] eqn:Hfm; [ | discriminate ].
+      destruct Tm as [ | | | | | | | Self Tco | | | ]; try discriminate H.
+      destruct Tco as [ | | | | | | | A R | | | ]; try discriminate H.
+      destruct (synth Sig G e2) as [ Sa | ] eqn:Ha; [ | discriminate ].
+      destruct (andb (decide_rsub (BRec M) Self) (decide_ssub Sa A)) eqn:Hd;
+        [ | discriminate ].
+      apply Bool.andb_true_iff in Hd. destruct Hd as [HdS HdA].
+      injection H as <-.
+      eapply TCallMeta.
+      * apply IHe1. exact Hf.
+      * apply flook_In. exact Hfm.
+      * apply decide_rsub_sound. exact HdS.
+      * eapply TSub; [ apply IHe2; exact Ha | apply RsSsub; apply decide_ssub_sound; exact HdA ].
+    + (* BArrow A B: ordinary application *)
+      destruct (synth Sig G e2) as [ Sa | ] eqn:Ha; [ | discriminate ].
+      destruct (decide_ssub Sa A) eqn:Hd; [ | discriminate ].
+      injection H as <-.
+      eapply TApp; [ apply IHe1; exact Hf | ].
+      eapply TSub; [ apply IHe2; exact Ha | apply RsSsub; apply decide_ssub_sound; exact Hd ].
   - (* tlet *) simpl in H.
     destruct (synth Sig G e1) as [ Se | ] eqn:H1; [ | discriminate ].
     eapply TLet; [ apply IHe1; exact H1 | apply IHe2; exact H ].
@@ -526,6 +636,38 @@ Proof.
     + match goal with [ IH : forall _ _ _, synth _ _ proto0 = Some _ -> has_type _ _ proto0 _ |- _ ] =>
         apply IH; exact Hp end.
     + apply keys_nodup_NoDup. exact Hndp.
+  - (* METATABLE [__newindex] — tnewidx: own fields synth to [Town] (NoDup gate),
+       [k] absent from [Town], prototype to [BRec Pf] (NoDup gate) with a writable
+       cell [(k, BRef U)], value checked against [U]; result [nil] = [TNewIdx]. *)
+    simpl in H.
+    match goal with [ |- has_type _ _ (tnewidx ?o ?p ?kk ?vv) _ ] =>
+      rename o into own0; rename p into proto0; rename kk into k0; rename vv into v0 end.
+    destruct (keys_nodup (map fst own0)) eqn:Hndo; [ | discriminate ].
+    destruct (synth_fields (synth Sig G) own0) as [ Town | ] eqn:Hfo; [ | discriminate ].
+    destruct (key_in k0 Town) eqn:Hki; [ discriminate | ].
+    destruct (synth Sig G proto0) as [ Sp | ] eqn:Hp; [ | discriminate ].
+    destruct Sp as [ | | | | | | Pf | | | | ]; try discriminate H.
+    destruct (keys_nodup (map fst Pf)) eqn:Hndp; [ | discriminate ].
+    destruct (flook k0 Pf) as [ Tc | ] eqn:Hfl; [ | discriminate ].
+    destruct Tc as [ | | | | | | | | U | | ]; try discriminate H.
+    destruct (synth Sig G v0) as [ Sv | ] eqn:Hv; [ | discriminate ].
+    destruct (decide_rsub Sv U) eqn:Hd; [ | discriminate ].
+    injection H as <-.
+    assert (Hown : has_fields Sig G own0 Town).
+    { match goal with [ IH : forall _ _ _, synth_fields _ own0 = Some _ -> has_fields _ _ own0 _ |- _ ] =>
+        apply IH; exact Hfo end. }
+    pose proof (has_fields_keys Sig G own0 Town Hown) as Hk.
+    eapply TNewIdx.
+    + exact Hown.
+    + apply keys_nodup_NoDup in Hndo. rewrite Hk in Hndo. exact Hndo.
+    + exact Hki.
+    + match goal with [ IH : forall _ _ _, synth _ _ proto0 = Some _ -> has_type _ _ proto0 _ |- _ ] =>
+        apply IH; exact Hp end.
+    + apply keys_nodup_NoDup. exact Hndp.
+    + apply flook_In. exact Hfl.
+    + eapply TSub; [ | apply decide_rsub_sound; exact Hd ].
+      match goal with [ IH : forall _ _ _, synth _ _ v0 = Some _ -> has_type _ _ v0 _ |- _ ] =>
+        apply IH; exact Hv end.
   - (* Pl [] *) simpl in H. injection H as <-. apply HFnil.
   - (* Pl cons *) simpl in H.
     destruct (synth Sig G e) as [ Te | ] eqn:He; [ | discriminate ].
@@ -679,6 +821,34 @@ Proof.
     + match goal with [ IH : forall _ _ _ _, _ -> _ -> has_type _ _ _ _ |- _ ] =>
         eapply (IH G1 _ G2 A'); [ reflexivity | eassumption ] end.
     + eassumption.
+  - (* METATABLE [__call] — TCallMeta: table + arg narrow; In/rsub stable. *)
+    eapply TCallMeta.
+    + match goal with [ IH : forall _ _ _ _, _ -> _ -> has_type _ _ (tmeta _ _) _ |- _ ] =>
+        eapply (IH G1 _ G2 A'); [ reflexivity | eassumption ] end.
+    + eassumption.
+    + eassumption.
+    + match goal with [ IH : forall _ _ _ _, _ -> _ -> has_type _ _ ?x _, Hh : has_type _ _ ?x _ |- has_type _ _ ?x _ ] =>
+        eapply (IH G1 _ G2 A'); [ reflexivity | eassumption ] end.
+  - (* METATABLE OPERATOR — TPrimMetaL: table + right operand narrow. *)
+    eapply TPrimMetaL.
+    + match goal with [ IH : forall _ _ _ _, _ -> _ -> has_type _ _ (tmeta _ _) _ |- _ ] =>
+        eapply (IH G1 _ G2 A'); [ reflexivity | eassumption ] end.
+    + eassumption.
+    + eassumption.
+    + match goal with [ IH : forall _ _ _ _, _ -> _ -> has_type _ _ ?x _, Hh : has_type _ _ ?x _ |- has_type _ _ ?x _ ] =>
+        eapply (IH G1 _ G2 A'); [ reflexivity | eassumption ] end.
+  - (* METATABLE [__newindex] — TNewIdx: own fields + proto + value narrow. *)
+    eapply TNewIdx.
+    + match goal with [ IH : forall _ _ _ _, _ -> _ -> has_fields _ _ _ _ |- _ ] =>
+        eapply (IH G1 _ G2 A'); [ reflexivity | eassumption ] end.
+    + eassumption.
+    + eassumption.
+    + match goal with [ IH : forall _ _ _ _, _ -> _ -> has_type _ _ ?x _, Hh : has_type _ _ ?x (BRec _) |- has_type _ _ ?x _ ] =>
+        eapply (IH G1 _ G2 A'); [ reflexivity | eassumption ] end.
+    + eassumption.
+    + eassumption.
+    + match goal with [ IH : forall _ _ _ _, _ -> _ -> has_type _ _ ?x _, Hh : has_type _ _ ?x ?TT |- has_type _ _ ?x ?TT ] =>
+        eapply (IH G1 _ G2 A'); [ reflexivity | eassumption ] end.
   - apply HFnil.
   - apply HFcons;
       [ eapply (IHhas_type G1 _ G2 A') | eapply (IHhas_type0 G1 _ G2 A') ];
@@ -761,6 +931,14 @@ Fixpoint proj_free (e : tm) : Prop :=
           | (_, e0) :: rest => proj_free e0 /\ pl rest
           end) own)
       /\ proj_free proto
+  (* METATABLE [__newindex] — own fields, [__newindex] target, value proj-free. *)
+  | tnewidx own proto _ v =>
+      ((fix pl (xs : list (string * tm)) : Prop :=
+          match xs with
+          | [] => True
+          | (_, e0) :: rest => proj_free e0 /\ pl rest
+          end) own)
+      /\ proj_free proto /\ proj_free v
   end.
 
 (* ===========================================================================
@@ -1164,6 +1342,45 @@ Example oop_absent_synth_None : synth [] [] (tproj oop_derived "nonesuch") = Non
 Proof. reflexivity. Qed.
 
 (* ===========================================================================
+   METATABLE METAMETHODS — the ALGORITHMIC payoffs: the checker dispatches
+   [__call] / [__add] / [__newindex] and routes to real declarative typings.
+   (Terms [cobj] / [vobj] / [niwrite] from typing.v.)
+   =========================================================================== *)
+
+(* __call: the checker computes the callable table's application type [Int]. *)
+Example call_synths : synth [] [] (tapp cobj (tlit (LInt 3))) = Some (BAtom AInt).
+Proof. reflexivity. Qed.
+Example call_check_sound : has_type [] [] (tapp cobj (tlit (LInt 3))) (BAtom AInt).
+Proof. apply synth_sound. reflexivity. Qed.
+
+(* __add: the checker dispatches operator overloading, result [Int]. *)
+Example add_synths : synth [] [] (tprim PAdd vobj vobj) = Some (BAtom AInt).
+Proof. reflexivity. Qed.
+Example add_check_sound : has_type [] [] (tprim PAdd vobj vobj) (BAtom AInt).
+Proof. apply synth_sound. reflexivity. Qed.
+
+(* an operator whose metamethod is ABSENT ([__sub] not on [vobj]) is REJECTED. *)
+Example sub_synth_None : synth [] [] (tprim PSub vobj vobj) = None.
+Proof. reflexivity. Qed.
+
+(* __newindex (synthesizable form): the [__newindex] target is a context variable
+   of record-of-refs type [{k : ref Int}] (a [tloc] is runtime-only and not
+   source-synthesizable). The checker accepts the write-fallback, result [nil]. *)
+Definition niwrite_syn : tm := tnewidx [] (tvar 0) "k" (tlit (LInt 5)).
+Definition ni_ctx : list BTy := [BRec [("k"%string, BRef (BAtom AInt))]].
+Example newindex_synths :
+  synth [] ni_ctx niwrite_syn = Some (BAtom ANil).
+Proof. reflexivity. Qed.
+Example newindex_check_sound :
+  has_type [] ni_ctx niwrite_syn (BAtom ANil).
+Proof. apply synth_sound. reflexivity. Qed.
+
+(* a write to a key NOT in the [__newindex] target's cells is REJECTED. *)
+Example newindex_absent_synth_None :
+  synth [] ni_ctx (tnewidx [] (tvar 0) "nope" (tlit (LInt 5))) = None.
+Proof. reflexivity. Qed.
+
+(* ===========================================================================
    ASSUMPTION AUDIT — closed under the global context (no axioms / Admitted /
    Classical). The soundness theorems are the load-bearing point; the
    principality (tractable completeness) theorem is audited alongside.
@@ -1175,6 +1392,15 @@ Print Assumptions oop_derived_synths.
 Print Assumptions oop_inherited_synths.
 Print Assumptions oop_inherited_check_sound.
 Print Assumptions oop_absent_synth_None.
+(* METATABLE METAMETHODS — __call / __add / __newindex algorithmic payoffs. *)
+Print Assumptions call_synths.
+Print Assumptions call_check_sound.
+Print Assumptions add_synths.
+Print Assumptions add_check_sound.
+Print Assumptions sub_synth_None.
+Print Assumptions newindex_synths.
+Print Assumptions newindex_check_sound.
+Print Assumptions newindex_absent_synth_None.
 (* MULTI-RETURN — the executable-checker payoff. *)
 Print Assumptions mr_call_synths_tuple.
 Print Assumptions mr_truncate_synths_first.

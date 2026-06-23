@@ -780,6 +780,41 @@ Still open (DEFERRED — recorded honestly, minimal core only):
   - DEFERRED (backlog): `__newindex` (write fallback), operator/comparison
     metamethods (`__add`/`__eq`/`__lt`/…), `__call`, `__index` as a FUNCTION,
     dynamic metatable MUTATION (`setmetatable`), `rawget`/`rawset`.
+- [x] **Metatable metamethods — `__newindex`, `__call`, binary operators**
+  (`proof/typing.v` + `proof/check.v`; `subtype.v`/`ssub.v` BYTE-UNMODIFIED — no new
+  type-level former). Completes the metamethod protocol begun with `__index`:
+  - **`__call`** (callable tables): a metatable-table whose read interface carries
+    a `__call : Self -> Arg -> R` metamethod is APPLICABLE — `tapp (tmeta ofs proto)
+    arg` dispatches (op-sem `SCallMeta`) to `(table.__call) table arg`, resolving the
+    metamethod through the same `__index` chain (`tproj`) and reusing the arrow
+    machinery (two betas). Typing `TCallMeta`; result `R`. Payoff `call_payoff_typed`/
+    `call_payoff_steps` (callable table computes `3`).
+  - **Binary operators** (`__add`/`__sub`/`__mul`, `__eq`/`__lt`/`__le`): a primop
+    whose LEFT operand is a metatable-table dispatches (op-sem `SPrimMetaL`,
+    typing `TPrimMetaL`) to `(a.<mm>) a b`; the metamethod key is `mm_binop op`
+    (ordinary data — one general `tproj`-resolved lookup, NOT a name-keyed handler).
+    Number path (`TPrimArith`/`TPrimCmp`) kept for plain numbers. Payoff
+    `add_payoff_typed`/`add_payoff_steps` (vector-like `vobj + vobj : Int` → `7`);
+    `sub_absent_rejected` rejects an absent metamethod. **RIGHT-operand fallback
+    DEFERRED** (left-operand dispatch is the representative; Lua tries left then
+    right — the right-operand branch is a clean follow-up, not a fork).
+  - **`__newindex`** (write fallback): new term `tnewidx own proto k v` (the write
+    `(tmeta own proto).k = v`). When `k` is ABSENT from own, dispatches (op-sem
+    `SNewIdx`, typing `TNewIdx`) to `tassign (proto.k) v` — the records-of-refs
+    write-through (`proto`'s field `k` is a mutable `BRef` cell). Mirrors the
+    `__index` read fallback on the assignment side. Payoff `newindex_payoff_typed`/
+    `newindex_payoff_steps` (write `5` through the cell; store `[0]` → `[5]`);
+    `newindex_absent_cell_rejected` rejects a missing target cell.
+  - `progress`/`preservation`/`synth_sound`/`check_sound` ALL re-proved `Qed`; new
+    helper `tmeta_step_shape` (a `tmeta` steps only to a `tmeta`). `Print
+    Assumptions` on every result + payoff: Closed under the global context.
+  - HONEST SCOPE / model note: metamethods are carried as OWN fields of the table
+    under their reserved keys (`__call`/`__add`/…) — a simplification of Lua's
+    separate-metatable-object, sound and faithful for the static fragment. STILL
+    DEFERRED: `setmetatable`/dynamic metatables, `__index`/`__newindex` as
+    FUNCTIONS, `__concat`/`__len`/`__unm`/`__tostring`/other metamethods, `__call`
+    multi-arg/multi-return, operator RIGHT-operand fallback, own-present rawset on
+    the immutable own record, `rawget`/`rawset`.
 - [ ] **Arrow types as TERM introduction forms** (the type ALGEBRA has arrows via
   `BTy` and `tlam` introduces them; broader arrow-term ergonomics are min-core).
 - [ ] **Duplicate-key record literals** (currently `TRec` requires `NoDup` keys,

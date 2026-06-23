@@ -220,7 +220,21 @@ Inductive tm : Type :=
      object's own field table is concrete, and this pins the OWN type to exactly
      its keys — see [TMeta]'s soundness note for why a subsumed own term would
      break preservation. *)
-  | tmeta      : list (string * tm) -> tm -> tm.   (* tmeta own_fields proto *)
+  | tmeta      : list (string * tm) -> tm -> tm   (* tmeta own_fields proto *)
+  (* METATABLE METAMETHOD — [__newindex] WRITE FALLBACK. [tnewidx tbl k v] is the
+     field-write [tbl.k = v]. When [tbl] is a metatable-table [tmeta own ni] and [k]
+     is ABSENT from [own], it dispatches to the metatable's [__newindex] TABLE [ni]:
+     the write goes through to [ni]'s cell for [k] (the records-of-refs encoding — a
+     writable field is a mutable [BRef] cell). This mirrors the [__index] read
+     fallback on the assignment side. NOT a value (a write computes to [nil]).
+     DEFERRED: own-present rawset (own is an immutable literal here), [__newindex]
+     as a FUNCTION, dynamic metatable mutation. *)
+  | tnewidx    : list (string * tm) -> tm -> string -> tm -> tm.
+       (* tnewidx own proto k v : the write [(tmeta own proto).k = v]. The table is
+          given by its OWN field-list + [__newindex] target [proto] DIRECTLY (not a
+          nested [tmeta] subterm), so the own fields are typed EXACTLY by
+          [has_fields] — the same exactness discipline as [TMeta] (a subsumed table
+          would let [Town] under-report own's keys and mis-route the dispatch). *)
 
 (* The type a tag pins (the THEN-branch narrowed type). TgNum ↦ ANum (all numbers,
    per the 5.1 [type()] model), the other scalars to their atoms, TgTable to the
@@ -287,6 +301,34 @@ Definition prim_cmp (op : primop) (m n : nat) : bool :=
   | _   => false
   end.
 
+(* ===========================================================================
+   METATABLE METAMETHOD NAMES — the metamethod-name TABLE. This is ORDINARY DATA
+   (a map from the syntactic construct to the reserved field key), NOT name-keyed
+   special-casing in the gen-pass/solver: dispatch is a GENERAL field-lookup of
+   the metamethod key in the table's OWN fields, and the key is selected by this
+   pure function. The construct (a [primop], or the literal [__call]/[__newindex]
+   forms) determines the key; the dispatch machinery is uniform across keys.
+
+   [mm_call] / [mm_newindex] are the [__call] / [__newindex] metamethod keys;
+   [mm_arith] / [mm_cmp] map each arithmetic / comparison [primop] to its operator
+   metamethod key ([__add]/[__sub]/[__mul] and [__eq]/[__lt]/[__le]). Lua's actual
+   names — the protocol the runtime uses. *)
+Definition mm_call     : string := "__call".
+Definition mm_newindex : string := "__newindex".
+
+(* the binary-operator metamethod key for a primop (the Lua name). Arithmetic and
+   comparison both flow through one lookup; the name is the only op-specific datum. *)
+Definition mm_binop (op : primop) : string :=
+  match op with
+  | PAdd => "__add"
+  | PSub => "__sub"
+  | PMul => "__mul"
+  | PDiv => "__div"
+  | PLt  => "__lt"
+  | PLe  => "__le"
+  | PEq  => "__eq"
+  end.
+
 (* ---- A usable induction principle: the auto-generated [tm_ind] gives no IH
    for the subterms inside a [trec] list. Hand-roll the nested scheme (a plain
    Fixpoint, no axiom), mirroring [V_rect_strong] in subtype.v. *)
@@ -315,6 +357,8 @@ Section tm_ind_strong.
   Hypothesis Hfst    : forall e, P e -> P (tfst e).
   Hypothesis Hspread : forall g a, P g -> P a -> P (tappspread g a).
   Hypothesis Hmeta   : forall own proto, Pl own -> P proto -> P (tmeta own proto).
+  Hypothesis Hnewidx : forall own proto k v, Pl own -> P proto -> P v ->
+                       P (tnewidx own proto k v).
   Hypothesis Hnil  : Pl [].
   Hypothesis Hcons : forall k e rest, P e -> Pl rest -> Pl ((k, e) :: rest).
   Hypothesis Htnil : Pt [].
@@ -362,6 +406,14 @@ Section tm_ind_strong.
               | (k, e) :: rest => Hcons k e rest (tm_rect_strong e) (gom rest)
               end) own)
           (tm_rect_strong proto)
+    | tnewidx own proto k v =>
+        Hnewidx own proto k v
+          ((fix goni (fs : list (string * tm)) : Pl fs :=
+              match fs with
+              | [] => Hnil
+              | (k0, e) :: rest => Hcons k0 e rest (tm_rect_strong e) (goni rest)
+              end) own)
+          (tm_rect_strong proto) (tm_rect_strong v)
     end.
 End tm_ind_strong.
 
@@ -876,6 +928,59 @@ Inductive has_type : list BTy -> list BTy -> tm -> BTy -> Prop :=
       has_type S G proto (BRec Pfields) ->
       NoDup (map fst Pfields) ->
       has_type S G (tmeta ofs proto) (BRec (merge_fields Town Pfields))
+  (* METATABLE METAMETHOD — [__call] (callable tables). A metatable-table
+     [tmeta ofs proto] whose READ INTERFACE [BRec M] (its merged own+inherited type)
+     carries a [__call] metamethod [Self -> Arg -> R] is APPLICABLE:
+     [tapp (tmeta ofs proto) arg] dispatches to [(table.__call) table arg] — the
+     table is passed as [self], then the argument (Lua [t(x)] = [__call(t, x)]). The
+     metamethod is CURRIED ([Self -> Arg -> R]) so the single-arg arrow machinery is
+     reused; the table's record type must be a valid [self] ([rsub] the [Self]
+     domain). The metamethod is reached by the SAME [__index] chain that resolves any
+     field ([tproj] — own field or inherited through [proto]), so the metamethod may
+     be inherited; membership is on the MERGED type [M], one ordinary field lookup,
+     not a hardcoded handler. Result is the metamethod's codomain [R]. (Multi-arg /
+     multi-return [__call] interaction is DEFERRED.) *)
+  | TCallMeta : forall S G ofs proto M Self A R arg,
+      has_type S G (tmeta ofs proto) (BRec M) ->
+      In (mm_call, BArrow Self (BArrow A R)) M ->
+      rsub (BRec M) Self ->
+      has_type S G arg A ->
+      has_type S G (tapp (tmeta ofs proto) arg) R
+  (* METATABLE METAMETHOD — BINARY OPERATOR overloading ([__add]/[__sub]/[__mul] and
+     [__eq]/[__lt]/[__le]). A primop [tprim op a b] whose LEFT operand [a] is a
+     metatable-table whose read interface [BRec M] carries the operator's metamethod
+     [Self -> Other -> R] dispatches to [(a.<mm>) a b] (Lua tries the LEFT operand's
+     metamethod first). Curried, reusing the arrow machinery; result [R]. The
+     metamethod key is selected by [mm_binop op] — ordinary data, one general lookup
+     through the [__index] chain; the number path ([TPrimArith]/[TPrimCmp]) is kept
+     for plain numbers, so the two coexist. RIGHT-operand fallback is DEFERRED;
+     LEFT-operand dispatch is the representative landed here. *)
+  | TPrimMetaL : forall S G op ofs proto M Self Other R b,
+      has_type S G (tmeta ofs proto) (BRec M) ->
+      In (mm_binop op, BArrow Self (BArrow Other R)) M ->
+      rsub (BRec M) Self ->
+      has_type S G b Other ->
+      has_type S G (tprim op (tmeta ofs proto) b) R
+  (* METATABLE METAMETHOD — [__newindex] (write fallback). [tnewidx (tmeta ofs ni) k v]
+     is the Lua field-write [t.k = v]: when [k] is ABSENT from the table's OWN fields,
+     it dispatches to the metatable's [__newindex]. Here [__newindex] is a TABLE
+     (the [ni] prototype-position target) holding the writable cells: the
+     write-through goes into [ni]'s cell for [k] — the records-of-refs encoding,
+     where the target field is a mutable [BRef] cell. So [ni : BRec Pf] with
+     [(k, BRef T) ∈ Pf], and the write assigns a [v : T] into that cell, yielding
+     the unit value [nil]. [k] must NOT be an own key (absent-from-own is the
+     dispatch condition; the own-present case is a rawset on the immutable own
+     record — DEFERRED, the genuine dynamic-mutation fork). [__newindex] as a
+     FUNCTION is also DEFERRED. *)
+  | TNewIdx : forall S G ofs proto Town Pf k v T,
+      has_fields S G ofs Town ->
+      NoDup (map fst Town) ->
+      key_in k Town = false ->
+      has_type S G proto (BRec Pf) ->
+      NoDup (map fst Pf) ->
+      In (k, BRef T) Pf ->
+      has_type S G v T ->
+      has_type S G (tnewidx ofs proto k v) (BAtom ANil)
 (* key-aligned pointwise typing of record fields; mutual so the generated
    induction principle carries an IH on every field derivation. *)
 with has_fields : list BTy -> list BTy -> list (string * tm) -> list (string * BTy) -> Prop :=
@@ -974,6 +1079,9 @@ Fixpoint lift (d k : nat) (e : tm) : tm :=
   (* METATABLES: no new binders — own fields and prototype lift at [k]. *)
   | tmeta own proto =>
       tmeta (map (fun ke => (fst ke, lift d k (snd ke))) own) (lift d k proto)
+  (* __newindex write: no new binders — own fields, proto, and value lift at [k]. *)
+  | tnewidx own proto k0 v =>
+      tnewidx (map (fun ke => (fst ke, lift d k (snd ke))) own) (lift d k proto) k0 (lift d k v)
   end.
 
 Fixpoint subst (j : nat) (s : tm) (e : tm) : tm :=
@@ -1018,6 +1126,9 @@ Fixpoint subst (j : nat) (s : tm) (e : tm) : tm :=
   (* METATABLES: no new binders — substitute into own fields and prototype at [j]. *)
   | tmeta own proto =>
       tmeta (map (fun ke => (fst ke, subst j s (snd ke))) own) (subst j s proto)
+  (* __newindex write: no new binders — substitute into own fields, proto, value. *)
+  | tnewidx own proto k0 v =>
+      tnewidx (map (fun ke => (fst ke, subst j s (snd ke))) own) (subst j s proto) k0 (subst j s v)
   end.
 
 (* record-field lookup at the term level (for projection) *)
@@ -1296,7 +1407,57 @@ Inductive step : tm * store -> tm * store -> Prop :=
   | SMetaProjProto : forall own proto k st,
       value (tmeta own proto) ->
       field_lookup k own = None ->
-      step (tproj (tmeta own proto) k, st) (tproj proto k, st).
+      step (tproj (tmeta own proto) k, st) (tproj proto k, st)
+  (* METATABLE METAMETHOD — [__call] DISPATCH. Applying a metatable-table VALUE
+     [tmeta own proto] to a VALUE [arg] dispatches to [(table.__call) table arg] —
+     the metamethod is RESOLVED BY THE SAME [__index] CHAIN as any field (the
+     [tproj (tmeta own proto) mm_call] subterm steps via [SMetaProjOwn]/[Proto]),
+     then applied to the table as [self] and to [arg]. Reuses [tproj] + two [tapp]/
+     [SBeta] — no new lookup machinery; the metamethod may be inherited. *)
+  | SCallMeta : forall own proto arg st,
+      value (tmeta own proto) ->
+      value arg ->
+      step (tapp (tmeta own proto) arg, st)
+           (tapp (tapp (tproj (tmeta own proto) mm_call) (tmeta own proto)) arg, st)
+  (* METATABLE METAMETHOD — BINARY OPERATOR DISPATCH (LEFT operand). A primop whose
+     LEFT operand is a metatable-table VALUE dispatches to [(a.<mm>) a b] — the
+     operator metamethod [mm_binop op] resolved through the [__index] chain
+     ([tproj]), applied to the left operand as [self] and the right operand [b].
+     (Lua tries the left operand's metamethod first.) Reuses [tproj] + [tapp]. The
+     plain-number path fires only on two number literals; a metatable left operand
+     takes THIS rule. *)
+  | SPrimMetaL : forall op own proto b st,
+      value (tmeta own proto) ->
+      step (tprim op (tmeta own proto) b, st)
+           (tapp (tapp (tproj (tmeta own proto) (mm_binop op)) (tmeta own proto)) b, st)
+  (* METATABLE METAMETHOD — [__newindex] WRITE-FALLBACK DISPATCH. [tnewidx own ni k v]
+     — the write [(tmeta own ni).k = v] — with [k] ABSENT from [own]
+     ([field_lookup k own = None]) and own fields + [ni] + [v] all VALUES dispatches
+     the write to the [__newindex] target [ni]: it becomes [tassign (tproj ni k) v] —
+     project [ni]'s cell for [k] (the projection machinery resolves it to a [tloc])
+     and assign [v] into that mutable cell (the records-of-refs write). Congruences
+     [SNewIdx1] (own fields, like [SRec]), [SNewIdx2] (proto), [SNewIdx3] (value)
+     reduce the operands left-to-right first. *)
+  | SNewIdx : forall own ni k v st,
+      Forall (fun ke => value (snd ke)) own ->
+      value ni ->
+      value v ->
+      field_lookup k own = None ->
+      step (tnewidx own ni k v, st)
+           (tassign (tproj ni k) v, st)
+  | SNewIdx1 : forall pre k0 e e' post proto k v st st',
+      Forall (fun ke => value (snd ke)) pre ->
+      step (e, st) (e', st') ->
+      step (tnewidx (pre ++ (k0, e) :: post) proto k v, st)
+           (tnewidx (pre ++ (k0, e') :: post) proto k v, st')
+  | SNewIdx2 : forall own proto proto' k v st st',
+      Forall (fun ke => value (snd ke)) own ->
+      step (proto, st) (proto', st') ->
+      step (tnewidx own proto k v, st) (tnewidx own proto' k v, st')
+  | SNewIdx3 : forall own proto k v v' st st',
+      Forall (fun ke => value (snd ke)) own -> value proto ->
+      step (v, st) (v', st') ->
+      step (tnewidx own proto k v, st) (tnewidx own proto k v', st').
 
 (* STORE well-typedness + extension (ported from imp.v). [store_well_typed S st]:
    same length, each stored value has its S-type (closed — stored values are
@@ -1424,24 +1585,46 @@ Proof.
   - subst. eapply RsTrans; [ apply IHhas_type; reflexivity | exact H0 ].
 Qed.
 
-(* INCREMENT 19 — primop inversion (subsumption-transparent). The result type is
-   [ANum] (arithmetic) or [ABool] (comparison); both subsume to [T]. The operands
-   are typed at [ANum]. *)
+(* INCREMENT 19 + METATABLE OPERATOR METAMETHODS — primop inversion (subsumption-
+   transparent), now a DISJUNCTION between the NUMERIC path and the LEFT-operand
+   metamethod dispatch:
+   - NUMERIC: operands typed at [ANum]; result [ANum] (arith) or [ABool] (cmp),
+     subsumed to [T].
+   - METAMETHOD: the LEFT operand is a metatable-table [tmeta ofs proto] whose own
+     fields carry the operator metamethod [mm_binop op : Self -> Other -> R]; the
+     table's merged record [rsub]'s [Self]; the right operand [b : Other]; result
+     [R] subsumed to [T]. *)
 Lemma inv_prim : forall S G op a b T,
   has_type S G (tprim op a b) T ->
-  has_type S G a (BAtom ANum) /\ has_type S G b (BAtom ANum) /\
-  ((arith_op op = true /\ rsub (BAtom ANum) T) \/
-   (cmp_op op = true /\ rsub (BAtom ABool) T)).
+  (has_type S G a (BAtom ANum) /\ has_type S G b (BAtom ANum) /\
+   ((arith_op op = true /\ rsub (BAtom ANum) T) \/
+    (cmp_op op = true /\ rsub (BAtom ABool) T)))
+  \/
+  (exists ofs proto M Self Other R,
+     a = tmeta ofs proto /\
+     has_type S G (tmeta ofs proto) (BRec M) /\
+     In (mm_binop op, BArrow Self (BArrow Other R)) M /\
+     rsub (BRec M) Self /\
+     has_type S G b Other /\ rsub R T).
 Proof.
   intros S G op a b T H. remember (tprim op a b) as e eqn:Ee.
   induction H; try discriminate Ee.
-  - (* TPrimArith *) injection Ee as <- <- <-.
+  - (* TPrimArith *) injection Ee as <- <- <-. left.
     split; [assumption|split;[assumption| left; split;[assumption|apply rsub_refl]]].
-  - (* TPrimCmp *) injection Ee as <- <- <-.
+  - (* TPrimCmp *) injection Ee as <- <- <-. left.
     split; [assumption|split;[assumption| right; split;[assumption|apply rsub_refl]]].
-  - (* TSub *) subst. destruct (IHhas_type eq_refl) as [Ha [Hb [[Har Hd]|[Hcr Hd]]]].
-    + split;[assumption|split;[assumption| left; split;[assumption|eapply RsTrans; eassumption]]].
-    + split;[assumption|split;[assumption| right; split;[assumption|eapply RsTrans; eassumption]]].
+  - (* TSub *) subst. destruct (IHhas_type eq_refl) as
+      [ [Ha [Hb [[Har Hd]|[Hcr Hd]]]] | [ofs [proto [M [Self [Other [R [Ea Hrest]]]]]]] ].
+    + left. split;[assumption|split;[assumption| left; split;[assumption|eapply RsTrans; eassumption]]].
+    + left. split;[assumption|split;[assumption| right; split;[assumption|eapply RsTrans; eassumption]]].
+    + right. exists ofs, proto, M, Self, Other, R.
+      destruct Hrest as [Htbl [Hin [Hself [Hb Hd]]]].
+      split; [assumption|]. split; [assumption|]. split; [assumption|].
+      split; [assumption|]. split; [assumption|]. eapply RsTrans; eassumption.
+  - (* TPrimMetaL *) injection Ee as <- <- <-. right.
+    exists ofs, proto, M, Self, Other, R.
+    split; [reflexivity|]. split; [assumption|]. split; [assumption|].
+    split; [assumption|]. split; [assumption|]. apply rsub_refl.
 Qed.
 
 Lemma inv_var : forall S G n T,
@@ -1465,15 +1648,65 @@ Proof.
     exists Tb. split; [assumption | eapply RsTrans; eassumption].
 Qed.
 
+(* METATABLE [__call] — application inversion is now a DISJUNCTION: the ordinary
+   ARROW application ([f : A -> B]) OR a [__call] metatable dispatch (the function
+   is a metatable-table [tmeta ofs proto] whose own [mm_call] field is
+   [Self -> A -> R]; the table's merged record [rsub]'s [Self]; the argument
+   [a : A]; result [R] subsumed to [T]). *)
 Lemma inv_app : forall S G f a T,
   has_type S G (tapp f a) T ->
-  exists A B, has_type S G f (BArrow A B) /\ has_type S G a A /\ rsub B T.
+  (exists A B, has_type S G f (BArrow A B) /\ has_type S G a A /\ rsub B T)
+  \/
+  (exists ofs proto M Self A R,
+     f = tmeta ofs proto /\
+     has_type S G (tmeta ofs proto) (BRec M) /\
+     In (mm_call, BArrow Self (BArrow A R)) M /\
+     rsub (BRec M) Self /\
+     has_type S G a A /\ rsub R T).
 Proof.
   intros S G f a T H. remember (tapp f a) as e eqn:Ee.
   induction H; try discriminate Ee.
-  - injection Ee as <- <-. exists A, B. split; [assumption|split;[assumption|apply rsub_refl]].
-  - subst. destruct (IHhas_type eq_refl) as [A0 [B0 [Hf [Ha Hd]]]].
-    exists A0, B0. split; [assumption|split;[assumption|eapply RsTrans; eassumption]].
+  - (* TApp *) injection Ee as <- <-. left.
+    exists A, B. split; [assumption|split;[assumption|apply rsub_refl]].
+  - (* TSub *) subst. destruct (IHhas_type eq_refl) as
+      [ [A0 [B0 [Hf [Ha Hd]]]] | [ofs [proto [M [Self [A0 [R [Ef Hrest]]]]]]] ].
+    + left. exists A0, B0. split; [assumption|split;[assumption|eapply RsTrans; eassumption]].
+    + right. exists ofs, proto, M, Self, A0, R.
+      destruct Hrest as [Htbl [Hin [Hself [Ha Hd]]]].
+      split; [assumption|]. split; [assumption|]. split; [assumption|].
+      split; [assumption|]. split; [assumption|]. eapply RsTrans; eassumption.
+  - (* TCallMeta *) injection Ee as <- <-. right.
+    exists ofs, proto, M, Self, A, R.
+    split; [reflexivity|]. split; [assumption|]. split; [assumption|].
+    split; [assumption|]. split; [assumption|]. apply rsub_refl.
+Qed.
+
+(* METATABLE [__newindex] — inversion of the write [tnewidx tbl k v]. The table is
+   a metatable-table whose own fields omit [k]; the [__newindex] target [proto]
+   (read at [BRec Pf]) has a writable cell [(k, BRef T) ∈ Pf]; the written value
+   [v : T]; result is [ANil] subsumed to the goal. *)
+Lemma inv_newidx : forall S G ofs proto k v T,
+  has_type S G (tnewidx ofs proto k v) T ->
+  exists Town Pf U,
+    has_fields S G ofs Town /\ NoDup (map fst Town) /\
+    key_in k Town = false /\
+    has_type S G proto (BRec Pf) /\ NoDup (map fst Pf) /\ In (k, BRef U) Pf /\
+    has_type S G v U /\ rsub (BAtom ANil) T.
+Proof.
+  intros S G ofs proto k v T H. remember (tnewidx ofs proto k v) as e eqn:Ee.
+  induction H; try discriminate Ee.
+  - (* TSub *) subst. destruct (IHhas_type eq_refl) as
+      [Town [Pf [U Hrest]]].
+    exists Town, Pf, U.
+    destruct Hrest as [Hfs [Hno [Hni [Hp [Hnp [Hin [Hv Hd]]]]]]].
+    split; [assumption|]. split; [assumption|]. split; [assumption|].
+    split; [assumption|]. split; [assumption|]. split; [assumption|].
+    split; [assumption|]. eapply RsTrans; eassumption.
+  - (* TNewIdx *) injection Ee as <- <- <- <-.
+    eexists Town, Pf, _.
+    split; [eassumption|]. split; [eassumption|].
+    split; [eassumption|]. split; [eassumption|]. split; [eassumption|].
+    split; [eassumption|]. split; [eassumption|]. apply rsub_refl.
 Qed.
 
 Lemma inv_let : forall S G e1 e2 T,
@@ -3019,6 +3252,32 @@ Proof.
       | match goal with [ IH : forall _ _ _, _ = _ -> has_type _ _ (lift _ _ proto) _ |- _ ] =>
           exact (IH G1 G2 U eq_refl) end
       | assumption ].
+  - (* METATABLE [__call] — TCallMeta: the table (whole [tmeta]) and the argument
+       weaken; the [In]/[rsub] premises are context-independent. *)
+    eapply TCallMeta;
+      [ match goal with [ IH : forall _ _ _, _ = _ -> has_type _ _ (lift _ _ (tmeta _ _)) _ |- _ ] =>
+          exact (IH G1 G2 U eq_refl) end
+      | eassumption | assumption
+      | match goal with [ IH : forall _ _ _, _ = _ -> has_type _ _ (lift _ _ arg) _ |- _ ] =>
+          exact (IH G1 G2 U eq_refl) end ].
+  - (* METATABLE OPERATOR — TPrimMetaL: the table and the right operand [b] weaken. *)
+    eapply TPrimMetaL;
+      [ match goal with [ IH : forall _ _ _, _ = _ -> has_type _ _ (lift _ _ (tmeta _ _)) _ |- _ ] =>
+          exact (IH G1 G2 U eq_refl) end
+      | eassumption | assumption
+      | match goal with [ IH : forall _ _ _, _ = _ -> has_type _ _ (lift _ _ b) _ |- _ ] =>
+          exact (IH G1 G2 U eq_refl) end ].
+  - (* METATABLE [__newindex] — TNewIdx: own fields (has_fields IH), prototype, and
+       value weaken; [key_in]/[NoDup]/[In] premises are context-independent. *)
+    eapply TNewIdx;
+      [ match goal with [ IH : forall _ _ _, _ = _ -> has_fields _ _ _ _ |- _ ] =>
+          exact (IH G1 G2 U eq_refl) end
+      | assumption | eassumption
+      | match goal with [ IH : forall _ _ _, _ = _ -> has_type _ _ (lift _ _ proto) _ |- _ ] =>
+          exact (IH G1 G2 U eq_refl) end
+      | assumption | eassumption
+      | match goal with [ IH : forall _ _ _, _ = _ -> has_type _ _ (lift _ _ v) _ |- _ ] =>
+          exact (IH G1 G2 U eq_refl) end ].
   - (* HFnil *) apply HFnil.
   - (* HFcons *) apply HFcons.
     + match goal with [ IH : forall _ _ _, _ = _ -> has_type _ _ _ _ |- _ ] =>
@@ -3084,6 +3343,14 @@ Fixpoint closed_at (k : nat) (e : tm) : Prop :=
          | (_, e) :: rest => closed_at k e /\ allc rest
          end) own
       /\ closed_at k proto
+  (* __newindex write: no new binders — own fields, proto, and value closed at [k]. *)
+  | tnewidx own proto _ v =>
+      (fix allc (fs : list (string * tm)) : Prop :=
+         match fs with
+         | [] => True
+         | (_, e) :: rest => closed_at k e /\ allc rest
+         end) own
+      /\ closed_at k proto /\ closed_at k v
   end.
 
 (* typing in [G] bounds free vars by [length G]. By term induction + inversion.
@@ -3101,12 +3368,22 @@ Proof.
   - exact I.
   - (* tvar *) apply inv_var in H. destruct H as [U [Hl _]].
     apply nth_error_Some. rewrite Hl. discriminate.
-  - (* tprim *) apply inv_prim in H. destruct H as [Ha [Hb _]].
-    split; [ exact (IHe1 Sg G (BAtom ANum) Ha) | exact (IHe2 Sg G (BAtom ANum) Hb) ].
+  - (* tprim *) apply inv_prim in H.
+    destruct H as [ [Ha [Hb _]] | [ofs [proto [M [Self [Other [R [Ea Hrest]]]]]]] ].
+    + split; [ exact (IHe1 Sg G (BAtom ANum) Ha) | exact (IHe2 Sg G (BAtom ANum) Hb) ].
+    + (* metamethod: left operand [e1 = tmeta ofs proto : BRec M], right [e2 : Other] *)
+      subst e1.
+      destruct Hrest as [Htbl [Hin [Hself [Hb _]]]].
+      split; [ exact (IHe1 Sg G (BRec M) Htbl) | exact (IHe2 Sg G Other Hb) ].
   - (* tlam *) apply inv_lam in H. destruct H as [Tb [Hb _]].
     exact (IHe Sg (T :: G) Tb Hb).
-  - (* tapp *) apply inv_app in H. destruct H as [A [B [Hf [Ha _]]]].
-    split; [ exact (IHe1 Sg G (BArrow A B) Hf) | exact (IHe2 Sg G A Ha) ].
+  - (* tapp *) apply inv_app in H.
+    destruct H as [ [A [B [Hf [Ha _]]]] | [ofs [proto [M [Self [A [R [Ef Hrest]]]]]]] ].
+    + split; [ exact (IHe1 Sg G (BArrow A B) Hf) | exact (IHe2 Sg G A Ha) ].
+    + (* [__call]: function [e1 = tmeta ofs proto : BRec M], argument [e2 : A] *)
+      subst e1.
+      destruct Hrest as [Htbl [Hin [Hself [Ha _]]]].
+      split; [ exact (IHe1 Sg G (BRec M) Htbl) | exact (IHe2 Sg G A Ha) ].
   - (* tlet *) apply inv_let in H. destruct H as [A [B [H1 [H2 _]]]].
     split; [ exact (IHe1 Sg G A H1) | exact (IHe2 Sg (A :: G) B H2) ].
   - (* trec *) apply inv_rec in H. destruct H as [Ts [Hf [_ _]]].
@@ -3149,6 +3426,19 @@ Proof.
     + match goal with
       | [ IH : forall (_:list BTy)(_:list BTy)(_:BTy), has_type _ _ ?x _ -> _,
           Hh : has_type ?Sg0 ?G0 ?x ?Tx |- _ ] => exact (IH Sg G (BRec Pf) Hp) end.
+  - (* METATABLE [__newindex] — tnewidx: own fields (Pl IH), proto, value closed. *)
+    apply inv_newidx in H.
+    destruct H as [Town [Pf [U [Hfs [Hno [Hni [Hp [Hnp [Hin [Hv _]]]]]]]]]].
+    split; [ | split ].
+    + match goal with
+      | [ IH : forall (_:list BTy)(_:list BTy)(_:list (string*BTy)), has_fields _ _ ?xs _ -> _ |- _ ] =>
+          exact (IH Sg G Town Hfs) end.
+    + match goal with [ IH : forall (_:list BTy)(_:list BTy)(_:BTy),
+          has_type _ _ ?x _ -> closed_at _ ?x, Hh : has_type _ _ ?x (BRec _) |- _ ] =>
+        exact (IH Sg G (BRec Pf) Hp) end.
+    + match goal with [ IH : forall (_:list BTy)(_:list BTy)(_:BTy),
+          has_type _ _ ?x _ -> closed_at _ ?x, Hh : has_type _ _ ?x U |- _ ] =>
+        exact (IH Sg G U Hv) end.
   - (* Pl nil *) exact I.
   - (* Pl cons *) inversion H; subst. simpl. split.
     + match goal with
@@ -3225,6 +3515,19 @@ Proof.
     + match goal with
       | [ IH : forall k, closed_at k ?x -> forall d j, k <= j -> lift d j ?x = ?x |- _ ] =>
           apply (IH k); [exact H2 | exact H0] end.
+  - (* METATABLE [__newindex] — tnewidx: own fields (Pl IH), proto, value lift-inv.
+       NB the constructor's string key shadows the nat cut, so reference IHs by
+       their conclusion shape and let unification fill the cut ([eapply]). *)
+    destruct H as [H1 [H2 H3]]. f_equal;
+      [ match goal with
+        | [ IH : forall k0, _ -> forall d j, k0 <= j -> map _ ?xs = ?xs |- map _ ?xs = ?xs ] =>
+            eapply IH; [exact H1 | exact H0] end
+      | match goal with
+        | [ IH : forall k0, closed_at k0 ?x -> forall d j, k0 <= j -> lift d j ?x = ?x
+            |- lift _ _ ?x = ?x ] => eapply IH; [exact H2 | exact H0] end
+      | match goal with
+        | [ IH : forall k0, closed_at k0 ?x -> forall d j, k0 <= j -> lift d j ?x = ?x
+            |- lift _ _ ?x = ?x ] => eapply IH; [exact H3 | exact H0] end ].
   - (* Pl nil *) reflexivity.
   - (* Pl cons *) destruct H as [Hc Hr]. f_equal;
       [ f_equal; apply (IHe k0); [exact Hc | exact H0]
@@ -3295,20 +3598,45 @@ Proof.
       eapply TSub; [ apply TVar | exact Hs ].
       destruct n as [ | n' ]; [ lia | ]. simpl Nat.pred.
       rewrite (nth_error_insert_hi G1 G2 U n') in Hl by lia. exact Hl.
-  - (* tprim *) apply inv_prim in H. destruct H as [Ha [Hb Hres]]. simpl.
-    pose proof (IHe1 Sg G1 G2 U (BAtom ANum) s Ha H0) as Ha'.
-    pose proof (IHe2 Sg G1 G2 U (BAtom ANum) s Hb H0) as Hb'.
-    destruct Hres as [[Har Hd] | [Hcr Hd]].
-    + eapply TSub; [ apply TPrimArith; [ exact Har | exact Ha' | exact Hb' ] | exact Hd ].
-    + eapply TSub; [ apply TPrimCmp; [ exact Hcr | exact Ha' | exact Hb' ] | exact Hd ].
+  - (* tprim *) apply inv_prim in H.
+    destruct H as [ [Ha [Hb Hres]] | [ofs [proto [M [Self [Other [R [Ea Hrest]]]]]]] ]; simpl.
+    + (* NUMERIC path *)
+      pose proof (IHe1 Sg G1 G2 U (BAtom ANum) s Ha H0) as Ha'.
+      pose proof (IHe2 Sg G1 G2 U (BAtom ANum) s Hb H0) as Hb'.
+      destruct Hres as [[Har Hd] | [Hcr Hd]].
+      * eapply TSub; [ apply TPrimArith; [ exact Har | exact Ha' | exact Hb' ] | exact Hd ].
+      * eapply TSub; [ apply TPrimCmp; [ exact Hcr | exact Ha' | exact Hb' ] | exact Hd ].
+    + (* METAMETHOD path: left operand [tmeta ofs proto : BRec M], reconstruct
+         TPrimMetaL via the whole-table IH (substitution preserves [BRec M]). *)
+      subst e1.
+      destruct Hrest as [Htbl [Hin [Hself [Hb Hd]]]].
+      eapply TSub; [ eapply (TPrimMetaL Sg (G1 ++ G2) _ _ _ M Self Other R) | exact Hd ].
+      * match goal with
+        | [ IH : forall _ _ _ _ _ _, has_type _ _ (tmeta ofs proto) _ -> _ -> has_type _ _ _ _ |- _ ] =>
+            apply (IH Sg G1 G2 U (BRec M) s); [ exact Htbl | exact H0 ] end.
+      * exact Hin.
+      * exact Hself.
+      * apply (IHe2 Sg G1 G2 U Other s); [ exact Hb | exact H0 ].
   - (* tlam *) apply inv_lam in H. destruct H as [Tb [Hb Hsub]]. simpl.
     eapply TSub; [ apply TLam | exact Hsub ].
     rewrite (closed_lift s H0 1 0).
     apply (IHe Sg (T :: G1) G2 U Tb s); [ exact Hb | exact H0 ].
-  - (* tapp *) apply inv_app in H. destruct H as [A [B [Hf [Ha Hsub]]]]. simpl.
-    eapply TSub; [ eapply TApp | exact Hsub ].
-    + apply (IHe1 Sg G1 G2 U (BArrow A B) s); [ exact Hf | exact H0 ].
-    + apply (IHe2 Sg G1 G2 U A s); [ exact Ha | exact H0 ].
+  - (* tapp *) apply inv_app in H.
+    destruct H as [ [A [B [Hf [Ha Hsub]]]] | [ofs [proto [M [Self [A [R [Ef Hrest]]]]]]] ]; simpl.
+    + eapply TSub; [ eapply TApp | exact Hsub ].
+      * apply (IHe1 Sg G1 G2 U (BArrow A B) s); [ exact Hf | exact H0 ].
+      * apply (IHe2 Sg G1 G2 U A s); [ exact Ha | exact H0 ].
+    + (* [__call] path: function [tmeta ofs proto : BRec M], reconstruct TCallMeta
+         via the whole-table IH (substitution preserves [BRec M]). *)
+      subst e1.
+      destruct Hrest as [Htbl [Hin [Hself [Ha Hd]]]].
+      eapply TSub; [ eapply (TCallMeta Sg (G1 ++ G2) _ _ M Self A R) | exact Hd ].
+      * match goal with
+        | [ IH : forall _ _ _ _ _ _, has_type _ _ (tmeta ofs proto) _ -> _ -> has_type _ _ _ _ |- _ ] =>
+            apply (IH Sg G1 G2 U (BRec M) s); [ exact Htbl | exact H0 ] end.
+      * exact Hin.
+      * exact Hself.
+      * apply (IHe2 Sg G1 G2 U A s); [ exact Ha | exact H0 ].
   - (* tlet *) apply inv_let in H. destruct H as [A [B [H1 [H2 Hsub]]]]. simpl.
     eapply TSub; [ eapply TLet | exact Hsub ].
     + apply (IHe1 Sg G1 G2 U A s); [ exact H1 | exact H0 ].
@@ -3395,6 +3723,28 @@ Proof.
           Hh : has_type _ _ ?x _ |- _ ] =>
           apply (IH Sg G1 G2 U (BRec Pf) s); [ exact Hp | exact H0 ] end.
     + exact Hnp.
+  - (* METATABLE [__newindex] — tnewidx: substitute into own fields (Pl IH, EXACT
+       [Town]), proto, and value; [Town] (hence [key_in k Town]) and [Pf] preserved,
+       so [TNewIdx] re-applies at [ANil]. *)
+    apply inv_newidx in H.
+    destruct H as [Town [Pf [W [Hfs [Hno [Hni [Hp [Hnp [Hin [Hv Hd]]]]]]]]]].
+    simpl.
+    eapply TSub; [ apply (TNewIdx Sg (G1 ++ G2) _ _ Town Pf k _ W) | exact Hd ].
+    + match goal with
+      | [ IH : forall _ _ _ _ _ _, has_fields _ _ ?xs _ -> _ |- _ ] =>
+          apply (IH Sg G1 G2 U Town s); [ exact Hfs | exact H0 ] end.
+    + exact Hno.
+    + exact Hni.
+    + match goal with
+      | [ IH : forall _ _ _ _ _ _, has_type _ _ ?x _ -> _ -> has_type _ _ _ _,
+          Hh : has_type _ _ ?x (BRec Pf) |- _ ] =>
+          apply (IH Sg G1 G2 U (BRec Pf) s); [ exact Hp | exact H0 ] end.
+    + exact Hnp.
+    + exact Hin.
+    + match goal with
+      | [ IH : forall _ _ _ _ _ _, has_type _ _ ?x _ -> _ -> has_type _ _ _ _,
+          Hh : has_type _ _ ?x W |- _ ] =>
+          apply (IH Sg G1 G2 U W s); [ exact Hv | exact H0 ] end.
   - (* Pl nil *) inversion H; subst. simpl. apply HFnil.
   - (* Pl cons *) inversion H; subst. simpl. apply HFcons.
     + match goal with [ Hh : has_type ?Sg0 (G1 ++ U :: G2) e ?Tk |- _ ] =>
@@ -3464,6 +3814,23 @@ Proof.
       | assumption
       | match goal with [ IH : forall _, extends _ _ -> has_type _ _ _ _ |- _ ] => apply IH; exact Hext end
       | assumption ].
+  - (* METATABLE [__call] — TCallMeta: table + arg store-weaken; In/rsub stable. *)
+    eapply TCallMeta;
+      [ match goal with [ IH : forall _, extends _ _ -> has_type _ _ (tmeta _ _) _ |- _ ] => apply IH; exact Hext end
+      | eassumption | assumption
+      | match goal with [ IH : forall _, extends _ _ -> has_type _ _ ?x _, Hh : has_type _ _ ?x _ |- has_type _ _ ?x _ ] => apply IH; exact Hext end ].
+  - (* METATABLE OPERATOR — TPrimMetaL: table + right operand store-weaken. *)
+    eapply TPrimMetaL;
+      [ match goal with [ IH : forall _, extends _ _ -> has_type _ _ (tmeta _ _) _ |- _ ] => apply IH; exact Hext end
+      | eassumption | assumption
+      | match goal with [ IH : forall _, extends _ _ -> has_type _ _ ?x _, Hh : has_type _ _ ?x _ |- has_type _ _ ?x _ ] => apply IH; exact Hext end ].
+  - (* METATABLE [__newindex] — TNewIdx: own fields + proto + value store-weaken. *)
+    eapply TNewIdx;
+      [ match goal with [ IH : forall _, extends _ _ -> has_fields _ _ _ _ |- _ ] => apply IH; exact Hext end
+      | assumption | eassumption
+      | match goal with [ IH : forall _, extends _ _ -> has_type _ _ ?x _, Hh : has_type _ _ ?x (BRec _) |- has_type _ _ ?x _ ] => apply IH; exact Hext end
+      | assumption | eassumption
+      | match goal with [ IH : forall _, extends _ _ -> has_type _ _ ?x _, Hh : has_type _ _ ?x ?TT |- has_type _ _ ?x ?TT ] => apply IH; exact Hext end ].
   - apply HFnil.
   - apply HFcons; [ apply IHhas_type; exact Hext | apply IHhas_type0; exact Hext ].
   - (* MULTI-RETURN — HTnil *) apply HTnil.
@@ -3758,6 +4125,19 @@ Qed.
    congruence cases recurse, getting an extended [S'] and store-weakening the
    unchanged surroundings; [SAlloc] EXTENDS [S]; [SDeref]/[SAssign] keep [S] fixed
    and use the store-well-typedness invariant. *)
+(* METATABLE METAMETHODS — a metatable-table steps only to another metatable-table
+   (its only reductions are [SMeta1]/[SMeta2], building own fields / the prototype).
+   Used in preservation's [SPrim1]/[SApp1] metamethod cases to re-apply
+   [TPrimMetaL]/[TCallMeta] (which need the left/function operand syntactically a
+   [tmeta]). *)
+Lemma tmeta_step_shape : forall own proto st e' st',
+  step (tmeta own proto, st) (e', st') ->
+  exists own' proto', e' = tmeta own' proto'.
+Proof.
+  intros own proto st e' st' Hstep.
+  inversion Hstep; subst; eauto.
+Qed.
+
 Theorem preservation : forall S e T st e' st',
   has_type S [] e T ->
   store_well_typed S st ->
@@ -3770,7 +4150,9 @@ Proof.
   induction Hstep; intros e0 st0 e0' st0' Ecfg Ecfg' Hwt T0 Hty;
     injection Ecfg as <- <-; injection Ecfg' as <- <-.
   - (* SBeta *)
-    apply inv_app in Hty. destruct Hty as [A [B0 [Hf [Ha Hsub]]]].
+    apply inv_app in Hty.
+    destruct Hty as [ [A [B0 [Hf [Ha Hsub]]]] | [ofs [proto [M [Self [A [R [Ef _]]]]]]] ];
+      [ | discriminate Ef ].
     apply inv_lam in Hf. destruct Hf as [Tb [Hb HsubArr]].
     apply rsub_arrow_inv in HsubArr. destruct HsubArr as [HsA HsB].
     exists S. split; [ apply extends_refl | split; [ | exact Hwt ] ].
@@ -3792,57 +4174,112 @@ Proof.
     pose proof (nodup_unique_type Ts k Tk Tk' Hnd' HinTk HinTk') as Heq. subst Tk'.
     exists S. split; [ apply extends_refl | split; [ | exact Hwt ] ].
     eapply TSub; [ exact Hvt | eapply RsTrans; [ apply RsSsub; exact HsTk' | exact Hsub ] ].
-  - (* SPrim1: reduce the left operand *)
-    apply inv_prim in Hty. destruct Hty as [Ha [Hb Hres]].
-    destruct (IHHstep a st a' st' eq_refl eq_refl Hwt (BAtom ANum) Ha)
-      as [S' [Hext [Ha' Hwt']]].
-    exists S'. split; [ exact Hext | split; [ | exact Hwt' ] ].
-    destruct Hres as [[Har Hd] | [Hcr Hd]].
-    + eapply TSub; [ apply TPrimArith;
-        [ exact Har | exact Ha' | eapply store_weakening; [ exact Hb | exact Hext ] ] | exact Hd ].
-    + eapply TSub; [ apply TPrimCmp;
-        [ exact Hcr | exact Ha' | eapply store_weakening; [ exact Hb | exact Hext ] ] | exact Hd ].
-  - (* SPrim2: left is a value, reduce the right operand *)
-    apply inv_prim in Hty. destruct Hty as [Ha [Hb Hres]].
-    destruct (IHHstep b st b' st' eq_refl eq_refl Hwt (BAtom ANum) Hb)
-      as [S' [Hext [Hb' Hwt']]].
-    exists S'. split; [ exact Hext | split; [ | exact Hwt' ] ].
-    destruct Hres as [[Har Hd] | [Hcr Hd]].
-    + eapply TSub; [ apply TPrimArith;
-        [ exact Har | eapply store_weakening; [ exact Ha | exact Hext ] | exact Hb' ] | exact Hd ].
-    + eapply TSub; [ apply TPrimCmp;
-        [ exact Hcr | eapply store_weakening; [ exact Ha | exact Hext ] | exact Hb' ] | exact Hd ].
-  - (* SPrimArith: both operands are number literals; the result is [LInt _ : AInt
-       <: ANum]. The arithmetic result type is [ANum] (subsumed to [T]). *)
-    apply inv_prim in Hty. destruct Hty as [Ha [Hb Hres]].
+  - (* SPrim1: reduce the left operand (NUMERIC or METAMETHOD left operand) *)
+    apply inv_prim in Hty.
+    destruct Hty as [ [Ha [Hb Hres]] | [ofs [proto [M [Self [Other [R [Ea [Htbl [Hin [Hself [Hb Hd]]]]]]]]]]] ].
+    + destruct (IHHstep a st a' st' eq_refl eq_refl Hwt (BAtom ANum) Ha)
+        as [S' [Hext [Ha' Hwt']]].
+      exists S'. split; [ exact Hext | split; [ | exact Hwt' ] ].
+      destruct Hres as [[Har Hd] | [Hcr Hd]].
+      * eapply TSub; [ apply TPrimArith;
+          [ exact Har | exact Ha' | eapply store_weakening; [ exact Hb | exact Hext ] ] | exact Hd ].
+      * eapply TSub; [ apply TPrimCmp;
+          [ exact Hcr | exact Ha' | eapply store_weakening; [ exact Hb | exact Hext ] ] | exact Hd ].
+    + (* metamethod: left operand [tmeta ofs proto : BRec M] steps; preserved by IH;
+         the stepped operand is again a [tmeta] ([tmeta_step_shape]) so [TPrimMetaL]
+         re-applies. *)
+      subst a.
+      destruct (tmeta_step_shape ofs proto st a' st' Hstep) as [own' [proto' Ea']].
+      subst a'.
+      destruct (IHHstep (tmeta ofs proto) st (tmeta own' proto') st' eq_refl eq_refl Hwt (BRec M) Htbl)
+        as [S' [Hext [Htbl' Hwt']]].
+      exists S'. split; [ exact Hext | split; [ | exact Hwt' ] ].
+      eapply TSub; [ eapply (TPrimMetaL S' [] op own' proto' M Self Other R) | exact Hd ].
+      * exact Htbl'.
+      * exact Hin.
+      * exact Hself.
+      * eapply store_weakening; [ exact Hb | exact Hext ].
+  - (* SPrim2: left is a value, reduce the right operand (NUMERIC or METAMETHOD) *)
+    apply inv_prim in Hty.
+    destruct Hty as [ [Ha [Hb Hres]] | [ofs [proto [M [Self [Other [R [Ea [Htbl [Hin [Hself [Hb Hd]]]]]]]]]]] ].
+    + destruct (IHHstep b st b' st' eq_refl eq_refl Hwt (BAtom ANum) Hb)
+        as [S' [Hext [Hb' Hwt']]].
+      exists S'. split; [ exact Hext | split; [ | exact Hwt' ] ].
+      destruct Hres as [[Har Hd] | [Hcr Hd]].
+      * eapply TSub; [ apply TPrimArith;
+          [ exact Har | eapply store_weakening; [ exact Ha | exact Hext ] | exact Hb' ] | exact Hd ].
+      * eapply TSub; [ apply TPrimCmp;
+          [ exact Hcr | eapply store_weakening; [ exact Ha | exact Hext ] | exact Hb' ] | exact Hd ].
+    + (* metamethod: left operand is the value [v = tmeta ofs proto]; right operand
+         [b : Other] steps; preserved by IH; left operand unchanged. *)
+      rewrite Ea in *.
+      destruct (IHHstep b st b' st' eq_refl eq_refl Hwt Other Hb)
+        as [S' [Hext [Hb' Hwt']]].
+      exists S'. split; [ exact Hext | split; [ | exact Hwt' ] ].
+      eapply TSub; [ eapply (TPrimMetaL S' [] op ofs proto M Self Other R) | exact Hd ].
+      * eapply store_weakening; [ exact Htbl | exact Hext ].
+      * exact Hin.
+      * exact Hself.
+      * exact Hb'.
+  - (* SPrimArith: both operands are number literals (the NUMERIC path; a metamethod
+       left operand is a [tmeta], not a number literal — refuted). *)
+    apply inv_prim in Hty.
+    destruct Hty as [ [Ha [Hb Hres]] | [ofs [proto [M [Self [Other [R [Ea _]]]]]]] ];
+      [ | discriminate Ea ].
     exists S. split; [ apply extends_refl | split; [ | exact Hwt ] ].
     destruct Hres as [[_ Hd] | [Hcr _]].
-    + (* arithmetic: result [LInt _] types at [AInt <: ANum], then subsumed to [T] *)
-      eapply TSub;
+    + eapply TSub;
         [ eapply TSub; [ apply (TLit S [] (LInt (prim_arith op m n)))
                        | apply RsSsub; apply SsAtom; apply ALInt ]
         | exact Hd ].
-    + (* a comparison op cannot also be arithmetic (SPrimArith carries [arith_op
-         op = true], but [cmp_op op = true] is impossible for the same op). *)
-      destruct op; simpl in H, Hcr; discriminate.
-  - (* SPrimCmp: both operands are number literals; the result is [LBool _ : ABool].
-       The comparison result type is [ABool] (subsumed to [T]). *)
-    apply inv_prim in Hty. destruct Hty as [Ha [Hb Hres]].
+    + destruct op; simpl in H, Hcr; discriminate.
+  - (* SPrimCmp: both operands are number literals (NUMERIC path; metamethod refuted). *)
+    apply inv_prim in Hty.
+    destruct Hty as [ [Ha [Hb Hres]] | [ofs [proto [M [Self [Other [R [Ea _]]]]]]] ];
+      [ | discriminate Ea ].
     exists S. split; [ apply extends_refl | split; [ | exact Hwt ] ].
     destruct Hres as [[Har _] | [_ Hd]].
-    + (* an arithmetic op cannot also be a comparison. *)
-      destruct op; simpl in H, Har; discriminate.
+    + destruct op; simpl in H, Har; discriminate.
     + eapply TSub; [ apply (TLit S [] (LBool (prim_cmp op m n))) | exact Hd ].
-  - (* SApp1 *) apply inv_app in Hty. destruct Hty as [A [B [Hf [Ha Hsub]]]].
-    destruct (IHHstep f st f' st' eq_refl eq_refl Hwt (BArrow A B) Hf)
-      as [S' [Hext [Hf' Hwt']]].
-    exists S'. split; [ exact Hext | split; [ | exact Hwt' ] ].
-    eapply TSub; [ eapply TApp; [ exact Hf' | eapply store_weakening; [ exact Ha | exact Hext ] ] | exact Hsub ].
-  - (* SApp2 *) apply inv_app in Hty. destruct Hty as [A [B [Hf [Ha Hsub]]]].
-    destruct (IHHstep a st a' st' eq_refl eq_refl Hwt A Ha)
-      as [S' [Hext [Ha' Hwt']]].
-    exists S'. split; [ exact Hext | split; [ | exact Hwt' ] ].
-    eapply TSub; [ eapply TApp; [ eapply store_weakening; [ exact Hf | exact Hext ] | exact Ha' ] | exact Hsub ].
+  - (* SApp1: function steps (ARROW or METAMETHOD-table function) *)
+    apply inv_app in Hty.
+    destruct Hty as [ [A [B [Hf [Ha Hsub]]]] | [ofs [proto [M [Self [A [R [Ef [Htbl [Hin [Hself [Ha Hd]]]]]]]]]]] ].
+    + destruct (IHHstep f st f' st' eq_refl eq_refl Hwt (BArrow A B) Hf)
+        as [S' [Hext [Hf' Hwt']]].
+      exists S'. split; [ exact Hext | split; [ | exact Hwt' ] ].
+      eapply TSub; [ eapply TApp; [ exact Hf' | eapply store_weakening; [ exact Ha | exact Hext ] ] | exact Hsub ].
+    + (* metamethod: function [tmeta ofs proto : BRec M] steps; preserved by IH; the
+         stepped function is again a [tmeta] ([tmeta_step_shape]) so [TCallMeta]
+         re-applies. *)
+      subst f.
+      destruct (tmeta_step_shape ofs proto st f' st' Hstep) as [own' [proto' Ef']].
+      subst f'.
+      destruct (IHHstep (tmeta ofs proto) st (tmeta own' proto') st' eq_refl eq_refl Hwt (BRec M) Htbl)
+        as [S' [Hext [Htbl' Hwt']]].
+      exists S'. split; [ exact Hext | split; [ | exact Hwt' ] ].
+      eapply TSub; [ eapply (TCallMeta S' [] own' proto' M Self A R) | exact Hd ].
+      * exact Htbl'.
+      * exact Hin.
+      * exact Hself.
+      * eapply store_weakening; [ exact Ha | exact Hext ].
+  - (* SApp2: function is a VALUE, argument steps (ARROW or METAMETHOD) *)
+    apply inv_app in Hty.
+    destruct Hty as [ [A [B [Hf [Ha Hsub]]]] | [ofs [proto [M [Self [A [R [Ef [Htbl [Hin [Hself [Ha Hd]]]]]]]]]]] ].
+    + destruct (IHHstep a st a' st' eq_refl eq_refl Hwt A Ha)
+        as [S' [Hext [Ha' Hwt']]].
+      exists S'. split; [ exact Hext | split; [ | exact Hwt' ] ].
+      eapply TSub; [ eapply TApp; [ eapply store_weakening; [ exact Hf | exact Hext ] | exact Ha' ] | exact Hsub ].
+    + (* metamethod: function is the value [v = tmeta ofs proto]; argument [a : A]
+         steps; preserved by IH; function unchanged. *)
+      rewrite Ef in *.
+      destruct (IHHstep a st a' st' eq_refl eq_refl Hwt A Ha)
+        as [S' [Hext [Ha' Hwt']]].
+      exists S'. split; [ exact Hext | split; [ | exact Hwt' ] ].
+      eapply TSub; [ eapply (TCallMeta S' [] ofs proto M Self A R) | exact Hd ].
+      * eapply store_weakening; [ exact Htbl | exact Hext ].
+      * exact Hin.
+      * exact Hself.
+      * exact Ha'.
   - (* SLet1 *) apply inv_let in Hty. destruct Hty as [A [B [H1 [H2 Hsub]]]].
     destruct (IHHstep e1 st e1' st' eq_refl eq_refl Hwt A H1)
       as [S' [Hext [H1' Hwt']]].
@@ -4192,6 +4629,103 @@ Proof.
     (* [tproj proto k : Tg], then subsume [Tg <: W <: T0] *)
     eapply TSub; [ eapply TProj; [ exact Hp | exact HinPf ]
                  | eapply RsTrans; [ apply RsSsub; exact HsTg | exact Hsub ] ].
+  - (* METATABLE [__call] — SCallMeta: [tapp (tmeta own proto) arg] dispatches to
+       [(table.__call) table arg]. Typing: the metamethod [tproj table mm_call :
+       Self -> A -> R] (table : BRec M, [mm_call ∈ M]); apply to [table : Self]
+       (table : BRec M [rsub] Self) giving [A -> R]; apply to [arg : A] giving [R],
+       subsumed to [T0]. *)
+    apply inv_app in Hty.
+    destruct Hty as [ [A0 [B0 [Hf _]]] | [ofs [proto0 [M [Self [A [R [Ef [Htbl [Hin [Hself [Ha Hd]]]]]]]]]]] ];
+      [ apply inv_meta in Hf; destruct Hf as [Tw [Pf [_ [_ [_ [_ Hbad]]]]]];
+        exfalso; eapply rsub_rec_not_arrow; exact Hbad
+      | ].
+    injection Ef as <- <-.
+    exists S. split; [ apply extends_refl | split; [ | exact Hwt ] ].
+    eapply TSub; [ | exact Hd ].
+    eapply TApp.
+    + eapply TApp.
+      * eapply TProj; [ exact Htbl | exact Hin ].
+      * eapply TSub; [ exact Htbl | exact Hself ].
+    + exact Ha.
+  - (* METATABLE OPERATOR — SPrimMetaL: [tprim op (tmeta own proto) b] dispatches to
+       [(table.<mm>) table b]. Same shape as SCallMeta: [tproj table (mm_binop op) :
+       Self -> Other -> R], applied to [table : Self] and [b : Other], result [R]. *)
+    apply inv_prim in Hty.
+    destruct Hty as [ [Ha [_ _]] | [ofs [proto0 [M [Self [Other [R [Ea [Htbl [Hin [Hself [Hb Hd]]]]]]]]]]] ];
+      [ apply inv_meta in Ha; destruct Ha as [Tw [Pf [_ [_ [_ [_ Hbad]]]]]];
+        exfalso; eapply rsub_rec_not_atom; exact Hbad
+      | ].
+    injection Ea as <- <-.
+    exists S. split; [ apply extends_refl | split; [ | exact Hwt ] ].
+    eapply TSub; [ | exact Hd ].
+    eapply TApp.
+    + eapply TApp.
+      * eapply TProj; [ exact Htbl | exact Hin ].
+      * eapply TSub; [ exact Htbl | exact Hself ].
+    + exact Hb.
+  - (* METATABLE [__newindex] — SNewIdx: [tnewidx own ni k v] ([k] absent from own)
+       dispatches to [tassign (tproj ni k) v]. Typing: [tproj ni k : BRef U] (ni :
+       BRec Pf, [(k,BRef U) ∈ Pf]); [tassign (tproj ni k) v : ANil] (cell BRef U,
+       [v : U]); subsumed to [T0]. The records-of-refs write-through. *)
+    apply inv_newidx in Hty.
+    destruct Hty as [Town [Pf [U [Hfs [Hno [Hni [Hp [Hnp [Hin [Hv Hd]]]]]]]]]].
+    exists S. split; [ apply extends_refl | split; [ | exact Hwt ] ].
+    eapply TSub; [ | exact Hd ].
+    eapply TAssign.
+    + eapply TProj; [ exact Hp | exact Hin ].
+    + exact Hv.
+  - (* METATABLE [__newindex] — SNewIdx1: an own field steps. Preserved: own's
+       field-types [Town] unchanged (stepped field keeps its type by the IH), so
+       [key_in k Town] and the merge are unchanged; [TNewIdx] re-applies. *)
+    apply inv_newidx in Hty.
+    destruct Hty as [Town [Pf [U [Hfs [Hno [Hni [Hp [Hnp [Hin [Hv Hd]]]]]]]]]].
+    apply has_fields_split in Hfs.
+    destruct Hfs as [Tpre [Tk [Tpost [ETown [Hpre [Hfe Hpost]]]]]]. subst Town.
+    destruct (IHHstep e st e' st' eq_refl eq_refl Hwt Tk Hfe)
+      as [S' [Hext [Hfe' Hwt']]].
+    exists S'. split; [ exact Hext | split; [ | exact Hwt' ] ].
+    eapply TSub; [ eapply (TNewIdx S' [] (pre ++ (k0, e') :: post) proto
+                            (Tpre ++ (k0, Tk) :: Tpost) Pf k _ U) | exact Hd ].
+    + eapply has_fields_app_replace;
+        [ eapply has_fields_store_weaken; [ exact Hpre | exact Hext ]
+        | exact Hfe'
+        | eapply has_fields_store_weaken; [ exact Hpost | exact Hext ] ].
+    + exact Hno.
+    + exact Hni.
+    + eapply store_weakening; [ exact Hp | exact Hext ].
+    + exact Hnp.
+    + exact Hin.
+    + eapply store_weakening; [ exact Hv | exact Hext ].
+  - (* METATABLE [__newindex] — SNewIdx2: the [__newindex] target [proto] steps.
+       Preserved: [proto] keeps its type [BRec Pf], merge unchanged. *)
+    apply inv_newidx in Hty.
+    destruct Hty as [Town [Pf [U [Hfs [Hno [Hni [Hp [Hnp [Hin [Hv Hd]]]]]]]]]].
+    destruct (IHHstep proto st proto' st' eq_refl eq_refl Hwt (BRec Pf) Hp)
+      as [S' [Hext [Hp' Hwt']]].
+    exists S'. split; [ exact Hext | split; [ | exact Hwt' ] ].
+    eapply TSub; [ eapply (TNewIdx S' [] own proto' Town Pf k _ U) | exact Hd ].
+    + eapply has_fields_store_weaken; [ exact Hfs | exact Hext ].
+    + exact Hno.
+    + exact Hni.
+    + exact Hp'.
+    + exact Hnp.
+    + exact Hin.
+    + eapply store_weakening; [ exact Hv | exact Hext ].
+  - (* METATABLE [__newindex] — SNewIdx3: the written value steps. Preserved: it
+       keeps its content type [U]. *)
+    apply inv_newidx in Hty.
+    destruct Hty as [Town [Pf [U [Hfs [Hno [Hni [Hp [Hnp [Hin [Hv Hd]]]]]]]]]].
+    destruct (IHHstep v st v' st' eq_refl eq_refl Hwt U Hv)
+      as [S' [Hext [Hv' Hwt']]].
+    exists S'. split; [ exact Hext | split; [ | exact Hwt' ] ].
+    eapply TSub; [ eapply (TNewIdx S' [] own proto Town Pf k _ U) | exact Hd ].
+    + eapply has_fields_store_weaken; [ exact Hfs | exact Hext ].
+    + exact Hno.
+    + exact Hni.
+    + eapply store_weakening; [ exact Hp | exact Hext ].
+    + exact Hnp.
+    + exact Hin.
+    + exact Hv'.
 Qed.
 
 (* ===========================================================================
@@ -4492,6 +5026,56 @@ Proof.
       * right. exists (tmeta ofs proto'), stp. apply SMeta2; [ exact Hvs | exact Hp' ].
     + right. subst ofs. exists (tmeta (pre ++ (k, e') :: post) proto), st'.
       apply SMeta1; [ exact Hpre | exact He' ].
+  - (* METATABLE [__call] — TCallMeta: [tapp (tmeta ofs proto) arg]. If the table
+       steps, [SApp1]; else table value and the arg steps, [SApp2]; else both values
+       — [SCallMeta] dispatches. The table is a [tmeta] typed at [BRec M], so its
+       progress IH is the [tmeta]-subterm IH (always steps unless a value). *)
+    intros st Hwt. right.
+    match goal with [ IHt : [] = [] -> forall st, _ -> value (tmeta ofs proto) \/ _ |- _ ] =>
+      destruct (IHt eq_refl st Hwt) as [Hvt | [t' [stt Ht']]] end.
+    + match goal with [ IHa : [] = [] -> forall st, _ -> value arg \/ _ |- _ ] =>
+        destruct (IHa eq_refl st Hwt) as [Hva | [a' [sta Ha']]] end.
+      * exists (tapp (tapp (tproj (tmeta ofs proto) mm_call) (tmeta ofs proto)) arg), st.
+        apply SCallMeta; [ exact Hvt | exact Hva ].
+      * exists (tapp (tmeta ofs proto) a'), sta. apply SApp2; [ exact Hvt | exact Ha' ].
+    + exists (tapp t' arg), stt. apply SApp1. exact Ht'.
+  - (* METATABLE OPERATOR — TPrimMetaL: [tprim op (tmeta ofs proto) b]. If the table
+       steps, [SPrim1]; else the table is a value — [SPrimMetaL] dispatches (the right
+       operand need not be a value, the metamethod is a function). *)
+    intros st Hwt. right.
+    match goal with [ IHt : [] = [] -> forall st, _ -> value (tmeta ofs proto) \/ _ |- _ ] =>
+      destruct (IHt eq_refl st Hwt) as [Hvt | [t' [stt Ht']]] end.
+    + exists (tapp (tapp (tproj (tmeta ofs proto) (mm_binop op)) (tmeta ofs proto)) b), st.
+      apply SPrimMetaL. exact Hvt.
+    + exists (tprim op t' b), stt. apply SPrim1. exact Ht'.
+  - (* METATABLE [__newindex] — TNewIdx: [tnewidx ofs proto k v]. If an own field
+       steps, [SNewIdx1]; else own all values — if proto steps [SNewIdx2]; else if
+       the value steps [SNewIdx3]; else all values — [SNewIdx] dispatches the write
+       to the [__newindex] target ([k] absent from own, since [key_in k Town = false]
+       and own's keys are [Town]'s keys, so [field_lookup k ofs = None]). *)
+    intros st Hwt. right.
+    match goal with [ Hfs0 : has_fields S [] ofs Town, IH : [] = [] -> _ |- _ ] =>
+      destruct (fields_progress S ofs Town st Hfs0 (IH eq_refl st Hwt)) as
+        [Hvs | [pre [k0 [e0 [post [Efs [Hpre [e0' [st0' He0']]]]]]]]] end.
+    + (* own all values: proto, then value, then dispatch *)
+      match goal with [ IHp : [] = [] -> forall st, _ -> value proto \/ _ |- _ ] =>
+        destruct (IHp eq_refl st Hwt) as [Hvp | [proto' [stp Hp']]] end.
+      * match goal with [ IHv : [] = [] -> forall st, _ -> value v \/ _ |- _ ] =>
+          destruct (IHv eq_refl st Hwt) as [Hvv | [v' [stv Hv']]] end.
+        -- (* all values: SNewIdx — establish [field_lookup k ofs = None] *)
+           assert (Hlk : field_lookup k ofs = None).
+           { match goal with [ Hkey : key_in k Town = false, Hf : has_fields S [] ofs Town |- _ ] =>
+               pose proof (has_fields_keys S [] ofs Town Hf) as Hkeys;
+               destruct (field_lookup k ofs) as [vv | ] eqn:Elk; [ | reflexivity ];
+               exfalso;
+               apply field_lookup_in_keys in Elk; rewrite Hkeys in Elk;
+               apply key_in_iff in Elk; rewrite Elk in Hkey; discriminate end. }
+           exists (tassign (tproj proto k) v), st.
+           apply SNewIdx; [ exact Hvs | exact Hvp | exact Hvv | exact Hlk ].
+        -- exists (tnewidx ofs proto k v'), stv. apply SNewIdx3; assumption.
+      * exists (tnewidx ofs proto' k v), stp. apply SNewIdx2; [ exact Hvs | exact Hp' ].
+    + subst ofs. exists (tnewidx (pre ++ (k0, e0') :: post) proto k v), st0'.
+      apply SNewIdx1; [ exact Hpre | exact He0' ].
   - (* P0 HFnil *) intros st Hwt ke [].
   - (* P0 HFcons *) intros st Hwt ke Hin. simpl in Hin. destruct Hin as [Heq | Hin].
     + subst ke.
@@ -4583,7 +5167,8 @@ Definition ex_bad2 : tm := tapp (tlit (LInt 3)) (tlit (LInt 0)).
 Example ex_bad2_untyped : forall S T, ~ has_type S [] ex_bad2 T.
 Proof.
   intros S T H. unfold ex_bad2 in H. apply inv_app in H.
-  destruct H as [A [B [Hf [_ _]]]].
+  destruct H as [ [A [B [Hf [_ _]]]] | [ofs [proto [M [Self [A [R [Ef _]]]]]]] ];
+    [ | discriminate Ef ].
   apply inv_lit in Hf. simpl in Hf.
   eapply rsub_atom_not_arrow; eauto.
 Qed.
@@ -4628,7 +5213,8 @@ Example payoff_rejected_WITHOUT_narrowing :
     (tapp (tvar 1) (tvar 0)) T.
 Proof.
   intros T H. apply inv_app in H.
-  destruct H as [A [B [Hf [Ha _]]]].
+  destruct H as [ [A [B [Hf [Ha _]]]] | [ofs [proto [M [Self [A [R [Ef _]]]]]]] ];
+    [ | discriminate Ef ].
   apply inv_var in Hf. destruct Hf as [Sf [Hlf Hsf]]. simpl in Hlf. injection Hlf as <-.
   apply rsub_arrow_inv in Hsf. destruct Hsf as [Hdom _].
   apply inv_var in Ha. destruct Ha as [Sa [Hla Hsa]]. simpl in Hla. injection Hla as <-.
@@ -4680,7 +5266,8 @@ Example tt_payoff_rejected_WITHOUT_narrowing :
     (tapp (tvar 1) (tvar 0)) T.
 Proof.
   intros T H. apply inv_app in H.
-  destruct H as [A [B [Hf [Ha _]]]].
+  destruct H as [ [A [B [Hf [Ha _]]]] | [ofs [proto [M [Self [A [R [Ef _]]]]]]] ];
+    [ | discriminate Ef ].
   apply inv_var in Hf. destruct Hf as [Sf [Hlf Hsf]]. simpl in Hlf. injection Hlf as <-.
   apply rsub_arrow_inv in Hsf. destruct Hsf as [Hdom _].
   apply inv_var in Ha. destruct Ha as [Sa [Hla Hsa]]. simpl in Hla. injection Hla as <-.
@@ -5279,7 +5866,8 @@ Definition ex_bad_add : tm := tprim PAdd (tlit (LStr 0)) (tlit (LInt 1)).
 Example ex_bad_add_untyped : forall S T, ~ has_type S [] ex_bad_add T.
 Proof.
   intros S T H. unfold ex_bad_add in H. apply inv_prim in H.
-  destruct H as [Ha [_ _]].
+  destruct H as [ [Ha [_ _]] | [ofs [proto [M [Self [Other [R [Ea _]]]]]]] ];
+    [ | discriminate Ea ].
   apply inv_lit in Ha. simpl in Ha.   (* Ha : rsub AStr ANum *)
   apply rsub_sound in Ha. pose proof (Ha (VStr 0) I) as Hbad. exact Hbad.
 Qed.
@@ -5375,6 +5963,9 @@ Proof.
   - (* tappspread *) rewrite IHe1, IHe2; reflexivity.
   - (* METATABLES — tmeta: own fields (Pl IH) + proto (P IH) cancel. *)
     rewrite IHe, IHe0; reflexivity.
+  - (* METATABLE [__newindex] — tnewidx: own fields (Pl IH) + proto + value cancel. *)
+    repeat match goal with [ IH : forall ss kk, _ = _ |- _ ] => rewrite IH end;
+      reflexivity.
   - (* Pl cons *) rewrite IHe, IHe0; reflexivity.
   - (* MULTI-RETURN — Pt cons *) rewrite IHe, IHe0; reflexivity.
 Qed.
@@ -6036,6 +6627,224 @@ Proof.
 Qed.
 
 (* ===========================================================================
+   METATABLE METAMETHODS — THE PAYOFFS: callable tables (__call), operator
+   overloading (__add), and write-fallback (__newindex), machine-checked.
+   =========================================================================== *)
+
+(* ---- __call: a CALLABLE TABLE. [cobj] carries a [__call] metamethod
+   [BTop -> Int -> Int] (curried self, then arg; returns the arg). Applying it to
+   [3] dispatches through [__call] and computes [3]. *)
+Definition call_mm : tm := tlam BTop (tlam (BAtom AInt) (tvar 0)).
+Definition cobj : tm := tmeta [(mm_call, call_mm)] (trec []).
+Definition cobj_M : list (string * BTy) :=
+  merge_fields [(mm_call, BArrow BTop (BArrow (BAtom AInt) (BAtom AInt)))] [].
+
+(* the callable table itself types at its merged read record. *)
+Example call_obj_typed : has_type [] [] cobj (BRec cobj_M).
+Proof.
+  unfold cobj, cobj_M, call_mm. eapply TMeta.
+  - apply HFcons; [ apply TLam; apply TLam; apply (TVar [] [BAtom AInt; BTop] 0); reflexivity | apply HFnil ].
+  - repeat constructor; simpl; intuition discriminate.
+  - apply TRec; [ apply HFnil | constructor ].
+  - constructor.
+Qed.
+
+(* APPLYING the callable table to [3] is well typed at [Int] — via [TCallMeta],
+   the [__call] metamethod's final codomain. *)
+Example call_payoff_typed : has_type [] [] (tapp cobj (tlit (LInt 3))) (BAtom AInt).
+Proof.
+  eapply TCallMeta.
+  - apply call_obj_typed.
+  - unfold cobj_M, merge_fields, mm_call. simpl. left; reflexivity.
+  - apply RsSsub. apply SsTop.
+  - apply (TLit [] [] (LInt 3)).
+Qed.
+
+(* and it COMPUTES: [cobj 3] dispatches to [(cobj.__call) cobj 3] (the metamethod
+   resolved through the [__index] chain), two betas, reaching [3]. *)
+Example call_payoff_steps : forall st,
+  multistep (tapp cobj (tlit (LInt 3)), st) (tlit (LInt 3), st).
+Proof.
+  intro st. unfold cobj, call_mm.
+  eapply multistep_trans.
+  { apply multistep_one. apply SCallMeta.
+    - apply VMeta; [ repeat constructor | apply VRec; constructor ].
+    - constructor. }
+  (* resolve the metamethod via SMetaProjOwn (it is an own field) *)
+  eapply multistep_trans.
+  { apply multistep_one. apply SApp1. apply SApp1. apply SMetaProjOwn.
+    - apply VMeta; [ repeat constructor | apply VRec; constructor ].
+    - unfold mm_call; reflexivity. }
+  (* outer beta: [(λself.λx.x) cobj] ⤳ [λx.x] *)
+  eapply multistep_trans.
+  { apply multistep_one. apply SApp1. apply SBeta.
+    apply VMeta; [ repeat constructor | apply VRec; constructor ]. }
+  (* inner beta: [(λx.x) 3] ⤳ [3] *)
+  simpl. apply multistep_one. apply SBeta. constructor.
+Qed.
+
+(* ---- __add: OPERATOR OVERLOADING. [vobj] carries an [__add] metamethod
+   [BTop -> BTop -> Int]; [vobj + vobj] dispatches to it, result type [Int]. This
+   is real Lua operator overloading, machine-checked at the type level. *)
+Definition add_mm : tm := tlam BTop (tlam BTop (tlit (LInt 7))).
+Definition vobj : tm := tmeta [("__add"%string, add_mm)] (trec []).
+Definition vobj_M : list (string * BTy) :=
+  merge_fields [("__add"%string, BArrow BTop (BArrow BTop (BAtom AInt)))] [].
+
+Example add_obj_typed : has_type [] [] vobj (BRec vobj_M).
+Proof.
+  unfold vobj, vobj_M, add_mm. eapply TMeta.
+  - apply HFcons; [ apply TLam; apply TLam; apply (TLit [] [BTop; BTop] (LInt 7)) | apply HFnil ].
+  - repeat constructor; simpl; intuition discriminate.
+  - apply TRec; [ apply HFnil | constructor ].
+  - constructor.
+Qed.
+
+(* [vobj + vobj] is well typed at [Int] (the [__add] metamethod's result) — LEFT
+   operand dispatch via [TPrimMetaL]. [mm_binop PAdd = "__add"]. *)
+Example add_payoff_typed :
+  has_type [] [] (tprim PAdd vobj vobj) (BAtom AInt).
+Proof.
+  eapply TPrimMetaL.
+  - apply add_obj_typed.
+  - unfold vobj_M, merge_fields. simpl. unfold mm_binop. left; reflexivity.
+  - apply RsSsub. apply SsTop.
+  - (* right operand [vobj : BTop] via [SsTop] subsumption *)
+    eapply TSub; [ apply add_obj_typed | apply RsSsub; apply SsTop ].
+Qed.
+
+(* and it COMPUTES: [vobj + vobj] dispatches to [(vobj.__add) vobj vobj], reaching
+   the metamethod's result [7]. *)
+Example add_payoff_steps : forall st,
+  multistep (tprim PAdd vobj vobj, st) (tlit (LInt 7), st).
+Proof.
+  intro st. unfold vobj, add_mm.
+  eapply multistep_trans.
+  { apply multistep_one. apply SPrimMetaL.
+    apply VMeta; [ repeat constructor | apply VRec; constructor ]. }
+  eapply multistep_trans.
+  { apply multistep_one. apply SApp1. apply SApp1. apply SMetaProjOwn.
+    - apply VMeta; [ repeat constructor | apply VRec; constructor ].
+    - unfold mm_binop; reflexivity. }
+  eapply multistep_trans.
+  { apply multistep_one. apply SApp1. apply SBeta.
+    apply VMeta; [ repeat constructor | apply VRec; constructor ]. }
+  simpl. apply multistep_one. apply SBeta.
+  apply VMeta; [ repeat constructor | apply VRec; constructor ].
+Qed.
+
+(* a primop whose LEFT operand is a metatable WITHOUT the operator's metamethod is
+   REJECTED (the metamethod must be present in the table's read interface). Here
+   [vobj] has [__add] but NOT [__sub], so [vobj - vobj] does not type via the
+   metamethod, and [vobj] is not a number, so the numeric path fails too. *)
+Example sub_absent_rejected : forall T,
+  ~ has_type [] [] (tprim PSub vobj vobj) T.
+Proof.
+  intros T H. apply inv_prim in H.
+  destruct H as [ [Ha [_ _]] | [ofs [proto [M [Self [Other [R [Ea [Htbl [Hin [_ [_ _]]]]]]]]]]] ].
+  - (* numeric: [vobj : ANum] is false (a table is not a number) *)
+    apply inv_meta in Ha. destruct Ha as [Tw [Pf [_ [_ [_ [_ Hbad]]]]]].
+    eapply rsub_rec_not_atom; exact Hbad.
+  - (* metamethod: [vobj]'s merged type [M] must contain ("__sub", _); but the only
+       member is ("__add", _) — refuted. *)
+    unfold vobj in Ea. injection Ea as <- <-.
+    (* [Htbl : has_type [] [] vobj (BRec M)] forces [M] ssub-above [vobj_M] *)
+    apply inv_meta in Htbl.
+    destruct Htbl as [Tw [Pf [Hfs [_ [Hp [_ HsubRec]]]]]].
+    unfold vobj, add_mm in Hfs.
+    inversion Hfs as [ | S0 G0 k0 e0 Te0 fs0 Ts0 He0 Hrest E1 E2 E3 ]; subst.
+    inversion Hrest; subst.
+    (* the prototype [trec []] has read type [BRec Pf] with [Pf]'s keys empty *)
+    apply inv_rec in Hp. destruct Hp as [Pbase [Hpb [_ HsubP]]].
+    inversion Hpb; subst.
+    apply rsub_rec_super in HsubP. simpl in HsubP.
+    (* the supplier of ("__sub", _) in [M] comes from [merge [("__add",_)] Pf] *)
+    destruct (rsub_rec_inv (merge_fields [("__add"%string, Te0)] Pf) M
+                "__sub"%string (BArrow Self (BArrow Other R)) HsubRec Hin)
+      as [Tg [HinTg _]].
+    (* its key is in the merge keys ⇒ "__add" (own) or a [Pf] key; [Pf]'s keys ⊆ ∅ *)
+    assert (Hk : In "__sub"%string (map fst (merge_fields [("__add"%string, Te0)] Pf)))
+      by (replace "__sub"%string with (fst ("__sub"%string, Tg)) by reflexivity;
+          apply in_map; exact HinTg).
+    apply merge_fields_key_in in Hk.
+    destruct Hk as [Hown | Hproto].
+    + simpl in Hown. destruct Hown as [E | F]; [ discriminate E | exact F ].
+    + (* a [Pf] key — but [Pf] has no keys (its [srec []] gives every key in ∅) *)
+      apply in_map_iff in Hproto. destruct Hproto as [[k' T'] [Ek' HinPf]].
+      simpl in Ek'. subst k'.
+      destruct (srec_lookup _ _ HsubP "__sub"%string T' HinPf) as [Tf [Hinb _]].
+      simpl in Hinb. exact Hinb.
+Qed.
+
+(* ---- __newindex: WRITE FALLBACK. [tnewidx [] ni "k" v] with [k] ABSENT from the
+   empty own fields dispatches to the [__newindex] target [ni], a record of REFS;
+   the write goes through to [ni]'s cell for [k]. With [ni = { k = loc0 }] over a
+   store [[0]] typed [[Int]], writing [5] yields [nil] and store [[5]]. *)
+Definition ni_target : tm := trec [("k"%string, tloc 0)].
+Definition niwrite : tm := tnewidx [] ni_target "k" (tlit (LInt 5)).
+
+(* the write is well typed at [nil] ([ANil]) under store typing [[Int]]. *)
+Example newindex_payoff_typed :
+  has_type [BAtom AInt] [] niwrite (BAtom ANil).
+Proof.
+  unfold niwrite, ni_target.
+  eapply (TNewIdx [BAtom AInt] [] [] (trec [("k"%string, tloc 0)])
+            [] [("k"%string, BRef (BAtom AInt))] "k" (tlit (LInt 5)) (BAtom AInt)).
+  - apply HFnil.
+  - constructor.
+  - reflexivity.                         (* key_in "k" [] = false *)
+  - apply TRec; [ apply HFcons; [ apply (TLoc [BAtom AInt] [] 0); reflexivity | apply HFnil ]
+                | repeat constructor; simpl; intuition discriminate ].
+  - repeat constructor; simpl; intuition discriminate.
+  - left; reflexivity.                   (* ("k", BRef Int) in Pf *)
+  - apply (TLit [BAtom AInt] [] (LInt 5)).
+Qed.
+
+(* and it WRITES THROUGH: the [__newindex] dispatch becomes [tassign (ni.k) 5],
+   which assigns [5] into the cell [loc0]; from store [[0]] the result is [nil] and
+   store [[5]]. The records-of-refs write-fallback, computed end-to-end. *)
+Example newindex_payoff_steps :
+  multistep (niwrite, [tlit (LInt 0)]) (tlit LNil, [tlit (LInt 5)]).
+Proof.
+  unfold niwrite, ni_target.
+  (* dispatch: SNewIdx ([k] absent from own []) ⤳ tassign (tproj ni "k") 5 *)
+  eapply multistep_trans.
+  { apply multistep_one. apply SNewIdx.
+    - constructor.                          (* own [] all values *)
+    - apply VRec; repeat constructor.       (* ni is a value record *)
+    - constructor.                          (* 5 is a value *)
+    - reflexivity. }                        (* field_lookup "k" [] = None *)
+  (* resolve [tproj ni "k"] to [loc0] (plain record projection) *)
+  eapply multistep_trans.
+  { apply multistep_one. apply SAssign1. apply SProj.
+    - apply VRec; repeat constructor.
+    - reflexivity. }
+  (* assign [5] into [loc0]: store [0] ↦ [5], yields nil *)
+  apply multistep_one. apply SAssign. constructor.
+Qed.
+
+(* writing an OWN key is the deferred rawset case — but a write to a key NOT in the
+   [__newindex] target's cells is REJECTED (no cell to write through to). Here the
+   target [ni] has only cell [k], so [tnewidx [] ni "nope" 5] does not type. *)
+Example newindex_absent_cell_rejected : forall T,
+  ~ has_type [BAtom AInt] [] (tnewidx [] ni_target "nope" (tlit (LInt 5))) T.
+Proof.
+  intros T H. apply inv_newidx in H.
+  destruct H as [Town [Pf [U [Hfs [_ [_ [Hp [_ [Hin [_ _]]]]]]]]]].
+  (* own is empty; the target [ni] has read type [Pf] ssub-above [{k:BRef Int}].
+     ("nope", BRef U) ∈ Pf forces "nope" a key of the target — but its only key is
+     "k". Refuted via the record subtyping supplier. *)
+  unfold ni_target in Hp. apply inv_rec in Hp.
+  destruct Hp as [Pbase [Hpb [_ HsubP]]].
+  inversion Hpb as [ | Sb Gb kb eb Teb fsb Tsb Heb Hrestb Eb1 Eb2 Eb3 ]; subst.
+  inversion Hrestb; subst.
+  apply rsub_rec_super in HsubP. simpl in HsubP.
+  destruct (srec_lookup _ _ HsubP "nope"%string (BRef U) Hin) as [Tf [Hinb _]].
+  simpl in Hinb. destruct Hinb as [E | F];
+    [ injection E; intros _ Ek; discriminate Ek | exact F ].
+Qed.
+
+(* ===========================================================================
    ASSUMPTION AUDIT — closed under the global context.
    =========================================================================== *)
 Print Assumptions progress.
@@ -6046,6 +6855,16 @@ Print Assumptions oop_inherited_steps.
 Print Assumptions oop_own_typed.
 Print Assumptions oop_own_steps.
 Print Assumptions oop_absent_rejected.
+(* METATABLE METAMETHODS — __call / __add / __newindex payoffs (typed + stepped +
+   rejected): callable tables, operator overloading, write fallback. *)
+Print Assumptions call_payoff_typed.
+Print Assumptions call_payoff_steps.
+Print Assumptions add_payoff_typed.
+Print Assumptions add_payoff_steps.
+Print Assumptions sub_absent_rejected.
+Print Assumptions newindex_payoff_typed.
+Print Assumptions newindex_payoff_steps.
+Print Assumptions newindex_absent_cell_rejected.
 Print Assumptions preservation.
 Print Assumptions ex_add_typed.
 Print Assumptions ex_add_steps.
