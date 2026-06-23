@@ -728,8 +728,8 @@ Still open (DEFERRED — recorded honestly, minimal core only):
   mutating the state the condition reads; general termination is neither provided
   nor needed. `Print Assumptions` Closed on all; cores (subtype.v/ssub.v/check.v)
   UNMODIFIED. DEFERRED (backlog): `break`/`return`/`goto` (non-local control —
-  labelled exits/continuations), generic `for-in` (iterator protocols). Numeric
-  `for` now DONE (see below). See `proof-kernel.md` increment 20.
+  labelled exits/continuations). Numeric `for` and generic `for-in` now DONE (see
+  below). See `proof-kernel.md` increment 20.
 - [x] **Numeric `for`-loop `for i = e1, e2, e3 do body end` — DONE (encoded over
   `twhile`).** Models Lua 5.1 numeric-for as a desugaring over the existing while-
   loop + reference + arithmetic + comparison + local-binding substrate; NO new core
@@ -763,6 +763,42 @@ Still open (DEFERRED — recorded honestly, minimal core only):
   never descends. The two-form static-sign rendering is the faithful `nat`-substrate model;
   unifying needs a signed `NumRep` (`Z` payload) + signed `LInt` + a `PNeg`/sign-aware `PSub`.
   See `proof-kernel.md` increment 28.
+- [x] **Generic `for-in` loop `for v1,…,vn in explist do body end` (iterator
+  protocol) — DONE (encoded over `twhile` + `tmassign` + `tapp` + `tifn`).** Models
+  Lua 5.1's own generic-for desugaring (`local f,s,ctrl=explist; while true do local
+  v1..vn=f(s,ctrl); if v1==nil then break end; ctrl=v1; body end`) as a desugaring
+  over EXISTING substrate; NO new core term, NO new subtyping, NO new check.v synth
+  arm; `subtype.v`/`ssub.v`/`check.v` byte-UNMODIFIED. KEY MOVE (avoids needing
+  `break`, which this dev lacks): FOLD the nil-termination into the `twhile` GUARD,
+  exactly as numeric-for folded its termination. The iterator sits in the `twhile`
+  CONDITION (re-evaluated each unfold ⇒ called ONCE per iteration); its first result
+  both drives termination and becomes the next control value (advanced in the body).
+  Forms: `forin_guard` = `tseq (tmassign vcells iter_call) (tifn (!v1cell) true
+  false)` (call iterator, multi-bind the n results via multiple-assignment, test the
+  first cell truthy ⇒ Bool); `forin_body` = `tseq (ctrl := !v1cell) (tifn (!v1cell)
+  body nil)` (advance control, run body under the NARROWED first loop variable);
+  `tforin = twhile forin_guard forin_body`. Typing inherited from `twhile_typed`
+  (`tforin_typed`/`forin_guard_typed`/`forin_body_typed`), unfold/step from
+  `twhile_unfold`. NARROWING: the body's `tifn (!v1cell)` substitutes `v1` at de
+  Bruijn 0 narrowed to `truthy_type` (the EXISTING expressible non-nil bound), so the
+  body sees `v1` non-nil. CONTROL TYPE = `V1 = T ∪ nil` (compatible-with-V1, no new
+  substrate): `ctrl := !v1cell` type-checks by reflexivity; the iterator narrows its
+  own control argument internally (`ttypetest TgNum`), exactly Lua's stateful-iterator
+  pattern. Payoffs: a concrete generic-for over an explicit finite iterator
+  `(Num∪nil)→BTuple[Num∪nil]` yielding 1,2,3 then nil TYPES (`forin_loop_typed`,
+  `forin_iter_typed`) and STEPS end-to-end accumulating `cnt=3` then TERMINATING on
+  nil (`forin_loop_runs` = three `forin_one_iter` + `forin_terminates`); the first
+  loop variable is narrowed to non-nil inside the body (`forin_v1_narrowed_nonnil :
+  v1 : truthy_type`) and REJECTED at nil (`forin_v1_not_nil : ~ v1 : ANil`, via a
+  number witness in `truthy_type`); the loop terminates when the iterator returns nil
+  (`forin_terminates`). `Print Assumptions` Closed on all. SUBSTRATE BOUNDARY noted
+  (not faked): termination is folded as "first result TRUTHY" (the only expressible
+  non-nil narrowing — `tifn`'s `truthy_type` bound) rather than exact `v1 == nil`;
+  the precise `v1 : V1 ∩ ¬nil` narrowing is the SAME intersection-narrowing substrate
+  gap the `TIfn` note already records (needs an intersection-introduction typing rule
+  + arrow inversion). On a standard iterator (non-falsy element or nil) truthiness
+  COINCIDES with non-nil, so this is sound and Lua-faithful. See `proof-kernel.md`
+  increment 29.
 - [x] **Mutable TABLE fields (record fields as refs) — DONE (increment M4,
   records-of-refs ENCODING).** A Lua mutable table `{x:T,y:U}` IS a record of
   reference cells `BRec [("x", BRef T); ("y", BRef U)]`: the field SET is fixed

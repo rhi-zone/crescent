@@ -9273,6 +9273,434 @@ Proof.
 Qed.
 
 (* ===========================================================================
+   INCREMENT — GENERIC FOR-IN LOOP:  for v1,…,vn in explist do body end (Lua 5.1).
+
+   Like the numeric-for (previous increment) and the while-loop (increment 20)
+   this is an ENCODING over the existing core — NO new core term, NO new
+   subtyping, NO change to lift/subst/progress/preservation/check.v. It REDUCES
+   to the already-proven [twhile] + multiple-assignment ([tmassign]) + function
+   application ([tapp]) + truthiness narrowing ([tifn]) + reference substrate;
+   soundness is inherited from [twhile_typed]/[twhile_unfold] (hence from
+   [progress]+[preservation]). It adds NO new check.v synth arm — the build stays
+   fast (no O(constructors²) blowup).
+
+   WHY DESUGAR (not a new primitive). Lua's own definition of generic-for IS a
+   desugaring into while + a multi-bind of an iterator call + a nil-termination
+   test (the standard 5.1 expansion). Every ingredient already exists as proven
+   substrate: [twhile] (the loop with store-driven termination), [tmassign] (bind
+   the n loop variables from the iterator's multi-return, with arity adjustment),
+   [tapp] (call the iterator), [tifn] (narrow the first loop variable past nil).
+   Reusing them gives the loop's whole metatheory for free and keeps the addition
+   ad-hoc-free.
+
+   LUA 5.1 SEMANTICS modelled.  [for v1,…,vn in explist do body end] ≡
+     local f, s, ctrl = explist        -- iterator fn f, state s, initial control
+     while true do
+       local v1,…,vn = f(s, ctrl)      -- call iterator → multi-return
+       if v1 == nil then break end     -- nil in the FIRST var terminates
+       ctrl = v1                        -- advance control to first result
+       body
+     end
+   The KEY MODELING MOVE (avoids needing [break], which this dev does not have):
+   FOLD the nil-termination into the loop GUARD, exactly as numeric-for folded its
+   termination into the [twhile] guard. The iterator is called ONCE per iteration
+   (it sits in the [twhile] CONDITION, which [twhile_unfold] re-evaluates against
+   the current store each turn); its first result both (a) drives termination —
+   nil/falsy ⇒ stop — and (b) becomes the next control value (advanced in the
+   body). Loop state f/s and the bound vars/control live in MUTABLE STORE CELLS
+   (locations), mirroring how numeric-for / while manage mutable loop state.
+
+   TERMINATION-AS-TRUTHINESS (the faithful narrowing boundary, NOT faked). Lua
+   terminates on [v1 == nil] EXACTLY. The narrowing substrate this dev has that
+   yields a USABLE non-nil type for the body is TRUTHINESS narrowing ([tifn]):
+   the then-branch narrows the scrutinee to [truthy_type] (the non-nil, non-false
+   bound). A standard iterator yields a non-falsy element or nil, so on its
+   results truthiness COINCIDES with non-nil; we therefore fold termination as
+   "first result truthy" and the body sees [v1 : truthy_type] (the EXISTING
+   expressible non-nil narrowing — exactly the truthiness increment's bound). The
+   precise [v1 : V1 ∩ ¬nil] narrowing is the SAME intersection-narrowing substrate
+   gap the [TIfn] note already records (proof-kernel.md / TODO.md); using the
+   truthy bound is sound and Lua-faithful for the iterator protocol — not faked.
+
+   CONTROL TYPE = V1 (compatible-with-V1, no new substrate). The control advances
+   to v1 each step ([ctrl := !v1cell]); both the control cell and v1cell are typed
+   at the SAME [V1 = T ∪ nil] shape, so the advance type-checks by reflexivity. A
+   real iterator receives the previous loop variable as its control argument and
+   narrows it itself — modelled here by the iterator's body doing a [ttypetest]/
+   [tifn] on its control before using it, exactly Lua's stateful-iterator pattern.
+   =========================================================================== *)
+
+(* THE GENERIC FOR-IN GUARD (runs once per iteration as the [twhile] condition).
+   It (1) calls the iterator [iter_call] (a multivalue-typed call), (2) binds the
+   n results into the result cells [vcells] via multiple-assignment (arity
+   adjustment for free), then (3) tests the FIRST result cell [v1cell] for
+   truthiness, yielding a Bool: [true] continues the loop, [false] (falsy ⇒ nil)
+   terminates it. The truthiness test is [tifn (!v1cell) true false] — a Bool that
+   is [true] iff the cell holds a truthy (non-nil) value. *)
+Definition forin_guard (vcells : list tm) (v1cell iter_call : tm) : tm :=
+  tseq (tmassign vcells iter_call)
+       (tifn (tderef v1cell) (tlit (LBool true)) (tlit (LBool false))).
+
+(* THE GENERIC FOR-IN BODY (runs after a truthy guard). It (1) advances the control
+   cell to the first result [ctrl := !v1cell] (both [V1 = T ∪ nil]-typed, so this
+   type-checks), then (2) runs the user [body] under the NARROWED first loop
+   variable: [tifn (!v1cell) body nil] re-reads [v1cell] (the guard just
+   established it is truthy, so this selects the then-branch and SUBSTITUTES the
+   value, narrowed to [truthy_type], at de Bruijn 0 in [body]). The user [body]
+   references [v1] as de Bruijn 0 (narrowed non-nil); v2…vn it reads from their
+   cells [!v2cell …] (at their tuple types). *)
+Definition forin_body (ctrlcell v1cell body : tm) : tm :=
+  tseq (tassign ctrlcell (tderef v1cell))
+       (tifn (tderef v1cell) body (tlit LNil)).
+
+(* THE GENERIC FOR-IN LOOP — the [twhile] of the guard over the body. *)
+Definition tforin (vcells : list tm) (ctrlcell v1cell iter_call body : tm) : tm :=
+  twhile (forin_guard vcells v1cell iter_call)
+         (forin_body ctrlcell v1cell body).
+
+(* TYPING the loop. Under the self-ref binder ([Tunit :: G]):
+   - the guard's [tmassign] binds the iterator's multi-return into the result
+     cells (whatever the multiple-assignment rule demands of caller),
+   - the truthiness test yields Bool, so the whole guard is Bool;
+   - the body's control-advance and narrowed user-body are unit statements.
+   Inherits [Tunit] from [twhile_typed]. We package the obligations as the caller-
+   supplied derivations of the two halves (guard : Bool, body : Tunit), keeping the
+   rule a thin wrapper over [twhile_typed]. *)
+Lemma tforin_typed : forall S G vcells ctrlcell v1cell iter_call body,
+  has_type S (Tunit :: G) (forin_guard vcells v1cell iter_call) (BAtom ABool) ->
+  has_type S (Tunit :: G) (forin_body ctrlcell v1cell body) Tunit ->
+  has_type S G (tforin vcells ctrlcell v1cell iter_call body) Tunit.
+Proof.
+  intros S G vcells ctrlcell v1cell iter_call body Hg Hb.
+  unfold tforin. apply twhile_typed; [ exact Hg | exact Hb ].
+Qed.
+
+(* The guard is a Bool whenever the multi-assignment is well typed (yields nil) and
+   the first cell is a reference: the [tifn true/false] is [Bool ∪ Bool ⊑ Bool]. *)
+Lemma forin_guard_typed : forall S G vcells v1cell iter_call,
+  has_type S G (tmassign vcells iter_call) (BAtom ANil) ->
+  (exists V1, has_type S G (tderef v1cell) V1) ->
+  has_type S G (forin_guard vcells v1cell iter_call) (BAtom ABool).
+Proof.
+  intros S G vcells v1cell iter_call Hma [V1 Hd]. unfold forin_guard.
+  eapply tseq_typed; [ exact Hma | ].
+  eapply TSub.
+  - eapply TIfn with (U := V1);
+      [ exact Hd
+      | apply (TLit S (truthy_type :: G) (LBool true))
+      | apply (TLit S (falsy_type  :: G) (LBool false)) ].
+  - (* Bool ∪ Bool ⊑ Bool *) apply RsSsub. apply SsUnionE; apply SsRefl.
+Qed.
+
+(* The body is a unit statement whenever the control-advance type-checks (control
+   cell and v1cell share the [V1] shape) and the user body types at unit UNDER THE
+   NARROWED first loop variable (de Bruijn 0 : [truthy_type]). *)
+Lemma forin_body_typed : forall S G ctrlcell v1cell body V1,
+  has_type S G ctrlcell (BRef V1) ->
+  has_type S G (tderef v1cell) V1 ->
+  has_type S (truthy_type :: G) body Tunit ->
+  has_type S G (forin_body ctrlcell v1cell body) Tunit.
+Proof.
+  intros S G ctrlcell v1cell body V1 Hctrl Hd Hbody. unfold forin_body.
+  eapply tseq_typed.
+  - (* ctrl := !v1cell : nil  — both V1-shaped *)
+    eapply TAssign; [ exact Hctrl | exact Hd ].
+  - (* tifn (!v1cell) body nil : Tunit  — then-branch [body : Tunit] narrows v1 to
+       truthy_type; else-branch [nil : Tunit]; union ⊑ Tunit. *)
+    eapply TSub.
+    + eapply TIfn with (U := V1);
+        [ exact Hd | exact Hbody | apply (TLit S (falsy_type :: G) LNil) ].
+    + (* Tunit ∪ Tunit ⊑ Tunit *) apply RsSsub. apply SsUnionE; apply SsRefl.
+Qed.
+
+(* ---------------------------------------------------------------------------
+   PAYOFF — A CONCRETE GENERIC-FOR over a small explicit iterator, single loop
+   variable [v1 : Num ∪ nil].
+
+   The ITERATOR is a closed function [iter : (Num ∪ nil) -> BTuple [Num ∪ nil]]:
+   given the previous control [c], it narrows [c] to a number ([ttypetest TgNum])
+   and, while [c < 3], yields [c + 1]; once [c >= 3] (or [c] is nil) it yields
+   [nil] — a finite sequence 1, 2, 3 then nil, driven by the control thread. The
+   LOOP accumulates: a counter cell [cnt] is incremented once per (truthy)
+   iteration, so after the 3 yielded values [cnt = 3]; the loop then sees [nil]
+   and TERMINATES.
+
+   STORE LAYOUT:  loc0 = cnt (the accumulator, Num),  loc1 = v1cell (the bound
+   loop variable, Num ∪ nil),  loc2 = ctrlcell (the control, Num ∪ nil).
+   --------------------------------------------------------------------------- *)
+
+(* the V1 type: a number or nil — what the iterator yields, what the cells hold. *)
+Definition forin_V1 : BTy := BUnion (BAtom ANum) (BAtom ANil).
+
+(* the iterator BODY, under its parameter [c : Num ∪ nil] (de Bruijn 0). It narrows
+   [c] with [ttypetest TgNum]: in the number case (then) it computes [if c < 3 then
+   c+1 else nil]; in the nil case (else) it yields [nil]. The whole element is
+   [Num ∪ nil]; wrapped in [tret [·]] it is the multivalue [BTuple [Num ∪ nil]]. *)
+Definition forin_iter : tm :=
+  tlam forin_V1
+    (tret [ ttypetest TgNum (tvar 0)
+              (* c : Num  ==>  if c < 3 then c+1 else nil *)
+              (tif (tprim PLt (tvar 0) (tlit (LInt 3)))
+                   (tprim PAdd (tvar 0) (tlit (LInt 1)))
+                   (tlit LNil))
+              (* c : nil (or non-number) ==> nil *)
+              (tlit LNil) ]).
+
+(* the iterator CALL each iteration: [iter (!ctrlcell)] (control = loc2). *)
+Definition forin_call : tm := tapp forin_iter (tderef (tloc 2)).
+
+(* the user BODY: [cnt := !cnt + 1] (loc0), counting iterations. It does NOT use the
+   loop variable's NUMERIC value (that would need [truthy_type ⊑ Num] — the
+   intersection-narrowing gap); it demonstrates the loop running to completion and
+   accumulating. The narrowed [v1] (de Bruijn 0) is in scope but unused here. *)
+Definition forin_user_body : tm :=
+  tassign (tloc 0) (tprim PAdd (tderef (tloc 0)) (tlit (LInt 1))).
+
+Definition forin_loop : tm :=
+  tforin [ tloc 1 ] (tloc 2) (tloc 1) forin_call forin_user_body.
+
+(* the store typing: [cnt : Num ; v1cell : Num∪nil ; ctrlcell : Num∪nil]. *)
+Definition forin_S : list BTy := [ BAtom ANum ; forin_V1 ; forin_V1 ].
+
+(* THE ITERATOR TYPES at [(Num ∪ nil) -> BTuple [Num ∪ nil]]. *)
+Lemma forin_iter_typed :
+  has_type forin_S [] forin_iter (BArrow forin_V1 (BTuple [ forin_V1 ])).
+Proof.
+  unfold forin_iter, forin_V1. apply TLam. apply TRet.
+  apply HTcons; [ | apply HTnil ].
+  (* the element : Num ∪ nil — by the ttypetest, both branches subsumed in. *)
+  eapply TSub.
+  - eapply TTypeTest with (U := BUnion (BAtom ANum) (BAtom ANil)).
+    + apply TVar. reflexivity.                                  (* c : Num∪nil *)
+    + (* then: c : Num (tag_type TgNum = ANum at db0). if c<3 then c+1 else nil *)
+      eapply TIf.
+      * apply TPrimCmp; [ reflexivity | apply TVar; reflexivity
+        | eapply TSub; [ apply (TLit forin_S _ (LInt 3)) | apply RsSsub; apply SsAtom; apply ALInt ] ].
+      * apply TPrimArith; [ reflexivity | apply TVar; reflexivity
+        | eapply TSub; [ apply (TLit forin_S _ (LInt 1)) | apply RsSsub; apply SsAtom; apply ALInt ] ].
+      * apply (TLit forin_S _ LNil).
+    + (* else: nil *) apply (TLit forin_S _ LNil).
+  - (* (Num ∪ nil) ∪ nil  ⊑  Num ∪ nil *)
+    apply RsSsub. apply SsUnionE; [ apply SsRefl | ].
+    apply SsUnionInR. apply SsRefl.
+Qed.
+
+(* THE WHOLE LOOP TYPES at [Tunit] (a statement) under [forin_S]. *)
+Example forin_loop_typed :
+  has_type forin_S [] forin_loop Tunit.
+Proof.
+  unfold forin_loop. apply tforin_typed.
+  - (* guard *)
+    apply forin_guard_typed.
+    + (* tmassign [v1cell] (iter call) : nil — RHS is BTuple [Num∪nil], target
+         cell BRef (Num∪nil), pad identity, rsub refl. *)
+      unfold forin_call.
+      eapply (TMAssign forin_S (Tunit :: []) [ tloc 1 ] forin_call
+                [ forin_V1 ] [ forin_V1 ]).
+      * apply HTcons; [ apply TLoc; reflexivity | apply HTnil ].
+      * unfold forin_call. eapply TApp.
+        -- apply (weakening_cons forin_S [] forin_iter
+                    (BArrow forin_V1 (BTuple [forin_V1])) Tunit forin_iter_typed).
+        -- eapply TDeref. apply TLoc. reflexivity.
+      * simpl. apply Forall2_cons; [ apply rsub_refl | apply Forall2_nil ].
+    + (* the first cell deref types (at Num∪nil) *)
+      exists forin_V1. eapply TDeref. apply TLoc. reflexivity.
+  - (* body *)
+    eapply forin_body_typed with (V1 := forin_V1).
+    + (* ctrlcell : BRef (Num∪nil) *) apply TLoc. reflexivity.
+    + (* !v1cell : Num∪nil *) eapply TDeref. apply TLoc. reflexivity.
+    + (* user body [cnt := !cnt + 1] : Tunit, under the narrowed v1 binder *)
+      unfold forin_user_body. eapply TAssign with (T := BAtom ANum).
+      * apply TLoc. reflexivity.
+      * apply TPrimArith; [ reflexivity | | ].
+        -- eapply TDeref. apply TLoc. reflexivity.
+        -- eapply TSub; [ apply (TLit forin_S _ (LInt 1)) | apply RsSsub; apply SsAtom; apply ALInt ].
+Qed.
+
+(* ---------------------------------------------------------------------------
+   PAYOFF 2 — THE FIRST LOOP VARIABLE IS NARROWED TO NON-NIL INSIDE THE BODY.
+
+   In the body, the guard has established [v1] truthy, so [tifn (!v1cell) · ·]
+   substitutes [v1] at de Bruijn 0 NARROWED to [truthy_type] — the non-nil bound.
+   We exhibit a body that USES de Bruijn 0 AS A NON-NIL value (truthy_type) and
+   types — but is REJECTED at [BAtom ANil] (v1 is NOT nil inside the body). This is
+   the narrowing payoff: past the guard, v1's type excludes nil.
+   --------------------------------------------------------------------------- *)
+
+(* the narrowed [v1] (de Bruijn 0) has type [truthy_type] in the body context. *)
+Example forin_v1_narrowed_nonnil :
+  has_type forin_S (truthy_type :: []) (tvar 0) truthy_type.
+Proof. apply TVar. reflexivity. Qed.
+
+(* and the narrowed [v1] is NOT typeable at [nil]: [truthy_type </: ANil] (a truthy
+   value — e.g. a number — inhabits truthy_type but never the nil type), so a
+   nil-consumer of [v1] in the body is REJECTED. The body's v1 has shed nil. *)
+Example forin_v1_not_nil :
+  ~ has_type forin_S (truthy_type :: []) (tvar 0) (BAtom ANil).
+Proof.
+  intro H. apply inv_var in H. destruct H as [U [Hnth Hsub]].
+  simpl in Hnth. injection Hnth as <-.
+  (* Hsub : truthy_type <: ANil.  But truthy_type denotes every non-nil value;
+     a number [VNum (NRint 0)] inhabits truthy_type and NOT ANil. *)
+  apply rsub_sound in Hsub.
+  (* Hsub : dsub truthy_type ANil. A number inhabits truthy_type (the ANum arm)
+     but not ANil, contradicting the supposed inclusion. *)
+  pose proof (Hsub (VNum (NRint 0))) as Hbad.
+  unfold truthy_type in Hbad. simpl in Hbad.
+  apply Hbad. right. left. exact I.
+Qed.
+
+(* ---------------------------------------------------------------------------
+   PAYOFF 3 (operational) — ONE TRUTHY ITERATION steps, and the loop TERMINATES
+   when the iterator returns nil.
+   --------------------------------------------------------------------------- *)
+
+(* the guard and body are CLOSED at the fix self-ref binder (only [tloc]s and the
+   tifn-bound de Bruijn 0, which is BELOW the fix binder), so the fix-unfold
+   substitution [subst 0 (loop)] leaves them unchanged. *)
+Lemma forin_guard_closed : forall s,
+  subst 0 s (forin_guard [ tloc 1 ] (tloc 1) forin_call) =
+  forin_guard [ tloc 1 ] (tloc 1) forin_call.
+Proof. reflexivity. Qed.
+Lemma forin_body_closed : forall s,
+  subst 0 s (forin_body (tloc 2) (tloc 1) forin_user_body) =
+  forin_body (tloc 2) (tloc 1) forin_user_body.
+Proof. reflexivity. Qed.
+
+(* ONE ITERATION at control [c] with [c < 3] (so the iterator yields [c+1], truthy):
+   from store [cnt ; v1 ; c] the loop calls the iterator (→ c+1), binds it into
+   v1cell, the guard is TRUE, advances ctrl := c+1, runs the body (cnt := cnt+1),
+   leaving control back at the loop with store [cnt+1 ; c+1 ; c+1]. *)
+Lemma forin_one_iter : forall cnt v c,
+  Nat.ltb c 3 = true ->
+  multistep (forin_loop, [ tlit (LInt cnt) ; tlit (LInt v) ; tlit (LInt c) ])
+            (forin_loop, [ tlit (LInt (cnt + 1)) ; tlit (LInt (c + 1)) ; tlit (LInt (c + 1)) ]).
+Proof.
+  intros cnt v c Hlt. unfold forin_loop, tforin.
+  eapply MSstep. { apply twhile_unfold. }
+  rewrite forin_guard_closed, forin_body_closed.
+  (* GUARD: tseq (tmassign [v1cell] (iter (!ctrl))) (tifn (!v1cell) true false) *)
+  unfold forin_guard, forin_call, forin_iter, forin_V1.
+  (* step the iterator call: read ctrl c, beta, the ttypetest on a number, the
+     inner [if c<3] true ⇒ c+1; RHS becomes [tret [c+1]]. *)
+  eapply MSstep. { apply SIf1. apply tseq_step1. apply SMAssign2.
+                   - apply Forall_cons; [ apply VLoc | apply Forall_nil ].
+                   - apply SApp2; [ apply VLam | apply SDeref ]. } simpl.
+  eapply MSstep. { apply SIf1. apply tseq_step1. apply SMAssign2.
+                   - apply Forall_cons; [ apply VLoc | apply Forall_nil ].
+                   - apply SBeta. apply VLit. } simpl.
+  (* the returned element: ttypetest TgNum (LInt c) ... : c IS a number ⇒ then *)
+  eapply MSstep. { apply SIf1. apply tseq_step1. apply SMAssign2.
+                   - apply Forall_cons; [ apply VLoc | apply Forall_nil ].
+                   - apply SRet with (pre := []); [ apply Forall_nil
+                     | apply STtTrue; [ apply VLit | exact I ] ]. } simpl.
+  eapply MSstep. { apply SIf1. apply tseq_step1. apply SMAssign2.
+                   - apply Forall_cons; [ apply VLoc | apply Forall_nil ].
+                   - apply SRet with (pre := []); [ apply Forall_nil
+                     | apply SIf1; apply SPrimCmp; reflexivity ]. } simpl.
+  unfold prim_cmp. rewrite Hlt.
+  eapply MSstep. { apply SIf1. apply tseq_step1. apply SMAssign2.
+                   - apply Forall_cons; [ apply VLoc | apply Forall_nil ].
+                   - apply SRet with (pre := []); [ apply Forall_nil | apply SIfTrue ]. } simpl.
+  eapply MSstep. { apply SIf1. apply tseq_step1. apply SMAssign2.
+                   - apply Forall_cons; [ apply VLoc | apply Forall_nil ].
+                   - apply SRet with (pre := []); [ apply Forall_nil | apply SPrimArith; reflexivity ]. } simpl.
+  (* now RHS is [tret [c+1]] a value multivalue; the multi-write binds v1cell := c+1 *)
+  eapply MSstep. { apply SIf1. apply tseq_step1. apply SMAssign.
+                   - apply Forall_cons; [ apply VLoc | apply Forall_nil ].
+                   - apply Forall_cons; [ apply VLit | apply Forall_nil ]. } simpl.
+  (* the tmassign yielded nil; discard it, evaluate the truthiness test *)
+  eapply MSstep. { apply SIf1. apply tseq_step_value. apply VLit. }
+  (* tifn (!v1cell) true false : read v1cell = c+1 (a number, truthy) ⇒ true *)
+  eapply MSstep. { apply SIf1. apply SIfn1. apply SDeref. } simpl.
+  eapply MSstep. { apply SIf1. apply SIfnTrue.
+                   - apply VLit.
+                   - split; [ intros [F|F]; discriminate | intros [es F]; discriminate ]. } simpl.
+  (* guard true ⇒ run the then-branch [tseq (forin_body) (loop)] *)
+  eapply MSstep. { apply SIfTrue. }
+  (* BODY (the OUTER tseq sequences [forin_body] then the recursive loop). The body
+     [forin_body] is itself [tseq (ctrl := !v1cell) (tifn (!v1cell) user_body nil)]. *)
+  unfold forin_body, forin_user_body.
+  (* advance ctrl := !v1cell = c+1  (outer tseq_step1 + inner tseq_step1) *)
+  eapply MSstep. { apply tseq_step1. apply tseq_step1.
+                   apply SAssign2; [ apply VLoc | apply SDeref ]. } simpl.
+  eapply MSstep. { apply tseq_step1. apply tseq_step1. apply SAssign. apply VLit. } simpl.
+  eapply MSstep. { apply tseq_step1. apply tseq_step_value. apply VLit. }
+  (* tifn (!v1cell) user_body nil : v1cell = c+1 truthy ⇒ run user body (subst) *)
+  eapply MSstep. { apply tseq_step1. apply SIfn1. apply SDeref. } simpl.
+  eapply MSstep. { apply tseq_step1. apply SIfnTrue.
+                   - apply VLit.
+                   - split; [ intros [F|F]; discriminate | intros [es F]; discriminate ]. } simpl.
+  (* user body [cnt := !cnt + 1] : read cnt, add 1, write cnt+1 *)
+  eapply MSstep. { apply tseq_step1. apply SAssign2; [ apply VLoc | apply SPrim1; apply SDeref ]. } simpl.
+  eapply MSstep. { apply tseq_step1. apply SAssign2; [ apply VLoc | apply SPrimArith; reflexivity ]. } simpl.
+  eapply MSstep. { apply tseq_step1. apply SAssign. apply VLit. } simpl.
+  (* the body finished (nil); the outer sequence yields the loop again *)
+  eapply MSstep. { apply tseq_step_value. apply VLit. }
+  apply MSrefl.
+Qed.
+
+(* TERMINATION: at control [c] with [c >= 3] the iterator yields nil (falsy); the
+   guard is FALSE and the loop ends with [nil]. The store: v1cell is overwritten
+   with nil, ctrl is unchanged (advance only happens in the body, which the false
+   guard skips), cnt unchanged. *)
+Lemma forin_terminates : forall cnt v c,
+  Nat.ltb c 3 = false ->
+  multistep (forin_loop, [ tlit (LInt cnt) ; tlit (LInt v) ; tlit (LInt c) ])
+            (tlit LNil, [ tlit (LInt cnt) ; tlit LNil ; tlit (LInt c) ]).
+Proof.
+  intros cnt v c Hge. unfold forin_loop, tforin.
+  eapply MSstep. { apply twhile_unfold. }
+  rewrite forin_guard_closed, forin_body_closed.
+  unfold forin_guard, forin_call, forin_iter, forin_V1.
+  eapply MSstep. { apply SIf1. apply tseq_step1. apply SMAssign2.
+                   - apply Forall_cons; [ apply VLoc | apply Forall_nil ].
+                   - apply SApp2; [ apply VLam | apply SDeref ]. } simpl.
+  eapply MSstep. { apply SIf1. apply tseq_step1. apply SMAssign2.
+                   - apply Forall_cons; [ apply VLoc | apply Forall_nil ].
+                   - apply SBeta. apply VLit. } simpl.
+  eapply MSstep. { apply SIf1. apply tseq_step1. apply SMAssign2.
+                   - apply Forall_cons; [ apply VLoc | apply Forall_nil ].
+                   - apply SRet with (pre := []); [ apply Forall_nil
+                     | apply STtTrue; [ apply VLit | exact I ] ]. } simpl.
+  eapply MSstep. { apply SIf1. apply tseq_step1. apply SMAssign2.
+                   - apply Forall_cons; [ apply VLoc | apply Forall_nil ].
+                   - apply SRet with (pre := []); [ apply Forall_nil
+                     | apply SIf1; apply SPrimCmp; reflexivity ]. } simpl.
+  unfold prim_cmp. rewrite Hge.
+  eapply MSstep. { apply SIf1. apply tseq_step1. apply SMAssign2.
+                   - apply Forall_cons; [ apply VLoc | apply Forall_nil ].
+                   - apply SRet with (pre := []); [ apply Forall_nil | apply SIfFalse ]. } simpl.
+  (* RHS is [tret [nil]] a value multivalue; bind v1cell := nil *)
+  eapply MSstep. { apply SIf1. apply tseq_step1. apply SMAssign.
+                   - apply Forall_cons; [ apply VLoc | apply Forall_nil ].
+                   - apply Forall_cons; [ apply VLit | apply Forall_nil ]. } simpl.
+  eapply MSstep. { apply SIf1. apply tseq_step_value. apply VLit. }
+  (* tifn (!v1cell) true false : v1cell = nil (falsy) ⇒ false *)
+  eapply MSstep. { apply SIf1. apply SIfn1. apply SDeref. } simpl.
+  eapply MSstep. { apply SIf1. apply SIfnFalse.
+                   - apply VLit.
+                   - right; reflexivity. } simpl.
+  (* guard false ⇒ the loop ends with nil *)
+  eapply MSstep. { apply SIfFalse. }
+  apply MSrefl.
+Qed.
+
+(* THE WHOLE LOOP, END-TO-END: from [cnt=0 ; v1=0 ; ctrl=0] the iterator yields
+   1, 2, 3 (control 0→1→2→3, cnt 0→1→2→3), then at control 3 yields nil and the
+   loop TERMINATES — accumulating [cnt = 3] (three iterations). A generic-for over
+   an explicit finite iterator, run to completion. *)
+Example forin_loop_runs :
+  multistep (forin_loop, [ tlit (LInt 0) ; tlit (LInt 0) ; tlit (LInt 0) ])
+            (tlit LNil, [ tlit (LInt 3) ; tlit LNil ; tlit (LInt 3) ]).
+Proof.
+  eapply multistep_trans. { apply (forin_one_iter 0 0 0). reflexivity. } simpl.
+  eapply multistep_trans. { apply (forin_one_iter 1 1 1). reflexivity. } simpl.
+  eapply multistep_trans. { apply (forin_one_iter 2 2 2). reflexivity. } simpl.
+  apply (forin_terminates 3 3 3). reflexivity.
+Qed.
+
+(* ===========================================================================
    ASSUMPTION AUDIT — closed under the global context.
    =========================================================================== *)
 Print Assumptions progress.
@@ -9406,3 +9834,18 @@ Print Assumptions fordown_terminates.
 Print Assumptions fordown_loop_runs.
 Print Assumptions for_var_typed_number.
 Print Assumptions for_var_not_int.
+(* GENERIC FOR-IN LOOP — encoded over [twhile] + [tmassign] + [tapp] + [tifn]:
+   typing of the loop forms (guard/body/loop); a concrete generic-for over an
+   explicit finite iterator (types + steps to completion accumulating cnt=3);
+   the first loop variable narrowed to non-nil inside the body (typed, and
+   rejected at nil); one truthy iteration steps; the loop terminates on nil. *)
+Print Assumptions tforin_typed.
+Print Assumptions forin_guard_typed.
+Print Assumptions forin_body_typed.
+Print Assumptions forin_iter_typed.
+Print Assumptions forin_loop_typed.
+Print Assumptions forin_v1_narrowed_nonnil.
+Print Assumptions forin_v1_not_nil.
+Print Assumptions forin_one_iter.
+Print Assumptions forin_terminates.
+Print Assumptions forin_loop_runs.

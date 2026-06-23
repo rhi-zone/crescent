@@ -3001,8 +3001,9 @@ typed at `ANum`**. Exactly Lua's single-number model: `i` is a number, not an in
 
 ### Honest scope / deferrals
 
-Generic `for-in` (iterator protocols) remains deferred. A single runtime numeric-for
-form deciding step direction at runtime requires a **signed number model** (a signed
+Generic `for-in` (iterator protocols) is now landed (increment 29 below). A single
+runtime numeric-for form deciding step direction at runtime requires a **signed number
+model** (a signed
 `NumRep` / `LInt`, plus a sign-aware `PSub` or a working number `PNeg`) — not just at
 the term level: the deeper blocker is that the `nat` update `i := i + step` can never
 descend, so descent must switch operator statically (see the step-sign boundary above).
@@ -3017,4 +3018,115 @@ substrate need. The dynamic-metatable frontier is unaffected (untouched, per
 `preservation`, `synth_sound`, `check_sound`): **Closed under the global context** —
 no axioms, no `Admitted`, no `Classical`. `subtype.v` + `ssub.v` + `check.v`
 byte-unmodified (confirmed `git diff --stat`); whole chain compiles (`coqc
+proof/subtype.v` → `typing.v` → `ssub.v` → `check.v`).
+
+## Increment 29 — GENERIC `for-in` LOOP `for v1,…,vn in explist do body end` (iterator protocol; encoded over `twhile` + `tmassign` + `tapp` + `tifn`)
+
+The generic (iterator-protocol) for-loop, modelled correct-by-construction as an
+**encoding over the existing core** — like the while-loop (increment 20) and the
+numeric-for (increment 28). **NO new core term, NO new subtyping, NO new check.v synth
+arm**; soundness is inherited from `twhile_typed` / `twhile_unfold` (hence from
+`progress` + `preservation`). It consumes four already-proven mechanisms: `twhile`
+(the loop with store-driven termination), `tmassign` (multiple-assignment with arity
+adjustment, to bind the n loop variables from the iterator's multi-return), `tapp`
+(call the iterator), and `tifn` (truthiness narrowing, to narrow the first loop
+variable past nil).
+
+### Why desugar (not a new primitive)
+
+Lua's own definition of generic-for IS a desugaring:
+```
+for v1,…,vn in explist do body end
+≡ local f, s, ctrl = explist
+  while true do
+    local v1,…,vn = f(s, ctrl)      -- iterator call → multi-return
+    if v1 == nil then break end     -- nil in the FIRST var terminates
+    ctrl = v1                        -- advance control to first result
+    body
+  end
+```
+Every ingredient already exists as proven substrate, so reusing them gives the loop's
+whole metatheory for free and keeps the addition ad-hoc-free (and the build fast — no
+new check.v constructor ⇒ no O(constructors²) synth blowup).
+
+### The key modeling move — nil-termination folded into the loop guard
+
+This dev has no `break`. As numeric-for folded its termination into the `twhile`
+guard, generic-for **folds the nil-termination into the guard**. The iterator sits in
+the `twhile` CONDITION, which `twhile_unfold` re-evaluates against the current store
+each turn — so it is **called ONCE per iteration**; its first result both (a) drives
+termination (nil/falsy ⇒ stop) and (b) becomes the next control value (advanced in the
+body). Loop state and the bound vars/control live in **mutable store cells**
+(locations), mirroring while / numeric-for.
+
+The three forms (`typing.v`):
+- `forin_guard vcells v1cell iter_call` ≡ `tseq (tmassign vcells iter_call) (tifn
+  (!v1cell) true false)`: call the iterator, multi-bind its n results into the result
+  cells, then test the FIRST cell for truthiness — a Bool (`true` continues, falsy ⇒
+  nil stops). `forin_guard_typed`: Bool whenever the multi-assignment types and the
+  first cell derefs.
+- `forin_body ctrlcell v1cell body` ≡ `tseq (ctrl := !v1cell) (tifn (!v1cell) body
+  nil)`: advance the control cell to the first result, then run the user body under
+  the NARROWED first loop variable. `forin_body_typed`: unit whenever the
+  control-advance types and the body types at unit under `truthy_type :: G`.
+- `tforin vcells ctrlcell v1cell iter_call body` ≡ `twhile (forin_guard …)
+  (forin_body …)`. `tforin_typed` is a thin wrapper over `twhile_typed`.
+
+### Termination-as-truthiness (the faithful narrowing boundary, not faked)
+
+Lua terminates on `v1 == nil` exactly. The narrowing substrate that yields a USABLE
+non-nil type for the body is **truthiness narrowing** (`tifn`): the then-branch
+narrows the scrutinee to `truthy_type` (the expressible non-nil, non-false bound — the
+increment-13 truthiness bound). So termination is folded as "first result truthy" and
+the body sees `v1 : truthy_type` (non-nil). On a standard iterator (yields a non-falsy
+element or nil) truthiness COINCIDES with non-nil, so this is sound and Lua-faithful.
+The precise `v1 : V1 ∩ ¬nil` narrowing is the SAME **intersection-narrowing substrate
+gap** the `TIfn` note already records (needs an intersection-introduction typing rule
+whose arrow inversion is the hard core of intersection-type systems) — recorded, not
+faked.
+
+### Control type = V1 (compatible-with-V1, no new substrate)
+
+The control advances to v1 each step (`ctrl := !v1cell`); both the control cell and
+v1cell are typed at the SAME `V1 = T ∪ nil` shape, so the advance type-checks by
+reflexivity. A real iterator receives the previous loop variable as its control
+argument and narrows it itself — modelled here by the iterator's body doing a
+`ttypetest TgNum` on its control before using it as a number, exactly Lua's
+stateful-iterator pattern. No new mechanism was needed; this is the threading the task
+flagged as a possible substrate gap, resolved within existing narrowing.
+
+### Payoffs (machine-checked)
+
+1. **A concrete generic-for over a small explicit iterator that types and steps to
+   completion.** The iterator `forin_iter : (Num ∪ nil) → BTuple [Num ∪ nil]` narrows
+   its control to a number (`ttypetest TgNum`) and yields `c+1` while `c < 3`, else
+   nil — the finite sequence 1, 2, 3 then nil, driven by the control thread.
+   `forin_iter_typed` / `forin_loop_typed` TYPE it; `forin_loop_runs` STEPS it
+   end-to-end from `[cnt=0; v1=0; ctrl=0]`, three `forin_one_iter` (control 0→1→2→3,
+   accumulator `cnt` 0→1→2→3) then `forin_terminates` at control 3 — accumulating
+   `cnt = 3` and TERMINATING.
+2. **The first loop variable narrowed to non-nil inside the body.**
+   `forin_v1_narrowed_nonnil` : `v1 : truthy_type` (de Bruijn 0 in the body context);
+   `forin_v1_not_nil` : `~ (v1 : ANil)` — a number `VNum (NRint 0)` inhabits
+   `truthy_type` but not `ANil` (via `rsub_sound`), so the body's `v1` has shed nil.
+3. **The loop terminates when the iterator returns nil.** `forin_terminates`: at
+   control `c ≥ 3` the iterator yields nil (falsy), the guard is false, the loop ends
+   with nil.
+
+### Honest scope / deferrals
+
+The body USES the narrowed `v1` as a non-nil value but does not consume its NUMERIC
+value (the payoff body counts iterations); doing arithmetic on `v1` would require
+`truthy_type ⊑ Num`, which is the same intersection-narrowing gap noted above. The
+multi-variable (n>1) binding is fully supported by `tmassign` (the payoff exhibits
+n=1 for a compact end-to-end run; v2…vn would be read from their cells at their tuple
+types). The dynamic-metatable frontier is unaffected (untouched, per
+`docs/decisions/metatable-representation.md`).
+
+`Print Assumptions` on `tforin_typed`, `forin_guard_typed`, `forin_body_typed`,
+`forin_iter_typed`, `forin_loop_typed`, `forin_v1_narrowed_nonnil`, `forin_v1_not_nil`,
+`forin_one_iter`, `forin_terminates`, `forin_loop_runs` (and the still-Closed
+`progress`, `preservation`, `synth_sound`, `check_sound`): **Closed under the global
+context** — no axioms, no `Admitted`, no `Classical`. `subtype.v` + `ssub.v` +
+`check.v` byte-unmodified (confirmed `git diff --stat`); whole chain compiles (`coqc
 proof/subtype.v` → `typing.v` → `ssub.v` → `check.v`).
