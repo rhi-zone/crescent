@@ -728,8 +728,31 @@ Still open (DEFERRED — recorded honestly, minimal core only):
   mutating the state the condition reads; general termination is neither provided
   nor needed. `Print Assumptions` Closed on all; cores (subtype.v/ssub.v/check.v)
   UNMODIFIED. DEFERRED (backlog): `break`/`return`/`goto` (non-local control —
-  labelled exits/continuations), numeric `for` + generic `for-in` (iterator
-  protocols). See `proof-kernel.md` increment 20.
+  labelled exits/continuations), generic `for-in` (iterator protocols). Numeric
+  `for` now DONE (see below). See `proof-kernel.md` increment 20.
+- [x] **Numeric `for`-loop `for i = e1, e2, e3 do body end` — DONE (encoded over
+  `twhile`).** Models Lua 5.1 numeric-for as a desugaring over the existing while-
+  loop + reference + arithmetic + comparison + local-binding substrate; NO new core
+  terms, NO new subtyping, `subtype.v`/`ssub.v`/`check.v` byte-UNMODIFIED. Two forms
+  (the step's SIGN is resolved statically, faithful to the nat number model that has
+  no negative literal): `tfor_up cnt limit step body` (step>0: guard `!i ≤ limit`,
+  increment `i := !i + step`, mirroring the while-loop's ascending `cinc`) and
+  `tfor_down` (step<0: guard `limit ≤ !i`, decrement `i := !i - step` — descent
+  carried by the subtraction direction). The loop variable `i = !cnt` is re-read
+  each iteration (Lua's per-iteration binding under the store model) and typed at
+  the NUMBER type `ANum` (the counter is a `BRef ANum` cell: arithmetic yields
+  `ANum`, invariant cell ⇒ Num cell; init `AInt` widens by `AInt <: ANum`). Typing
+  inherited from `twhile_typed` (`tfor_up_typed`/`tfor_down_typed`), unfold/step from
+  `twhile_unfold`. Payoffs: a counting-up sum loop `for i=1,3,1 do sum:=sum+i end`
+  TYPES (`forsum_loop_typed`) and STEPS end-to-end to `sum=6` (`forsum_loop_runs`,
+  three store-driven iterations + termination); a counting-down loop `for i=2,1,-1`
+  TYPES (`fordown_loop_typed`) and terminates `2→1→0` (`fordown_loop_runs`); the
+  loop variable is typed soundly as a number (`for_var_typed_number : !i : ANum`)
+  and NOT an integer (`for_var_not_int : ~ !i : AInt`, via a `NRfrac` witness — 5.1's
+  single-number model). `Print Assumptions` Closed on all. SUBSTRATE BOUNDARY noted
+  (not faked): a SINGLE runtime form deciding step direction needs SIGNED numbers at
+  the term level (the literal language is `LInt : nat`); the two-form static-sign
+  rendering is the faithful nat-substrate model. See `proof-kernel.md` increment 23.
 - [x] **Mutable TABLE fields (record fields as refs) — DONE (increment M4,
   records-of-refs ENCODING).** A Lua mutable table `{x:T,y:U}` IS a record of
   reference cells `BRec [("x", BRef T); ("y", BRef U)]`: the field SET is fixed

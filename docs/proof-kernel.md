@@ -2891,3 +2891,105 @@ every multiple-assignment payoff: **Closed under the global context** — no axi
 `Admitted`, no `Classical`. `subtype.v` + `ssub.v` byte-unmodified (confirmed
 `git diff --stat`); whole chain compiles (`coqc proof/subtype.v` → `typing.v` →
 `ssub.v` → `check.v`).
+
+## Increment 28 — NUMERIC `for`-LOOP `for i = e1, e2, e3 do body end` (5.1 number-faithful loop variable; encoded over `twhile`)
+
+The numeric-for loop, modelled correct-by-construction as an **encoding over the
+existing while-loop** (increment 20) — exactly the increment-20 discipline: plain
+`Definition`s over the existing core, **NO new core terms**, NO new subtyping, NO
+change to `tm_rect_strong`/`lift`/`subst`/`progress`/`preservation`/`check.v`.
+Soundness is **inherited** from the already-proven `twhile_typed` / `twhile_unfold`
+(hence from `progress` + `preservation`). All additions live in `proof/typing.v`;
+`subtype.v`, `ssub.v`, `check.v` are **byte-unmodified** (only `.vo`s recompile).
+
+### Why desugar into `twhile` (route choice)
+
+The while-loop already supplies the exact step/typing discipline a numeric-for needs:
+a fixpoint whose condition re-reads the store, a body that mutates it, and store-
+driven termination. Numeric-for is **while-with-bookkeeping** (an init, a bound-test,
+an increment). Reducing to `twhile` inherits the loop's metatheory for free and keeps
+the addition ad-hoc-free — no new step rule, no new typing rule, no new subtyping.
+
+### The encoding (two static-sign forms)
+
+`for i = e1, e2, e3 do body end`: `e1` (init) is the value placed in the counter
+**cell** (allocated once); `e2` (limit) / `e3` (step) are the closed number terms
+substituted into the condition / increment — all three evaluated once at entry. The
+loop variable `i` is **fresh per iteration**: each turn re-reads the counter cell
+(`tderef cnt`), exactly Lua's per-iteration binding under the store model (the body
+never aliases a mutable outer `i`; the value it sees is the current counter, re-
+fetched each turn). Iteration continues while `(step>0 ∧ i≤limit) ∨ (step<0 ∧
+i≥limit)`; each turn runs `body` then `i := i + step`.
+
+**Step-sign / nat substrate (honest boundary, not a faked gap).** The TERM number
+model in this dev is `LInt : nat` — there is **no negative number literal** at the
+term level (the value model abstracts the double; the literal language is non-
+negative). A runtime step value therefore cannot carry a sign, so the sign-dependent
+guard cannot be decided at runtime by a single form. The **faithful nat-substrate
+rendering resolves the step's sign STATICALLY** (as a real compiler does for a
+constant step) into two encodings, mirroring the while-loop's ascending `cinc`
+(`PAdd`/`PLt`):
+
+- **`tfor_up cnt limit step body`** (step > 0) :=
+  `twhile (PLe (!cnt) limit) (tseq body (cnt := !cnt + step))` — guard `i ≤ limit`,
+  increment `i := !i + step`.
+- **`tfor_down cnt limit step body`** (step < 0; `step` the positive magnitude) :=
+  `twhile (PLe limit (!cnt)) (tseq body (cnt := !cnt - step))` — guard `limit ≤ i`
+  (i.e. `i ≥ limit`), decrement `i := !i - step` (the descent carried by the
+  **subtraction direction**, since nat has no sign).
+
+This is the 3-value form (init, limit, step magnitude all explicit), faithful to 5.1
+modulo the nat number model. A **single** runtime form deciding direction needs
+SIGNED numbers at the term level — recorded as a substrate need, **not faked**.
+
+### Loop-variable typing (the 5.1 number model)
+
+`i = !cnt` is typed at the **number type `ANum`**. The counter cell is a `BRef ANum`
+cell: the increment `i := !i + step` stores the arithmetic result, which `TPrimArith`
+gives type `ANum`, and a `BRef` cell is **invariant**, so the cell must be a `Num`
+cell; thus `!cnt : ANum`. The initial `LInt n : AInt` widens to `ANum` at allocation
+by subsumption (`AInt <: ANum`). This is **precise for this dev's number model**:
+arithmetic yields `ANum`; the precise `Int+Int : AInt` preservation is the **same
+deferred substrate** the while-loop's `sumloop` note records (needs Int-preserving
+arithmetic result types), so an all-int loop's counter is **soundly — not over- —
+typed at `ANum`**. Exactly Lua's single-number model: `i` is a number, not an integer.
+
+- `for_var_is_number` : `cnt : BRef ANum ⊢ !cnt : ANum` (abstract over the cell, so it
+  holds for both the `tloc` and `tvar` forms).
+- `tfor_up_typed` / `tfor_down_typed` : under the self-ref binder, a `Num`-cell
+  counter + number `limit`/`step` + a unit-statement `body` ⇒ the loop is a unit
+  statement (`Tunit`). Both proved straight through `twhile_typed`.
+
+### Payoffs (typed + stepped end-to-end)
+
+1. **Counting-up sum loop** `sum = 0; for i = 1, 3, 1 do sum := sum + i end`
+   (`sum` = loc 0, counter `i` = loc 1). `forsum_loop_typed` (types at `Tunit` under
+   store-typing `[Num; Num]`). `forsum_loop_runs` reduces it END-TO-END through the
+   store: `[0;1] → [1;2] → [3;3] → [6;4] → (i=4>3, stop) [6;4]`, i.e. **sum = 0+1+2+3
+   = 6** — three machine-checked store-driven iterations (`forsum_one_iter`, the
+   store-read guard gating a store-mutating body) then `forsum_terminates`.
+2. **Counting-down loop** `for i = 2, 1, -1 do () end` via `tfor_down`.
+   `fordown_loop_typed` (types at `Tunit`); `fordown_loop_runs` decrements `2 → 1 → 0`
+   and terminates when `1 ≤ 0` is false (`fordown_one_iter` + `fordown_terminates`) —
+   a negative-step loop computed to its end.
+3. **Loop variable typed soundly as a number.** `for_var_typed_number` : `!i : ANum`
+   (the number type). `for_var_not_int` : `~ (!i : AInt)` — the loop variable is NOT
+   an integer (a `VNum (NRfrac 0)` inhabits `ANum` but not `AInt`, refuting `ANum <:
+   AInt` via `rsub_sound`), exactly 5.1's single-number model.
+
+### Honest scope / deferrals
+
+Generic `for-in` (iterator protocols) remains deferred. A single runtime numeric-for
+form deciding step direction at runtime requires **signed numbers at the term level**
+(the literal language is `LInt : nat`) — the two-form static-sign rendering is the
+faithful nat-substrate model, recorded as the substrate need. The dynamic-metatable
+frontier is unaffected (untouched, per `docs/decisions/metatable-representation.md`).
+
+`Print Assumptions` on `for_var_is_number`, `tfor_up_typed`, `tfor_down_typed`,
+`forsum_loop_typed`, `forsum_one_iter`, `forsum_terminates`, `forsum_loop_runs`,
+`fordown_loop_typed`, `fordown_one_iter`, `fordown_terminates`, `fordown_loop_runs`,
+`for_var_typed_number`, `for_var_not_int` (and the still-Closed `progress`,
+`preservation`, `synth_sound`, `check_sound`): **Closed under the global context** —
+no axioms, no `Admitted`, no `Classical`. `subtype.v` + `ssub.v` + `check.v`
+byte-unmodified (confirmed `git diff --stat`); whole chain compiles (`coqc
+proof/subtype.v` → `typing.v` → `ssub.v` → `check.v`).

@@ -8914,6 +8914,350 @@ Proof.
 Qed.
 
 (* ===========================================================================
+   INCREMENT — NUMERIC FOR-LOOP:  for i = e1, e2, e3 do body end  (Lua 5.1).
+
+   Like the [while]-loop (increment 20) this is an ENCODING over the existing core
+   — NO new core terms, NO new subtyping, NO change to lift/subst/progress/
+   preservation/check.v. It REDUCES to the already-proven [twhile] + reference +
+   arithmetic + comparison + local-binding substrate; soundness is inherited from
+   [twhile_typed]/[twhile_unfold] (hence from [progress]+[preservation]).
+
+   WHY DESUGAR (not a new primitive). The while-loop already supplies the exact
+   step/typing discipline a numeric-for needs: a fixpoint whose condition re-reads
+   the store, a body that mutates it, and store-driven termination. Numeric-for is
+   while-with-bookkeeping (an init, a bound-test, an increment). Reusing [twhile]
+   gives the loop's metatheory for free and keeps the addition ad-hoc-free.
+
+   LUA 5.1 SEMANTICS modelled.  [for i = e1, e2, e3 do body end]:
+     - e1 (init), e2 (limit), e3 (step) are evaluated ONCE at loop entry. Here e1
+       is the value placed in the counter CELL (allocated once), and e2/e3 are the
+       closed number terms substituted into the condition / increment.
+     - The loop variable [i] is FRESH PER ITERATION: each iteration re-reads the
+       counter cell ([tderef cnt]) — the body never aliases a mutable outer [i],
+       exactly Lua's per-iteration binding (faithful under the store model: the
+       value the body sees is the current counter, re-fetched each turn).
+     - Iteration continues while  (step>0 /\ i<=limit) \/ (step<0 /\ i>=limit);
+       each iteration runs [body] then  i := i + step.
+
+   STEP-SIGN / NAT SUBSTRATE (honest boundary, NOT a faked gap). The TERM number
+   model in this dev is [LInt : nat] — there is no negative number literal at the
+   term level (the value model abstracts the double; the literal language is
+   non-negative). A runtime step value therefore cannot carry a sign, so the
+   sign-dependent guard above cannot be decided at runtime by a single form. The
+   FAITHFUL nat-substrate rendering resolves the step's SIGN STATICALLY (as a real
+   compiler does for a constant step) into one of two encodings, mirroring the
+   while-loop's ascending [cinc] (PAdd / PLt) :
+     - [tfor_up]   : step>0 — guard [!i <= limit], increment [i := !i + step].
+     - [tfor_down] : step<0 — guard [limit <= !i] (i.e. [i >= limit]), decrement
+                     [i := !i - step] (step the POSITIVE magnitude; the descent is
+                     carried by the subtraction direction, since nat has no sign).
+   This is the 3-value form (init, limit, step magnitude all explicit), faithful to
+   5.1 modulo the nat number model. A single runtime form deciding direction needs
+   SIGNED numbers at the term level — recorded as a substrate need, not faked.
+
+   LOOP-VARIABLE TYPING (5.1).  [i = !cnt] is typed at the NUMBER type [ANum]. The
+   counter cell is a [BRef ANum] cell: the increment [i := !i + step] stores the
+   arithmetic result, which [TPrimArith] gives type [ANum], and a [BRef] cell is
+   INVARIANT, so the cell must be a [Num] cell; thus [!cnt : ANum]. The initial
+   [LInt n : AInt] widens to [ANum] at allocation by subsumption ([AInt <: ANum]).
+   This is precise FOR THIS DEV'S NUMBER MODEL: arithmetic yields [ANum]; the
+   precise [Int+Int : AInt] preservation is the SAME deferred substrate the while-
+   loop's [sumloop] note records (needs Int-preserving arithmetic result types),
+   so an all-int loop's counter is soundly — not over- — typed at [ANum]. Exactly
+   Lua's single-number model: [i] is a number.
+   =========================================================================== *)
+
+(* ASCENDING numeric-for (step > 0). [cnt] is the counter cell (a reference term,
+   e.g. [tloc n] or [tvar k] positioned for use INSIDE the loop, under the fix
+   self-ref binder); [limit]/[step] are closed number terms; [body] is the unit
+   statement (it reads the loop variable via [tderef cnt]). Reduces to [twhile]:
+   loop while [!cnt <= limit]; each turn run [body] then [cnt := !cnt + step]. *)
+Definition tfor_up (cnt limit step body : tm) : tm :=
+  twhile (tprim PLe (tderef cnt) limit)
+         (tseq body (tassign cnt (tprim PAdd (tderef cnt) step))).
+
+(* DESCENDING numeric-for (step < 0; [step] is the positive magnitude). Loop while
+   [limit <= !cnt] (i.e. [i >= limit]); each turn run [body] then [cnt := !cnt - step]. *)
+Definition tfor_down (cnt limit step body : tm) : tm :=
+  twhile (tprim PLe limit (tderef cnt))
+         (tseq body (tassign cnt (tprim PSub (tderef cnt) step))).
+
+(* THE LOOP VARIABLE IS A NUMBER. Whenever the counter cell is a [Num] cell,
+   reading the loop variable [i = !cnt] yields the number type [ANum] — the 5.1
+   typing of a numeric-for variable. (Stated abstractly over the cell reference so
+   it holds for both the [tloc] and [tvar] forms.) *)
+Lemma for_var_is_number : forall S G cnt,
+  has_type S G cnt (BRef (BAtom ANum)) ->
+  has_type S G (tderef cnt) (BAtom ANum).
+Proof. intros S G cnt Hc. apply TDeref with (T := BAtom ANum). exact Hc. Qed.
+
+(* TYPING the ascending loop. Under the self-ref binder ([Tunit :: G]) the counter
+   is a [Num] cell, [limit]/[step] are numbers, and [body] is a unit statement; the
+   whole loop is a unit statement. Inherits from [twhile_typed]. *)
+Lemma tfor_up_typed : forall S G cnt limit step body,
+  has_type S (Tunit :: G) cnt (BRef (BAtom ANum)) ->
+  has_type S (Tunit :: G) limit (BAtom ANum) ->
+  has_type S (Tunit :: G) step (BAtom ANum) ->
+  has_type S (Tunit :: G) body Tunit ->
+  has_type S G (tfor_up cnt limit step body) Tunit.
+Proof.
+  intros S G cnt limit step body Hc Hl Hs Hbody. unfold tfor_up.
+  apply twhile_typed.
+  - (* condition  !cnt <= limit : Bool *)
+    apply TPrimCmp; [ reflexivity | apply for_var_is_number; exact Hc | exact Hl ].
+  - (* body ; cnt := !cnt + step : Tunit *)
+    eapply tseq_typed; [ exact Hbody | ].
+    eapply TAssign with (T := BAtom ANum); [ exact Hc | ].
+    apply TPrimArith; [ reflexivity | apply for_var_is_number; exact Hc | exact Hs ].
+Qed.
+
+(* TYPING the descending loop (same shape; guard and update swapped). *)
+Lemma tfor_down_typed : forall S G cnt limit step body,
+  has_type S (Tunit :: G) cnt (BRef (BAtom ANum)) ->
+  has_type S (Tunit :: G) limit (BAtom ANum) ->
+  has_type S (Tunit :: G) step (BAtom ANum) ->
+  has_type S (Tunit :: G) body Tunit ->
+  has_type S G (tfor_down cnt limit step body) Tunit.
+Proof.
+  intros S G cnt limit step body Hc Hl Hs Hbody. unfold tfor_down.
+  apply twhile_typed.
+  - apply TPrimCmp; [ reflexivity | exact Hl | apply for_var_is_number; exact Hc ].
+  - eapply tseq_typed; [ exact Hbody | ].
+    eapply TAssign with (T := BAtom ANum); [ exact Hc | ].
+    apply TPrimArith; [ reflexivity | apply for_var_is_number; exact Hc | exact Hs ].
+Qed.
+
+(* ---------------------------------------------------------------------------
+   PAYOFF 1 — A COUNTING LOOP THAT TYPES AND STEPS:  sum 1..3 into an accumulator.
+
+     sum = 0;  for i = 1, 3, 1 do  sum := sum + i  end     (* sum = 6 *)
+
+   Two cells: [sum] = loc 0, the counter [i] = loc 1 (init 1). The body adds the
+   loop variable [!i] to [sum]; the loop increments [i] by 1 until [i > 3].
+   --------------------------------------------------------------------------- *)
+
+(* the body  [ sum := !sum + !i ]  with [sum]=loc0, [i]=loc1 (both closed values). *)
+Definition forsum_body : tm :=
+  tassign (tloc 0) (tprim PAdd (tderef (tloc 0)) (tderef (tloc 1))).
+Definition forsum_loop : tm :=
+  tfor_up (tloc 1) (tlit (LInt 3)) (tlit (LInt 1)) forsum_body.
+
+(* it TYPES at [Tunit] under store-typing [Num; Num] (both cells are Num cells). *)
+Example forsum_loop_typed :
+  has_type [ BAtom ANum ; BAtom ANum ] [] forsum_loop Tunit.
+Proof.
+  unfold forsum_loop. apply tfor_up_typed.
+  - apply TLoc. reflexivity.                                   (* counter loc1 : Num cell *)
+  - eapply TSub; [ apply (TLit _ _ (LInt 3)) | apply RsSsub; apply SsAtom; apply ALInt ].
+  - eapply TSub; [ apply (TLit _ _ (LInt 1)) | apply RsSsub; apply SsAtom; apply ALInt ].
+  - unfold forsum_body. eapply TAssign with (T := BAtom ANum).
+    + apply TLoc. reflexivity.
+    + apply TPrimArith; [ reflexivity | | ].
+      * apply TDeref with (T := BAtom ANum). apply TLoc. reflexivity.
+      * apply TDeref with (T := BAtom ANum). apply TLoc. reflexivity.
+Qed.
+
+(* the counter/condition/body are CLOSED (only [tloc]s, values), so the fix-unfold
+   substitution leaves them unchanged. *)
+Lemma forsum_cond_closed : forall s,
+  subst 0 s (tprim PLe (tderef (tloc 1)) (tlit (LInt 3))) =
+  tprim PLe (tderef (tloc 1)) (tlit (LInt 3)).
+Proof. reflexivity. Qed.
+Lemma forsum_step_closed : forall s,
+  subst 0 s (tseq forsum_body (tassign (tloc 1)
+               (tprim PAdd (tderef (tloc 1)) (tlit (LInt 1))))) =
+  tseq forsum_body (tassign (tloc 1)
+               (tprim PAdd (tderef (tloc 1)) (tlit (LInt 1)))).
+Proof. reflexivity. Qed.
+
+(* ONE ITERATION at counter value [c] (with [c <= 3] so the guard is true), store
+   [sum=s ; i=c]: the loop unfolds, reads [c <= 3 = true], runs the body (sum ->
+   s+c), then increments the counter (i -> c+1) — leaving control back at the loop
+   with store [s+c ; c+1]. Machine-checked, store-driven. *)
+Lemma forsum_one_iter : forall s c,
+  Nat.leb c 3 = true ->
+  multistep (forsum_loop, [tlit (LInt s) ; tlit (LInt c)])
+            (forsum_loop, [tlit (LInt (s + c)) ; tlit (LInt (c + 1))]).
+Proof.
+  intros s c Hle. unfold forsum_loop, tfor_up.
+  eapply MSstep. { apply twhile_unfold. }
+  rewrite forsum_cond_closed, forsum_step_closed.
+  (* condition  !(loc1) <= 3 : read the counter c, then compute  c <= 3 = true *)
+  eapply MSstep. { apply SIf1. apply SPrim1. apply SDeref. } simpl.
+  eapply MSstep. { apply SIf1. apply SPrimCmp. reflexivity. }
+  unfold prim_cmp. rewrite Hle.
+  eapply MSstep. { apply SIfTrue. }
+  (* body  sum := !sum + !i : read s, read c, add, write s+c -> store [s+c ; c] *)
+  unfold forsum_body.
+  eapply MSstep. { apply tseq_step1. apply tseq_step1.
+                   apply SAssign2; [ apply VLoc | apply SPrim1; apply SDeref ]. } simpl.
+  eapply MSstep. { apply tseq_step1. apply tseq_step1.
+                   apply SAssign2; [ apply VLoc | apply SPrim2; [ apply VLit | apply SDeref ] ]. } simpl.
+  eapply MSstep. { apply tseq_step1. apply tseq_step1.
+                   apply SAssign2; [ apply VLoc | apply SPrimArith; reflexivity ]. } simpl.
+  eapply MSstep. { apply tseq_step1. apply tseq_step1. apply SAssign. apply VLit. } simpl.
+  (* the body finished (nil); discard it and run the increment *)
+  eapply MSstep. { apply tseq_step1. apply tseq_step_value. apply VLit. }
+  (* increment  i := !i + 1 : read c, add 1, write c+1 -> store [s+c ; c+1] *)
+  eapply MSstep. { apply tseq_step1.
+                   apply SAssign2; [ apply VLoc | apply SPrim1; apply SDeref ]. } simpl.
+  eapply MSstep. { apply tseq_step1.
+                   apply SAssign2; [ apply VLoc | apply SPrimArith; reflexivity ]. } simpl.
+  eapply MSstep. { apply tseq_step1. apply SAssign. apply VLit. } simpl.
+  (* the increment finished (nil); the outer sequence yields the loop again *)
+  eapply MSstep. { apply tseq_step_value. apply VLit. }
+  apply MSrefl.
+Qed.
+
+(* TERMINATION: at counter value [c] with [c > 3] (guard false), the loop reads the
+   store, the condition is FALSE, and the loop ends with [nil] — store unchanged. *)
+Lemma forsum_terminates : forall s c,
+  Nat.leb c 3 = false ->
+  multistep (forsum_loop, [tlit (LInt s) ; tlit (LInt c)])
+            (tlit LNil, [tlit (LInt s) ; tlit (LInt c)]).
+Proof.
+  intros s c Hgt. unfold forsum_loop, tfor_up.
+  eapply MSstep. { apply twhile_unfold. }
+  rewrite forsum_cond_closed, forsum_step_closed.
+  eapply MSstep. { apply SIf1. apply SPrim1. apply SDeref. } simpl.
+  eapply MSstep. { apply SIf1. apply SPrimCmp. reflexivity. }
+  unfold prim_cmp. rewrite Hgt.
+  eapply MSstep. { apply SIfFalse. }
+  apply MSrefl.
+Qed.
+
+(* THE WHOLE LOOP, END-TO-END: from [sum=0 ; i=1] it runs three iterations
+   (i=1,2,3) and terminates at i=4, computing  sum = 0+1+2+3 = 6.  Store
+   [0;1] -> [1;2] -> [3;3] -> [6;4] -> (i=4>3, stop) [6;4]. *)
+Example forsum_loop_runs :
+  multistep (forsum_loop, [tlit (LInt 0) ; tlit (LInt 1)])
+            (tlit LNil, [tlit (LInt 6) ; tlit (LInt 4)]).
+Proof.
+  eapply multistep_trans. { apply (forsum_one_iter 0 1). reflexivity. } simpl.
+  eapply multistep_trans. { apply (forsum_one_iter 1 2). reflexivity. } simpl.
+  eapply multistep_trans. { apply (forsum_one_iter 3 3). reflexivity. } simpl.
+  apply (forsum_terminates 6 4). reflexivity.
+Qed.
+
+(* ---------------------------------------------------------------------------
+   PAYOFF 2 — A COUNTING-DOWN LOOP THAT TERMINATES:  for i = 2, 1, -1 do () end.
+
+   The descending form ([tfor_down]): counter starts at 2, limit 1, step magnitude
+   1; guard [1 <= !i]; each turn decrement  i := !i - 1. Body is the unit statement
+   [()] (we exhibit termination of the loop control itself). One cell, [i] = loc 0.
+   Iterations: i=2 (1<=2 true, ->1), i=1 (1<=1 true, ->0), i=0 (1<=0 false) stop.
+   --------------------------------------------------------------------------- *)
+
+Definition fordown_loop : tm :=
+  tfor_down (tloc 0) (tlit (LInt 1)) (tlit (LInt 1)) (tlit LNil).
+
+(* it TYPES at [Tunit] under a single [Num] cell. *)
+Example fordown_loop_typed :
+  has_type [ BAtom ANum ] [] fordown_loop Tunit.
+Proof.
+  unfold fordown_loop. apply tfor_down_typed.
+  - apply TLoc. reflexivity.
+  - eapply TSub; [ apply (TLit _ _ (LInt 1)) | apply RsSsub; apply SsAtom; apply ALInt ].
+  - eapply TSub; [ apply (TLit _ _ (LInt 1)) | apply RsSsub; apply SsAtom; apply ALInt ].
+  - apply (TLit _ _ LNil).
+Qed.
+
+Lemma fordown_cond_closed : forall s,
+  subst 0 s (tprim PLe (tlit (LInt 1)) (tderef (tloc 0))) =
+  tprim PLe (tlit (LInt 1)) (tderef (tloc 0)).
+Proof. reflexivity. Qed.
+Lemma fordown_step_closed : forall s,
+  subst 0 s (tseq (tlit LNil)
+               (tassign (tloc 0) (tprim PSub (tderef (tloc 0)) (tlit (LInt 1))))) =
+  tseq (tlit LNil)
+       (tassign (tloc 0) (tprim PSub (tderef (tloc 0)) (tlit (LInt 1)))).
+Proof. reflexivity. Qed.
+
+(* ONE DECREMENTING ITERATION at counter [c] with guard [1 <= c] true: the loop
+   reads the store, runs the (empty) body, then decrements  i := c - 1. *)
+Lemma fordown_one_iter : forall c,
+  Nat.leb 1 c = true ->
+  multistep (fordown_loop, [tlit (LInt c)])
+            (fordown_loop, [tlit (LInt (c - 1))]).
+Proof.
+  intros c Hge. unfold fordown_loop, tfor_down.
+  eapply MSstep. { apply twhile_unfold. }
+  rewrite fordown_cond_closed, fordown_step_closed.
+  (* condition  1 <= !(loc0) : read c, compute  1 <= c = true *)
+  eapply MSstep. { apply SIf1. apply SPrim2; [ apply VLit | apply SDeref ]. } simpl.
+  eapply MSstep. { apply SIf1. apply SPrimCmp. reflexivity. }
+  unfold prim_cmp. rewrite Hge.
+  eapply MSstep. { apply SIfTrue. }
+  (* the loop body [body ; decrement] : the body is the unit value [nil], the inner
+     sequence discards it, leaving the decrement. *)
+  eapply MSstep. { apply tseq_step1. apply tseq_step_value. apply VLit. }
+  (* decrement  i := !i - 1 : read c, subtract 1, write c-1 *)
+  eapply MSstep. { apply tseq_step1.
+                   apply SAssign2; [ apply VLoc | apply SPrim1; apply SDeref ]. } simpl.
+  eapply MSstep. { apply tseq_step1.
+                   apply SAssign2; [ apply VLoc | apply SPrimArith; reflexivity ]. } simpl.
+  eapply MSstep. { apply tseq_step1. apply SAssign. apply VLit. } simpl.
+  (* the decrement finished (nil); the outer sequence yields the loop again *)
+  eapply MSstep. { apply tseq_step_value. apply VLit. }
+  apply MSrefl.
+Qed.
+
+(* TERMINATION: at counter [c] with guard [1 <= c] FALSE (c = 0), the loop ends. *)
+Lemma fordown_terminates : forall c,
+  Nat.leb 1 c = false ->
+  multistep (fordown_loop, [tlit (LInt c)]) (tlit LNil, [tlit (LInt c)]).
+Proof.
+  intros c Hlt. unfold fordown_loop, tfor_down.
+  eapply MSstep. { apply twhile_unfold. }
+  rewrite fordown_cond_closed, fordown_step_closed.
+  eapply MSstep. { apply SIf1. apply SPrim2; [ apply VLit | apply SDeref ]. } simpl.
+  eapply MSstep. { apply SIf1. apply SPrimCmp. reflexivity. }
+  unfold prim_cmp. rewrite Hlt.
+  eapply MSstep. { apply SIfFalse. }
+  apply MSrefl.
+Qed.
+
+(* THE WHOLE COUNTING-DOWN LOOP, END-TO-END: from [i=2] it decrements 2 -> 1 -> 0
+   and terminates (1 <= 0 false). A negative-step loop computed to its end. *)
+Example fordown_loop_runs :
+  multistep (fordown_loop, [tlit (LInt 2)]) (tlit LNil, [tlit (LInt 0)]).
+Proof.
+  eapply multistep_trans. { apply (fordown_one_iter 2). reflexivity. } simpl.
+  eapply multistep_trans. { apply (fordown_one_iter 1). reflexivity. } simpl.
+  apply (fordown_terminates 0). reflexivity.
+Qed.
+
+(* ---------------------------------------------------------------------------
+   PAYOFF 3 — THE LOOP VARIABLE IS TYPED SOUNDLY AS A NUMBER. In the [forsum]
+   context (the counter is a [Num] cell at loc 1), the loop variable [i = !i] has
+   the number type [ANum] — and an INT consumer of it is REJECTED (the variable is
+   not narrowed to [Int]; it is the full number type, exactly 5.1's number model).
+   --------------------------------------------------------------------------- *)
+
+(* [i = !(loc 1)] is typed at the NUMBER type [ANum]. *)
+Example for_var_typed_number :
+  has_type [ BAtom ANum ; BAtom ANum ] [] (tderef (tloc 1)) (BAtom ANum).
+Proof. apply for_var_is_number. apply TLoc. reflexivity. Qed.
+
+(* and the loop variable is NOT an [Int]: a number is not soundly an [Int]
+   ([ANum </: AInt]), so [i] cannot be typed at [AInt] — Lua's number model: the
+   numeric-for variable is a NUMBER, not an integer. *)
+Example for_var_not_int :
+  ~ has_type [ BAtom ANum ; BAtom ANum ] [] (tderef (tloc 1)) (BAtom AInt).
+Proof.
+  intro H. apply inv_deref in H. destruct H as [U [Hc Hsub]].
+  apply inv_loc in Hc. destruct Hc as [T0 [Hnth HsubR]].
+  simpl in Hnth. injection Hnth as <-.
+  (* HsubR : BRef ANum <: BRef U   ==>  U == ANum (ref invariance);
+     Hsub  : U <: AInt.  Then ANum <: AInt, impossible (NRfrac witness). *)
+  apply rsub_ref_inv in HsubR. destruct HsubR as [Hsu Hus].
+  pose proof (rsub_trans _ _ _ Hsu Hsub) as Hbad.   (* ANum <: AInt *)
+  apply rsub_sound in Hbad.
+  (* a NON-integer number [VNum (NRfrac 0)] inhabits ANum but NOT AInt. *)
+  pose proof (Hbad (VNum (NRfrac 0)) I) as Hcontra. simpl in Hcontra. exact Hcontra.
+Qed.
+
+(* ===========================================================================
    ASSUMPTION AUDIT — closed under the global context.
    =========================================================================== *)
 Print Assumptions progress.
@@ -9031,3 +9375,19 @@ Print Assumptions mp_assign_typed.
 Print Assumptions mp_assign_steps.
 Print Assumptions md_assign_typed.
 Print Assumptions md_assign_steps.
+(* NUMERIC FOR-LOOP — encoded over [twhile]: typing of the loop forms + the loop
+   variable as a number; a counting-up sum loop (types + steps to 6); a counting-
+   down loop (terminates); the loop variable typed soundly as ANum (not AInt). *)
+Print Assumptions for_var_is_number.
+Print Assumptions tfor_up_typed.
+Print Assumptions tfor_down_typed.
+Print Assumptions forsum_loop_typed.
+Print Assumptions forsum_one_iter.
+Print Assumptions forsum_terminates.
+Print Assumptions forsum_loop_runs.
+Print Assumptions fordown_loop_typed.
+Print Assumptions fordown_one_iter.
+Print Assumptions fordown_terminates.
+Print Assumptions fordown_loop_runs.
+Print Assumptions for_var_typed_number.
+Print Assumptions for_var_not_int.
