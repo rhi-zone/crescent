@@ -291,10 +291,50 @@ Op-sem parity must hold at every commit. After the handler deletion, the adversa
   `proof/check.v` synth; `progress`/`preservation`/`synth_sound`/`check_sound`
   re-proved — see the Typing-layer §"Metatables" entry and proof-kernel
   increment 21). It is modelled by FLATTENING over the existing `BRec` (no new
-  `V`/`denote`-level former). STILL OPEN as a separate axis: a first-class
-  metatable model in `V`/`denote` (for operator metamethods / `__call` / dynamic
-  mutation, which are not record-flattenable). `reality-bridge.md` §4(C) tracks
-  the broader unobserved table axis.
+  `V`/`denote`-level former). The first-class / dynamic-metatable axis (a
+  metatable model in `V`/`denote` for `setmetatable`-driven dispatch / dynamic
+  mutation / dynamic-shape tables) was **DECIDED — do NOT build any first-class or
+  dynamic-metatable representation now**; keep this static `tmeta`/`merge_fields`
+  model. Full design-it-twice result (4 candidate designs + 4 adversarial judges,
+  grounded in `proof/*.v`) recorded in
+  `docs/decisions/metatable-representation.md`. The underlying open work is
+  re-filed below as three substrate prerequisites + the `__meta`-ref graft (each
+  gated on that substrate); they are deferred BEHIND the substrate, not built on
+  top of the current core. `reality-bridge.md` §4(C) tracks the broader unobserved
+  table axis.
+- [ ] **[substrate] Sound optional / absent-key field reads (`T | nil`) — proof
+  dev.** Reading a possibly-absent record key yielding `T | nil`. SUBTLETY: for a
+  CLOSED record an absent key is exactly `nil`; for the current OPEN `BRec` ("other
+  keys allowed") an absent key MIGHT be present — so this is entangled with the
+  open-vs-closed-record / index-signature distinction below. This is the same gap
+  recorded as "rawget on a key ABSENT from own returning `nil`" (proof-kernel
+  increment 25, `proof/typing.v`). PREREQUISITE for the dynamic-metatable frontier.
+  See `docs/decisions/metatable-representation.md` (substrate prerequisite 1).
+- [ ] **[substrate, high-stakes] Index signatures `{[K]:V}` in `BTy` — proof dev,
+  OWN design pass first.** Deferred per `subtype.v`'s comment (`BRec` is a fixed
+  finite key list). Unlike the rejected `BRecMt` constructor, this has a REAL
+  denotation (tables where every `K`-typed key maps to a `V`-typed value) and a
+  real subtyping semantics — a justified, denotation-bearing kernel extension. But
+  it TOUCHES THE FROZEN, reality-validated core, so it needs its OWN design pass
+  before any code. (Distinct from, but overlapping with, the existing
+  `[nice-to-have] Index signatures {[K]:V}` item under the type-algebra section.)
+  PREREQUISITE for the dynamic-metatable frontier. See
+  `docs/decisions/metatable-representation.md` (substrate prerequisite 2).
+- [ ] **[substrate] Precise function-type narrowing (intersection-typed
+  `ttypetest`) — proof dev.** For function-valued `__index` / `__newindex`.
+  Already-deferred substrate; otherwise the metamethod narrows to `BArrow BBot
+  BTop` and returns `BTop` (vs `tmeta`'s exact type). PREREQUISITE for
+  function-valued metamethods on the dynamic-metatable frontier. See
+  `docs/decisions/metatable-representation.md` (substrate prerequisite 3).
+- [ ] **[gated graft] `setmetatable`/`getmetatable` via a reserved `__meta` ref
+  field — proof dev.** Modellable WITHOUT any new core constructor and WITHOUT
+  touching `subtype.v`: `setmetatable(t,mt) ≈ tassign (tproj t "__meta") mt`
+  (return `t`) and `getmetatable(t) ≈ tderef (tproj t "__meta")` — pure existing
+  `TAssign`/`TProj`/`TDeref`. CAVEAT: this stores/retrieves the metatable VALUE but
+  does NOT by itself unify dynamic dispatch with the static `tmeta` path; adopting
+  it coherently (so dispatch READS the stored metatable) is GATED on the absent-key
+  / index-signature substrate above — else it is a parallel encoding of metatables.
+  See `docs/decisions/metatable-representation.md` ("the one clean graft").
 - [ ] **[nice-to-have] Non-string table keys.** Model `VTable` uses string keys;
   real Lua keys are any non-nil value. `reality-bridge.md` §4(C).
 - [ ] **[nice-to-have] Full stdlib.** No stdlib modelled in the proof value
