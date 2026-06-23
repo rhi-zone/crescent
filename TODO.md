@@ -840,6 +840,37 @@ Still open (DEFERRED — recorded honestly, minimal core only):
     RIGHT-operand fallback; `rawget`/`rawset`; `__tostring`; built-in numeric
     negation / table length; `setmetatable`/dynamic metatables; `__index`/
     `__newindex` as FUNCTIONS.
+- [x] **Binary operator RIGHT-operand fallback — `TPrimMetaR`/`SPrimMetaR`**
+  (increment 24; `proof/typing.v` + `proof/check.v`; `subtype.v`/`ssub.v`
+  BYTE-UNMODIFIED). The exact MIRROR of `TPrimMetaL`/`SPrimMetaL`, closing the ONE
+  deferral left by Increment 22's binary operators — when the left operand carries
+  no metamethod, dispatch to the right's. Shares `mm_binop`, the `__index`-chain
+  `tproj` resolution, and the arrow machinery; no new lookup mechanism.
+  - **Typing** `TPrimMetaR`: `tprim op a (tmeta ofs proto)` with the right table's
+    `BRec M` carrying `mm_binop op : BAtom al -> Other -> R`, the LEFT operand a
+    SCALAR `a : BAtom al`, and `rsub (BRec M) Other`; result `R`. The `BAtom` left
+    domain (not "syntactically not a `tmeta`") is the discriminator: stable under
+    substitution, step-disjoint from `SPrimMetaL`, and refutable by canonical forms.
+    New lemma `canon_atom` (a closed value of `BAtom al` is a literal).
+  - **Op-sem** `SPrimMetaR`: `tprim op (tlit l) (tmeta own proto)` (literal left —
+    the canonical scalar; table right a value) ⤳ `(table.<mm>) (tlit l) table`.
+  - `inv_prim` becomes a THREE-way disjunction (numeric / left-meta / right-meta),
+    threaded through every consumer. `synth` dispatches TYPE-FIRST on the synthesized
+    LEFT type (the existing outer `match synth a`): `BRec`+`tmeta` left ⇒ left-meta;
+    scalar `BAtom` left ⇒ refine on `synth b` (`BRec`+`tmeta` right ⇒ right-meta, else
+    numeric); else numeric. (Type-first, NOT a syntactic `destruct e1 × destruct e2`
+    split — that is quadratic and blows up the `synth_sound` compile time.)
+    `progress`/`preservation`/`synth_sound`/`check_sound`/`narrowing` ALL re-proved `Qed`.
+  - Payoffs (in `typing.v`): `add_right_payoff_typed`/`_steps` (`1 + robj : Int` ⤳ `8`),
+    `sub_right_absent_rejected` (`1 - robj` rejected — all 3 disjuncts refuted). The
+    algorithmic right-fallback is exercised by `synth_sound`/`check_sound` over the new
+    `synth` arm; no separate `check.v` payoff examples were added.
+    `Print Assumptions` on every result + payoff: Closed under the global context.
+    See proof-kernel increment 24.
+  - DEFERRED (narrower than before): a `tmeta` left missing the key falling through
+    to the right (needs a decidable `__index`-chain side-condition); `rawget`/
+    `rawset`; `__tostring`; built-in numeric negation / table length; `setmetatable`
+    / dynamic metatables; `__index`/`__newindex` as FUNCTIONS.
 - [ ] **Arrow types as TERM introduction forms** (the type ALGEBRA has arrows via
   `BTy` and `tlam` introduces them; broader arrow-term ergonomics are min-core).
 - [ ] **Duplicate-key record literals** (currently `TRec` requires `NoDup` keys,

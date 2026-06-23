@@ -2513,3 +2513,79 @@ and the `__concat`/`__unm`/`__len` payoff families: **Closed under the global
 context** — no axioms, no `Admitted`, no `Classical`. `subtype.v` + `ssub.v`
 byte-unmodified; whole chain compiles (`coqc proof/subtype.v` → `typing.v` →
 `ssub.v` → `check.v`).
+
+## Increment 24 — BINARY OPERATOR RIGHT-OPERAND FALLBACK (`TPrimMetaR`/`SPrimMetaR`)
+
+Closes the ONE deferral from Increment 22's binary operators: when the LEFT
+operand carries no metamethod, Lua tries the RIGHT operand's. The exact MIRROR of
+`TPrimMetaL`/`SPrimMetaL`, sharing the same `mm_binop` key, the same `__index`-chain
+resolution (`tproj`), and the same arrow machinery — no new lookup mechanism.
+
+### The model — a scalar left, a metatable right
+
+- **Typing** `TPrimMetaR`: `tprim op a (tmeta ofs proto)` where the right table's
+  read interface `BRec M` carries `mm_binop op : BAtom al -> Other -> R`, the LEFT
+  operand `a : BAtom al` is a SCALAR (number / string / bool / nil), and
+  `rsub (BRec M) Other`; result `R`. The curried argument order is unchanged —
+  `(metamethod) a b` — only the table that PROVIDES the metamethod differs.
+- **Why the `BAtom` left domain (not "syntactically not a `tmeta`").** A type-level
+  scalar discriminator is what keeps LEFT vs RIGHT dispatch disjoint and is robust
+  where a syntactic one is not: (1) STABLE UNDER SUBSTITUTION (a `BAtom`-typed
+  operand stays `BAtom`-typed; "not a `tmeta`" is destroyed when a variable is
+  substituted by a `tmeta` value); (2) STEP-DISJOINT from `SPrimMetaL` (a
+  `BAtom`-typed value is canonically a literal, never a `tmeta`); (3) lets
+  preservation refute the `TPrimMetaR` inversion at the `SPrimMetaL` site by
+  canonical forms. New lemma `canon_atom`: a closed value of type `BAtom al` is a
+  literal `tlit l` (every other value shape refuted by the `rsub_*_not_atom` facts).
+- **Op-sem** `SPrimMetaR`: `tprim op (tlit l) (tmeta own proto)` (left a literal —
+  the canonical scalar value; right table a value) ⤳
+  `tapp (tapp (tproj (tmeta own proto) (mm_binop op)) (tlit l)) (tmeta own proto)`.
+  The literal left is syntactically never a `tmeta`, so this never overlaps
+  `SPrimMetaL` and preservation discriminates the LEFT-fallback inversion cleanly.
+- **DEFERRED (a genuinely narrower concern, not faked):** a left operand that is
+  itself a `tmeta` MISSING the metamethod key, falling through to the right — that
+  needs a runtime `__index`-chain resolution side-condition (the `tproj` reduction)
+  which this static fragment does not expose as a decidable premise.
+
+### Metatheory re-proved (`Qed`)
+
+`inv_prim` becomes a THREE-way disjunction (numeric OR left-metamethod OR
+right-metamethod); every consumer (`has_type_closed`, `weakening`, `subst_lemma`,
+`store_weakening`, `progress`, `preservation`, the `SPrimMetaL`/`SPrimArith`/
+`SPrimCmp` cases, the rejection examples) threaded for the new disjunct. The
+right-metamethod congruence cases (`SPrim1` left steps, `SPrim2` right table steps)
+re-apply `TPrimMetaR`: the left stays `BAtom al` under stepping; the right table
+stays a `tmeta` via `tmeta_step_shape`. In `check.v`, `synth (tprim op a b)`
+dispatches TYPE-FIRST on the synthesized type of the LEFT operand (the existing
+outer `match synth a`): a `BRec M` left that is syntactically a `tmeta` ⇒
+`TPrimMetaL`; a scalar `BAtom al` left ⇒ refine on `synth b` — a `BRec` right that
+is syntactically a `tmeta` carrying the metamethod ⇒ `TPrimMetaR` (gated by
+`decide_ssub` on the left atom and `decide_rsub` on the table), else NUMERIC; any
+other left type ⇒ NUMERIC. Keeping the OUTER split on the synthesized TYPE (linear
+in type constructors) — rather than re-matching on operand SYNTAX (quadratic in term
+constructors, which made `check.v` take minutes to compile) — keeps the soundness
+proof a single linear case per arm. `synth_sound`/`check_sound`/`narrowing`
+re-proved `Qed`.
+
+### Payoffs
+
+`add_right_payoff_typed` (`1 + robj : Int` — plain-number left, `robj` carrying
+`__add : Int -> ⊤ -> Int`) + `add_right_payoff_steps` (⤳ `8`, exercising
+`SPrimMetaR`); `sub_right_absent_rejected` (`robj` has `__add` but not `__sub`, so
+`1 - robj` is rejected at every type — all three `inv_prim` disjuncts refuted). All
+in `typing.v`; the algorithmic right-fallback is covered by `synth_sound` /
+`check_sound` over the new `synth` arm (no separate `check.v` payoff examples).
+
+### Honest scope / deferrals
+
+DONE: binary-operator RIGHT-operand fallback for a scalar left + metatable right.
+DEFERRED (unchanged from Increment 23, less what landed here): a `tmeta` left
+missing the key falling through to the right (needs a decidable `__index`-chain
+side-condition); `rawget`/`rawset`; `__tostring`; built-in numeric negation / table
+length; `setmetatable` / dynamic metatables; `__index`/`__newindex` as FUNCTIONS.
+
+`Print Assumptions` on `progress`, `preservation`, `synth_sound`, `check_sound`,
+and the right-fallback payoffs (`add_right_*`, `sub_right_*`): **Closed under the
+global context** — no axioms, no `Admitted`, no `Classical`. `subtype.v` + `ssub.v`
+byte-unmodified; whole chain compiles (`coqc proof/subtype.v` → `typing.v` →
+`ssub.v` → `check.v`).

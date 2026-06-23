@@ -189,6 +189,36 @@ Fixpoint synth (Sig : list BTy) (G : list BTy) (e : tm) {struct e} : option BTy 
               end
           | _ => None
           end
+      | Some (BAtom al) =>
+          (* INCREMENT 24 — RIGHT-operand metamethod fallback ([TPrimMetaR]), the exact
+             MIRROR of the left-operand dispatch above. The left operand is a SCALAR
+             ([BAtom al]); if the right operand is SYNTACTICALLY a [tmeta] whose read
+             interface carries [mm_binop op : BAtom al' -> Other -> R] with [al <: al'],
+             dispatch to it. Otherwise (right not a [tmeta], or no such metamethod) fall
+             through to the NUMERIC path. Keeping this inside the [Some (BAtom al)] arm
+             of the OUTER match (rather than re-matching on operand syntax) keeps the
+             soundness proof a single linear case per arm. *)
+          match synth Sig G b with
+          | Some (BRec M) =>
+              match b with
+              | tmeta _ _ =>
+                  match flook (mm_binop op) M with
+                  | Some (BArrow (BAtom al') (BArrow Other R)) =>
+                      if andb (decide_ssub (BAtom al) (BAtom al'))
+                              (decide_rsub (BRec M) Other)
+                      then Some R else None
+                  | _ => None
+                  end
+              | _ => None
+              end
+          | Some Sb =>
+              if andb (decide_ssub (BAtom al) (BAtom ANum)) (decide_ssub Sb (BAtom ANum)) then
+                (if arith_op op then Some (BAtom ANum)
+                 else if cmp_op op then Some (BAtom ABool)
+                 else None)
+              else None
+          | None => None
+          end
       | Some Sa =>
           match synth Sig G b with
           | Some Sb =>
@@ -473,12 +503,19 @@ Proof.
     intros.
   - (* tlit *) simpl in H. injection H as <-. apply TLit.
   - (* tvar *) simpl in H. apply TVar. exact H.
-  - (* tprim — synth the left operand; a [BRec M] left operand that is a [tmeta]
-       takes the operator-metamethod branch, else NUMERIC. *)
+  - (* tprim — TYPE-FIRST dispatch on [synth e1] (the OUTER match), exactly mirroring
+       the function: a [BRec M] left that is a [tmeta] ⇒ [TPrimMetaL]; a scalar
+       [BAtom al] left with a [tmeta] right carrying the metamethod ⇒ [TPrimMetaR]
+       right-fallback (else NUMERIC); any other left type ⇒ NUMERIC. Keeping the
+       split on the synthesized TYPE (linear in type constructors) — not on operand
+       syntax (quadratic in term constructors) — is what keeps this proof fast. *)
     simpl in H.
     destruct (synth Sig G e1) as [ Sa | ] eqn:Ha; [ | discriminate ].
-    destruct Sa as [ | | | | | | M | | | | ];
-      (* every NON-[BRec] left type: NUMERIC path *)
+    destruct Sa as [ al | | | | | | M | | | | ];
+      (* every left type: try the NUMERIC path first. For the [BAtom al] left arm this
+         FAILS exactly when the right operand is a metamethod-bearing [tmeta] (the goal
+         then has the [match b]/[flook] shape, not the numeric [if andb ...] shape), and
+         we fall through to the right-fallback handler below. *)
       try (
         destruct (synth Sig G e2) as [ Sb | ] eqn:Hb; [ | discriminate ];
         match goal with [ H : (if andb (decide_ssub ?LT (BAtom ANum)) _ then _ else _) = _ |- _ ] =>
@@ -494,21 +531,60 @@ Proof.
           | destruct (cmp_op op) eqn:Hcm; [ | discriminate ];
             injection H as <-; apply TPrimCmp; assumption ];
         fail).
-    (* the [BRec M] left type: only a [tmeta] dispatches the operator metamethod. *)
-    destruct e1; try discriminate H.
-    destruct (flook (mm_binop op) M) as [ Tm | ] eqn:Hfm; [ | discriminate ].
-    destruct Tm as [ | | | | | | | Self Tco | | | ]; try discriminate H.
-    destruct Tco as [ | | | | | | | Other R | | | ]; try discriminate H.
-    destruct (synth Sig G e2) as [ Sb | ] eqn:Hb; [ | discriminate ].
-    destruct (andb (decide_rsub (BRec M) Self) (decide_ssub Sb Other)) eqn:Hd;
-      [ | discriminate ].
-    apply Bool.andb_true_iff in Hd. destruct Hd as [HdS HdO].
-    injection H as <-.
-    eapply TPrimMetaL.
-    + apply IHe1. exact Ha.
-    + apply flook_In. exact Hfm.
-    + apply decide_rsub_sound. exact HdS.
-    + eapply TSub; [ apply IHe2; exact Hb | apply RsSsub; apply decide_ssub_sound; exact HdO ].
+    + (* the [BAtom al] left arm. The outer numeric [try] could not fire here (the
+         function's [BAtom al] arm first matches [synth b] for a record before the
+         numeric path, so the goal is not yet in [if andb ...] shape). We split [synth b]:
+         a [tmeta]-record right ⇒ RIGHT-FALLBACK ([TPrimMetaR]); any other right ⇒
+         NUMERIC. *)
+      destruct (synth Sig G e2) as [ Sb | ] eqn:Hb; [ | discriminate ].
+      destruct Sb as [ alb | | | | | | Mr | | | | ];
+        (* every NON-[BRec] right type for the [BAtom] left: NUMERIC path. ([Sb] is now
+           a concrete constructor; we read both atom domains back off the goal shape.) *)
+        try (
+          match goal with [ H : (if andb (decide_ssub ?LT (BAtom ANum)) (decide_ssub ?RT (BAtom ANum)) then _ else _) = _ |- _ ] =>
+            destruct (andb (decide_ssub LT (BAtom ANum)) (decide_ssub RT (BAtom ANum))) eqn:Hd;
+              [ | discriminate ];
+            apply Bool.andb_true_iff in Hd; destruct Hd as [HdA HdB] end;
+          assert (HaN : has_type Sig G e1 (BAtom ANum)) by
+            (eapply TSub; [ apply IHe1; exact Ha | apply RsSsub; apply decide_ssub_sound; exact HdA ]);
+          assert (HbN : has_type Sig G e2 (BAtom ANum)) by
+            (eapply TSub; [ apply IHe2; exact Hb | apply RsSsub; apply decide_ssub_sound; exact HdB ]);
+          destruct (arith_op op) eqn:Har;
+            [ injection H as <-; apply TPrimArith; assumption
+            | destruct (cmp_op op) eqn:Hcm; [ | discriminate ];
+              injection H as <-; apply TPrimCmp; assumption ];
+          fail).
+      (* the [BRec Mr] right type: only a [tmeta] dispatches the RIGHT-operand fallback. *)
+      destruct e2; try discriminate H.
+      destruct (flook (mm_binop op) Mr) as [ Tm | ] eqn:Hfm; [ | discriminate ].
+      destruct Tm as [ | | | | | | | Td Tco | | | ]; try discriminate H.
+      destruct Td as [ al' | | | | | | | | | | ]; try discriminate H.
+      destruct Tco as [ | | | | | | | Other R | | | ]; try discriminate H.
+      destruct (andb (decide_ssub (BAtom al) (BAtom al')) (decide_rsub (BRec Mr) Other)) eqn:Hd;
+        [ | discriminate ].
+      apply Bool.andb_true_iff in Hd. destruct Hd as [HdA HdO].
+      injection H as <-.
+      eapply TPrimMetaR.
+      * eapply TSub; [ apply IHe1; exact Ha | apply RsSsub; apply decide_ssub_sound; exact HdA ].
+      * apply IHe2. exact Hb.
+      * apply flook_In. exact Hfm.
+      * apply decide_rsub_sound. exact HdO.
+    + (* the [BRec M] left type: only a [tmeta] dispatches the operator metamethod
+         ([TPrimMetaL]). *)
+      destruct e1; try discriminate H.
+      destruct (flook (mm_binop op) M) as [ Tm | ] eqn:Hfm; [ | discriminate ].
+      destruct Tm as [ | | | | | | | Self Tco | | | ]; try discriminate H.
+      destruct Tco as [ | | | | | | | Other R | | | ]; try discriminate H.
+      destruct (synth Sig G e2) as [ Sb | ] eqn:Hb; [ | discriminate ].
+      destruct (andb (decide_rsub (BRec M) Self) (decide_ssub Sb Other)) eqn:Hd;
+        [ | discriminate ].
+      apply Bool.andb_true_iff in Hd. destruct Hd as [HdS HdO].
+      injection H as <-.
+      eapply TPrimMetaL.
+      * apply IHe1. exact Ha.
+      * apply flook_In. exact Hfm.
+      * apply decide_rsub_sound. exact HdS.
+      * eapply TSub; [ apply IHe2; exact Hb | apply RsSsub; apply decide_ssub_sound; exact HdO ].
   - (* tlam *) simpl in H.
     destruct (synth Sig (T :: G) e) as [ Tb | ] eqn:Hb; [ | discriminate ].
     injection H as <-. apply TLam. apply IHe. exact Hb.
@@ -876,6 +952,15 @@ Proof.
     + eassumption.
     + match goal with [ IH : forall _ _ _ _, _ -> _ -> has_type _ _ ?x _, Hh : has_type _ _ ?x _ |- has_type _ _ ?x _ ] =>
         eapply (IH G1 _ G2 A'); [ reflexivity | eassumption ] end.
+  - (* METATABLE OPERATOR — TPrimMetaR (RIGHT-operand fallback): scalar left operand +
+       table right narrow; In/rsub stable. The exact mirror of the TPrimMetaL case. *)
+    eapply TPrimMetaR.
+    + match goal with [ IH : forall _ _ _ _, _ -> _ -> has_type _ _ ?x (BAtom _), Hh : has_type _ _ ?x (BAtom _) |- has_type _ _ ?x (BAtom _) ] =>
+        eapply (IH G1 _ G2 A'); [ reflexivity | eassumption ] end.
+    + match goal with [ IH : forall _ _ _ _, _ -> _ -> has_type _ _ (tmeta _ _) _ |- _ ] =>
+        eapply (IH G1 _ G2 A'); [ reflexivity | eassumption ] end.
+    + eassumption.
+    + eassumption.
   - (* METATABLE [__newindex] — TNewIdx: own fields + proto + value narrow. *)
     eapply TNewIdx.
     + match goal with [ IH : forall _ _ _ _, _ -> _ -> has_fields _ _ _ _ |- _ ] =>
