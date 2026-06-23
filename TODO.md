@@ -871,6 +871,42 @@ Still open (DEFERRED — recorded honestly, minimal core only):
     to the right (needs a decidable `__index`-chain side-condition); `rawget`/
     `rawset`; `__tostring`; built-in numeric negation / table length; `setmetatable`
     / dynamic metatables; `__index`/`__newindex` as FUNCTIONS.
+- [x] **`rawget`/`rawset` — raw table access bypassing `__index`/`__newindex`**
+  (increment 25; `proof/typing.v` + `proof/check.v`; `subtype.v`/`ssub.v`
+  BYTE-UNMODIFIED — confirmed `git diff --stat`). Raw access reduces DIRECTLY to the
+  underlying record-of-refs read/write on the table's OWN fields, NEVER consulting
+  the prototype — the own-field path of `tproj`/`tnewidx` WITHOUT the fallback step;
+  reuses the SAME `field_lookup`/`tassign` primitives (no new lookup mechanism, no
+  special-casing).
+  - **Terms** `trawget own proto k` / `trawset own proto k v` (the table given by
+    its own field-list + prototype-position target directly, like `tnewidx`, so own
+    is typed EXACTLY via `has_fields`).
+  - **Typing** `TRawGet`: own `(k,T) ∈ Town` ⇒ result `T` (no merge — an inherited
+    proto-only key is NOT typeable). `TRawSet`: writable own cell `(k, BRef T) ∈
+    Town`, `v : T` ⇒ `nil`. The prototype is typed (`BRec Pf`) for well-formedness
+    but never read/written.
+  - **Op-sem** `SRawGet` (own value via `field_lookup k own`, no proto rule) +
+    congruences `SRawGet1`/`SRawGet2`; `SRawSet` (own cell → `tassign cell v`, no
+    proto rule) + congruences `SRawSet1`/`SRawSet2`/`SRawSet3`.
+  - Full de Bruijn metatheory threaded (`tm_rect_strong`, lift/subst/closed_at,
+    weakening, `subst_lemma`, `store_weakening`, `has_type_closed`, `proj_free`).
+    `progress`/`preservation`/`synth_sound`/`check_sound`/`narrowing` ALL re-proved
+    `Qed`. `synth` dispatches structurally on the `trawget`/`trawset` constructor
+    (like `tnewidx` — NOT a quadratic syntactic operand split); `check.v` builds in
+    seconds.
+  - Payoffs (`typing.v`): `rawget_own_typed`/`_steps`, `rawset_payoff_typed`/`_steps`
+    (raw write through OWN's cell over a store, `[0]`⤳`[5]`), and the DISTINGUISHING
+    property `rawget_bypasses_proto` / `rawset_absent_own_rejected` (a key in the
+    PROTOTYPE but absent from OWN — resolved by `tproj` via `__index`, see
+    `oop_inherited_typed` — is REJECTED by raw access at every type). Algorithmic
+    mirror (`check.v`): `rawget_own_synths`, `rawget_bypasses_proto_synth_None`,
+    `rawset_synths`, `rawset_absent_own_synth_None`. `Print Assumptions` on every
+    result + payoff: Closed under the global context. See proof-kernel increment 25.
+  - DEFERRED (recorded as substrate, not faked): raw access on a key ABSENT from own
+    returning `nil` (the static fragment does not model absent-key reads — `TProj`
+    likewise requires the key present); `__index`/`__newindex` as FUNCTIONS;
+    `setmetatable`/dynamic metatables; `__tostring`; built-in numeric negation /
+    table length.
 - [ ] **Arrow types as TERM introduction forms** (the type ALGEBRA has arrows via
   `BTy` and `tlam` introduces them; broader arrow-term ergonomics are min-core).
 - [ ] **Duplicate-key record literals** (currently `TRec` requires `NoDup` keys,

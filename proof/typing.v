@@ -267,7 +267,42 @@ Inductive tm : Type :=
      the [__index] chain + curried arrow application — no new lookup machinery, the
      unary analogue of [tprim]'s [TPrimMetaL]/[SPrimMetaL]. NOT a value (it computes).
      DEFERRED: built-in numeric negation / table length (metamethod-only here). *)
-  | tunop      : unop -> tm -> tm.            (* tunop uop e : unary [-e] / [#e] *)
+  | tunop      : unop -> tm -> tm             (* tunop uop e : unary [-e] / [#e] *)
+  (* RAW TABLE ACCESS — [rawget]/[rawset]. These BYPASS the metatable
+     [__index]/[__newindex] fallback: they reduce DIRECTLY to the underlying
+     record-of-refs read/write on the table's OWN fields, WITHOUT ever consulting
+     the prototype. The DISTINGUISHING property versus [tproj]/[tnewidx] on a
+     [tmeta]: a key present in the PROTOTYPE but ABSENT from OWN is resolved by the
+     ordinary [tproj] ([SMetaProjProto]) yet is NOT reachable by [trawget] (raw
+     access never falls through) — machine-checked in the payoff lemmas.
+
+     The table is given DIRECTLY by its OWN field-list [own] + [__index]/[__newindex]
+     prototype-position target [proto] (NOT a nested [tmeta] subterm), exactly as
+     [tnewidx] takes its operands — so the own fields are typed EXACTLY by
+     [has_fields] (the same exactness discipline as [TMeta]/[TNewIdx]; a subsumed
+     own table would let the own type under-report own's keys).
+
+     [trawget own proto k] = [rawget((tmeta own proto), k)]: the RAW read of own
+     field [k]. It REUSES the own-field primitive [field_lookup k own] — literally
+     the [SMetaProjOwn] own arm WITHOUT the [SMetaProjProto] fallback. Typing: an
+     own key [(k, T) ∈ Town] gives result [T]. (A key absent from own is a type
+     error the checker rejects — Lua's runtime [nil] for an absent raw key is NOT
+     modelled here, mirroring the static fragment's [TProj] which also requires the
+     key present; that is recorded as deferred, not faked.)
+
+     [trawset own proto k v] = [rawset((tmeta own proto), k, v)]: the RAW write of
+     own field [k]. Like [tnewidx] it goes through the records-of-refs write — but
+     to OWN's cell, never the prototype's. The own field for [k] is a mutable
+     [BRef T] cell ([(k, BRef T) ∈ Town]); the write reduces to [tassign (own's
+     cell for k) v] and assigns a [v : T] into it, yielding [nil]. This is exactly
+     [TNewIdx]'s write side with the cell read from OWN ([field_lookup k own])
+     instead of the prototype, and WITHOUT the absent-from-own dispatch. Neither
+     form is a value (both compute). DEFERRED: raw access on a key absent from own
+     returning [nil] (needs the static fragment to model absent-key reads). *)
+  | trawget    : list (string * tm) -> tm -> string -> tm
+       (* trawget own proto k : [rawget((tmeta own proto), k)] — raw own read *)
+  | trawset    : list (string * tm) -> tm -> string -> tm -> tm.
+       (* trawset own proto k v : [rawset((tmeta own proto), k, v)] — raw own write *)
 
 (* The type a tag pins (the THEN-branch narrowed type). TgNum ↦ ANum (all numbers,
    per the 5.1 [type()] model), the other scalars to their atoms, TgTable to the
@@ -404,6 +439,9 @@ Section tm_ind_strong.
   Hypothesis Hnewidx : forall own proto k v, Pl own -> P proto -> P v ->
                        P (tnewidx own proto k v).
   Hypothesis Hunop   : forall uop e, P e -> P (tunop uop e).
+  Hypothesis Hrawget : forall own proto k, Pl own -> P proto -> P (trawget own proto k).
+  Hypothesis Hrawset : forall own proto k v, Pl own -> P proto -> P v ->
+                       P (trawset own proto k v).
   Hypothesis Hnil  : Pl [].
   Hypothesis Hcons : forall k e rest, P e -> Pl rest -> Pl ((k, e) :: rest).
   Hypothesis Htnil : Pt [].
@@ -460,6 +498,22 @@ Section tm_ind_strong.
               end) own)
           (tm_rect_strong proto) (tm_rect_strong v)
     | tunop uop e => Hunop uop e (tm_rect_strong e)
+    | trawget own proto k =>
+        Hrawget own proto k
+          ((fix gorg (fs : list (string * tm)) : Pl fs :=
+              match fs with
+              | [] => Hnil
+              | (k0, e) :: rest => Hcons k0 e rest (tm_rect_strong e) (gorg rest)
+              end) own)
+          (tm_rect_strong proto)
+    | trawset own proto k v =>
+        Hrawset own proto k v
+          ((fix gors (fs : list (string * tm)) : Pl fs :=
+              match fs with
+              | [] => Hnil
+              | (k0, e) :: rest => Hcons k0 e rest (tm_rect_strong e) (gors rest)
+              end) own)
+          (tm_rect_strong proto) (tm_rect_strong v)
     end.
 End tm_ind_strong.
 
@@ -1074,6 +1128,35 @@ Inductive has_type : list BTy -> list BTy -> tm -> BTy -> Prop :=
       rsub (BRec M) Self ->
       rsub (BRec M) Other ->
       has_type S G (tunop uop (tmeta ofs proto)) R
+  (* RAW READ — [rawget((tmeta own proto), k)]. The OWN field-list is typed EXACTLY
+     by [has_fields] (same exactness discipline as [TMeta]/[TNewIdx]). The key [k]
+     must be a DIRECT (own) field — [(k, T) ∈ Town] — and the result is OWN's type
+     [T] for it. Raw access NEVER consults [proto]: there is no merge and no
+     fallback, so an inherited (prototype-only) key is NOT typeable here (the
+     distinguishing static property versus [TProj] on the merged read interface).
+     [proto] is still typed (a [BRec], the prototype shape) so the table is
+     well-formed, but its fields play no part in the result. *)
+  | TRawGet : forall S G ofs proto Town Pf k T,
+      has_fields S G ofs Town ->
+      NoDup (map fst Town) ->
+      In (k, T) Town ->
+      has_type S G proto (BRec Pf) ->
+      NoDup (map fst Pf) ->
+      has_type S G (trawget ofs proto k) T
+  (* RAW WRITE — [rawset((tmeta own proto), k, v)]. The records-of-refs write of
+     [TNewIdx], but to OWN's cell, NEVER the prototype's, and WITHOUT the
+     absent-from-own dispatch: [k] must be a DIRECT own field whose value is a
+     writable [BRef T] cell ([(k, BRef T) ∈ Town]); the write assigns a [v : T]
+     into that cell, yielding the unit value [nil]. [proto] is typed for
+     well-formedness but is never written. *)
+  | TRawSet : forall S G ofs proto Town Pf k v T,
+      has_fields S G ofs Town ->
+      NoDup (map fst Town) ->
+      In (k, BRef T) Town ->
+      has_type S G proto (BRec Pf) ->
+      NoDup (map fst Pf) ->
+      has_type S G v T ->
+      has_type S G (trawset ofs proto k v) (BAtom ANil)
 (* key-aligned pointwise typing of record fields; mutual so the generated
    induction principle carries an IH on every field derivation. *)
 with has_fields : list BTy -> list BTy -> list (string * tm) -> list (string * BTy) -> Prop :=
@@ -1177,6 +1260,11 @@ Fixpoint lift (d k : nat) (e : tm) : tm :=
       tnewidx (map (fun ke => (fst ke, lift d k (snd ke))) own) (lift d k proto) k0 (lift d k v)
   (* unary metamethod: no new binders — the operand lifts at [k]. *)
   | tunop uop e => tunop uop (lift d k e)
+  (* RAW ACCESS: no new binders — own fields, proto (and value) lift at [k]. *)
+  | trawget own proto k0 =>
+      trawget (map (fun ke => (fst ke, lift d k (snd ke))) own) (lift d k proto) k0
+  | trawset own proto k0 v =>
+      trawset (map (fun ke => (fst ke, lift d k (snd ke))) own) (lift d k proto) k0 (lift d k v)
   end.
 
 Fixpoint subst (j : nat) (s : tm) (e : tm) : tm :=
@@ -1226,6 +1314,11 @@ Fixpoint subst (j : nat) (s : tm) (e : tm) : tm :=
       tnewidx (map (fun ke => (fst ke, subst j s (snd ke))) own) (subst j s proto) k0 (subst j s v)
   (* unary metamethod: no new binders — substitute into the operand at [j]. *)
   | tunop uop e => tunop uop (subst j s e)
+  (* RAW ACCESS: no new binders — substitute into own fields, proto (and value). *)
+  | trawget own proto k0 =>
+      trawget (map (fun ke => (fst ke, subst j s (snd ke))) own) (subst j s proto) k0
+  | trawset own proto k0 v =>
+      trawset (map (fun ke => (fst ke, subst j s (snd ke))) own) (subst j s proto) k0 (subst j s v)
   end.
 
 (* record-field lookup at the term level (for projection) *)
@@ -1584,7 +1677,53 @@ Inductive step : tm * store -> tm * store -> Prop :=
            (tapp (tapp (tproj (tmeta own proto) (mm_unop uop)) (tmeta own proto)) (tmeta own proto), st)
   (* unary metamethod — congruence: reduce the operand to a value first. *)
   | SUnop1 : forall uop e e' st st',
-      step (e, st) (e', st') -> step (tunop uop e, st) (tunop uop e', st').
+      step (e, st) (e', st') -> step (tunop uop e, st) (tunop uop e', st')
+  (* RAW READ DISPATCH — [trawget own proto k] with own fields + proto all VALUES
+     resolves the RAW own read: [field_lookup k own] (the SAME own-field primitive
+     [SMetaProjOwn] uses) steps DIRECTLY to the own value [v]. There is NO
+     prototype-fallback rule: raw access never consults [proto] (contrast
+     [SMetaProjProto]). Congruences [SRawGet1]/[SRawGet2] reduce own / proto first. *)
+  | SRawGet : forall own proto k v st,
+      Forall (fun ke => value (snd ke)) own ->
+      value proto ->
+      field_lookup k own = Some v ->
+      step (trawget own proto k, st) (v, st)
+  | SRawGet1 : forall pre k0 e e' post proto k st st',
+      Forall (fun ke => value (snd ke)) pre ->
+      step (e, st) (e', st') ->
+      step (trawget (pre ++ (k0, e) :: post) proto k, st)
+           (trawget (pre ++ (k0, e') :: post) proto k, st')
+  | SRawGet2 : forall own proto proto' k st st',
+      Forall (fun ke => value (snd ke)) own ->
+      step (proto, st) (proto', st') ->
+      step (trawget own proto k, st) (trawget own proto' k, st')
+  (* RAW WRITE DISPATCH — [trawset own proto k v] with own fields + proto + value
+     all VALUES resolves the RAW own write: the own cell for [k]
+     ([field_lookup k own = Some cell], a [tloc] by typing) is assigned [v] — it
+     becomes [tassign cell v] (the records-of-refs write, [SAssign]). This is
+     [SNewIdx]'s write WITH the cell read from OWN ([field_lookup k own]) instead of
+     the prototype ([tproj ni k]), and WITHOUT any absent-from-own dispatch. No
+     prototype rule exists; raw write never writes [proto]. Congruences
+     [SRawSet1]/[SRawSet2]/[SRawSet3] reduce own / proto / value first. *)
+  | SRawSet : forall own proto k v cell st,
+      Forall (fun ke => value (snd ke)) own ->
+      value proto ->
+      value v ->
+      field_lookup k own = Some cell ->
+      step (trawset own proto k v, st) (tassign cell v, st)
+  | SRawSet1 : forall pre k0 e e' post proto k v st st',
+      Forall (fun ke => value (snd ke)) pre ->
+      step (e, st) (e', st') ->
+      step (trawset (pre ++ (k0, e) :: post) proto k v, st)
+           (trawset (pre ++ (k0, e') :: post) proto k v, st')
+  | SRawSet2 : forall own proto proto' k v st st',
+      Forall (fun ke => value (snd ke)) own ->
+      step (proto, st) (proto', st') ->
+      step (trawset own proto k v, st) (trawset own proto' k v, st')
+  | SRawSet3 : forall own proto k v v' st st',
+      Forall (fun ke => value (snd ke)) own -> value proto ->
+      step (v, st) (v', st') ->
+      step (trawset own proto k v, st) (trawset own proto k v', st').
 
 (* STORE well-typedness + extension (ported from imp.v). [store_well_typed S st]:
    same length, each stored value has its S-type (closed — stored values are
@@ -1855,6 +1994,56 @@ Proof.
     split; [eassumption|]. split; [eassumption|].
     split; [eassumption|]. split; [eassumption|]. split; [eassumption|].
     split; [eassumption|]. split; [eassumption|]. apply rsub_refl.
+Qed.
+
+(* RAW READ — inversion of [trawget ofs proto k]. The own field-list types
+   EXACTLY ([has_fields], NoDup keys), [k] is a DIRECT own field [(k,U) ∈ Town],
+   the prototype is a [BRec], and the read type [U] subsumes (via [TSub]) to the
+   observed [T]. *)
+Lemma inv_rawget : forall S G ofs proto k T,
+  has_type S G (trawget ofs proto k) T ->
+  exists Town Pf U,
+    has_fields S G ofs Town /\ NoDup (map fst Town) /\
+    In (k, U) Town /\
+    has_type S G proto (BRec Pf) /\ NoDup (map fst Pf) /\ rsub U T.
+Proof.
+  intros S G ofs proto k T H. remember (trawget ofs proto k) as e eqn:Ee.
+  induction H; try discriminate Ee.
+  - (* TSub *) subst. destruct (IHhas_type eq_refl) as [Town [Pf [U Hrest]]].
+    exists Town, Pf, U.
+    destruct Hrest as [Hfs [Hno [Hin [Hp [Hnp Hd]]]]].
+    split; [assumption|]. split; [assumption|]. split; [assumption|].
+    split; [assumption|]. split; [assumption|]. eapply RsTrans; eassumption.
+  - (* TRawGet *) injection Ee as <- <- <-.
+    eexists Town, Pf, _.
+    split; [eassumption|]. split; [eassumption|]. split; [eassumption|].
+    split; [eassumption|]. split; [eassumption|]. apply rsub_refl.
+Qed.
+
+(* RAW WRITE — inversion of [trawset ofs proto k v]. The own field-list types
+   EXACTLY, [k] is a DIRECT own field whose cell is writable [(k, BRef U) ∈ Town],
+   the prototype is a [BRec], the value types at [U], and [nil] subsumes to [T]. *)
+Lemma inv_rawset : forall S G ofs proto k v T,
+  has_type S G (trawset ofs proto k v) T ->
+  exists Town Pf U,
+    has_fields S G ofs Town /\ NoDup (map fst Town) /\
+    In (k, BRef U) Town /\
+    has_type S G proto (BRec Pf) /\ NoDup (map fst Pf) /\
+    has_type S G v U /\ rsub (BAtom ANil) T.
+Proof.
+  intros S G ofs proto k v T H. remember (trawset ofs proto k v) as e eqn:Ee.
+  induction H; try discriminate Ee.
+  - (* TSub *) subst. destruct (IHhas_type eq_refl) as [Town [Pf [U Hrest]]].
+    exists Town, Pf, U.
+    destruct Hrest as [Hfs [Hno [Hin [Hp [Hnp [Hv Hd]]]]]].
+    split; [assumption|]. split; [assumption|]. split; [assumption|].
+    split; [assumption|]. split; [assumption|]. split; [assumption|].
+    eapply RsTrans; eassumption.
+  - (* TRawSet *) injection Ee as <- <- <- <-.
+    eexists Town, Pf, _.
+    split; [eassumption|]. split; [eassumption|]. split; [eassumption|].
+    split; [eassumption|]. split; [eassumption|]. split; [eassumption|].
+    apply rsub_refl.
 Qed.
 
 (* METATABLE UNARY METAMETHOD — inversion of [tunop uop e]. The operand is a
@@ -3486,6 +3675,26 @@ Proof.
       [ match goal with [ IH : forall _ _ _, _ = _ -> has_type _ _ (lift _ _ (tmeta _ _)) _ |- _ ] =>
           exact (IH G1 G2 U eq_refl) end
       | eassumption | assumption | assumption ].
+  - (* RAW READ — TRawGet: own fields + prototype weaken; [In]/[NoDup] premises
+       are context-independent. *)
+    eapply TRawGet;
+      [ match goal with [ IH : forall _ _ _, _ = _ -> has_fields _ _ _ _ |- _ ] =>
+          exact (IH G1 G2 U eq_refl) end
+      | assumption | eassumption
+      | match goal with [ IH : forall _ _ _, _ = _ -> has_type _ _ (lift _ _ proto) _ |- _ ] =>
+          exact (IH G1 G2 U eq_refl) end
+      | assumption ].
+  - (* RAW WRITE — TRawSet: own fields + prototype + value weaken; the premises are
+       context-independent. *)
+    eapply TRawSet;
+      [ match goal with [ IH : forall _ _ _, _ = _ -> has_fields _ _ _ _ |- _ ] =>
+          exact (IH G1 G2 U eq_refl) end
+      | assumption | eassumption
+      | match goal with [ IH : forall _ _ _, _ = _ -> has_type _ _ (lift _ _ proto) _ |- _ ] =>
+          exact (IH G1 G2 U eq_refl) end
+      | assumption
+      | match goal with [ IH : forall _ _ _, _ = _ -> has_type _ _ (lift _ _ v) _ |- _ ] =>
+          exact (IH G1 G2 U eq_refl) end ].
   - (* HFnil *) apply HFnil.
   - (* HFcons *) apply HFcons.
     + match goal with [ IH : forall _ _ _, _ = _ -> has_type _ _ _ _ |- _ ] =>
@@ -3561,6 +3770,21 @@ Fixpoint closed_at (k : nat) (e : tm) : Prop :=
       /\ closed_at k proto /\ closed_at k v
   (* unary metamethod: no new binders — the operand closed at [k]. *)
   | tunop _ e => closed_at k e
+  (* RAW ACCESS: no new binders — own fields, proto (and value) closed at [k]. *)
+  | trawget own proto _ =>
+      (fix allc (fs : list (string * tm)) : Prop :=
+         match fs with
+         | [] => True
+         | (_, e) :: rest => closed_at k e /\ allc rest
+         end) own
+      /\ closed_at k proto
+  | trawset own proto _ v =>
+      (fix allc (fs : list (string * tm)) : Prop :=
+         match fs with
+         | [] => True
+         | (_, e) :: rest => closed_at k e /\ allc rest
+         end) own
+      /\ closed_at k proto /\ closed_at k v
   end.
 
 (* typing in [G] bounds free vars by [length G]. By term induction + inversion.
@@ -3659,6 +3883,28 @@ Proof.
     apply inv_unop in H.
     destruct H as [ofs [proto [M [Self [Other [R [Ee [Htbl _]]]]]]]]. subst e.
     exact (IHe Sg G (BRec M) Htbl).
+  - (* RAW READ — trawget: own fields (Pl IH) + proto closed. *)
+    apply inv_rawget in H. destruct H as [Town [Pf [U [Hfs [_ [_ [Hp [_ _]]]]]]]].
+    split.
+    + match goal with
+      | [ IH : forall (_:list BTy)(_:list BTy)(_:list (string*BTy)), has_fields _ _ ?xs _ -> _ |- _ ] =>
+          exact (IH Sg G Town Hfs) end.
+    + match goal with [ IH : forall (_:list BTy)(_:list BTy)(_:BTy),
+          has_type _ _ ?x _ -> closed_at _ ?x, Hh : has_type _ _ ?x (BRec _) |- _ ] =>
+        exact (IH Sg G (BRec Pf) Hp) end.
+  - (* RAW WRITE — trawset: own fields (Pl IH), proto, value closed. *)
+    apply inv_rawset in H.
+    destruct H as [Town [Pf [U [Hfs [_ [_ [Hp [_ [Hv _]]]]]]]]].
+    split; [ | split ].
+    + match goal with
+      | [ IH : forall (_:list BTy)(_:list BTy)(_:list (string*BTy)), has_fields _ _ ?xs _ -> _ |- _ ] =>
+          exact (IH Sg G Town Hfs) end.
+    + match goal with [ IH : forall (_:list BTy)(_:list BTy)(_:BTy),
+          has_type _ _ ?x _ -> closed_at _ ?x, Hh : has_type _ _ ?x (BRec _) |- _ ] =>
+        exact (IH Sg G (BRec Pf) Hp) end.
+    + match goal with [ IH : forall (_:list BTy)(_:list BTy)(_:BTy),
+          has_type _ _ ?x _ -> closed_at _ ?x, Hh : has_type _ _ ?x U |- _ ] =>
+        exact (IH Sg G U Hv) end.
   - (* Pl nil *) exact I.
   - (* Pl cons *) inversion H; subst. simpl. split.
     + match goal with
@@ -3750,6 +3996,26 @@ Proof.
             |- lift _ _ ?x = ?x ] => eapply IH; [exact H3 | exact H0] end ].
   - (* unary metamethod — tunop: the operand is lift-invariant. *)
     f_equal. apply (IHe k); [exact H | exact H0].
+  - (* RAW READ — trawget: own fields (Pl IH) + proto lift-invariant. NB the string
+       key shadows the cut — reference IHs by conclusion shape, [eapply]. *)
+    destruct H as [H1 H2]. f_equal;
+      [ match goal with
+        | [ IH : forall k0, _ -> forall d j, k0 <= j -> map _ ?xs = ?xs |- map _ ?xs = ?xs ] =>
+            eapply IH; [exact H1 | exact H0] end
+      | match goal with
+        | [ IH : forall k0, closed_at k0 ?x -> forall d j, k0 <= j -> lift d j ?x = ?x
+            |- lift _ _ ?x = ?x ] => eapply IH; [exact H2 | exact H0] end ].
+  - (* RAW WRITE — trawset: own fields (Pl IH), proto, value lift-invariant. *)
+    destruct H as [H1 [H2 H3]]. f_equal;
+      [ match goal with
+        | [ IH : forall k0, _ -> forall d j, k0 <= j -> map _ ?xs = ?xs |- map _ ?xs = ?xs ] =>
+            eapply IH; [exact H1 | exact H0] end
+      | match goal with
+        | [ IH : forall k0, closed_at k0 ?x -> forall d j, k0 <= j -> lift d j ?x = ?x
+            |- lift _ _ ?x = ?x ] => eapply IH; [exact H2 | exact H0] end
+      | match goal with
+        | [ IH : forall k0, closed_at k0 ?x -> forall d j, k0 <= j -> lift d j ?x = ?x
+            |- lift _ _ ?x = ?x ] => eapply IH; [exact H3 | exact H0] end ].
   - (* Pl nil *) reflexivity.
   - (* Pl cons *) destruct H as [Hc Hr]. f_equal;
       [ f_equal; apply (IHe k0); [exact Hc | exact H0]
@@ -3995,6 +4261,40 @@ Proof.
     + exact Hin.
     + exact Hself.
     + exact Hother.
+  - (* RAW READ — trawget: substitute into own fields (Pl IH, EXACT [Town]) and
+       proto; [Town]/[Pf]/[In]/[NoDup] preserved, so [TRawGet] re-applies at [W]. *)
+    apply inv_rawget in H.
+    destruct H as [Town [Pf [W [Hfs [Hno [Hin [Hp [Hnp Hd]]]]]]]]. simpl.
+    eapply TSub; [ apply (TRawGet Sg (G1 ++ G2) _ _ Town Pf k W) | exact Hd ].
+    + match goal with
+      | [ IH : forall _ _ _ _ _ _, has_fields _ _ ?xs _ -> _ |- _ ] =>
+          apply (IH Sg G1 G2 U Town s); [ exact Hfs | exact H0 ] end.
+    + exact Hno.
+    + exact Hin.
+    + match goal with
+      | [ IH : forall _ _ _ _ _ _, has_type _ _ ?x _ -> _ -> has_type _ _ _ _,
+          Hh : has_type _ _ ?x (BRec Pf) |- _ ] =>
+          apply (IH Sg G1 G2 U (BRec Pf) s); [ exact Hp | exact H0 ] end.
+    + exact Hnp.
+  - (* RAW WRITE — trawset: substitute into own fields (Pl IH, EXACT [Town]), proto,
+       and value; premises preserved, so [TRawSet] re-applies at [ANil]. *)
+    apply inv_rawset in H.
+    destruct H as [Town [Pf [W [Hfs [Hno [Hin [Hp [Hnp [Hv Hd]]]]]]]]]. simpl.
+    eapply TSub; [ apply (TRawSet Sg (G1 ++ G2) _ _ Town Pf k _ W) | exact Hd ].
+    + match goal with
+      | [ IH : forall _ _ _ _ _ _, has_fields _ _ ?xs _ -> _ |- _ ] =>
+          apply (IH Sg G1 G2 U Town s); [ exact Hfs | exact H0 ] end.
+    + exact Hno.
+    + exact Hin.
+    + match goal with
+      | [ IH : forall _ _ _ _ _ _, has_type _ _ ?x _ -> _ -> has_type _ _ _ _,
+          Hh : has_type _ _ ?x (BRec Pf) |- _ ] =>
+          apply (IH Sg G1 G2 U (BRec Pf) s); [ exact Hp | exact H0 ] end.
+    + exact Hnp.
+    + match goal with
+      | [ IH : forall _ _ _ _ _ _, has_type _ _ ?x _ -> _ -> has_type _ _ _ _,
+          Hh : has_type _ _ ?x W |- _ ] =>
+          apply (IH Sg G1 G2 U W s); [ exact Hv | exact H0 ] end.
   - (* Pl nil *) inversion H; subst. simpl. apply HFnil.
   - (* Pl cons *) inversion H; subst. simpl. apply HFcons.
     + match goal with [ Hh : has_type ?Sg0 (G1 ++ U :: G2) e ?Tk |- _ ] =>
@@ -4090,6 +4390,19 @@ Proof.
     eapply TUnMetaL;
       [ match goal with [ IH : forall _, extends _ _ -> has_type _ _ (tmeta _ _) _ |- _ ] => apply IH; exact Hext end
       | eassumption | assumption | assumption ].
+  - (* RAW READ — TRawGet: own fields + proto store-weaken; premises stable. *)
+    eapply TRawGet;
+      [ match goal with [ IH : forall _, extends _ _ -> has_fields _ _ _ _ |- _ ] => apply IH; exact Hext end
+      | assumption | eassumption
+      | match goal with [ IH : forall _, extends _ _ -> has_type _ _ ?x _, Hh : has_type _ _ ?x (BRec _) |- has_type _ _ ?x _ ] => apply IH; exact Hext end
+      | assumption ].
+  - (* RAW WRITE — TRawSet: own fields + proto + value store-weaken; premises stable. *)
+    eapply TRawSet;
+      [ match goal with [ IH : forall _, extends _ _ -> has_fields _ _ _ _ |- _ ] => apply IH; exact Hext end
+      | assumption | eassumption
+      | match goal with [ IH : forall _, extends _ _ -> has_type _ _ ?x _, Hh : has_type _ _ ?x (BRec _) |- has_type _ _ ?x _ ] => apply IH; exact Hext end
+      | assumption
+      | match goal with [ IH : forall _, extends _ _ -> has_type _ _ ?x _, Hh : has_type _ _ ?x ?TT |- has_type _ _ ?x ?TT ] => apply IH; exact Hext end ].
   - apply HFnil.
   - apply HFcons; [ apply IHhas_type; exact Hext | apply IHhas_type0; exact Hext ].
   - (* MULTI-RETURN — HTnil *) apply HTnil.
@@ -5078,6 +5391,112 @@ Proof.
     + exact Hin.
     + exact Hself.
     + exact Hother.
+  - (* RAW READ — SRawGet: [trawget own proto k] with [field_lookup k own = Some v]
+       steps to [v]. SOUNDNESS: the own supplier [(k,U) ∈ Town] (inv_rawget);
+       [field_lookup_typed] gives [v : Tk] for the unique own supplier; [NoDup Town]
+       forces [Tk = U] ([nodup_unique_type]); so [v : U <: T]. No merge, no prototype
+       — the RAW own read. *)
+    apply inv_rawget in Hty.
+    destruct Hty as [Town [Pf [U [Hfs [Hno [Hin [Hp [Hnp Hd]]]]]]]].
+    pose proof (has_fields_keys S [] own Town Hfs) as Hkeys.
+    assert (Hndown : NoDup (map fst own)) by (rewrite Hkeys; exact Hno).
+    destruct (field_lookup_typed S [] own Town k v Hfs Hndown H1) as [Tk [HinTk Hvt]].
+    pose proof (nodup_unique_type Town k U Tk Hno Hin HinTk) as Heq. subst Tk.
+    exists S. split; [ apply extends_refl | split; [ | exact Hwt ] ].
+    eapply TSub; [ exact Hvt | exact Hd ].
+  - (* RAW READ — SRawGet1: an own field steps. Preserved: own's field-types [Town]
+       unchanged (stepped field keeps its type by the IH), so [In (k,U) Town] is
+       unchanged; [TRawGet] re-applies. *)
+    apply inv_rawget in Hty.
+    destruct Hty as [Town [Pf [U [Hfs [Hno [Hin [Hp [Hnp Hd]]]]]]]].
+    apply has_fields_split in Hfs.
+    destruct Hfs as [Tpre [Tk [Tpost [ETown [Hpre [Hfe Hpost]]]]]]. subst Town.
+    destruct (IHHstep e st e' st' eq_refl eq_refl Hwt Tk Hfe)
+      as [S' [Hext [Hfe' Hwt']]].
+    exists S'. split; [ exact Hext | split; [ | exact Hwt' ] ].
+    eapply TSub; [ eapply (TRawGet S' [] (pre ++ (k0, e') :: post) proto
+                            (Tpre ++ (k0, Tk) :: Tpost) Pf k U) | exact Hd ].
+    + eapply has_fields_app_replace;
+        [ eapply has_fields_store_weaken; [ exact Hpre | exact Hext ]
+        | exact Hfe'
+        | eapply has_fields_store_weaken; [ exact Hpost | exact Hext ] ].
+    + exact Hno.
+    + exact Hin.
+    + eapply store_weakening; [ exact Hp | exact Hext ].
+    + exact Hnp.
+  - (* RAW READ — SRawGet2: the prototype steps. Preserved: [proto] keeps [BRec Pf];
+       own and the result type unchanged. *)
+    apply inv_rawget in Hty.
+    destruct Hty as [Town [Pf [U [Hfs [Hno [Hin [Hp [Hnp Hd]]]]]]]].
+    destruct (IHHstep proto st proto' st' eq_refl eq_refl Hwt (BRec Pf) Hp)
+      as [S' [Hext [Hp' Hwt']]].
+    exists S'. split; [ exact Hext | split; [ | exact Hwt' ] ].
+    eapply TSub; [ eapply (TRawGet S' [] own proto' Town Pf k U) | exact Hd ].
+    + eapply has_fields_store_weaken; [ exact Hfs | exact Hext ].
+    + exact Hno.
+    + exact Hin.
+    + exact Hp'.
+    + exact Hnp.
+  - (* RAW WRITE — SRawSet: [trawset own proto k v] with [field_lookup k own = Some
+       cell] steps to [tassign cell v]. SOUNDNESS: the own supplier [(k, BRef U) ∈
+       Town] (inv_rawset); [field_lookup_typed] gives [cell : Tk]; [NoDup Town]
+       forces [Tk = BRef U]; so [cell : BRef U] and [v : U], hence [tassign cell v :
+       ANil <: T]. The records-of-refs write to OWN's cell — no prototype, no
+       absent-from-own dispatch. *)
+    apply inv_rawset in Hty.
+    destruct Hty as [Town [Pf [U [Hfs [Hno [Hin [Hp [Hnp [Hv Hd]]]]]]]]].
+    pose proof (has_fields_keys S [] own Town Hfs) as Hkeys.
+    assert (Hndown : NoDup (map fst own)) by (rewrite Hkeys; exact Hno).
+    destruct (field_lookup_typed S [] own Town k cell Hfs Hndown H2) as [Tk [HinTk Hct]].
+    pose proof (nodup_unique_type Town k (BRef U) Tk Hno Hin HinTk) as Heq. subst Tk.
+    exists S. split; [ apply extends_refl | split; [ | exact Hwt ] ].
+    eapply TSub; [ eapply TAssign; [ exact Hct | exact Hv ] | exact Hd ].
+  - (* RAW WRITE — SRawSet1: an own field steps. Preserved: [Town] unchanged, so
+       [In (k, BRef U) Town] holds; [TRawSet] re-applies at [ANil]. *)
+    apply inv_rawset in Hty.
+    destruct Hty as [Town [Pf [U [Hfs [Hno [Hin [Hp [Hnp [Hv Hd]]]]]]]]].
+    apply has_fields_split in Hfs.
+    destruct Hfs as [Tpre [Tk [Tpost [ETown [Hpre [Hfe Hpost]]]]]]. subst Town.
+    destruct (IHHstep e st e' st' eq_refl eq_refl Hwt Tk Hfe)
+      as [S' [Hext [Hfe' Hwt']]].
+    exists S'. split; [ exact Hext | split; [ | exact Hwt' ] ].
+    eapply TSub; [ eapply (TRawSet S' [] (pre ++ (k0, e') :: post) proto
+                            (Tpre ++ (k0, Tk) :: Tpost) Pf k _ U) | exact Hd ].
+    + eapply has_fields_app_replace;
+        [ eapply has_fields_store_weaken; [ exact Hpre | exact Hext ]
+        | exact Hfe'
+        | eapply has_fields_store_weaken; [ exact Hpost | exact Hext ] ].
+    + exact Hno.
+    + exact Hin.
+    + eapply store_weakening; [ exact Hp | exact Hext ].
+    + exact Hnp.
+    + eapply store_weakening; [ exact Hv | exact Hext ].
+  - (* RAW WRITE — SRawSet2: the prototype steps. Preserved: [proto] keeps [BRec Pf]. *)
+    apply inv_rawset in Hty.
+    destruct Hty as [Town [Pf [U [Hfs [Hno [Hin [Hp [Hnp [Hv Hd]]]]]]]]].
+    destruct (IHHstep proto st proto' st' eq_refl eq_refl Hwt (BRec Pf) Hp)
+      as [S' [Hext [Hp' Hwt']]].
+    exists S'. split; [ exact Hext | split; [ | exact Hwt' ] ].
+    eapply TSub; [ eapply (TRawSet S' [] own proto' Town Pf k _ U) | exact Hd ].
+    + eapply has_fields_store_weaken; [ exact Hfs | exact Hext ].
+    + exact Hno.
+    + exact Hin.
+    + exact Hp'.
+    + exact Hnp.
+    + eapply store_weakening; [ exact Hv | exact Hext ].
+  - (* RAW WRITE — SRawSet3: the written value steps. Preserved: it keeps [U]. *)
+    apply inv_rawset in Hty.
+    destruct Hty as [Town [Pf [U [Hfs [Hno [Hin [Hp [Hnp [Hv Hd]]]]]]]]].
+    destruct (IHHstep v st v' st' eq_refl eq_refl Hwt U Hv)
+      as [S' [Hext [Hv' Hwt']]].
+    exists S'. split; [ exact Hext | split; [ | exact Hwt' ] ].
+    eapply TSub; [ eapply (TRawSet S' [] own proto Town Pf k _ U) | exact Hd ].
+    + eapply has_fields_store_weaken; [ exact Hfs | exact Hext ].
+    + exact Hno.
+    + exact Hin.
+    + eapply store_weakening; [ exact Hp | exact Hext ].
+    + exact Hnp.
+    + exact Hv'.
 Qed.
 
 (* ===========================================================================
@@ -5452,6 +5871,62 @@ Proof.
     + exists (tapp (tapp (tproj (tmeta ofs proto) (mm_unop uop)) (tmeta ofs proto)) (tmeta ofs proto)), st.
       apply SUnMetaL. exact Hvt.
     + exists (tunop uop t'), stt. apply SUnop1. exact Ht'.
+  - (* RAW READ — TRawGet: [trawget ofs proto k]. If an own field steps, [SRawGet1];
+       else own all values — if proto steps [SRawGet2]; else all values, and since
+       [(k,T) ∈ Town] and own's keys are [Town]'s keys, [field_lookup k ofs] SUCCEEDS,
+       so [SRawGet] steps directly to the own value (no prototype consulted). *)
+    intros st Hwt. right.
+    match goal with [ Hfs0 : has_fields S [] ofs Town, IH : [] = [] -> _ |- _ ] =>
+      destruct (fields_progress S ofs Town st Hfs0 (IH eq_refl st Hwt)) as
+        [Hvs | [pre [k0 [e0 [post [Efs [Hpre [e0' [st0' He0']]]]]]]]] end.
+    + match goal with [ IHp : [] = [] -> forall st, _ -> value proto \/ _ |- _ ] =>
+        destruct (IHp eq_refl st Hwt) as [Hvp | [proto' [stp Hp']]] end.
+      * (* all values: [field_lookup k ofs] succeeds (k is an own key) *)
+        assert (Hink : In k (map fst ofs)).
+        { match goal with [ Hin0 : In (k, T) Town, Hf : has_fields S [] ofs Town |- _ ] =>
+            pose proof (has_fields_keys S [] ofs Town Hf) as Hkeys;
+            rewrite Hkeys; replace k with (fst (k, T)) by reflexivity;
+            apply in_map; exact Hin0 end. }
+        assert (Hlk : exists v, field_lookup k ofs = Some v).
+        { clear -Hink. induction ofs as [ | [k0 e0] ofs IH ]; simpl in *; [ contradiction | ].
+          destruct (string_dec k k0) as [Hk | Hk].
+          - exists e0; reflexivity.
+          - destruct Hink as [Hbad | Hin]; [ symmetry in Hbad; contradiction | apply IH; exact Hin ]. }
+        destruct Hlk as [v Hv].
+        exists v, st. apply SRawGet; [ exact Hvs | exact Hvp | exact Hv ].
+      * exists (trawget ofs proto' k), stp. apply SRawGet2; [ exact Hvs | exact Hp' ].
+    + subst ofs. exists (trawget (pre ++ (k0, e0') :: post) proto k), st0'.
+      apply SRawGet1; [ exact Hpre | exact He0' ].
+  - (* RAW WRITE — TRawSet: [trawset ofs proto k v]. If an own field steps,
+       [SRawSet1]; else own all values — proto steps [SRawSet2]; value steps
+       [SRawSet3]; else all values, and since [(k, BRef T) ∈ Town], [field_lookup k
+       ofs] SUCCEEDS, so [SRawSet] steps to the OWN-cell write (no prototype). *)
+    intros st Hwt. right.
+    match goal with [ Hfs0 : has_fields S [] ofs Town, IH : [] = [] -> _ |- _ ] =>
+      destruct (fields_progress S ofs Town st Hfs0 (IH eq_refl st Hwt)) as
+        [Hvs | [pre [k0 [e0 [post [Efs [Hpre [e0' [st0' He0']]]]]]]]] end.
+    + match goal with [ IHp : [] = [] -> forall st, _ -> value proto \/ _ |- _ ] =>
+        destruct (IHp eq_refl st Hwt) as [Hvp | [proto' [stp Hp']]] end.
+      * match goal with [ IHv : [] = [] -> forall st, _ -> value v \/ _ |- _ ] =>
+          destruct (IHv eq_refl st Hwt) as [Hvv | [v' [stv Hv']]] end.
+        -- (* all values: [field_lookup k ofs] succeeds (k an own key) *)
+           assert (Hink : In k (map fst ofs)).
+           { match goal with [ Hin0 : In (k, BRef T) Town, Hf : has_fields S [] ofs Town |- _ ] =>
+               pose proof (has_fields_keys S [] ofs Town Hf) as Hkeys;
+               rewrite Hkeys; replace k with (fst (k, BRef T)) by reflexivity;
+               apply in_map; exact Hin0 end. }
+           assert (Hlk : exists cell, field_lookup k ofs = Some cell).
+           { clear -Hink. induction ofs as [ | [k0 e0] ofs IH ]; simpl in *; [ contradiction | ].
+             destruct (string_dec k k0) as [Hk | Hk].
+             - exists e0; reflexivity.
+             - destruct Hink as [Hbad | Hin]; [ symmetry in Hbad; contradiction | apply IH; exact Hin ]. }
+           destruct Hlk as [cell Hcell].
+           exists (tassign cell v), st.
+           apply SRawSet; [ exact Hvs | exact Hvp | exact Hvv | exact Hcell ].
+        -- exists (trawset ofs proto k v'), stv. apply SRawSet3; assumption.
+      * exists (trawset ofs proto' k v), stp. apply SRawSet2; [ exact Hvs | exact Hp' ].
+    + subst ofs. exists (trawset (pre ++ (k0, e0') :: post) proto k v), st0'.
+      apply SRawSet1; [ exact Hpre | exact He0' ].
   - (* P0 HFnil *) intros st Hwt ke [].
   - (* P0 HFcons *) intros st Hwt ke Hin. simpl in Hin. destruct Hin as [Heq | Hin].
     + subst ke.
@@ -6346,6 +6821,11 @@ Proof.
       reflexivity.
   - (* unary metamethod — tunop: the operand cancels. *)
     rewrite IHe; reflexivity.
+  - (* RAW READ — trawget: own fields (Pl IH) + proto cancel. *)
+    rewrite IHe, IHe0; reflexivity.
+  - (* RAW WRITE — trawset: own fields (Pl IH) + proto + value cancel. *)
+    repeat match goal with [ IH : forall ss kk, _ = _ |- _ ] => rewrite IH end;
+      reflexivity.
   - (* Pl cons *) rewrite IHe, IHe0; reflexivity.
   - (* MULTI-RETURN — Pt cons *) rewrite IHe, IHe0; reflexivity.
 Qed.
@@ -7324,6 +7804,116 @@ Proof.
 Qed.
 
 (* ===========================================================================
+   RAW TABLE ACCESS — THE PAYOFF: [rawget]/[rawset] bypass the metatable
+   [__index]/[__newindex] fallback. We reuse the OOP object [oop_derived] (own
+   field [name], prototype [__index] = a base record carrying [greet]). The
+   DISTINGUISHING property: [tproj oop_derived "greet"] resolves THROUGH the
+   prototype (oop_inherited_typed/_steps above), yet [trawget] for the SAME key
+   "greet" is REJECTED — raw access never falls through to the prototype.
+   =========================================================================== *)
+
+(* RAW READ types the OWN field — same own-field primitive as the [__index] own
+   arm, WITHOUT the merge: [trawget] of [name] reads OWN's [name : Str]. *)
+Example rawget_own_typed :
+  has_type [] [] (trawget [("name"%string, tlit (LStr 1))] (trec oop_base) "name")
+                 (BAtom AStr).
+Proof.
+  unfold oop_base, oop_greet.
+  eapply (TRawGet [] [] _ _ [("name"%string, BAtom AStr)]
+            [("greet"%string, BArrow (BAtom ANil) (BAtom AStr))] "name" (BAtom AStr)).
+  - apply HFcons; [ apply (TLit [] [] (LStr 1)) | apply HFnil ].
+  - repeat constructor; simpl; intuition discriminate.
+  - left; reflexivity.                       (* ("name", Str) in own *)
+  - apply TRec;
+      [ apply HFcons; [ apply TLam; apply (TLit [] [BAtom ANil] (LStr 0)) | apply HFnil ]
+      | repeat constructor; simpl; intuition discriminate ].
+  - repeat constructor; simpl; intuition discriminate.
+Qed.
+
+(* RAW READ steps DIRECTLY to the own value — ONE step ([SRawGet]), no prototype
+   consulted (contrast [oop_own_steps]'s [SMetaProjOwn], which is the [tmeta]
+   projection; here the table is given by its own + proto components directly). *)
+Example rawget_own_steps : forall st,
+  multistep (trawget [("name"%string, tlit (LStr 1))] (trec oop_base) "name", st)
+            (tlit (LStr 1), st).
+Proof.
+  intro st. unfold oop_base, oop_greet.
+  apply multistep_one. apply SRawGet.
+  - repeat constructor.                       (* own all values *)
+  - apply VRec; repeat constructor.           (* proto a value record *)
+  - reflexivity.                              (* field_lookup "name" own = Some (LStr 1) *)
+Qed.
+
+(* THE DISTINGUISHING PROPERTY (raw read): the INHERITED key "greet" — projectable
+   through [__index] on the [tmeta] object (oop_inherited_typed) — is REJECTED by
+   [trawget] AT EVERY TYPE, because raw access reads ONLY own fields and "greet" is
+   not an own field. This is precisely "bypasses __index". *)
+Example rawget_bypasses_proto : forall T,
+  ~ has_type [] [] (trawget [("name"%string, tlit (LStr 1))] (trec oop_base) "greet") T.
+Proof.
+  intros T H. apply inv_rawget in H.
+  destruct H as [Town [Pf [U [Hfs [_ [Hin [_ [_ _]]]]]]]].
+  (* OWN fields are exactly [name] (concrete [has_fields]); "greet" is not among
+     them. [Hin : ("greet", U) ∈ Town] is therefore refuted. *)
+  inversion Hfs as [ | S0 G0 k0 e0 Te0 fs0 Ts0 He0 Hrest E1 E2 E3 E4 ]; subst.
+  inversion Hrest; subst.                     (* Town = [("name", Te0)] *)
+  simpl in Hin. destruct Hin as [E | F];
+    [ injection E; intros _ Ek; discriminate Ek | exact F ].
+Qed.
+
+(* RAW WRITE — to OWN's cell, bypassing [__newindex]. Own field [k] is a writable
+   [BRef Int] cell [loc0]; the prototype is irrelevant to the write. *)
+Definition rawset_own : list (string * tm) := [("k"%string, tloc 0)].
+Definition rawsetw : tm := trawset rawset_own (trec []) "k" (tlit (LInt 5)).
+
+(* the raw write is well typed at [nil] under store typing [[Int]]. *)
+Example rawset_payoff_typed :
+  has_type [BAtom AInt] [] rawsetw (BAtom ANil).
+Proof.
+  unfold rawsetw, rawset_own.
+  eapply (TRawSet [BAtom AInt] [] [("k"%string, tloc 0)] (trec [])
+            [("k"%string, BRef (BAtom AInt))] [] "k" (tlit (LInt 5)) (BAtom AInt)).
+  - apply HFcons; [ apply (TLoc [BAtom AInt] [] 0); reflexivity | apply HFnil ].
+  - repeat constructor; simpl; intuition discriminate.
+  - left; reflexivity.                       (* ("k", BRef Int) in OWN *)
+  - apply TRec; [ apply HFnil | constructor ].
+  - constructor.
+  - apply (TLit [BAtom AInt] [] (LInt 5)).
+Qed.
+
+(* and it WRITES THROUGH OWN's cell (never the prototype): the dispatch becomes
+   [tassign loc0 5], assigning [5] into [loc0]; from store [[0]] the result is
+   [nil] and store [[5]]. The records-of-refs write to OWN, end-to-end. *)
+Example rawset_payoff_steps :
+  multistep (rawsetw, [tlit (LInt 0)]) (tlit LNil, [tlit (LInt 5)]).
+Proof.
+  unfold rawsetw, rawset_own.
+  eapply multistep_trans.
+  { apply multistep_one. apply SRawSet.
+    - repeat constructor.                     (* own all values *)
+    - apply VRec; repeat constructor.         (* proto a value record *)
+    - constructor.                            (* 5 is a value *)
+    - reflexivity. }                          (* field_lookup "k" own = Some loc0 *)
+  apply multistep_one. apply SAssign. constructor.
+Qed.
+
+(* THE DISTINGUISHING PROPERTY (raw write): a key absent from OWN is REJECTED — raw
+   write never dispatches to the prototype's [__newindex] (contrast [TNewIdx],
+   which writes through the prototype for an absent-from-own key). Here own has
+   only "k", so [trawset] for "nope" does not type at any type. *)
+Example rawset_absent_own_rejected : forall T,
+  ~ has_type [BAtom AInt] [] (trawset rawset_own (trec []) "nope" (tlit (LInt 5))) T.
+Proof.
+  intros T H. apply inv_rawset in H.
+  destruct H as [Town [Pf [U [Hfs [_ [Hin [_ [_ [_ _]]]]]]]]].
+  unfold rawset_own in Hfs.
+  inversion Hfs as [ | S0 G0 k0 e0 Te0 fs0 Ts0 He0 Hrest E1 E2 E3 E4 ]; subst.
+  inversion Hrest; subst.                     (* Town = [("k", Te0)] *)
+  simpl in Hin. destruct Hin as [E | F];
+    [ injection E; intros _ Ek; discriminate Ek | exact F ].
+Qed.
+
+(* ===========================================================================
    METATABLE METAMETHOD FAMILY (extension) — __concat (binary), __unm / __len
    (unary). Each reuses the SAME machinery as __add: a metamethod field in the
    table's read interface, dispatched through the [__index] chain. Typed +
@@ -7497,6 +8087,12 @@ Print Assumptions sub_right_absent_rejected.
 Print Assumptions newindex_payoff_typed.
 Print Assumptions newindex_payoff_steps.
 Print Assumptions newindex_absent_cell_rejected.
+Print Assumptions rawget_own_typed.
+Print Assumptions rawget_own_steps.
+Print Assumptions rawget_bypasses_proto.
+Print Assumptions rawset_payoff_typed.
+Print Assumptions rawset_payoff_steps.
+Print Assumptions rawset_absent_own_rejected.
 Print Assumptions preservation.
 Print Assumptions ex_add_typed.
 Print Assumptions ex_add_steps.

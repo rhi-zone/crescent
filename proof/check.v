@@ -441,6 +441,54 @@ Fixpoint synth (Sig : list BTy) (G : list BTy) (e : tm) {struct e} : option BTy 
         | None => None
         end
       else None
+  (* RAW READ — [rawget((tmeta own proto), k)]. Synthesize the own field-list
+     [Town] (keys_nodup gate) and the prototype [BRec Pf] (keys_nodup gate); look up
+     [k] in OWN ONLY ([flook k Town]) — NO merge, NO prototype fallback. The result
+     is OWN's type for [k]; a key absent from own (even if in the prototype) yields
+     [None]. Exactly the declarative [TRawGet]. *)
+  | trawget own proto k =>
+      if keys_nodup (map fst own) then
+        match synth_fields (synth Sig G) own with
+        | Some Town =>
+            match synth Sig G proto with
+            | Some (BRec Pf) =>
+                if keys_nodup (map fst Pf)
+                then match flook k Town with
+                     | Some U => Some U
+                     | None => None
+                     end
+                else None
+            | _ => None
+            end
+        | None => None
+        end
+      else None
+  (* RAW WRITE — [rawset((tmeta own proto), k, v)]. Synthesize [Town] (keys_nodup),
+     the prototype [BRec Pf] (keys_nodup), require a writable OWN cell [(k, BRef U)]
+     ([flook k Town = Some (BRef U)]) — the own field, NOT the prototype's; check
+     the value against [U]; result [nil]. Exactly [TRawSet] (no absent-from-own
+     dispatch — an absent own key is rejected). *)
+  | trawset own proto k v =>
+      if keys_nodup (map fst own) then
+        match synth_fields (synth Sig G) own with
+        | Some Town =>
+            match synth Sig G proto with
+            | Some (BRec Pf) =>
+                if keys_nodup (map fst Pf) then
+                  match flook k Town with
+                  | Some (BRef U) =>
+                      match synth Sig G v with
+                      | Some Sv => if decide_rsub Sv U then Some (BAtom ANil) else None
+                      | None => None
+                      end
+                  | _ => None
+                  end
+                else None
+            | _ => None
+            end
+        | None => None
+        end
+      else None
   (* METATABLE UNARY METAMETHOD — [__unm]/[__len]. Synthesize the operand; it must be
      SYNTACTICALLY a [tmeta] with read interface [BRec M] carrying the unary metamethod
      [mm_unop uop : Self -> Self -> R] ([flook], the [__index]-chain interface), with
@@ -783,6 +831,60 @@ Proof.
     + apply flook_In. exact Hfm.
     + apply decide_rsub_sound. exact HdS.
     + apply decide_rsub_sound. exact HdO.
+  - (* RAW READ — trawget: own fields synth to [Town] (NoDup gate), prototype to
+       [BRec Pf] (NoDup gate), [k] looked up in OWN ONLY ([flook k Town]); result is
+       OWN's type [U] = [TRawGet]. *)
+    simpl in H.
+    match goal with [ |- has_type _ _ (trawget ?o ?p ?kk) _ ] =>
+      rename o into own0; rename p into proto0; rename kk into k0 end.
+    destruct (keys_nodup (map fst own0)) eqn:Hndo; [ | discriminate ].
+    destruct (synth_fields (synth Sig G) own0) as [ Town | ] eqn:Hfo; [ | discriminate ].
+    destruct (synth Sig G proto0) as [ Sp | ] eqn:Hp; [ | discriminate ].
+    destruct Sp as [ | | | | | | Pf | | | | ]; try discriminate H.
+    destruct (keys_nodup (map fst Pf)) eqn:Hndp; [ | discriminate ].
+    destruct (flook k0 Town) as [ U | ] eqn:Hfl; [ | discriminate ].
+    injection H as <-.
+    assert (Hown : has_fields Sig G own0 Town).
+    { match goal with [ IH : forall _ _ _, synth_fields _ own0 = Some _ -> has_fields _ _ own0 _ |- _ ] =>
+        apply IH; exact Hfo end. }
+    pose proof (has_fields_keys Sig G own0 Town Hown) as Hk.
+    eapply TRawGet.
+    + exact Hown.
+    + apply keys_nodup_NoDup in Hndo. rewrite Hk in Hndo. exact Hndo.
+    + apply flook_In. exact Hfl.
+    + match goal with [ IH : forall _ _ _, synth _ _ proto0 = Some _ -> has_type _ _ proto0 _ |- _ ] =>
+        apply IH; exact Hp end.
+    + apply keys_nodup_NoDup. exact Hndp.
+  - (* RAW WRITE — trawset: own fields synth to [Town] (NoDup gate), prototype to
+       [BRec Pf] (NoDup gate), [k] a writable OWN cell [(k, BRef U)] ([flook k Town]),
+       value checked against [U]; result [nil] = [TRawSet]. *)
+    simpl in H.
+    match goal with [ |- has_type _ _ (trawset ?o ?p ?kk ?vv) _ ] =>
+      rename o into own0; rename p into proto0; rename kk into k0; rename vv into v0 end.
+    destruct (keys_nodup (map fst own0)) eqn:Hndo; [ | discriminate ].
+    destruct (synth_fields (synth Sig G) own0) as [ Town | ] eqn:Hfo; [ | discriminate ].
+    destruct (synth Sig G proto0) as [ Sp | ] eqn:Hp; [ | discriminate ].
+    destruct Sp as [ | | | | | | Pf | | | | ]; try discriminate H.
+    destruct (keys_nodup (map fst Pf)) eqn:Hndp; [ | discriminate ].
+    destruct (flook k0 Town) as [ Tc | ] eqn:Hfl; [ | discriminate ].
+    destruct Tc as [ | | | | | | | | U | | ]; try discriminate H.
+    destruct (synth Sig G v0) as [ Sv | ] eqn:Hv; [ | discriminate ].
+    destruct (decide_rsub Sv U) eqn:Hd; [ | discriminate ].
+    injection H as <-.
+    assert (Hown : has_fields Sig G own0 Town).
+    { match goal with [ IH : forall _ _ _, synth_fields _ own0 = Some _ -> has_fields _ _ own0 _ |- _ ] =>
+        apply IH; exact Hfo end. }
+    pose proof (has_fields_keys Sig G own0 Town Hown) as Hk.
+    eapply TRawSet.
+    + exact Hown.
+    + apply keys_nodup_NoDup in Hndo. rewrite Hk in Hndo. exact Hndo.
+    + apply flook_In. exact Hfl.
+    + match goal with [ IH : forall _ _ _, synth _ _ proto0 = Some _ -> has_type _ _ proto0 _ |- _ ] =>
+        apply IH; exact Hp end.
+    + apply keys_nodup_NoDup. exact Hndp.
+    + eapply TSub; [ | apply decide_rsub_sound; exact Hd ].
+      match goal with [ IH : forall _ _ _, synth _ _ v0 = Some _ -> has_type _ _ v0 _ |- _ ] =>
+        apply IH; exact Hv end.
   - (* Pl [] *) simpl in H. injection H as <-. apply HFnil.
   - (* Pl cons *) simpl in H.
     destruct (synth Sig G e) as [ Te | ] eqn:He; [ | discriminate ].
@@ -981,6 +1083,26 @@ Proof.
     + eassumption.
     + eassumption.
     + eassumption.
+  - (* RAW READ — TRawGet: own fields + prototype narrow; In/NoDup stable. *)
+    eapply TRawGet.
+    + match goal with [ IH : forall _ _ _ _, _ -> _ -> has_fields _ _ _ _ |- _ ] =>
+        eapply (IH G1 _ G2 A'); [ reflexivity | eassumption ] end.
+    + eassumption.
+    + eassumption.
+    + match goal with [ IH : forall _ _ _ _, _ -> _ -> has_type _ _ ?x _, Hh : has_type _ _ ?x (BRec _) |- has_type _ _ ?x _ ] =>
+        eapply (IH G1 _ G2 A'); [ reflexivity | eassumption ] end.
+    + eassumption.
+  - (* RAW WRITE — TRawSet: own fields + prototype + value narrow; premises stable. *)
+    eapply TRawSet.
+    + match goal with [ IH : forall _ _ _ _, _ -> _ -> has_fields _ _ _ _ |- _ ] =>
+        eapply (IH G1 _ G2 A'); [ reflexivity | eassumption ] end.
+    + eassumption.
+    + eassumption.
+    + match goal with [ IH : forall _ _ _ _, _ -> _ -> has_type _ _ ?x _, Hh : has_type _ _ ?x (BRec _) |- has_type _ _ ?x _ ] =>
+        eapply (IH G1 _ G2 A'); [ reflexivity | eassumption ] end.
+    + eassumption.
+    + match goal with [ IH : forall _ _ _ _, _ -> _ -> has_type _ _ ?x _, Hh : has_type _ _ ?x ?TT |- has_type _ _ ?x ?TT ] =>
+        eapply (IH G1 _ G2 A'); [ reflexivity | eassumption ] end.
   - apply HFnil.
   - apply HFcons;
       [ eapply (IHhas_type G1 _ G2 A') | eapply (IHhas_type0 G1 _ G2 A') ];
@@ -1073,6 +1195,23 @@ Fixpoint proj_free (e : tm) : Prop :=
       /\ proj_free proto /\ proj_free v
   (* METATABLE UNARY METAMETHOD — projection-free iff the operand is. *)
   | tunop _ e0 => proj_free e0
+  (* RAW ACCESS — projection-free iff every own field, the prototype (and value)
+     are. ([trawget]/[trawset] contain no syntactic [tproj]; the RAW own read/write
+     reuses [field_lookup], not [tproj].) *)
+  | trawget own proto _ =>
+      ((fix pl (xs : list (string * tm)) : Prop :=
+          match xs with
+          | [] => True
+          | (_, e0) :: rest => proj_free e0 /\ pl rest
+          end) own)
+      /\ proj_free proto
+  | trawset own proto _ v =>
+      ((fix pl (xs : list (string * tm)) : Prop :=
+          match xs with
+          | [] => True
+          | (_, e0) :: rest => proj_free e0 /\ pl rest
+          end) own)
+      /\ proj_free proto /\ proj_free v
   end.
 
 (* ===========================================================================
@@ -1541,6 +1680,50 @@ Example len_absent_synth_None : synth [] [] (tunop ULen ccobj) = None.
 Proof. reflexivity. Qed.
 
 (* ===========================================================================
+   RAW TABLE ACCESS — the ALGORITHMIC payoff: [synth] of [rawget]/[rawset] looks
+   up the key in OWN fields ONLY, NEVER the prototype. The DISTINGUISHING property
+   is decided by [reflexivity]: raw read of an OWN key SYNTHESIZES its type, raw
+   read of a PROTOTYPE-ONLY key synthesizes NONE (even though [tproj] on the same
+   metatable-table resolves it through [__index] — [oop_inherited_synths] above).
+   (Terms [oop_base] / [rawset_own] from typing.v.)
+   =========================================================================== *)
+
+(* RAW READ of the OWN field "name" synthesizes [Str] (own-only lookup). *)
+Example rawget_own_synths :
+  synth [] [] (trawget [("name"%string, tlit (LStr 1))] (trec oop_base) "name")
+  = Some (BAtom AStr).
+Proof. reflexivity. Qed.
+Example rawget_own_check_sound :
+  has_type [] [] (trawget [("name"%string, tlit (LStr 1))] (trec oop_base) "name")
+                 (BAtom AStr).
+Proof. apply synth_sound. reflexivity. Qed.
+
+(* THE DISTINGUISHING PROPERTY, ALGORITHMICALLY: the INHERITED key "greet" — which
+   [synth (tproj oop_derived "greet")] resolves through [__index] — synthesizes
+   NONE for [trawget]: raw access bypasses the prototype. *)
+Example rawget_bypasses_proto_synth_None :
+  synth [] [] (trawget [("name"%string, tlit (LStr 1))] (trec oop_base) "greet") = None.
+Proof. reflexivity. Qed.
+
+(* RAW WRITE to the OWN cell "k" (a context variable of record-of-refs type, since
+   a [tloc] is runtime-only) synthesizes [nil] — the write targets OWN, not the
+   prototype. *)
+Definition rawset_syn : tm := trawset [("k"%string, tvar 0)] (trec []) "k" (tlit (LInt 5)).
+Definition rawset_ctx : list BTy := [BRef (BAtom AInt)].
+Example rawset_synths :
+  synth [] rawset_ctx rawset_syn = Some (BAtom ANil).
+Proof. reflexivity. Qed.
+Example rawset_check_sound :
+  has_type [] rawset_ctx rawset_syn (BAtom ANil).
+Proof. apply synth_sound. reflexivity. Qed.
+
+(* a raw write to a key NOT in OWN is REJECTED (no own cell; never dispatches to
+   the prototype's [__newindex]). *)
+Example rawset_absent_own_synth_None :
+  synth [] rawset_ctx (trawset [("k"%string, tvar 0)] (trec []) "nope" (tlit (LInt 5))) = None.
+Proof. reflexivity. Qed.
+
+(* ===========================================================================
    ASSUMPTION AUDIT — closed under the global context (no axioms / Admitted /
    Classical). The soundness theorems are the load-bearing point; the
    principality (tractable completeness) theorem is audited alongside.
@@ -1569,6 +1752,12 @@ Print Assumptions unm_check_sound.
 Print Assumptions len_synths.
 Print Assumptions len_check_sound.
 Print Assumptions len_absent_synth_None.
+Print Assumptions rawget_own_synths.
+Print Assumptions rawget_own_check_sound.
+Print Assumptions rawget_bypasses_proto_synth_None.
+Print Assumptions rawset_synths.
+Print Assumptions rawset_check_sound.
+Print Assumptions rawset_absent_own_synth_None.
 (* MULTI-RETURN — the executable-checker payoff. *)
 Print Assumptions mr_call_synths_tuple.
 Print Assumptions mr_truncate_synths_first.

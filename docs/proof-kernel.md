@@ -2589,3 +2589,86 @@ and the right-fallback payoffs (`add_right_*`, `sub_right_*`): **Closed under th
 global context** — no axioms, no `Admitted`, no `Classical`. `subtype.v` + `ssub.v`
 byte-unmodified; whole chain compiles (`coqc proof/subtype.v` → `typing.v` →
 `ssub.v` → `check.v`).
+
+## Increment 25 — RAW TABLE ACCESS: `rawget` / `rawset` (bypassing `__index` / `__newindex`)
+
+`rawget(t, k)` and `rawset(t, k, v)` perform RAW table access that BYPASSES the
+metatable `__index` / `__newindex` fallback. They reduce DIRECTLY to the underlying
+record-of-refs read / write on the table's OWN fields, WITHOUT ever consulting the
+prototype — literally the OWN-field path of `tproj` / `tnewidx` with the
+prototype-fallback step removed. They reuse the SAME `field_lookup` (own read) and
+`tassign` (cell write) primitives — no new lookup mechanism, no special-casing, no
+new type-level former (the whole thing lives at the typing layer over the existing
+`BRec` / `BRef`; `subtype.v` + `ssub.v` are byte-unmodified). Modifies
+`proof/typing.v` + `proof/check.v`.
+
+### The model — raw access is "own without the fallback"
+
+New terms `trawget own proto k` and `trawset own proto k v`. As with `tnewidx`, the
+table is given by its OWN field-list + prototype-position target DIRECTLY (not a
+nested `tmeta` subterm), so the own fields are typed EXACTLY via `has_fields` — the
+same exactness discipline as `TMeta` / `TNewIdx` (a width-subsumed own table would
+let the own type under-report own's keys and mis-route the dispatch).
+
+- **Typing** `TRawGet`: an OWN field `(k, T) ∈ Town` ⇒ result `T`. There is NO merge
+  and NO fallback, so an inherited (prototype-only) key is NOT typeable — the
+  distinguishing static property versus `TProj` on the merged read interface. The
+  prototype is typed (`BRec Pf`, NoDup keys) for well-formedness but plays no part
+  in the result.
+- **Typing** `TRawSet`: a writable OWN cell `(k, BRef T) ∈ Town`, `v : T` ⇒ `nil`.
+  This is `TNewIdx`'s records-of-refs write side with the cell read from OWN
+  (`field_lookup k own`) instead of the prototype, and WITHOUT the absent-from-own
+  dispatch. The prototype is typed but never written.
+- **Op-sem** `SRawGet`: `trawget own proto k` (own fields + proto all values) with
+  `field_lookup k own = Some v` ⤳ `v` — the SAME own primitive `SMetaProjOwn` uses,
+  WITHOUT any `SMetaProjProto` analogue (raw read never falls through). Congruences
+  `SRawGet1` (own field steps, like `SRec`) / `SRawGet2` (proto steps).
+- **Op-sem** `SRawSet`: `trawset own proto k v` (own + proto + value all values)
+  with `field_lookup k own = Some cell` (a `tloc` by typing) ⤳ `tassign cell v` —
+  the records-of-refs write to OWN's cell, with NO prototype rule. Congruences
+  `SRawSet1` / `SRawSet2` / `SRawSet3`.
+
+### Metatheory re-proved (`Qed`)
+
+New term forms threaded through the ENTIRE de Bruijn metatheory exactly as existing
+forms: `tm_rect_strong`, `lift` / `subst` / `closed_at`, `closed_at_lift`,
+`subst_lift_cancel`, `weakening`, `subst_lemma`, `store_weakening`,
+`has_type_closed`, plus new inversion lemmas `inv_rawget` / `inv_rawset`. `progress`
+(extended with the two new dispatch arms — the raw read / write always resolves
+since `(k,_) ∈ Town` forces `field_lookup k own` to succeed) and `preservation` (the
+`NoDup`-forced unique own supplier gives the result / cell its exact type, via
+`field_lookup_typed` + `nodup_unique_type`) re-proved `Qed`.
+
+`check.v`: `synth` gets `trawget` / `trawset` arms — STRUCTURAL on the constructor
+(synthesize own `Town` under a `keys_nodup` gate, the prototype `BRec Pf` under a
+`keys_nodup` gate, then `flook k Town` in OWN ONLY — no merge, no prototype lookup).
+This is NOT a quadratic syntactic operand split; the `synth_sound` arms mirror the
+`tnewidx` arm and the file compiles in seconds. `synth_sound` / `check_sound` /
+`narrowing` re-proved `Qed`; `proj_free` extended (raw access contains no syntactic
+`tproj`).
+
+### Payoffs — raw access reads / writes OWN and does NOT trigger the prototype
+
+`typing.v`: `rawget_own_typed` / `_steps` (raw read of an own field, one
+`SRawGet` step to its value); `rawset_payoff_typed` / `_steps` (raw write through
+OWN's cell over a store: from `[0]` ⤳ `nil` with store `[5]`). The DISTINGUISHING
+property machine-checked: `rawget_bypasses_proto` — the INHERITED key `"greet"`,
+which `tproj` on the SAME object resolves THROUGH `__index` (`oop_inherited_typed`
+/ `_steps`, Increment 21), is REJECTED by `trawget` at EVERY type because raw
+access reads only own fields; and `rawset_absent_own_rejected` — a key absent from
+own is rejected (raw write never dispatches to the prototype's `__newindex`, unlike
+`TNewIdx`). Algorithmic mirror in `check.v`: `rawget_own_synths`,
+`rawget_bypasses_proto_synth_None`, `rawset_synths`, `rawset_absent_own_synth_None`
+(all by `reflexivity` / `synth_sound`).
+
+DEFERRED (recorded as substrate need, not faked): raw access on a key ABSENT from
+own returning `nil` — the static fragment does not model absent-key reads (`TProj`
+likewise requires the key present); `__index` / `__newindex` as FUNCTIONS;
+`setmetatable` / dynamic metatables; `__tostring`; built-in numeric negation / table
+length.
+
+`Print Assumptions` on `progress`, `preservation`, `synth_sound`, `check_sound`,
+and every raw-access payoff: **Closed under the global context** — no axioms, no
+`Admitted`, no `Classical`. `subtype.v` + `ssub.v` byte-unmodified (confirmed
+`git diff --stat`); whole chain compiles (`coqc proof/subtype.v` → `typing.v` →
+`ssub.v` → `check.v`).
