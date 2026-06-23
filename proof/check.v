@@ -411,6 +411,26 @@ Fixpoint synth (Sig : list BTy) (G : list BTy) (e : tm) {struct e} : option BTy 
         | None => None
         end
       else None
+  (* METATABLE UNARY METAMETHOD — [__unm]/[__len]. Synthesize the operand; it must be
+     SYNTACTICALLY a [tmeta] with read interface [BRec M] carrying the unary metamethod
+     [mm_unop uop : Self -> Self -> R] ([flook], the [__index]-chain interface), with
+     the table a valid [self] ([decide_rsub (BRec M) Self]); result [R]. A non-[tmeta]
+     operand (or one lacking the metamethod) is rejected — exactly [TUnMetaL]. *)
+  | tunop uop e =>
+      match synth Sig G e with
+      | Some (BRec M) =>
+          match e with
+          | tmeta _ _ =>
+              match flook (mm_unop uop) M with
+              | Some (BArrow Self (BArrow Self2 R)) =>
+                  if andb (decide_rsub (BRec M) Self) (decide_rsub (BRec M) Self2)
+                  then Some R else None
+              | _ => None
+              end
+          | _ => None
+          end
+      | _ => None
+      end
   end.
 
 (* [check] subsumes along the reference-aware [decide_rsub] (the unified relation),
@@ -668,6 +688,25 @@ Proof.
     + eapply TSub; [ | apply decide_rsub_sound; exact Hd ].
       match goal with [ IH : forall _ _ _, synth _ _ v0 = Some _ -> has_type _ _ v0 _ |- _ ] =>
         apply IH; exact Hv end.
+  - (* METATABLE UNARY METAMETHOD — tunop: the operand must be a [tmeta : BRec M]
+       whose [mm_unop uop] interface is [Self -> Other -> R]; both [self] gates pass;
+       result [R] = [TUnMetaL]. *)
+    simpl in H.
+    destruct (synth Sig G e) as [ Se | ] eqn:He; [ | discriminate ].
+    destruct Se as [ | | | | | | M | | | | ]; try discriminate H.
+    destruct e; try discriminate H.
+    destruct (flook (mm_unop uop) M) as [ Tm | ] eqn:Hfm; [ | discriminate ].
+    destruct Tm as [ | | | | | | | Self Tco | | | ]; try discriminate H.
+    destruct Tco as [ | | | | | | | Other R | | | ]; try discriminate H.
+    destruct (andb (decide_rsub (BRec M) Self) (decide_rsub (BRec M) Other)) eqn:Hd;
+      [ | discriminate ].
+    apply Bool.andb_true_iff in Hd. destruct Hd as [HdS HdO].
+    injection H as <-.
+    eapply TUnMetaL.
+    + apply IHe. exact He.
+    + apply flook_In. exact Hfm.
+    + apply decide_rsub_sound. exact HdS.
+    + apply decide_rsub_sound. exact HdO.
   - (* Pl [] *) simpl in H. injection H as <-. apply HFnil.
   - (* Pl cons *) simpl in H.
     destruct (synth Sig G e) as [ Te | ] eqn:He; [ | discriminate ].
@@ -849,6 +888,14 @@ Proof.
     + eassumption.
     + match goal with [ IH : forall _ _ _ _, _ -> _ -> has_type _ _ ?x _, Hh : has_type _ _ ?x ?TT |- has_type _ _ ?x ?TT ] =>
         eapply (IH G1 _ G2 A'); [ reflexivity | eassumption ] end.
+  - (* METATABLE UNARY METAMETHOD — TUnMetaL: the operand (whole [tmeta]) narrows;
+       In/rsub stable. *)
+    eapply TUnMetaL.
+    + match goal with [ IH : forall _ _ _ _, _ -> _ -> has_type _ _ (tmeta _ _) _ |- _ ] =>
+        eapply (IH G1 _ G2 A'); [ reflexivity | eassumption ] end.
+    + eassumption.
+    + eassumption.
+    + eassumption.
   - apply HFnil.
   - apply HFcons;
       [ eapply (IHhas_type G1 _ G2 A') | eapply (IHhas_type0 G1 _ G2 A') ];
@@ -939,6 +986,8 @@ Fixpoint proj_free (e : tm) : Prop :=
           | (_, e0) :: rest => proj_free e0 /\ pl rest
           end) own)
       /\ proj_free proto /\ proj_free v
+  (* METATABLE UNARY METAMETHOD — projection-free iff the operand is. *)
+  | tunop _ e0 => proj_free e0
   end.
 
 (* ===========================================================================
@@ -1380,6 +1429,32 @@ Example newindex_absent_synth_None :
   synth [] ni_ctx (tnewidx [] (tvar 0) "nope" (tlit (LInt 5))) = None.
 Proof. reflexivity. Qed.
 
+(* METATABLE METAMETHOD FAMILY — __concat / __unm / __len algorithmic payoffs.
+   (Terms [ccobj] / [uobj] from typing.v.) *)
+
+(* __concat: the checker dispatches the binary [..] metamethod, result [Str]. *)
+Example concat_synths : synth [] [] (tprim PConcat ccobj ccobj) = Some (BAtom AStr).
+Proof. reflexivity. Qed.
+Example concat_check_sound : has_type [] [] (tprim PConcat ccobj ccobj) (BAtom AStr).
+Proof. apply synth_sound. reflexivity. Qed.
+
+(* __unm: the checker dispatches the unary [-] metamethod, result [Int]. *)
+Example unm_synths : synth [] [] (tunop UNeg uobj) = Some (BAtom AInt).
+Proof. reflexivity. Qed.
+Example unm_check_sound : has_type [] [] (tunop UNeg uobj) (BAtom AInt).
+Proof. apply synth_sound. reflexivity. Qed.
+
+(* __len: the checker dispatches the unary [#] metamethod, result [Int]. *)
+Example len_synths : synth [] [] (tunop ULen uobj) = Some (BAtom AInt).
+Proof. reflexivity. Qed.
+Example len_check_sound : has_type [] [] (tunop ULen uobj) (BAtom AInt).
+Proof. apply synth_sound. reflexivity. Qed.
+
+(* a unary operator whose metamethod is ABSENT ([__unm]/[__len] not on [ccobj]) is
+   REJECTED by the checker. *)
+Example len_absent_synth_None : synth [] [] (tunop ULen ccobj) = None.
+Proof. reflexivity. Qed.
+
 (* ===========================================================================
    ASSUMPTION AUDIT — closed under the global context (no axioms / Admitted /
    Classical). The soundness theorems are the load-bearing point; the
@@ -1401,6 +1476,14 @@ Print Assumptions sub_synth_None.
 Print Assumptions newindex_synths.
 Print Assumptions newindex_check_sound.
 Print Assumptions newindex_absent_synth_None.
+(* METATABLE METAMETHOD FAMILY — __concat / __unm / __len algorithmic payoffs. *)
+Print Assumptions concat_synths.
+Print Assumptions concat_check_sound.
+Print Assumptions unm_synths.
+Print Assumptions unm_check_sound.
+Print Assumptions len_synths.
+Print Assumptions len_check_sound.
+Print Assumptions len_absent_synth_None.
 (* MULTI-RETURN — the executable-checker payoff. *)
 Print Assumptions mr_call_synths_tuple.
 Print Assumptions mr_truncate_synths_first.

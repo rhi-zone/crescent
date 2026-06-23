@@ -79,7 +79,32 @@ Inductive lit : Type :=
    general structural [==] (here [==] is numbers-only). *)
 Inductive primop : Type :=
   | PAdd | PSub | PMul | PDiv      (* arithmetic — result ANum *)
-  | PLt  | PLe  | PEq.             (* comparison — result ABool *)
+  | PLt  | PLe  | PEq              (* comparison — result ABool *)
+  (* METATABLE OPERATOR — CONCATENATION ([..], metamethod [__concat]). [PConcat]
+     is a binary operator carried by [tprim], BUT it has NO built-in numeric path:
+     [arith_op PConcat = false] and [cmp_op PConcat = false], so [SPrimArith] /
+     [SPrimCmp] never fire on it. Its ONLY typing rule is the metamethod dispatch
+     ([TPrimMetaL]/[SPrimMetaL] via [mm_binop PConcat = "__concat"]) — i.e. [..] is
+     a PURE operator-metamethod here (plain-string concatenation is a separate,
+     DEFERRED concern; the value model has no string-content concatenation). This
+     reuses the existing binary-operator metamethod machinery with no new term
+     form: it is exactly the "more metamethods extend the existing [mm_binop]
+     records-of-refs encoding" increment. *)
+  | PConcat.                       (* concatenation [..] — metamethod-only (__concat) *)
+
+(* METATABLE UNARY OPERATOR tags. [UNeg] is unary minus ([-x], metamethod [__unm]);
+   [ULen] is the length operator ([#x], metamethod [__len]). Like [PConcat] these
+   are METAMETHOD-ONLY here (the value model has no built-in numeric negation /
+   length to fall back on — that is a separate, DEFERRED concern); their sole
+   typing/step rules are the unary metamethod dispatch ([TUnMetaL]/[SUnMetaL] via
+   [mm_unop]). Faithful Lua semantics: a unary metamethod is invoked with the
+   operand passed TWICE ([__unm(x, x)] / [__len(x, x)]), modelled as a curried
+   [Self -> Self -> R] applied to the operand and then to itself — exactly mirroring
+   the binary [Self -> Other -> R] dispatch, so the SAME arrow + [__index]-chain
+   machinery is reused with no new lookup mechanism. *)
+Inductive unop : Type :=
+  | UNeg     (* unary minus [-x] — metamethod __unm *)
+  | ULen.    (* length [#x]      — metamethod __len *)
 
 Inductive tm : Type :=
   | tlit  : lit -> tm
@@ -229,12 +254,20 @@ Inductive tm : Type :=
      fallback on the assignment side. NOT a value (a write computes to [nil]).
      DEFERRED: own-present rawset (own is an immutable literal here), [__newindex]
      as a FUNCTION, dynamic metatable mutation. *)
-  | tnewidx    : list (string * tm) -> tm -> string -> tm -> tm.
+  | tnewidx    : list (string * tm) -> tm -> string -> tm -> tm
        (* tnewidx own proto k v : the write [(tmeta own proto).k = v]. The table is
           given by its OWN field-list + [__newindex] target [proto] DIRECTLY (not a
           nested [tmeta] subterm), so the own fields are typed EXACTLY by
           [has_fields] — the same exactness discipline as [TMeta] (a subsumed table
           would let [Town] under-report own's keys and mis-route the dispatch). *)
+  (* METATABLE UNARY METAMETHOD — [tunop uop e] is the unary operator [-e] / [#e]
+     ([uop ∈ {UNeg, ULen}]). When [e] is a metatable-table [tmeta own proto] whose
+     read interface carries the unary metamethod [mm_unop uop : Self -> Self -> R],
+     it dispatches to [(e.<mm>) e e] (the operand passed twice, Lua-faithful). Reuses
+     the [__index] chain + curried arrow application — no new lookup machinery, the
+     unary analogue of [tprim]'s [TPrimMetaL]/[SPrimMetaL]. NOT a value (it computes).
+     DEFERRED: built-in numeric negation / table length (metamethod-only here). *)
+  | tunop      : unop -> tm -> tm.            (* tunop uop e : unary [-e] / [#e] *)
 
 (* The type a tag pins (the THEN-branch narrowed type). TgNum ↦ ANum (all numbers,
    per the 5.1 [type()] model), the other scalars to their atoms, TgTable to the
@@ -327,6 +360,16 @@ Definition mm_binop (op : primop) : string :=
   | PLt  => "__lt"
   | PLe  => "__le"
   | PEq  => "__eq"
+  | PConcat => "__concat"
+  end.
+
+(* the unary-operator metamethod key for a [unop] (the Lua name). One general lookup
+   through the [__index] chain, the name is the only op-specific datum (ordinary
+   data, NOT name-keyed special-casing — the dispatch machinery is uniform). *)
+Definition mm_unop (uop : unop) : string :=
+  match uop with
+  | UNeg => "__unm"
+  | ULen => "__len"
   end.
 
 (* ---- A usable induction principle: the auto-generated [tm_ind] gives no IH
@@ -359,6 +402,7 @@ Section tm_ind_strong.
   Hypothesis Hmeta   : forall own proto, Pl own -> P proto -> P (tmeta own proto).
   Hypothesis Hnewidx : forall own proto k v, Pl own -> P proto -> P v ->
                        P (tnewidx own proto k v).
+  Hypothesis Hunop   : forall uop e, P e -> P (tunop uop e).
   Hypothesis Hnil  : Pl [].
   Hypothesis Hcons : forall k e rest, P e -> Pl rest -> Pl ((k, e) :: rest).
   Hypothesis Htnil : Pt [].
@@ -414,6 +458,7 @@ Section tm_ind_strong.
               | (k0, e) :: rest => Hcons k0 e rest (tm_rect_strong e) (goni rest)
               end) own)
           (tm_rect_strong proto) (tm_rect_strong v)
+    | tunop uop e => Hunop uop e (tm_rect_strong e)
     end.
 End tm_ind_strong.
 
@@ -981,6 +1026,22 @@ Inductive has_type : list BTy -> list BTy -> tm -> BTy -> Prop :=
       In (k, BRef T) Pf ->
       has_type S G v T ->
       has_type S G (tnewidx ofs proto k v) (BAtom ANil)
+  (* METATABLE UNARY METAMETHOD — [__unm]/[__len]. A unary operator [tunop uop e]
+     whose operand [e] is a metatable-table whose read interface [BRec M] carries the
+     unary metamethod [mm_unop uop : Self -> Other -> R] dispatches to [(e.<mm>) e e]
+     (operand passed TWICE — Lua-faithful unary metamethod calling convention).
+     Curried, reusing the arrow machinery; the table's record type must be a valid
+     [self] for BOTH argument positions ([rsub (BRec M) Self] and [rsub (BRec M)
+     Other] — the metamethod may declare distinct domains, both fed the operand).
+     Result [R]. The metamethod key is selected by [mm_unop uop] — ordinary data, ONE
+     general lookup through the [__index] chain (so it may be inherited); the unary
+     analogue of [TPrimMetaL] (with the right operand bound to the operand itself). *)
+  | TUnMetaL : forall S G uop ofs proto M Self Other R,
+      has_type S G (tmeta ofs proto) (BRec M) ->
+      In (mm_unop uop, BArrow Self (BArrow Other R)) M ->
+      rsub (BRec M) Self ->
+      rsub (BRec M) Other ->
+      has_type S G (tunop uop (tmeta ofs proto)) R
 (* key-aligned pointwise typing of record fields; mutual so the generated
    induction principle carries an IH on every field derivation. *)
 with has_fields : list BTy -> list BTy -> list (string * tm) -> list (string * BTy) -> Prop :=
@@ -1082,6 +1143,8 @@ Fixpoint lift (d k : nat) (e : tm) : tm :=
   (* __newindex write: no new binders — own fields, proto, and value lift at [k]. *)
   | tnewidx own proto k0 v =>
       tnewidx (map (fun ke => (fst ke, lift d k (snd ke))) own) (lift d k proto) k0 (lift d k v)
+  (* unary metamethod: no new binders — the operand lifts at [k]. *)
+  | tunop uop e => tunop uop (lift d k e)
   end.
 
 Fixpoint subst (j : nat) (s : tm) (e : tm) : tm :=
@@ -1129,6 +1192,8 @@ Fixpoint subst (j : nat) (s : tm) (e : tm) : tm :=
   (* __newindex write: no new binders — substitute into own fields, proto, value. *)
   | tnewidx own proto k0 v =>
       tnewidx (map (fun ke => (fst ke, subst j s (snd ke))) own) (subst j s proto) k0 (subst j s v)
+  (* unary metamethod: no new binders — substitute into the operand at [j]. *)
+  | tunop uop e => tunop uop (subst j s e)
   end.
 
 (* record-field lookup at the term level (for projection) *)
@@ -1457,7 +1522,20 @@ Inductive step : tm * store -> tm * store -> Prop :=
   | SNewIdx3 : forall own proto k v v' st st',
       Forall (fun ke => value (snd ke)) own -> value proto ->
       step (v, st) (v', st') ->
-      step (tnewidx own proto k v, st) (tnewidx own proto k v', st').
+      step (tnewidx own proto k v, st) (tnewidx own proto k v', st')
+  (* METATABLE UNARY METAMETHOD — DISPATCH. A unary operator [tunop uop e] whose
+     operand is a metatable-table VALUE [tmeta own proto] dispatches to [(e.<mm>) e e]
+     — the metamethod [mm_unop uop] resolved through the [__index] chain ([tproj]),
+     applied to the operand as BOTH arguments (Lua passes the operand twice for unary
+     metamethods). Reuses [tproj] + two [tapp]/[SBeta] — the unary analogue of
+     [SPrimMetaL]; no new lookup machinery, the metamethod may be inherited. *)
+  | SUnMetaL : forall uop own proto st,
+      value (tmeta own proto) ->
+      step (tunop uop (tmeta own proto), st)
+           (tapp (tapp (tproj (tmeta own proto) (mm_unop uop)) (tmeta own proto)) (tmeta own proto), st)
+  (* unary metamethod — congruence: reduce the operand to a value first. *)
+  | SUnop1 : forall uop e e' st st',
+      step (e, st) (e', st') -> step (tunop uop e, st) (tunop uop e', st').
 
 (* STORE well-typedness + extension (ported from imp.v). [store_well_typed S st]:
    same length, each stored value has its S-type (closed — stored values are
@@ -1707,6 +1785,31 @@ Proof.
     split; [eassumption|]. split; [eassumption|].
     split; [eassumption|]. split; [eassumption|]. split; [eassumption|].
     split; [eassumption|]. split; [eassumption|]. apply rsub_refl.
+Qed.
+
+(* METATABLE UNARY METAMETHOD — inversion of [tunop uop e]. The operand is a
+   metatable-table [tmeta ofs proto : BRec M] whose read interface carries the
+   unary metamethod [mm_unop uop : Self -> Self -> R]; the table's merged record
+   [rsub]'s [Self]; result [R] subsumed to [T]. (Subsumption-transparent, like the
+   binary [inv_prim] but without the numeric path — [tunop] has no numeric form.) *)
+Lemma inv_unop : forall S G uop e T,
+  has_type S G (tunop uop e) T ->
+  exists ofs proto M Self Other R,
+    e = tmeta ofs proto /\
+    has_type S G (tmeta ofs proto) (BRec M) /\
+    In (mm_unop uop, BArrow Self (BArrow Other R)) M /\
+    rsub (BRec M) Self /\ rsub (BRec M) Other /\ rsub R T.
+Proof.
+  intros S G uop e T H. remember (tunop uop e) as e0 eqn:Ee.
+  induction H; try discriminate Ee.
+  - (* TSub *) subst. destruct (IHhas_type eq_refl) as
+      [ofs [proto [M [Self [Other [R [Ee0 [Htbl [Hin [Hself [Hother Hd]]]]]]]]]]].
+    exists ofs, proto, M, Self, Other, R.
+    split; [assumption|]. split; [assumption|]. split; [assumption|].
+    split; [assumption|]. split; [assumption|]. eapply RsTrans; eassumption.
+  - (* TUnMetaL *) injection Ee as <- <-. exists ofs, proto, M, Self, Other, R.
+    split; [reflexivity|]. split; [assumption|]. split; [assumption|].
+    split; [assumption|]. split; [assumption|]. apply rsub_refl.
 Qed.
 
 Lemma inv_let : forall S G e1 e2 T,
@@ -3278,6 +3381,12 @@ Proof.
       | assumption | eassumption
       | match goal with [ IH : forall _ _ _, _ = _ -> has_type _ _ (lift _ _ v) _ |- _ ] =>
           exact (IH G1 G2 U eq_refl) end ].
+  - (* METATABLE UNARY METAMETHOD — TUnMetaL: the operand (whole [tmeta]) weakens;
+       the [In]/[rsub] premises are context-independent. *)
+    eapply TUnMetaL;
+      [ match goal with [ IH : forall _ _ _, _ = _ -> has_type _ _ (lift _ _ (tmeta _ _)) _ |- _ ] =>
+          exact (IH G1 G2 U eq_refl) end
+      | eassumption | assumption | assumption ].
   - (* HFnil *) apply HFnil.
   - (* HFcons *) apply HFcons.
     + match goal with [ IH : forall _ _ _, _ = _ -> has_type _ _ _ _ |- _ ] =>
@@ -3351,6 +3460,8 @@ Fixpoint closed_at (k : nat) (e : tm) : Prop :=
          | (_, e) :: rest => closed_at k e /\ allc rest
          end) own
       /\ closed_at k proto /\ closed_at k v
+  (* unary metamethod: no new binders — the operand closed at [k]. *)
+  | tunop _ e => closed_at k e
   end.
 
 (* typing in [G] bounds free vars by [length G]. By term induction + inversion.
@@ -3439,6 +3550,10 @@ Proof.
     + match goal with [ IH : forall (_:list BTy)(_:list BTy)(_:BTy),
           has_type _ _ ?x _ -> closed_at _ ?x, Hh : has_type _ _ ?x U |- _ ] =>
         exact (IH Sg G U Hv) end.
+  - (* METATABLE UNARY METAMETHOD — tunop: the operand (a [tmeta]) is closed. *)
+    apply inv_unop in H.
+    destruct H as [ofs [proto [M [Self [Other [R [Ee [Htbl _]]]]]]]]. subst e.
+    exact (IHe Sg G (BRec M) Htbl).
   - (* Pl nil *) exact I.
   - (* Pl cons *) inversion H; subst. simpl. split.
     + match goal with
@@ -3528,6 +3643,8 @@ Proof.
       | match goal with
         | [ IH : forall k0, closed_at k0 ?x -> forall d j, k0 <= j -> lift d j ?x = ?x
             |- lift _ _ ?x = ?x ] => eapply IH; [exact H3 | exact H0] end ].
+  - (* unary metamethod — tunop: the operand is lift-invariant. *)
+    f_equal. apply (IHe k); [exact H | exact H0].
   - (* Pl nil *) reflexivity.
   - (* Pl cons *) destruct H as [Hc Hr]. f_equal;
       [ f_equal; apply (IHe k0); [exact Hc | exact H0]
@@ -3745,6 +3862,20 @@ Proof.
       | [ IH : forall _ _ _ _ _ _, has_type _ _ ?x _ -> _ -> has_type _ _ _ _,
           Hh : has_type _ _ ?x W |- _ ] =>
           apply (IH Sg G1 G2 U W s); [ exact Hv | exact H0 ] end.
+  - (* METATABLE UNARY METAMETHOD — tunop: substitute into the operand (a [tmeta]
+       typed [BRec M]); substitution preserves [BRec M] and the [In]/[rsub] premises
+       are substitution-invariant, so [TUnMetaL] re-applies at [R]. *)
+    apply inv_unop in H.
+    destruct H as [ofs [proto [M [Self [Other [R [Ee [Htbl [Hin [Hself [Hother Hd]]]]]]]]]]]. subst e.
+    simpl.
+    eapply TSub; [ eapply (TUnMetaL Sg (G1 ++ G2) uop _ _ M Self Other R) | exact Hd ].
+    + match goal with
+      | [ IH : forall _ _ _ _ _ _, has_type _ _ ?x _ -> _ -> has_type _ _ _ _,
+          Hh : has_type _ _ ?x (BRec M) |- _ ] =>
+          apply (IH Sg G1 G2 U (BRec M) s); [ exact Htbl | exact H0 ] end.
+    + exact Hin.
+    + exact Hself.
+    + exact Hother.
   - (* Pl nil *) inversion H; subst. simpl. apply HFnil.
   - (* Pl cons *) inversion H; subst. simpl. apply HFcons.
     + match goal with [ Hh : has_type ?Sg0 (G1 ++ U :: G2) e ?Tk |- _ ] =>
@@ -3831,6 +3962,10 @@ Proof.
       | match goal with [ IH : forall _, extends _ _ -> has_type _ _ ?x _, Hh : has_type _ _ ?x (BRec _) |- has_type _ _ ?x _ ] => apply IH; exact Hext end
       | assumption | eassumption
       | match goal with [ IH : forall _, extends _ _ -> has_type _ _ ?x _, Hh : has_type _ _ ?x ?TT |- has_type _ _ ?x ?TT ] => apply IH; exact Hext end ].
+  - (* METATABLE UNARY METAMETHOD — TUnMetaL: the operand (whole [tmeta]) store-weakens. *)
+    eapply TUnMetaL;
+      [ match goal with [ IH : forall _, extends _ _ -> has_type _ _ (tmeta _ _) _ |- _ ] => apply IH; exact Hext end
+      | eassumption | assumption | assumption ].
   - apply HFnil.
   - apply HFcons; [ apply IHhas_type; exact Hext | apply IHhas_type0; exact Hext ].
   - (* MULTI-RETURN — HTnil *) apply HTnil.
@@ -4726,6 +4861,36 @@ Proof.
     + exact Hnp.
     + exact Hin.
     + exact Hv'.
+  - (* METATABLE UNARY METAMETHOD — SUnMetaL: [tunop uop (tmeta own proto)]
+       dispatches to [(table.<mm>) table table]. Same shape as SCallMeta/SPrimMetaL:
+       [tproj table (mm_unop uop) : Self -> Self -> R], applied to [table : Self]
+       TWICE, result [R]. *)
+    apply inv_unop in Hty.
+    destruct Hty as [ofs [proto0 [M [Self [Other [R [Ee [Htbl [Hin [Hself [Hother Hd]]]]]]]]]]].
+    injection Ee as <- <-.
+    exists S. split; [ apply extends_refl | split; [ | exact Hwt ] ].
+    eapply TSub; [ | exact Hd ].
+    eapply TApp.
+    + eapply TApp.
+      * eapply TProj; [ exact Htbl | exact Hin ].
+      * eapply TSub; [ exact Htbl | exact Hself ].
+    + eapply TSub; [ exact Htbl | exact Hother ].
+  - (* METATABLE UNARY METAMETHOD — SUnop1: the operand [tmeta ofs proto : BRec M]
+       steps; preserved by IH; the stepped operand is again a [tmeta]
+       ([tmeta_step_shape]) so [TUnMetaL] re-applies. *)
+    apply inv_unop in Hty.
+    destruct Hty as [ofs [proto0 [M [Self [Other [R [Ee [Htbl [Hin [Hself [Hother Hd]]]]]]]]]]].
+    subst e.
+    destruct (tmeta_step_shape ofs proto0 st e' st' Hstep) as [own' [proto' Ee']].
+    subst e'.
+    destruct (IHHstep (tmeta ofs proto0) st (tmeta own' proto') st' eq_refl eq_refl Hwt (BRec M) Htbl)
+      as [S' [Hext [Htbl' Hwt']]].
+    exists S'. split; [ exact Hext | split; [ | exact Hwt' ] ].
+    eapply TSub; [ eapply (TUnMetaL S' [] uop own' proto' M Self Other R) | exact Hd ].
+    + exact Htbl'.
+    + exact Hin.
+    + exact Hself.
+    + exact Hother.
 Qed.
 
 (* ===========================================================================
@@ -5076,6 +5241,14 @@ Proof.
       * exists (tnewidx ofs proto' k v), stp. apply SNewIdx2; [ exact Hvs | exact Hp' ].
     + subst ofs. exists (tnewidx (pre ++ (k0, e0') :: post) proto k v), st0'.
       apply SNewIdx1; [ exact Hpre | exact He0' ].
+  - (* METATABLE UNARY METAMETHOD — TUnMetaL: [tunop uop (tmeta ofs proto)]. If the
+       table steps, [SUnop1]; else the table is a value — [SUnMetaL] dispatches. *)
+    intros st Hwt. right.
+    match goal with [ IHt : [] = [] -> forall st, _ -> value (tmeta ofs proto) \/ _ |- _ ] =>
+      destruct (IHt eq_refl st Hwt) as [Hvt | [t' [stt Ht']]] end.
+    + exists (tapp (tapp (tproj (tmeta ofs proto) (mm_unop uop)) (tmeta ofs proto)) (tmeta ofs proto)), st.
+      apply SUnMetaL. exact Hvt.
+    + exists (tunop uop t'), stt. apply SUnop1. exact Ht'.
   - (* P0 HFnil *) intros st Hwt ke [].
   - (* P0 HFcons *) intros st Hwt ke Hin. simpl in Hin. destruct Hin as [Heq | Hin].
     + subst ke.
@@ -5966,6 +6139,8 @@ Proof.
   - (* METATABLE [__newindex] — tnewidx: own fields (Pl IH) + proto + value cancel. *)
     repeat match goal with [ IH : forall ss kk, _ = _ |- _ ] => rewrite IH end;
       reflexivity.
+  - (* unary metamethod — tunop: the operand cancels. *)
+    rewrite IHe; reflexivity.
   - (* Pl cons *) rewrite IHe, IHe0; reflexivity.
   - (* MULTI-RETURN — Pt cons *) rewrite IHe, IHe0; reflexivity.
 Qed.
@@ -6845,9 +7020,158 @@ Proof.
 Qed.
 
 (* ===========================================================================
+   METATABLE METAMETHOD FAMILY (extension) — __concat (binary), __unm / __len
+   (unary). Each reuses the SAME machinery as __add: a metamethod field in the
+   table's read interface, dispatched through the [__index] chain. Typed +
+   stepped end-to-end.
+   =========================================================================== *)
+
+(* ---- __concat: a BINARY operator metamethod, same shape as __add but with NO
+   numeric fallback ([PConcat] is metamethod-only). [ccobj] carries a [__concat]
+   metamethod [BTop -> BTop -> Str]; [ccobj .. ccobj] dispatches to it. *)
+Definition concat_mm : tm := tlam BTop (tlam BTop (tlit (LStr 0))).
+Definition ccobj : tm := tmeta [("__concat"%string, concat_mm)] (trec []).
+
+Example concat_payoff_typed :
+  has_type [] [] (tprim PConcat ccobj ccobj) (BAtom AStr).
+Proof.
+  eapply TPrimMetaL.
+  - unfold ccobj, concat_mm. eapply TMeta.
+    + apply HFcons; [ apply TLam; apply TLam; apply (TLit [] [BTop; BTop] (LStr 0)) | apply HFnil ].
+    + repeat constructor; simpl; intuition discriminate.
+    + apply TRec; [ apply HFnil | constructor ].
+    + constructor.
+  - unfold merge_fields. simpl. unfold mm_binop. left; reflexivity.
+  - apply RsSsub. apply SsTop.
+  - eapply TSub.
+    + unfold ccobj, concat_mm. eapply TMeta.
+      * apply HFcons; [ apply TLam; apply TLam; apply (TLit [] [BTop; BTop] (LStr 0)) | apply HFnil ].
+      * repeat constructor; simpl; intuition discriminate.
+      * apply TRec; [ apply HFnil | constructor ].
+      * constructor.
+    + apply RsSsub. apply SsTop.
+Qed.
+
+(* and it COMPUTES: [ccobj .. ccobj] dispatches to [(ccobj.__concat) ccobj ccobj]
+   reaching the metamethod's result (a string literal). *)
+Example concat_payoff_steps : forall st,
+  multistep (tprim PConcat ccobj ccobj, st) (tlit (LStr 0), st).
+Proof.
+  intro st. unfold ccobj, concat_mm.
+  eapply multistep_trans.
+  { apply multistep_one. apply SPrimMetaL.
+    apply VMeta; [ repeat constructor | apply VRec; constructor ]. }
+  eapply multistep_trans.
+  { apply multistep_one. apply SApp1. apply SApp1. apply SMetaProjOwn.
+    - apply VMeta; [ repeat constructor | apply VRec; constructor ].
+    - unfold mm_binop; reflexivity. }
+  eapply multistep_trans.
+  { apply multistep_one. apply SApp1. apply SBeta.
+    apply VMeta; [ repeat constructor | apply VRec; constructor ]. }
+  simpl. apply multistep_one. apply SBeta.
+  apply VMeta; [ repeat constructor | apply VRec; constructor ].
+Qed.
+
+(* ---- __unm / __len: UNARY metamethods. [uobj] carries BOTH [__unm] and [__len]
+   metamethods [BTop -> BTop -> Int]; [-uobj] dispatches to [__unm], [#uobj] to
+   [__len] (the operand passed TWICE — Lua's unary calling convention). *)
+Definition un_mm : tm := tlam BTop (tlam BTop (tlit (LInt 9))).
+Definition uobj : tm := tmeta [("__unm"%string, un_mm); ("__len"%string, un_mm)] (trec []).
+
+Lemma uobj_typed : has_type [] [] uobj
+  (BRec (merge_fields
+    [("__unm"%string, BArrow BTop (BArrow BTop (BAtom AInt)));
+     ("__len"%string, BArrow BTop (BArrow BTop (BAtom AInt)))] [])).
+Proof.
+  unfold uobj, un_mm. eapply TMeta.
+  - apply HFcons; [ apply TLam; apply TLam; apply (TLit [] [BTop; BTop] (LInt 9)) | ].
+    apply HFcons; [ apply TLam; apply TLam; apply (TLit [] [BTop; BTop] (LInt 9)) | apply HFnil ].
+  - repeat constructor; simpl; intuition discriminate.
+  - apply TRec; [ apply HFnil | constructor ].
+  - constructor.
+Qed.
+
+(* [-uobj] (unary minus) is well typed at [Int] via [TUnMetaL] on [__unm]. *)
+Example unm_payoff_typed : has_type [] [] (tunop UNeg uobj) (BAtom AInt).
+Proof.
+  eapply TUnMetaL.
+  - apply uobj_typed.
+  - unfold merge_fields. simpl. unfold mm_unop. left; reflexivity.
+  - apply RsSsub. apply SsTop.
+  - apply RsSsub. apply SsTop.
+Qed.
+
+(* [#uobj] (length) is well typed at [Int] via [TUnMetaL] on [__len]. *)
+Example len_payoff_typed : has_type [] [] (tunop ULen uobj) (BAtom AInt).
+Proof.
+  eapply TUnMetaL.
+  - apply uobj_typed.
+  - unfold merge_fields. simpl. unfold mm_unop. right; left; reflexivity.
+  - apply RsSsub. apply SsTop.
+  - apply RsSsub. apply SsTop.
+Qed.
+
+(* and [-uobj] COMPUTES: dispatch to [(uobj.__unm) uobj uobj] ⤳ the result [9]. *)
+Example unm_payoff_steps : forall st,
+  multistep (tunop UNeg uobj, st) (tlit (LInt 9), st).
+Proof.
+  intro st. unfold uobj, un_mm.
+  eapply multistep_trans.
+  { apply multistep_one. apply SUnMetaL.
+    apply VMeta; [ repeat constructor | apply VRec; constructor ]. }
+  eapply multistep_trans.
+  { apply multistep_one. apply SApp1. apply SApp1. apply SMetaProjOwn.
+    - apply VMeta; [ repeat constructor | apply VRec; constructor ].
+    - unfold mm_unop; reflexivity. }
+  eapply multistep_trans.
+  { apply multistep_one. apply SApp1. apply SBeta.
+    apply VMeta; [ repeat constructor | apply VRec; constructor ]. }
+  simpl. apply multistep_one. apply SBeta.
+  apply VMeta; [ repeat constructor | apply VRec; constructor ].
+Qed.
+
+(* a unary operator whose metamethod is ABSENT is REJECTED. [ccobj] has [__concat]
+   but neither [__unm] nor [__len], so [#ccobj] does not type. *)
+Example len_absent_rejected : forall T,
+  ~ has_type [] [] (tunop ULen ccobj) T.
+Proof.
+  intros T H. apply inv_unop in H.
+  destruct H as [ofs [proto [M [Self [Other [R [Ea [Htbl [Hin [_ [_ _]]]]]]]]]]].
+  unfold ccobj in Ea. injection Ea as <- <-.
+  apply inv_meta in Htbl.
+  destruct Htbl as [Tw [Pf [Hfs [_ [Hp [_ HsubRec]]]]]].
+  unfold ccobj, concat_mm in Hfs.
+  inversion Hfs as [ | S0 G0 k0 e0 Te0 fs0 Ts0 He0 Hrest E1 E2 E3 ]; subst.
+  inversion Hrest; subst.
+  apply inv_rec in Hp. destruct Hp as [Pbase [Hpb [_ HsubP]]].
+  inversion Hpb; subst.
+  apply rsub_rec_super in HsubP. simpl in HsubP.
+  destruct (rsub_rec_inv (merge_fields [("__concat"%string, Te0)] Pf) M
+              "__len"%string (BArrow Self (BArrow Other R)) HsubRec Hin)
+    as [Tg [HinTg _]].
+  assert (Hk : In "__len"%string (map fst (merge_fields [("__concat"%string, Te0)] Pf)))
+    by (replace "__len"%string with (fst ("__len"%string, Tg)) by reflexivity;
+        apply in_map; exact HinTg).
+  apply merge_fields_key_in in Hk.
+  destruct Hk as [Hown | Hproto].
+  - simpl in Hown. destruct Hown as [E | F]; [ discriminate E | exact F ].
+  - apply in_map_iff in Hproto. destruct Hproto as [[k' T'] [Ek' HinPf]].
+    simpl in Ek'. subst k'.
+    destruct (srec_lookup _ _ HsubP "__len"%string T' HinPf) as [Tf [Hinb _]].
+    simpl in Hinb. exact Hinb.
+Qed.
+
+(* ===========================================================================
    ASSUMPTION AUDIT — closed under the global context.
    =========================================================================== *)
 Print Assumptions progress.
+(* METATABLE METAMETHOD FAMILY — __concat / __unm / __len (typed + stepped + rejected). *)
+Print Assumptions concat_payoff_typed.
+Print Assumptions concat_payoff_steps.
+Print Assumptions unm_payoff_typed.
+Print Assumptions len_payoff_typed.
+Print Assumptions unm_payoff_steps.
+Print Assumptions len_absent_rejected.
 (* METATABLES — the OOP payoff: prototype inheritance, typed + stepped + rejected. *)
 Print Assumptions oop_derived_typed.
 Print Assumptions oop_inherited_typed.

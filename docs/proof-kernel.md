@@ -2445,3 +2445,71 @@ the three payoff families (`call_*`, `add_*`/`sub_*`, `newindex_*`): **Closed un
 the global context** — no axioms, no `Admitted`, no `Classical`. `subtype.v` +
 `ssub.v` byte-unmodified; whole chain compiles (`coqc proof/subtype.v` →
 `typing.v` → `ssub.v` → `check.v`).
+
+## Increment 23 — METAMETHOD FAMILY EXTENSION: `__concat`, `__unm`, `__len`
+
+Extends the metamethod protocol of Increment 22 with the remaining
+operator-only metamethods, reusing the existing dispatch machinery with no new
+lookup mechanism.
+
+### `__concat` — a binary, metamethod-only operator
+
+- **Term language.** `primop` gains `PConcat` (the `..` operator). Unlike the
+  arithmetic/comparison ops it has **NO numeric path**: `arith_op PConcat = false`
+  and `cmp_op PConcat = false`, so `SPrimArith`/`SPrimCmp` never fire. Its only
+  typing rule is the binary-operator metamethod dispatch already present —
+  `TPrimMetaL`/`SPrimMetaL` via `mm_binop PConcat = "__concat"`. No new term form,
+  no new step rule: it is exactly "more keys in the existing `mm_binop` table."
+  (Plain string-content concatenation is a separate, DEFERRED concern; the value
+  model has no string concatenation.)
+
+### `__unm` / `__len` — unary operator metamethods
+
+- **Term language.** New `unop` tag (`UNeg` `-x`, `ULen` `#x`) and a new term form
+  `tunop : unop -> tm -> tm`. Metamethod names via `mm_unop : unop -> string`
+  (`UNeg ↦ "__unm"`, `ULen ↦ "__len"`) — ordinary data, one uniform `__index`-chain
+  lookup, not name-keyed special-casing.
+- **Typing (declarative).** `TUnMetaL`: `tunop uop (tmeta ofs proto)` whose read
+  interface `BRec M` carries `mm_unop uop : Self -> Other -> R`, with the merged
+  record a valid self for BOTH argument positions (`rsub (BRec M) Self`,
+  `rsub (BRec M) Other`); result `R`. Metamethod-only (no built-in numeric
+  negation / table length — DEFERRED). New inversion `inv_unop`
+  (subsumption-transparent, like `inv_prim` but without the numeric branch).
+- **Operational semantics.** `SUnMetaL`: `tunop uop (tmeta own proto)` (operand a
+  value) ⤳ `(table.<mm>) table table` — the operand passed TWICE, Lua's unary
+  metamethod calling convention, modelled as a curried `Self -> Self -> R` applied
+  to the operand and then to itself. `SUnop1` is operand congruence. Reuses
+  `tproj` + two `tapp`/`SBeta` — the unary analogue of `SPrimMetaL`, no new lookup
+  machinery (so the metamethod may be inherited through the chain).
+- **Metatheory.** `tunop` threaded through the full de Bruijn metatheory
+  (`tm_rect_strong`, `lift`/`subst`/`closed_at`, `closed_at_lift`,
+  `subst_lift_cancel`, `weakening`, `subst_lemma`, `store_weakening`,
+  `has_type_closed`, `proj_free`). `progress` + `preservation` re-proved for
+  `TUnMetaL`/`SUnMetaL`/`SUnop1` (the congruence case reuses `tmeta_step_shape` to
+  re-apply `TUnMetaL` after the operand steps). In `check.v`, `synth (tunop uop e)`
+  synthesizes the operand, requires a syntactic `tmeta` with `BRec M` carrying the
+  metamethod (`flook (mm_unop uop) M`) and both self gates (`decide_rsub`), else
+  rejects; `synth_sound`/`check_sound` re-proved `Qed`.
+
+### Payoffs
+
+`concat_payoff_typed`/`_steps` (`ccobj .. ccobj : Str`, computes to the
+metamethod result); `unm_payoff_typed`/`_steps`, `len_payoff_typed`
+(`-uobj`/`#uobj : Int`); `len_absent_rejected` (`ccobj` has `__concat` but neither
+`__unm` nor `__len` — `#ccobj` rejected). Algorithmic mirrors in `check.v`:
+`concat_synths`/`unm_synths`/`len_synths`, the `*_check_sound` corollaries, and
+`len_absent_synth_None`.
+
+### Honest scope / deferrals
+
+DONE: `__concat` (binary, metamethod-only, LEFT-operand), `__unm`/`__len` (unary).
+DEFERRED (unchanged from Increment 22, less what landed here): binary-operator
+RIGHT-operand fallback; `rawget`/`rawset`; `__tostring`; built-in numeric
+negation / table length; `setmetatable` / dynamic metatables; `__index`/
+`__newindex` as FUNCTIONS.
+
+`Print Assumptions` on `progress`, `preservation`, `synth_sound`, `check_sound`,
+and the `__concat`/`__unm`/`__len` payoff families: **Closed under the global
+context** — no axioms, no `Admitted`, no `Classical`. `subtype.v` + `ssub.v`
+byte-unmodified; whole chain compiles (`coqc proof/subtype.v` → `typing.v` →
+`ssub.v` → `check.v`).

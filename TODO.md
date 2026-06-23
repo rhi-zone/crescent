@@ -815,6 +815,31 @@ Still open (DEFERRED — recorded honestly, minimal core only):
     FUNCTIONS, `__concat`/`__len`/`__unm`/`__tostring`/other metamethods, `__call`
     multi-arg/multi-return, operator RIGHT-operand fallback, own-present rawset on
     the immutable own record, `rawget`/`rawset`.
+- [x] **Metamethod family extension — `__concat`, `__unm`, `__len`** (increment 23;
+  `proof/typing.v` + `proof/check.v`; `subtype.v`/`ssub.v` BYTE-UNMODIFIED). Reuses
+  the Increment 22 dispatch machinery with no new lookup mechanism:
+  - **`__concat`** (`..`): new `primop PConcat`, metamethod-ONLY (`arith_op`/`cmp_op`
+    both false, so `SPrimArith`/`SPrimCmp` never fire). Sole rule is the EXISTING
+    binary-operator dispatch `TPrimMetaL`/`SPrimMetaL` via `mm_binop PConcat =
+    "__concat"` — i.e. just more keys in the `mm_binop` table, no new term/step form.
+    Payoff `concat_payoff_typed`/`_steps` (`ccobj .. ccobj : Str`, computes).
+  - **`__unm`/`__len`** (`-x`/`#x`): new `unop` tag + term `tunop uop e` + `mm_unop`
+    name table (ordinary data). Typing `TUnMetaL`: operand a `tmeta : BRec M` carrying
+    `mm_unop uop : Self -> Other -> R`, both self gates via `rsub`; result `R`. Op-sem
+    `SUnMetaL` dispatches to `(table.<mm>) table table` (operand passed TWICE — Lua's
+    unary calling convention), `SUnop1` congruence. New inversion `inv_unop`.
+    Metamethod-ONLY (no built-in numeric negation / table length). Payoffs
+    `unm_payoff_typed`/`_steps`, `len_payoff_typed`, `len_absent_rejected`; checker
+    mirrors `concat_synths`/`unm_synths`/`len_synths` + `*_check_sound` +
+    `len_absent_synth_None`.
+  - `progress`/`preservation`/`synth_sound`/`check_sound` ALL re-proved `Qed`;
+    `tunop` threaded through the full de Bruijn metatheory. `Print Assumptions` on
+    every result + payoff: Closed under the global context. See proof-kernel
+    increment 23.
+  - STILL DEFERRED (the rest of the original metamethod-family task): operator
+    RIGHT-operand fallback; `rawget`/`rawset`; `__tostring`; built-in numeric
+    negation / table length; `setmetatable`/dynamic metatables; `__index`/
+    `__newindex` as FUNCTIONS.
 - [ ] **Arrow types as TERM introduction forms** (the type ALGEBRA has arrows via
   `BTy` and `tlam` introduces them; broader arrow-term ergonomics are min-core).
 - [ ] **Duplicate-key record literals** (currently `TRec` requires `NoDup` keys,
