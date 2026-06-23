@@ -2921,14 +2921,35 @@ never aliases a mutable outer `i`; the value it sees is the current counter, re-
 fetched each turn). Iteration continues while `(step>0 ∧ i≤limit) ∨ (step<0 ∧
 i≥limit)`; each turn runs `body` then `i := i + step`.
 
-**Step-sign / nat substrate (honest boundary, not a faked gap).** The TERM number
-model in this dev is `LInt : nat` — there is **no negative number literal** at the
-term level (the value model abstracts the double; the literal language is non-
-negative). A runtime step value therefore cannot carry a sign, so the sign-dependent
-guard cannot be decided at runtime by a single form. The **faithful nat-substrate
-rendering resolves the step's sign STATICALLY** (as a real compiler does for a
-constant step) into two encodings, mirroring the while-loop's ascending `cinc`
-(`PAdd`/`PLt`):
+**Step-sign / nat substrate (honest boundary, not a faked gap — verified against the
+core).** The number model is `nat`-backed at BOTH levels: the value `VNum` carries
+`NRint nat` / `NRfrac nat` (`subtype.v`, no negative number value), the only number
+literal is `LInt : nat` (`typing.v`), arithmetic is `nat` (`prim_arith`; note `PSub` is
+truncating, `5 - 7 = 0`), and `tunop UNeg` dispatches only on metatable values
+(`SUnMetaL`) — it is **stuck on a plain number**. Consequently **no term evaluates to a
+negative number**.
+
+The blocker for a single runtime-sign-dispatched form is **not the guard**: a runtime
+sign test `0 < step` *is* expressible (`PLt` + `tif` both exist), but it is **vacuous** —
+every number value is `≥ 0`, so there is no negative step to dispatch on. The deeper
+blocker is the **update**: the faithful single-form Lua 5.1 body is `i := i + step` with
+a *signed* step (a negative step descends). Here `+` is `nat` addition, so `i := i + step`
+can **only ever ascend** for every representable step value. Descent is therefore carried
+**entirely** by switching the update operator to `PSub` (the `tfor_down` encoding) — a
+*static* choice, since there is no negative step value to select on at runtime. A
+"single form" that picked `+` vs `−` at runtime would just be the static-sign split moved
+inside one term, dispatching on a bit the substrate cannot supply.
+
+**Concrete blocked term:** `for i = 2, 1, c do body end` where `c` is intended to be `-1`
+at runtime. No term produces `-1` (`LInt` is `nat`; `tunop UNeg (tlit (LInt 1))` is stuck;
+`tprim PSub (tlit (LInt 0)) (tlit (LInt 1))` truncates to `0`), and `i := i + c` never
+descends for any representable `c`. Unifying the two forms requires a **signed `NumRep`**
+(a `Z` payload), a **signed `LInt`** (or a working `PNeg` on numbers), and a sign-aware
+`PSub` — recorded as the substrate need, **not faked**.
+
+The **faithful nat-substrate rendering resolves the step's sign STATICALLY** (as a real
+compiler does for a constant step) into two encodings, mirroring the while-loop's
+ascending `cinc` (`PAdd`/`PLt`):
 
 - **`tfor_up cnt limit step body`** (step > 0) :=
   `twhile (PLe (!cnt) limit) (tseq body (cnt := !cnt + step))` — guard `i ≤ limit`,
@@ -2939,8 +2960,9 @@ constant step) into two encodings, mirroring the while-loop's ascending `cinc`
   **subtraction direction**, since nat has no sign).
 
 This is the 3-value form (init, limit, step magnitude all explicit), faithful to 5.1
-modulo the nat number model. A **single** runtime form deciding direction needs
-SIGNED numbers at the term level — recorded as a substrate need, **not faked**.
+modulo the nat number model. A **single** runtime form deciding direction needs a
+signed number model at both the value and term level (see the step-sign boundary above),
+recorded as a substrate need, **not faked**.
 
 ### Loop-variable typing (the 5.1 number model)
 
@@ -2980,10 +3002,13 @@ typed at `ANum`**. Exactly Lua's single-number model: `i` is a number, not an in
 ### Honest scope / deferrals
 
 Generic `for-in` (iterator protocols) remains deferred. A single runtime numeric-for
-form deciding step direction at runtime requires **signed numbers at the term level**
-(the literal language is `LInt : nat`) — the two-form static-sign rendering is the
-faithful nat-substrate model, recorded as the substrate need. The dynamic-metatable
-frontier is unaffected (untouched, per `docs/decisions/metatable-representation.md`).
+form deciding step direction at runtime requires a **signed number model** (a signed
+`NumRep` / `LInt`, plus a sign-aware `PSub` or a working number `PNeg`) — not just at
+the term level: the deeper blocker is that the `nat` update `i := i + step` can never
+descend, so descent must switch operator statically (see the step-sign boundary above).
+The two-form static-sign rendering is the faithful nat-substrate model, recorded as the
+substrate need. The dynamic-metatable frontier is unaffected (untouched, per
+`docs/decisions/metatable-representation.md`).
 
 `Print Assumptions` on `for_var_is_number`, `tfor_up_typed`, `tfor_down_typed`,
 `forsum_loop_typed`, `forsum_one_iter`, `forsum_terminates`, `forsum_loop_runs`,

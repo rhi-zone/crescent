@@ -750,9 +750,19 @@ Still open (DEFERRED — recorded honestly, minimal core only):
   loop variable is typed soundly as a number (`for_var_typed_number : !i : ANum`)
   and NOT an integer (`for_var_not_int : ~ !i : AInt`, via a `NRfrac` witness — 5.1's
   single-number model). `Print Assumptions` Closed on all. SUBSTRATE BOUNDARY noted
-  (not faked): a SINGLE runtime form deciding step direction needs SIGNED numbers at
-  the term level (the literal language is `LInt : nat`); the two-form static-sign
-  rendering is the faithful nat-substrate model. See `proof-kernel.md` increment 23.
+  (not faked, verified): a SINGLE runtime-sign-dispatched form needs SIGNED numbers at
+  BOTH the value and term level. The number value is `nat`-backed (`NRint nat`/`NRfrac
+  nat`, no negative value); the only number literal is `LInt : nat`; arithmetic is `nat`
+  (truncating `PSub`: `5 - 7 = 0`); `tunop UNeg` dispatches only on metatables (`SUnMetaL`),
+  stuck on plain numbers. So NO term evaluates to a negative number. The blocker is NOT
+  only the guard (a runtime test `0 < step` IS expressible via `PLt`+`tif`, but it is
+  vacuous — every number value is `≥ 0`): the deeper blocker is the UPDATE `i := i + step`,
+  which with `nat` `+` can ONLY ascend for every representable step — descent is carried
+  entirely by switching the operator to `PSub`, the static-sign split. Concrete blocked
+  term: `for i = 2, 1, c` with `c` meant to be `-1` — no term produces `-1`, and `i := i + c`
+  never descends. The two-form static-sign rendering is the faithful `nat`-substrate model;
+  unifying needs a signed `NumRep` (`Z` payload) + signed `LInt` + a `PNeg`/sign-aware `PSub`.
+  See `proof-kernel.md` increment 28.
 - [x] **Mutable TABLE fields (record fields as refs) — DONE (increment M4,
   records-of-refs ENCODING).** A Lua mutable table `{x:T,y:U}` IS a record of
   reference cells `BRec [("x", BRef T); ("y", BRef U)]`: the field SET is fixed

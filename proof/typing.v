@@ -8939,21 +8939,36 @@ Qed.
      - Iteration continues while  (step>0 /\ i<=limit) \/ (step<0 /\ i>=limit);
        each iteration runs [body] then  i := i + step.
 
-   STEP-SIGN / NAT SUBSTRATE (honest boundary, NOT a faked gap). The TERM number
-   model in this dev is [LInt : nat] — there is no negative number literal at the
-   term level (the value model abstracts the double; the literal language is
-   non-negative). A runtime step value therefore cannot carry a sign, so the
-   sign-dependent guard above cannot be decided at runtime by a single form. The
-   FAITHFUL nat-substrate rendering resolves the step's SIGN STATICALLY (as a real
-   compiler does for a constant step) into one of two encodings, mirroring the
+   STEP-SIGN / NAT SUBSTRATE (honest boundary, NOT a faked gap — verified against the
+   core). The number model is [nat]-backed at BOTH levels: the value [VNum] carries
+   [NRint nat] / [NRfrac nat] (subtype.v — no negative number value), the only number
+   literal is [LInt : nat], arithmetic is [nat] ([prim_arith]; [PSub] is TRUNCATING,
+   [5 - 7 = 0]), and [tunop UNeg] dispatches only on metatable values ([SUnMetaL]) — it
+   is STUCK on a plain number. Hence NO term evaluates to a negative number.
+
+   The blocker for a single runtime-sign-dispatched form is NOT the guard: a runtime
+   sign test [0 < step] IS expressible ([PLt] + [tif] both exist), but it is VACUOUS —
+   every number value is [>= 0], so there is no negative step to dispatch on. The deeper
+   blocker is the UPDATE: the faithful single-form Lua 5.1 body is [i := i + step] with a
+   SIGNED step (negative descends); here [+] is [nat] addition, so [i := i + step] can
+   ONLY ascend for every representable step. Descent is therefore carried ENTIRELY by
+   switching the update operator to [PSub] (the [tfor_down] encoding) — a STATIC choice,
+   since no negative step value exists to select on at runtime.
+
+   CONCRETE BLOCKED TERM: [for i = 2, 1, c do body end] with [c] meant to be [-1] — no
+   term produces [-1] ([LInt] is [nat]; [tunop UNeg (tlit (LInt 1))] is stuck;
+   [tprim PSub (tlit (LInt 0)) (tlit (LInt 1))] truncates to [0]), and [i := i + c] never
+   descends. The FAITHFUL nat-substrate rendering resolves the step's SIGN STATICALLY (as
+   a real compiler does for a constant step) into one of two encodings, mirroring the
    while-loop's ascending [cinc] (PAdd / PLt) :
      - [tfor_up]   : step>0 — guard [!i <= limit], increment [i := !i + step].
      - [tfor_down] : step<0 — guard [limit <= !i] (i.e. [i >= limit]), decrement
                      [i := !i - step] (step the POSITIVE magnitude; the descent is
                      carried by the subtraction direction, since nat has no sign).
    This is the 3-value form (init, limit, step magnitude all explicit), faithful to
-   5.1 modulo the nat number model. A single runtime form deciding direction needs
-   SIGNED numbers at the term level — recorded as a substrate need, not faked.
+   5.1 modulo the nat number model. A single runtime form deciding direction needs a
+   SIGNED number model (signed [NumRep] / [LInt] + a sign-aware [PSub] or working number
+   [PNeg]) — recorded as a substrate need, not faked.
 
    LOOP-VARIABLE TYPING (5.1).  [i = !cnt] is typed at the NUMBER type [ANum]. The
    counter cell is a [BRef ANum] cell: the increment [i := !i + step] stores the
