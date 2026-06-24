@@ -623,19 +623,19 @@ Qed.
    The base order [AInt <: ANum] (and [AInt <: AFloat]) is likewise baked into
    the denotation, not asserted. LuaJIT 5.1 has ONE number value (a double), so
    there is a SINGLE number constructor [VNum : NumRep -> V]; the representation
-   [NumRep] records whether the double is integer-valued ([NRint z], e.g. [3.0])
-   or genuinely non-integer ([NRfrac z], e.g. [1.5]). "Integer-valued" is thus
+   [NumRep] records whether the double is integer-valued ([NRint], e.g. [3.0])
+   or genuinely non-integer ([NRfrac], e.g. [1.5]) — a CLASS, no magnitude.
+   "Integer-valued" is thus
    DECIDABLE on the value. [atom_denote ANum]/[atom_denote AFloat] accept EVERY
    [VNum _] (all numbers); [atom_denote AInt] accepts only [VNum (NRint _)]. So
    [denote (atom AInt) v -> denote (atom ANum) v] and the same for [AFloat] hold
    definitionally (NRint-numbers are a literal subset of all numbers), while the
    converse fails because [VNum (NRfrac _)] inhabits ANum/AFloat but not AInt.
 
-   [VInt n]/[VFloat n] are kept as NOTATIONS for [VNum (NRint n)]/[VNum (NRfrac
-   n)] — so [VInt 3] and [VFloat 3] are NO LONGER distinct values; they denote
-   different doubles only when [n] differs and the rep differs. The collapse is
-   genuine: there is exactly one [V] value per double, and [VInt 3] is literally
-   [VNum (NRint 3)], an integer-valued number that IS a float. (PUC 5.3/5.4's
+   [VInt]/[VFloat] are kept as NOTATIONS for [VNum NRint]/[VNum NRfrac] — they
+   carry NO magnitude. There is exactly one value per number CLASS (the "types,
+   not magnitudes" stage-2 refactor): [VInt] is literally [VNum NRint], an
+   integer-valued number that IS a float. (PUC 5.3/5.4's
    tagged-integer values, where [3] and [3.0] are distinct siblings, are the
    version-parametric DEFERRED design — see docs/reality-bridge.md.)
    =========================================================================== *)
@@ -688,16 +688,17 @@ Inductive BTy : Type :=
 
 (* ---- The number representation (LuaJIT 5.1: one double per number) ---------
    A number value is a single double. [NumRep] is the value-level witness of
-   whether that double is integer-valued. [NRint z] = an integer-valued double
-   (e.g. [3.0]); [NRfrac z] = a genuinely non-integer double (e.g. [1.5]). This
+   whether that double is integer-valued. [NRint] = the integer-valued number
+   CLASS (e.g. [3.0]); [NRfrac] = the non-integer number class (e.g. [1.5]). This
    makes "integer-valued" DECIDABLE structurally (it is the [NRint] head) while
    keeping non-integer numbers representable — so [AInt] is a proper, non-trivial
-   subset of the number type, NOT everything. The [z : nat] payload distinguishes
-   distinct doubles within each class; classification is head-determined. *)
+   subset of the number type, NOT everything. There is NO magnitude payload:
+   numbers are two type-CLASSES with no value/magnitude (the "types, not
+   magnitudes" stage-2 refactor). Classification is head-determined. *)
 
 Inductive NumRep : Type :=
-  | NRint  : nat -> NumRep     (* an integer-valued double, e.g. 3.0 *)
-  | NRfrac : nat -> NumRep.    (* a genuinely non-integer double, e.g. 1.5 *)
+  | NRint  : NumRep     (* the integer-valued number CLASS (e.g. 3.0) *)
+  | NRfrac : NumRep.    (* the genuinely-non-integer number CLASS (e.g. 1.5) *)
 
 (* ---- The value domain -----------------------------------------------------
    Distinct constructor heads => unrelated atoms denote disjoint sets, decided
@@ -746,14 +747,14 @@ Inductive V : Type :=
   | VTup : list V -> V.
 
 (* ---- VInt / VFloat as NOTATIONS over the single number value --------------
-   [VInt n] is literally [VNum (NRint n)] (an integer-valued double) and
-   [VFloat n] is [VNum (NRfrac n)] (a non-integer double). These are NOTATIONS,
-   not constructors: there is one number value per double. [VInt 3] is an
-   integer-valued number that IS a float — exactly the 5.1 picture. The old
-   distinct-value reading is gone; these names survive only as readable spellings
-   of the two NumRep classes. *)
-Notation VInt n := (VNum (NRint n)).
-Notation VFloat n := (VNum (NRfrac n)).
+   [VInt] is literally [VNum NRint] (THE integer-valued number class) and
+   [VFloat] is literally [VNum NRfrac] (THE non-integer number class). These are
+   NOTATIONS, not constructors, and they carry NO magnitude — there is exactly one
+   value per number CLASS (the "types, not magnitudes" stage-2 refactor). [VInt]
+   is an integer-valued number that IS a float — exactly the 5.1 picture. These
+   names survive only as readable spellings of the two NumRep classes. *)
+Notation VInt := (VNum NRint).
+Notation VFloat := (VNum NRfrac).
 
 (* ---- Finite key lookup in a table ----------------------------------------- *)
 
@@ -776,8 +777,8 @@ Section V_ind_strong.
   Variable Pg : list (V * V) -> Prop.
   (* a third list-property, for the tuple/value-sequence (a list of V) *)
   Variable Pt : list V -> Prop.
-  Hypothesis HInt   : forall n, P (VInt n).
-  Hypothesis HFloat : forall n, P (VFloat n).
+  Hypothesis HInt   : P VInt.
+  Hypothesis HFloat : P VFloat.
   Hypothesis HStr   : P VStr.
   Hypothesis HBool  : forall b, P (VBool b).
   Hypothesis HNil   : P VNil.
@@ -794,8 +795,8 @@ Section V_ind_strong.
   Hypothesis Htcons : forall v rest, P v -> Pt rest -> Pt (v :: rest).
   Fixpoint V_rect_strong (v : V) : P v :=
     match v with
-    | VNum (NRint n)  => HInt n
-    | VNum (NRfrac n) => HFloat n
+    | VNum NRint  => HInt
+    | VNum NRfrac => HFloat
     | VStr     => HStr
     | VBool b  => HBool b
     | VNil     => HNil
@@ -838,7 +839,7 @@ Definition atom_denote (a : Atom) (v : V) : Prop :=
   match a with
   | ANil   => match v with VNil    => True | _ => False end
   | ABool  => match v with VBool _ => True | _ => False end
-  | AInt   => match v with VNum (NRint _) => True | _ => False end
+  | AInt   => match v with VNum NRint => True | _ => False end
   | ANum   => match v with VNum _ => True | _ => False end
   | AFloat => match v with VNum _ => True | _ => False end
   | AStr   => match v with VStr    => True | _ => False end
@@ -1306,7 +1307,7 @@ Qed.
    not AInt — so AInt is a PROPER subtype of AFloat (the edge is non-trivial). *)
 Theorem not_float_sub_int : ~ dsub (BAtom AFloat) (BAtom AInt).
 Proof.
-  unfold dsub; intro H. specialize (H (VFloat 0)). simpl in H. apply H. exact I.
+  unfold dsub; intro H. specialize (H (VFloat)). simpl in H. apply H. exact I.
 Qed.
 
 (* ===========================================================================
@@ -1323,9 +1324,9 @@ Proof. exists VNil; exact I. Qed.
 
 (* Each atom is genuinely inhabited (denotations are nonempty). *)
 Theorem int_inhabited  : exists v, denote (BAtom AInt) v.
-Proof. exists (VInt 0); simpl; exact I. Qed.
+Proof. exists (VInt); simpl; exact I. Qed.
 Theorem num_inhabited  : exists v, denote (BAtom ANum) v.
-Proof. exists (VFloat 0); simpl; exact I. Qed.
+Proof. exists (VFloat); simpl; exact I. Qed.
 Theorem str_inhabited  : exists v, denote (BAtom AStr) v.
 Proof. exists (VStr); simpl; exact I. Qed.
 
@@ -1346,14 +1347,14 @@ Qed.
 (* Numbers are NOT all ints: ANum </: AInt, witnessed by a non-integer number. *)
 Theorem not_num_sub_int : ~ dsub (BAtom ANum) (BAtom AInt).
 Proof.
-  unfold dsub; intro H. specialize (H (VFloat 0)). simpl in H.
+  unfold dsub; intro H. specialize (H (VFloat)). simpl in H.
   apply H. exact I.
 Qed.
 
 (* A NON-disjoint pair does NOT collapse to Bot: AInt inhabits ANum∩AInt. *)
 Theorem num_int_not_bot : ~ dsub (BInter (BAtom ANum) (BAtom AInt)) BBot.
 Proof.
-  unfold dsub; intro H. specialize (H (VInt 0)). simpl in H.
+  unfold dsub; intro H. specialize (H (VInt)). simpl in H.
   apply H. split; exact I.
 Qed.
 
@@ -1361,7 +1362,7 @@ Qed.
    INCREMENT 4 — DECIDABLE SUBTYPING: an executable decider, sound + complete.
 
    [dsub a b := forall v:V, denote a v -> denote b v] is the correct definition
-   but is NOT computable: it quantifies over the infinite domain [V] (VInt n for
+   but is NOT computable: it quantifies over the infinite domain [V] (VTable etc. for
    every nat n, etc.). This increment makes subtyping DECIDABLE BY CONSTRUCTION
    — an executable [decide_dsub : BTy -> BTy -> bool] proven [= true <-> dsub].
 
@@ -1412,9 +1413,9 @@ Fixpoint atomic (t : BTy) : Prop :=
 
 (* ---- Head classes: canonical representatives ------------------------------
    [head v] collapses a value to the canonical representative of its
-   classification class (erasing the payload). NOTE the number value [VNum]
-   needs TWO representatives — [VInt 0 = VNum (NRint 0)] and [VFloat 0 = VNum
-   (NRfrac 0)] — because [atom_denote AInt] distinguishes [NRint] from [NRfrac]
+   classification class. NOTE the number value [VNum]
+   needs TWO representatives — [VInt = VNum NRint] and [VFloat = VNum
+   NRfrac] — because [atom_denote AInt] distinguishes [NRint] from [NRfrac]
    (integer-valued vs non-integer). So although there is a SINGLE number VALUE
    constructor (5.1: one double), classification is determined by the
    [NRint]/[NRfrac] CLASS, and [head] preserves that class. [head_reps]
@@ -1424,8 +1425,8 @@ Fixpoint atomic (t : BTy) : Prop :=
 
 Definition head (v : V) : V :=
   match v with
-  | VInt _   => VInt 0
-  | VFloat _ => VFloat 0
+  | VInt     => VInt
+  | VFloat   => VFloat
   | VStr     => VStr
   | VBool _  => VBool false
   | VNil     => VNil
@@ -1457,7 +1458,7 @@ Definition head (v : V) : V :=
   end.
 
 Definition head_reps : list V :=
-  VInt 0 :: VFloat 0 :: VStr :: VBool false :: VNil :: VTable [] :: VFun [] :: VRef 0 :: VTup [] :: nil.
+  VInt :: VFloat :: VStr :: VBool false :: VNil :: VTable [] :: VFun [] :: VRef 0 :: VTup [] :: nil.
 
 (* [head v] is always one of the seven representatives. *)
 Lemma head_in_reps : forall v, In (head v) head_reps.
@@ -1769,11 +1770,11 @@ Qed.
 
 (* A record type is INHABITED: exhibit a concrete table witness. *)
 Theorem rec_inhabited :
-  denote (BRec [("f"%string, BAtom AInt)]) (VTable [("f"%string, VInt 0)]).
+  denote (BRec [("f"%string, BAtom AInt)]) (VTable [("f"%string, VInt)]).
 Proof.
-  apply denote_rec_iff. exists [("f"%string, VInt 0)]. split; [ reflexivity | ].
+  apply denote_rec_iff. exists [("f"%string, VInt)]. split; [ reflexivity | ].
   intros k T Hin. simpl in Hin. destruct Hin as [Heq | []].
-  injection Heq as <- <-. exists (VInt 0). simpl. split; [ reflexivity | exact I ].
+  injection Heq as <- <-. exists (VInt). simpl. split; [ reflexivity | exact I ].
 Qed.
 
 (* DEPTH does NOT collapse: a record with an int field is NOT a subtype of the
@@ -1783,8 +1784,8 @@ Theorem not_rec_int_sub_str :
   ~ dsub (BRec [("f"%string, BAtom AInt)]) (BRec [("f"%string, BAtom AStr)]).
 Proof.
   unfold dsub. intro H.
-  specialize (H (VTable [("f"%string, VInt 0)])).
-  assert (Hpre : denote (BRec [("f"%string, BAtom AInt)]) (VTable [("f"%string, VInt 0)]))
+  specialize (H (VTable [("f"%string, VInt)])).
+  assert (Hpre : denote (BRec [("f"%string, BAtom AInt)]) (VTable [("f"%string, VInt)]))
     by apply rec_inhabited.
   specialize (H Hpre). apply denote_rec_iff in H.
   destruct H as [ents [Hv Hall]]. injection Hv as <-.
@@ -1800,8 +1801,8 @@ Theorem not_rec_narrow_sub_wide :
          (BRec [("f"%string, BAtom AInt); ("g"%string, BAtom AInt)]).
 Proof.
   unfold dsub. intro H.
-  specialize (H (VTable [("f"%string, VInt 0)])).
-  assert (Hpre : denote (BRec [("f"%string, BAtom AInt)]) (VTable [("f"%string, VInt 0)]))
+  specialize (H (VTable [("f"%string, VInt)])).
+  assert (Hpre : denote (BRec [("f"%string, BAtom AInt)]) (VTable [("f"%string, VInt)]))
     by apply rec_inhabited.
   specialize (H Hpre). apply denote_rec_iff in H.
   destruct H as [ents [Hv Hall]]. injection Hv as <-.
@@ -3580,7 +3581,7 @@ Proof. reflexivity. Qed.
    "decision deferred", and can claim [a <: b] for a GENUINE NON-subtype it
    cannot actually decide. Concrete witness: a = {h:Int}, b = {f:Int} ∪ {g:Int}.
    Then [a ∧ ¬b] has the coupled-negated-record conjunct, [clause_wit] returns
-   [None] (deferred), [gsub_empty a b = true] — but [VTable[("h",VInt 0)]]
+   [None] (deferred), [gsub_empty a b = true] — but [VTable[("h",VInt)]]
    inhabits [a ∧ ¬b], so [~ dsub a b]. A confident WRONG answer.
 
    THE FIX — distinguish the two meanings of [None] at the source. The witness
@@ -4158,7 +4159,7 @@ Qed.
    a = {h:Int}, b = {f:Int} ∪ {g:Int}. The bool decider answered "subtype"
    (DSub-equivalent: gsub_empty a b = true) because [a ∧ ¬b] reduces to a clause
    with TWO coupled negated records and [clause_wit] deferred to [None] ⇒ true.
-   But [VTable[("h",VInt 0)]] inhabits [a ∧ ¬b], so [~ dsub a b]. The new
+   But [VTable[("h",VInt)]] inhabits [a ∧ ¬b], so [~ dsub a b]. The new
    three-valued [gdecide] returns DUnknown there (NEVER DSub) — no confident
    wrong answer.
    =========================================================================== *)
@@ -4175,11 +4176,11 @@ Proof. reflexivity. Qed.
 Theorem trap_not_dsub : ~ dsub Ah Bfg.
 Proof.
   unfold dsub. intro H.
-  specialize (H (VTable [("h"%string, VInt 0)])).
-  assert (Hpre : denote Ah (VTable [("h"%string, VInt 0)])).
-  { apply denote_rec_iff. exists [("h"%string, VInt 0)]. split; [reflexivity|].
+  specialize (H (VTable [("h"%string, VInt)])).
+  assert (Hpre : denote Ah (VTable [("h"%string, VInt)])).
+  { apply denote_rec_iff. exists [("h"%string, VInt)]. split; [reflexivity|].
     intros k T Hin. simpl in Hin. destruct Hin as [Heq|[]].
-    injection Heq as <- <-. exists (VInt 0). simpl. split; [reflexivity| exact I]. }
+    injection Heq as <- <-. exists (VInt). simpl. split; [reflexivity| exact I]. }
   specialize (H Hpre). simpl in H. destruct H as [Hf|Hg].
   - destruct Hf as [ents [Hv [[vv [Hlk _]] _]]]. injection Hv as <-.
     simpl in Hlk. discriminate Hlk.
@@ -4312,8 +4313,8 @@ Proof. intro fields. apply arrow_disjoint_rec. Qed.
    arrow type, and a singleton graph respecting the constraint works too. *)
 Theorem arrow_inhabited : exists v, denote (BArrow (BAtom AInt) (BAtom AInt)) v.
 Proof.
-  exists (VFun [(VInt 0, VInt 0)]). apply denote_arrow_iff.
-  exists [(VInt 0, VInt 0)]. split; [reflexivity|].
+  exists (VFun [(VInt, VInt)]). apply denote_arrow_iff.
+  exists [(VInt, VInt)]. split; [reflexivity|].
   intros i o Hin Hi. simpl in Hin. destruct Hin as [Heq|[]].
   injection Heq as <- <-. exact I.
 Qed.
@@ -4324,41 +4325,41 @@ Proof.
   intros A B. apply denote_arrow_iff. exists []. split; [reflexivity| intros i o []].
 Qed.
 
-(* CODOMAIN non-subtype: Int->Int </: Int->Str. Witness [VFun [(VInt 0, VInt 0)]]:
+(* CODOMAIN non-subtype: Int->Int </: Int->Str. Witness [VFun [(VInt, VInt)]]:
    it is in Int->Int (0 maps int 0 to int 0) but NOT in Int->Str (the output 0 is
    an int, not a string, and the input 0 IS an int so the constraint bites). *)
 Theorem not_arrow_int_int_sub_int_str :
   ~ dsub (BArrow (BAtom AInt) (BAtom AInt)) (BArrow (BAtom AInt) (BAtom AStr)).
 Proof.
   unfold dsub. intro H.
-  specialize (H (VFun [(VInt 0, VInt 0)])).
-  assert (Hpre : denote (BArrow (BAtom AInt) (BAtom AInt)) (VFun [(VInt 0, VInt 0)])).
-  { apply denote_arrow_iff. exists [(VInt 0, VInt 0)]. split; [reflexivity|].
+  specialize (H (VFun [(VInt, VInt)])).
+  assert (Hpre : denote (BArrow (BAtom AInt) (BAtom AInt)) (VFun [(VInt, VInt)])).
+  { apply denote_arrow_iff. exists [(VInt, VInt)]. split; [reflexivity|].
     intros i o Hin Hi. simpl in Hin. destruct Hin as [Heq|[]].
     injection Heq as <- <-. exact I. }
   specialize (H Hpre). apply denote_arrow_iff in H.
   destruct H as [g [Hv Hall]]. injection Hv as <-.
-  (* the pair (VInt 0, VInt 0) is in g; input VInt 0 ∈ Int, so output VInt 0 ∈ Str — false *)
-  pose proof (Hall (VInt 0) (VInt 0) (or_introl eq_refl) I) as Ho. simpl in Ho. exact Ho.
+  (* the pair (VInt, VInt) is in g; input VInt ∈ Int, so output VInt ∈ Str — false *)
+  pose proof (Hall (VInt) (VInt) (or_introl eq_refl) I) as Ho. simpl in Ho. exact Ho.
 Qed.
 
 (* DOMAIN contravariance non-subtype: Int->Int </: Num->Int. Witness
-   [VFun [(VFloat 0, VStr)]]: it is VACUOUSLY in Int->Int (VFloat 0 ∉ Int, so the
-   constraint is vacuous), but NOT in Num->Int (VFloat 0 ∈ Num, forcing the output
+   [VFun [(VFloat, VStr)]]: it is VACUOUSLY in Int->Int (VFloat ∉ Int, so the
+   constraint is vacuous), but NOT in Num->Int (VFloat ∈ Num, forcing the output
    VStr ∈ Int — false). This is exactly the contravariance witness. *)
 Theorem not_arrow_int_int_sub_num_int :
   ~ dsub (BArrow (BAtom AInt) (BAtom AInt)) (BArrow (BAtom ANum) (BAtom AInt)).
 Proof.
   unfold dsub. intro H.
-  specialize (H (VFun [(VFloat 0, VStr)])).
-  assert (Hpre : denote (BArrow (BAtom AInt) (BAtom AInt)) (VFun [(VFloat 0, VStr)])).
-  { apply denote_arrow_iff. exists [(VFloat 0, VStr)]. split; [reflexivity|].
+  specialize (H (VFun [(VFloat, VStr)])).
+  assert (Hpre : denote (BArrow (BAtom AInt) (BAtom AInt)) (VFun [(VFloat, VStr)])).
+  { apply denote_arrow_iff. exists [(VFloat, VStr)]. split; [reflexivity|].
     intros i o Hin Hi. simpl in Hin. destruct Hin as [Heq|[]].
-    injection Heq as <- <-. simpl in Hi. contradiction.   (* VFloat 0 ∉ Int *) }
+    injection Heq as <- <-. simpl in Hi. contradiction.   (* VFloat ∉ Int *) }
   specialize (H Hpre). apply denote_arrow_iff in H.
   destruct H as [g [Hv Hall]]. injection Hv as <-.
-  (* input VFloat 0 ∈ Num, so output VStr must be ∈ Int — false *)
-  pose proof (Hall (VFloat 0) (VStr) (or_introl eq_refl) I) as Ho. simpl in Ho. exact Ho.
+  (* input VFloat ∈ Num, so output VStr must be ∈ Int — false *)
+  pose proof (Hall (VFloat) (VStr) (or_introl eq_refl) I) as Ho. simpl in Ho. exact Ho.
 Qed.
 
 (* ---- DECISION PROCEDURE STAYS SOUND WITH ARROWS (sanity) -------------------
@@ -4483,10 +4484,10 @@ Theorem anyref_inhabited : denote BAnyRef (VRef 0).
 Proof. simpl. exact I. Qed.
 
 (* a NON-reference value is in NEITHER [BRef _] NOR [BAnyRef]. *)
-Theorem nonref_not_ref : forall T, ~ denote (BRef T) (VInt 0).
+Theorem nonref_not_ref : forall T, ~ denote (BRef T) (VInt).
 Proof. intros T H. simpl in H. exact H. Qed.
 
-Theorem nonref_not_anyref : ~ denote BAnyRef (VInt 0).
+Theorem nonref_not_anyref : ~ denote BAnyRef (VInt).
 Proof. intro H. simpl in H. exact H. Qed.
 
 (* CONTENT-BLINDNESS, made precise: [BAnyRef] and [BRef T] denote the SAME set
@@ -4685,10 +4686,10 @@ Qed.
 
 (* NON-VACUITY: a concrete two-element sequence inhabits its tuple type. *)
 Theorem tuple_inhabited :
-  denote (BTuple [BAtom AInt; BAtom AStr]) (VTup [VInt 0; VStr]).
-Proof. apply denote_tuple_iff. exists [VInt 0; VStr]. split; [reflexivity|].
+  denote (BTuple [BAtom AInt; BAtom AStr]) (VTup [VInt; VStr]).
+Proof. apply denote_tuple_iff. exists [VInt; VStr]. split; [reflexivity|].
   split; [reflexivity|]. intros [|[|[|i]]] T Hnth; simpl in Hnth; try discriminate Hnth.
-  - injection Hnth as <-. exists (VInt 0); split; [reflexivity| exact I].
+  - injection Hnth as <-. exists (VInt); split; [reflexivity| exact I].
   - injection Hnth as <-. exists (VStr); split; [reflexivity| exact I].
 Qed.
 
@@ -4699,10 +4700,10 @@ Theorem tuple_length_matters :
   ~ dsub (BTuple [BAtom AInt]) (BTuple [BAtom AInt; BAtom AInt]).
 Proof.
   unfold dsub. intro H.
-  specialize (H (VTup [VInt 0])).
-  assert (Hpre : denote (BTuple [BAtom AInt]) (VTup [VInt 0])).
-  { apply denote_tuple_iff. exists [VInt 0]. split; [reflexivity|]. split; [reflexivity|].
-    intros [|i] T Hnth; simpl in Hnth; [injection Hnth as <-; exists (VInt 0); split; [reflexivity|exact I] | destruct i; discriminate Hnth]. }
+  specialize (H (VTup [VInt])).
+  assert (Hpre : denote (BTuple [BAtom AInt]) (VTup [VInt])).
+  { apply denote_tuple_iff. exists [VInt]. split; [reflexivity|]. split; [reflexivity|].
+    intros [|i] T Hnth; simpl in Hnth; [injection Hnth as <-; exists (VInt); split; [reflexivity|exact I] | destruct i; discriminate Hnth]. }
   specialize (H Hpre). apply denote_tuple_iff in H. destruct H as [vs [Hv [Hlen _]]].
   injection Hv as <-. simpl in Hlen. discriminate Hlen.
 Qed.

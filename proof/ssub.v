@@ -1197,8 +1197,8 @@ Proof.
         first
           [ exact (H VNil I)
           | exact (H (VBool true) I)
-          | exact (H (VInt 0) I)
-          | exact (H (VNum (NRfrac 0)) I)
+          | exact (H (VInt) I)
+          | exact (H (VFloat) I)
           | exact (H (VStr) I) ] ].
 Qed.
 

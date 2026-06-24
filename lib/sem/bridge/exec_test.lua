@@ -164,73 +164,73 @@ local function battery()
 	return {
 		-- arithmetic 3 + 4 : ANum
 		{ desc = "3 + 4 : ANum",
-			term = L.prim("PAdd", L.lit_int(3), L.lit_int(4)), infer = An },
+			term = L.prim("PAdd", L.lit_int(), L.lit_int()), infer = An },
 		-- subtraction 10 - 4 : ANum
 		{ desc = "10 - 4 : ANum",
-			term = L.prim("PSub", L.lit_int(10), L.lit_int(4)), infer = An },
+			term = L.prim("PSub", L.lit_int(), L.lit_int()), infer = An },
 		-- multiplication 6 * 7 : ANum
 		{ desc = "6 * 7 : ANum",
-			term = L.prim("PMul", L.lit_int(6), L.lit_int(7)), infer = An },
+			term = L.prim("PMul", L.lit_int(), L.lit_int()), infer = An },
 		-- comparison 3 < 4 : Bool
 		{ desc = "3 < 4 : Bool",
-			term = L.prim("PLt", L.lit_int(3), L.lit_int(4)), infer = Ab },
+			term = L.prim("PLt", L.lit_int(), L.lit_int()), infer = Ab },
 		-- comparison 5 <= 5 : Bool
 		{ desc = "5 <= 5 : Bool",
-			term = L.prim("PLe", L.lit_int(5), L.lit_int(5)), infer = Ab },
+			term = L.prim("PLe", L.lit_int(), L.lit_int()), infer = Ab },
 		-- equality 4 == 4 : Bool
 		{ desc = "4 == 4 : Bool",
-			term = L.prim("PEq", L.lit_int(4), L.lit_int(4)), infer = Ab },
+			term = L.prim("PEq", L.lit_int(), L.lit_int()), infer = Ab },
 		-- conditional if (3<4) then 1 else 0 : ANum ∪ ANum (synth: AInt∪AInt)
 		{ desc = "if 3<4 then 1 else 0 : AInt ∪ AInt",
-			term = L.if_(L.prim("PLt", L.lit_int(3), L.lit_int(4)),
-				L.lit_int(1), L.lit_int(0)),
+			term = L.if_(L.prim("PLt", L.lit_int(), L.lit_int()),
+				L.lit_int(), L.lit_int()),
 			infer = IT.union(Ai, Ai) },
 		-- let x = 6+1 in x*2 : ANum
 		{ desc = "let x = 6+1 in x*2 : ANum",
-			term = L.let_(L.prim("PAdd", L.lit_int(6), L.lit_int(1)),
-				L.prim("PMul", L.var(0), L.lit_int(2))),
+			term = L.let_(L.prim("PAdd", L.lit_int(), L.lit_int()),
+				L.prim("PMul", L.var(0), L.lit_int())),
 			infer = An },
 		-- record { x = 3+4, y = 5 } : BRec [(x,ANum),(y,AInt)]
 		{ desc = "{ x = 3+4, y = 5 } : { x: ANum, y: AInt }",
 			term = L.rec({
-				{ k = "x", e = L.prim("PAdd", L.lit_int(3), L.lit_int(4)) },
-				{ k = "y", e = L.lit_int(5) },
+				{ k = "x", e = L.prim("PAdd", L.lit_int(), L.lit_int()) },
+				{ k = "y", e = L.lit_int() },
 			}),
 			infer = IT.rec({ { k = "x", T = An }, { k = "y", T = Ai } }) },
 		-- projection { x = 3+4, y = 5 }.x : ANum
 		{ desc = "{ x = 3+4, y = 5 }.x : ANum",
 			term = L.proj(L.rec({
-				{ k = "x", e = L.prim("PAdd", L.lit_int(3), L.lit_int(4)) },
-				{ k = "y", e = L.lit_int(5) },
+				{ k = "x", e = L.prim("PAdd", L.lit_int(), L.lit_int()) },
+				{ k = "y", e = L.lit_int() },
 			}), "x"),
 			infer = An },
 		-- ref alloc + deref  !(ref (2+3)) : ANum
 		{ desc = "!(ref (2+3)) : ANum",
-			term = L.deref(L.alloc(L.prim("PAdd", L.lit_int(2), L.lit_int(3)))),
+			term = L.deref(L.alloc(L.prim("PAdd", L.lit_int(), L.lit_int()))),
 			infer = An },
 		-- ref alloc  ref (2+3) : BRef ANum  (the cell itself)
 		{ desc = "ref (2+3) : BRef ANum",
-			term = L.alloc(L.prim("PAdd", L.lit_int(2), L.lit_int(3))),
+			term = L.alloc(L.prim("PAdd", L.lit_int(), L.lit_int())),
 			infer = IT.ref(An) },
 		-- ref mutation reading the new value
 		--   let r = ref 0 in (r := 9 ; !r) : AInt
 		{ desc = "let r = ref 0 in (r := 9 ; !r) : AInt",
-			term = L.let_(L.alloc(L.lit_int(0)),
-				L.seq(L.assign(L.var(0), L.lit_int(9)), L.deref(L.var(0)))),
+			term = L.let_(L.alloc(L.lit_int()),
+				L.seq(L.assign(L.var(0), L.lit_int()), L.deref(L.var(0)))),
 			infer = Ai },
 		-- function application  (\x:ANum. x+1) 5 : ANum
 		{ desc = "(\\x. x+1) 5 : ANum",
-			term = L.app(L.lam(L.prim("PAdd", L.var(0), L.lit_int(1))),
-				L.lit_int(5)),
+			term = L.app(L.lam(L.prim("PAdd", L.var(0), L.lit_int())),
+				L.lit_int()),
 			infer = An },
 		-- counting while-loop: local i = ref(0+0); while !i<3 do i:=!i+1 end; !i
 		--   : ANum  (synth-acceptable form, see bridge_exec_oracle.v b_while)
 		{ desc = "let i=ref(0+0) in (while !i<3 do i:=!i+1 end ; !i) : ANum",
-			term = L.let_(L.alloc(L.prim("PAdd", L.lit_int(0), L.lit_int(0))),
+			term = L.let_(L.alloc(L.prim("PAdd", L.lit_int(), L.lit_int())),
 				L.seq(
-					L.while_(L.prim("PLt", L.deref(L.var(0)), L.lit_int(3)),
+					L.while_(L.prim("PLt", L.deref(L.var(0)), L.lit_int()),
 						L.assign(L.var(0),
-							L.prim("PAdd", L.deref(L.var(0)), L.lit_int(1)))),
+							L.prim("PAdd", L.deref(L.var(0)), L.lit_int()))),
 					L.deref(L.var(0)))),
 			infer = An },
 		-- nil literal : ANil
@@ -288,41 +288,9 @@ T.describe("sem reality-bridge: well-typed term executes to a value inhabiting i
 			"every well-typed program's real result inhabits its inferred type (checker soundness vs reality)")
 	end)
 
-	-- ── leg (2): the PDiv FAITHFULNESS GAP (surfaced, not hidden) ─────────────
-	-- The proof's PDiv is Nat.div (INTEGER division: 7/2 = 3); real Lua `/` is
-	-- FLOAT division (7/2 = 3.5). Both 3 and 3.5 inhabit the inferred type ANum,
-	-- so the RESULT-INHABITS-TYPE assertion HOLDS for a division term — but the
-	-- VALUES disagree. This is a sound-but-UNFAITHFUL model choice; the bridge
-	-- exists to surface it. We assert BOTH facts: (a) the real result still
-	-- inhabits ANum (soundness preserved), and (b) the real value (3.5) differs
-	-- from the proof's nat-div value (3) — the faithfulness gap, with a witness.
-	T.it("PDiv faithfulness gap: real float `/` (7/2=3.5) vs proof Nat.div (7/2=3)", function()
-		if not probe(caps, LUAJIT) then
-			T.skip("vendored LuaJIT not probeable; PDiv gap leg skipped (bare-clone safe)")
-			return
-		end
-		-- 7 / 2 : ANum (inferred). Run it and read both inhabitance and the value.
-		local div = ex.prim("PDiv", ex.lit_int(7), ex.lit_int(2))
-		local rr = run_and_check(caps, LUAJIT, div, IT.atom("ANum"))
-		T.neq(rr, nil, "real interpreter produced a result for 7/2")
-		if rr ~= nil then
-			-- (a) soundness preserved: 3.5 inhabits ANum (type(x)=="number").
-			T.ok(rr.inhabits,
-				"7/2 = 3.5 STILL inhabits the inferred type ANum (soundness preserved)")
-			-- (b) the faithfulness gap: real value is 3.5, proof Nat.div value is 3.
-			local real_val = rr.shape:match("^number|(.*)$")
-			T.neq(real_val, nil, "7/2 produced a number result")
-			local proof_natdiv = 3 -- Compute (prim_arith PDiv 7 2) = 3 (Nat.div)
-			print("  [bridge] PDiv FAITHFULNESS GAP: proof Nat.div 7/2 = "
-				.. proof_natdiv .. "  vs  real Lua 7/2 = " .. tostring(real_val)
-				.. "  (both inhabit ANum; the VALUE disagrees — proof's PDiv is"
-				.. " sound-but-unfaithful: integer division, not Lua float division)")
-			-- assert the disagreement is REAL (3.5 ~= 3) — the witness.
-			T.neq(tonumber(real_val), proof_natdiv,
-				"the real float-div value differs from the proof's nat-div value (the gap)")
-			-- and pin the concrete witness value.
-			T.eq(tonumber(real_val), 3.5,
-				"real Lua 7/2 = 3.5 (float division) — the concrete witness")
-		end
-	end)
+	-- (The former leg (2) "PDiv faithfulness gap" — proof Nat.div 7/2=3 vs real
+	-- float 7/2=3.5 — was DELETED in the "types, not magnitudes" refactor: the
+	-- model no longer computes a number magnitude, so there is no model value to
+	-- disagree with reality. The bridge's claim is now purely the TYPE claim,
+	-- validated by leg (1) above.)
 end)

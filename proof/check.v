@@ -388,7 +388,7 @@ Fixpoint synth (Sig : list BTy) (G : list BTy) (e : tm) {struct e} : option BTy 
      ANNOTATION [T] (not [e]'s synthesized type). This is HOW an annotation guides
      inference — downstream consumers see [T], the type the programmer demanded, so
      a value whose synthesized type is too specific (e.g. [BRef AInt] for an
-     [LInt 0] cell that must hold arithmetic results) can be ascended to the wider
+     [LInt] cell that must hold arithmetic results) can be ascended to the wider
      [T] the later use requires. *)
   | tannot T e0 =>
       match synth Sig G e0 with
@@ -1411,20 +1411,20 @@ Fixpoint proj_free (e : tm) : Prop :=
 
 (* (λx:Int. x) 3  ⇒  Int *)
 Example compute_app_id :
-  synth [] [] (tapp (tlam (BAtom AInt) (tvar 0)) (tlit (LInt 3))) = Some (BAtom AInt).
+  synth [] [] (tapp (tlam (BAtom AInt) (tvar 0)) (tlit (LInt))) = Some (BAtom AInt).
 Proof. reflexivity. Qed.
 
 (* {a = 7, b = true}.a  ⇒  Int *)
 Example compute_proj :
   synth [] []
-    (tproj (trec [("a"%string, tlit (LInt 7)); ("b"%string, tlit (LBool true))]) "a"%string)
+    (tproj (trec [("a"%string, tlit (LInt)); ("b"%string, tlit (LBool true))]) "a"%string)
   = Some (BAtom AInt).
 Proof. reflexivity. Qed.
 
 (* {a = 7, b = true}.b  ⇒  Bool *)
 Example compute_proj_b :
   synth [] []
-    (tproj (trec [("a"%string, tlit (LInt 7)); ("b"%string, tlit (LBool true))]) "b"%string)
+    (tproj (trec [("a"%string, tlit (LInt)); ("b"%string, tlit (LBool true))]) "b"%string)
   = Some (BAtom ABool).
 Proof. reflexivity. Qed.
 
@@ -1436,24 +1436,24 @@ Proof. reflexivity. Qed.
 (* INCREMENT 11 — CONDITIONAL synthesis. [if true then 3 else "s"] synthesizes the
    UNION of the branch types [Int ∪ Str] — a genuinely union-typed term. *)
 Example compute_if_union :
-  synth [] [] (tif (tlit (LBool true)) (tlit (LInt 3)) (tlit (LStr 0)))
+  synth [] [] (tif (tlit (LBool true)) (tlit (LInt)) (tlit (LStr 0)))
   = Some (BUnion (BAtom AInt) (BAtom AStr)).
 Proof. reflexivity. Qed.
 
 (* it is well typed at the union, and CHECKS against any supertype (e.g. Top). *)
 Example compute_if_checks_top :
-  check [] [] (tif (tlit (LBool true)) (tlit (LInt 3)) (tlit (LStr 0))) BTop = true.
+  check [] [] (tif (tlit (LBool true)) (tlit (LInt)) (tlit (LStr 0))) BTop = true.
 Proof. reflexivity. Qed.
 
 (* and it is sound: has_type at the union (via check_sound). *)
 Example compute_if_sound :
-  has_type [] [] (tif (tlit (LBool true)) (tlit (LInt 3)) (tlit (LStr 0)))
+  has_type [] [] (tif (tlit (LBool true)) (tlit (LInt)) (tlit (LStr 0)))
               (BUnion (BAtom AInt) (BAtom AStr)).
 Proof. apply check_sound. reflexivity. Qed.
 
 (* ILL-TYPED: a non-Bool condition ⇒ None (3 is not a boolean). *)
 Example compute_if_badcond_None :
-  synth [] [] (tif (tlit (LInt 0)) (tlit (LInt 3)) (tlit (LStr 0))) = None.
+  synth [] [] (tif (tlit (LInt)) (tlit (LInt)) (tlit (LStr 0))) = None.
 Proof. reflexivity. Qed.
 
 (* INCREMENT 13 — NARROWING checker. The scrutinee may be ANY type (Lua truthiness,
@@ -1462,7 +1462,7 @@ Proof. reflexivity. Qed.
    then-branch reads the narrowed var (var0 : truthy_type) and the else-branch reads
    the falsy-narrowed var (var0 : falsy_type). *)
 Example compute_ifn_narrows :
-  synth [] [] (tifn (tlit (LInt 3)) (tvar 0) (tvar 0))
+  synth [] [] (tifn (tlit (LInt)) (tvar 0) (tvar 0))
   = Some (BUnion truthy_type falsy_type).
 Proof. reflexivity. Qed.
 
@@ -1473,14 +1473,14 @@ Example compute_ifn_payoff_synth :
   synth [] [ BArrow truthy_type (BAtom AInt) ]   (* index 0 : the consumer g *)
     (tifn (tvar 0)                            (* scrutinee = g itself (truthy: a function) *)
        (tapp (tvar 1) (tvar 0))               (* then: g (index 1) applied to narrowed var0 *)
-       (tlit (LInt 0)))
+       (tlit (LInt)))
   = Some (BUnion (BAtom AInt) (BAtom AInt)).
 Proof. reflexivity. Qed.
 
 (* and it is SOUND (declaratively well typed via check_sound). *)
 Example compute_ifn_payoff_sound :
   has_type [] [ BArrow truthy_type (BAtom AInt) ]
-    (tifn (tvar 0) (tapp (tvar 1) (tvar 0)) (tlit (LInt 0)))
+    (tifn (tvar 0) (tapp (tvar 1) (tvar 0)) (tlit (LInt)))
     (BUnion (BAtom AInt) (BAtom AInt)).
 Proof. apply check_sound. reflexivity. Qed.
 
@@ -1508,14 +1508,14 @@ Example compute_typetest_payoff_synth :
   synth [] [ BUnion (BAtom AStr) (BAtom ANum) ; BArrow (BAtom ANum) (BAtom AInt) ]
     (ttypetest TgNum (tvar 0)                  (* scrutinee = the maybe-number (index 0) *)
        (tapp (tvar 2) (tvar 0))                (* then: h (index 2) applied to NARROWED var0 : ANum *)
-       (tlit (LInt 0)))
+       (tlit (LInt)))
   = Some (BUnion (BAtom AInt) (BAtom AInt)).
 Proof. reflexivity. Qed.
 
 (* and it is SOUND (declaratively well typed via check_sound). *)
 Example compute_typetest_payoff_sound :
   has_type [] [ BUnion (BAtom AStr) (BAtom ANum) ; BArrow (BAtom ANum) (BAtom AInt) ]
-    (ttypetest TgNum (tvar 0) (tapp (tvar 2) (tvar 0)) (tlit (LInt 0)))
+    (ttypetest TgNum (tvar 0) (tapp (tvar 2) (tvar 0)) (tlit (LInt)))
     (BUnion (BAtom AInt) (BAtom AInt)).
 Proof. apply check_sound. reflexivity. Qed.
 
@@ -1529,12 +1529,12 @@ Proof. reflexivity. Qed.
 
 (* ILL-TYPED: projecting a field off a literal ⇒ None (not a record) *)
 Example compute_proj_of_lit_None :
-  synth [] [] (tproj (tlit (LInt 3)) "f"%string) = None.
+  synth [] [] (tproj (tlit (LInt)) "f"%string) = None.
 Proof. reflexivity. Qed.
 
 (* ILL-TYPED: applying a non-function ⇒ None *)
 Example compute_app_nonfun_None :
-  synth [] [] (tapp (tlit (LInt 3)) (tlit (LInt 1))) = None.
+  synth [] [] (tapp (tlit (LInt)) (tlit (LInt))) = None.
 Proof. reflexivity. Qed.
 
 (* ILL-TYPED: argument fails the domain check (Str vs Int) ⇒ None *)
@@ -1544,17 +1544,17 @@ Proof. reflexivity. Qed.
 
 (* ILL-TYPED: duplicate record keys rejected ⇒ None *)
 Example compute_dup_keys_None :
-  synth [] [] (trec [("a"%string, tlit (LInt 1)); ("a"%string, tlit (LInt 2))]) = None.
+  synth [] [] (trec [("a"%string, tlit (LInt)); ("a"%string, tlit (LInt))]) = None.
 Proof. reflexivity. Qed.
 
 (* projecting an ABSENT key ⇒ None *)
 Example compute_proj_absent_None :
-  synth [] [] (tproj (trec [("a"%string, tlit (LInt 7))]) "z"%string) = None.
+  synth [] [] (tproj (trec [("a"%string, tlit (LInt))]) "z"%string) = None.
 Proof. reflexivity. Qed.
 
 (* [check] decides correctly: Int checks against Num (Int <: Num) but not vice versa *)
 Example compute_check_subsume_true :
-  check [] [] (tlit (LInt 3)) (BAtom ANum) = true.
+  check [] [] (tlit (LInt)) (BAtom ANum) = true.
 Proof. reflexivity. Qed.
 
 Example compute_check_subsume_false :
@@ -1562,7 +1562,7 @@ Example compute_check_subsume_false :
 Proof. reflexivity. Qed.
 
 (* and [check] is SOUND on a real subsumption: 3 : Num via Int <: Num *)
-Example compute_check_sound_demo : has_type [] [] (tlit (LInt 3)) (BAtom ANum).
+Example compute_check_sound_demo : has_type [] [] (tlit (LInt)) (BAtom ANum).
 Proof. apply check_sound. reflexivity. Qed.
 
 (* INCREMENT 14 — GENERAL RECURSION checker. A recursive FUNCTION term synthesizes
@@ -1602,40 +1602,40 @@ Proof. reflexivity. Qed.
    [3 < 4] synthesizes the boolean type; both check + are sound. [ "s" + 1 ] is
    REJECTED ([synth = None]). An [AInt] operand works (subsumes to [ANum]). *)
 Example compute_add_synth :
-  synth [] [] (tprim PAdd (tlit (LInt 3)) (tlit (LInt 4))) = Some (BAtom ANum).
+  synth [] [] (tprim PAdd (tlit (LInt)) (tlit (LInt))) = Some (BAtom ANum).
 Proof. reflexivity. Qed.
 
 Example compute_lt_synth :
-  synth [] [] (tprim PLt (tlit (LInt 3)) (tlit (LInt 4))) = Some (BAtom ABool).
+  synth [] [] (tprim PLt (tlit (LInt)) (tlit (LInt))) = Some (BAtom ABool).
 Proof. reflexivity. Qed.
 
 Example compute_add_checks :
-  check [] [] (tprim PAdd (tlit (LInt 3)) (tlit (LInt 4))) (BAtom ANum) = true.
+  check [] [] (tprim PAdd (tlit (LInt)) (tlit (LInt))) (BAtom ANum) = true.
 Proof. reflexivity. Qed.
 
 Example compute_add_sound :
-  has_type [] [] (tprim PAdd (tlit (LInt 3)) (tlit (LInt 4))) (BAtom ANum).
+  has_type [] [] (tprim PAdd (tlit (LInt)) (tlit (LInt))) (BAtom ANum).
 Proof. apply check_sound. reflexivity. Qed.
 
 Example compute_lt_sound :
-  has_type [] [] (tprim PLt (tlit (LInt 3)) (tlit (LInt 4))) (BAtom ABool).
+  has_type [] [] (tprim PLt (tlit (LInt)) (tlit (LInt))) (BAtom ABool).
 Proof. apply check_sound. reflexivity. Qed.
 
 (* a nested arithmetic chain [(3 + 4) * 2] synthesizes [ANum]. *)
 Example compute_chain_synth :
   synth [] []
-    (tprim PMul (tprim PAdd (tlit (LInt 3)) (tlit (LInt 4))) (tlit (LInt 2)))
+    (tprim PMul (tprim PAdd (tlit (LInt)) (tlit (LInt))) (tlit (LInt)))
   = Some (BAtom ANum).
 Proof. reflexivity. Qed.
 
 (* ILL-TYPED: [ "s" + 1 ] ⇒ None (the string operand fails the [ANum] domain check). *)
 Example compute_bad_add_None :
-  synth [] [] (tprim PAdd (tlit (LStr 0)) (tlit (LInt 1))) = None.
+  synth [] [] (tprim PAdd (tlit (LStr 0)) (tlit (LInt))) = None.
 Proof. reflexivity. Qed.
 
 (* and [check] rejects it against every type — here against [ANum]. *)
 Example compute_bad_add_check_false :
-  check [] [] (tprim PAdd (tlit (LStr 0)) (tlit (LInt 1))) (BAtom ANum) = false.
+  check [] [] (tprim PAdd (tlit (LStr 0)) (tlit (LInt))) (BAtom ANum) = false.
 Proof. reflexivity. Qed.
 
 (* ===========================================================================
@@ -1645,33 +1645,33 @@ Proof. reflexivity. Qed.
 (* SANITY (ascription works). [(3 : Num)] synthesizes [Num] — the up-ascription
    [AInt <: ANum] is accepted in CHECK mode (decide_rsub). *)
 Example compute_annot_num :
-  synth [] [] (tannot (BAtom ANum) (tlit (LInt 3))) = Some (BAtom ANum).
+  synth [] [] (tannot (BAtom ANum) (tlit (LInt))) = Some (BAtom ANum).
 Proof. reflexivity. Qed.
 
 (* the ascription is SOUND: [(3 : Num) : Num] declaratively (via check_sound). *)
 Example compute_annot_sound :
-  has_type [] [] (tannot (BAtom ANum) (tlit (LInt 3))) (BAtom ANum).
+  has_type [] [] (tannot (BAtom ANum) (tlit (LInt))) (BAtom ANum).
 Proof. apply check_sound. reflexivity. Qed.
 
 (* it STEPS, runtime-erased: [(3 : Num)] strips to [3] on a value. *)
 Example compute_annot_steps : forall st,
-  step (tannot (BAtom ANum) (tlit (LInt 3)), st) (tlit (LInt 3), st).
+  step (tannot (BAtom ANum) (tlit (LInt)), st) (tlit (LInt), st).
 Proof. intro st. apply SAnnotV. apply VLit. Qed.
 
 (* SANITY (mis-ascription REJECTED). [(3 : Str)] is rejected by synth (None) — [3]
    synthesizes [AInt], and [AInt] is NOT [rsub]-below [AStr], so the CHECK fails. *)
 Example compute_annot_mismatch_None :
-  synth [] [] (tannot (BAtom AStr) (tlit (LInt 3))) = None.
+  synth [] [] (tannot (BAtom AStr) (tlit (LInt))) = None.
 Proof. reflexivity. Qed.
 
 (* and the mis-ascription is genuinely ILL-TYPED: [tannot AStr 3] has no type,
    because [TAnnot] would need [3 : AStr] which is false ([AInt ⊄ AStr]). *)
 Example compute_annot_mismatch_untyped :
-  forall S T, ~ has_type S [] (tannot (BAtom AStr) (tlit (LInt 3))) T.
+  forall S T, ~ has_type S [] (tannot (BAtom AStr) (tlit (LInt))) T.
 Proof.
   intros S T H. apply inv_annot in H. destruct H as [He _].
   apply inv_lit in He. simpl in He.   (* He : rsub AInt AStr *)
-  apply rsub_sound in He. pose proof (He (VInt 0) I) as Hbad. exact Hbad.
+  apply rsub_sound in He. pose proof (He (VInt) I) as Hbad. exact Hbad.
 Qed.
 
 (* ---- THE FIX: the OP-SEM-BRIDGE-SURFACED SYNTH GAP on a real imperative loop.
@@ -1684,18 +1684,18 @@ Qed.
    sound program the synthesizer cannot infer, because [talloc] commits the cell to
    the too-specific initialiser type.)
 
-   WITH the cells ANNOTATED — [talloc (tannot (BAtom ANum) (tlit (LInt 0)))] — the
-   cell synthesizes [BRef ANum] (the annotation ascends the [LInt 0 : AInt] to
+   WITH the cells ANNOTATED — [talloc (tannot (BAtom ANum) (tlit (LInt)))] — the
+   cell synthesizes [BRef ANum] (the annotation ascends the [LInt : AInt] to
    [ANum] before [talloc] reads its type), able to hold the arithmetic result. The
    whole loop then SYNTHESIZES [Some ANum]. The annotation GUIDED the inference. *)
 
 (* the ANNOTATED sum-loop counter/accumulator initialiser. *)
-Definition ann_zero : tm := tannot (BAtom ANum) (tlit (LInt 0)).
+Definition ann_zero : tm := tannot (BAtom ANum) (tlit (LInt)).
 
 (* the un-annotated whole program (alloc Int cells; arith result can't store back). *)
 Definition sumloop_unann (n : nat) : tm :=
-  tlet (talloc (tlit (LInt 0)))
-    (tlet (talloc (tlit (LInt 0)))
+  tlet (talloc (tlit (LInt)))
+    (tlet (talloc (tlit (LInt)))
       (tseq (twhile (sumloop_cond n) sumloop_body) (tderef (tvar 0)))).
 
 (* the ANNOTATED whole program (alloc Num cells via ascription). *)
@@ -1729,8 +1729,8 @@ Proof. intro n. apply check_sound. reflexivity. Qed.
 Definition mr_f : tm :=
   tlam (BAtom AInt) (tret [ tvar 0 ; tlit (LBool true) ]).
 Definition mr_tup : BTy := BTuple [ BAtom AInt ; BAtom ABool ].
-Definition mr_call : tm := tapp mr_f (tlit (LInt 3)).
-Definition mr_g : tm := tlam mr_tup (tlit (LInt 0)).
+Definition mr_call : tm := tapp mr_f (tlit (LInt)).
+Definition mr_g : tm := tlam mr_tup (tlit (LInt)).
 
 (* the call synthesizes the 2-tuple [(Int, Bool)] — a multivalue type. *)
 Example mr_call_synths_tuple : synth [] [] mr_call = Some mr_tup.
@@ -1781,7 +1781,7 @@ Proof. reflexivity. Qed.
    passing only ONE trailing arg where the rest is [(Int,Bool)] synths to None
    (the [decide_ssub (BTuple [Int]) (BTuple [Int;Bool])] gate fails). *)
 Example va_arity_mismatch_None :
-  synth [] [] (tvapp va_first (tlit (LInt 7)) [ tlit (LInt 3) ]) = None.
+  synth [] [] (tvapp va_first (tlit (LInt)) [ tlit (LInt) ]) = None.
 Proof. reflexivity. Qed.
 
 (* and both adjustments route to REAL declarative typings via [synth_sound]. *)
@@ -1807,7 +1807,7 @@ Definition ma_ctx : list BTy := [ BRef (BAtom AInt) ; BRef (BAtom ABool) ].
 (* (1) EXACT arity [a, b = e1, e2] : synthesizes [nil] (2 = 2, no adjustment). *)
 Example ma_exact_synths :
   synth [] ma_ctx
-    (tmassign [ tvar 0 ; tvar 1 ] (tret [ tlit (LInt 5) ; tlit (LBool false) ]))
+    (tmassign [ tvar 0 ; tvar 1 ] (tret [ tlit (LInt) ; tlit (LBool false) ]))
   = Some (BAtom ANil).
 Proof. reflexivity. Qed.
 
@@ -1815,7 +1815,7 @@ Proof. reflexivity. Qed.
    the pad), TWO RHS values ⇒ [pad_ty [Int;Bool] 3 = [Int;Bool;Nil]] gates true. *)
 Example ma_pad_synths :
   synth [] [ BRef (BAtom AInt) ; BRef (BAtom ABool) ; BRef (BAtom ANil) ]
-    (tmassign [ tvar 0 ; tvar 1 ; tvar 2 ] (tret [ tlit (LInt 5) ; tlit (LBool false) ]))
+    (tmassign [ tvar 0 ; tvar 1 ; tvar 2 ] (tret [ tlit (LInt) ; tlit (LBool false) ]))
   = Some (BAtom ANil).
 Proof. reflexivity. Qed.
 
@@ -1824,7 +1824,7 @@ Proof. reflexivity. Qed.
 Example ma_drop_synths :
   synth [] ma_ctx
     (tmassign [ tvar 0 ; tvar 1 ]
-       (tret [ tlit (LInt 5) ; tlit (LBool false) ; tlit (LInt 9) ]))
+       (tret [ tlit (LInt) ; tlit (LBool false) ; tlit (LInt) ]))
   = Some (BAtom ANil).
 Proof. reflexivity. Qed.
 
@@ -1839,13 +1839,13 @@ Proof. reflexivity. Qed.
 (* all three adjustment regimes route to REAL declarative typings via [synth_sound]. *)
 Example ma_exact_check_sound :
   has_type [] ma_ctx
-    (tmassign [ tvar 0 ; tvar 1 ] (tret [ tlit (LInt 5) ; tlit (LBool false) ]))
+    (tmassign [ tvar 0 ; tvar 1 ] (tret [ tlit (LInt) ; tlit (LBool false) ]))
     (BAtom ANil).
 Proof. apply synth_sound. reflexivity. Qed.
 Example ma_drop_check_sound :
   has_type [] ma_ctx
     (tmassign [ tvar 0 ; tvar 1 ]
-       (tret [ tlit (LInt 5) ; tlit (LBool false) ; tlit (LInt 9) ]))
+       (tret [ tlit (LInt) ; tlit (LBool false) ; tlit (LInt) ]))
     (BAtom ANil).
 Proof. apply synth_sound. reflexivity. Qed.
 
@@ -1882,9 +1882,9 @@ Proof. reflexivity. Qed.
    =========================================================================== *)
 
 (* __call: the checker computes the callable table's application type [Int]. *)
-Example call_synths : synth [] [] (tapp cobj (tlit (LInt 3))) = Some (BAtom AInt).
+Example call_synths : synth [] [] (tapp cobj (tlit (LInt))) = Some (BAtom AInt).
 Proof. reflexivity. Qed.
-Example call_check_sound : has_type [] [] (tapp cobj (tlit (LInt 3))) (BAtom AInt).
+Example call_check_sound : has_type [] [] (tapp cobj (tlit (LInt))) (BAtom AInt).
 Proof. apply synth_sound. reflexivity. Qed.
 
 (* __add: the checker dispatches operator overloading, result [Int]. *)
@@ -1900,7 +1900,7 @@ Proof. reflexivity. Qed.
 (* __newindex (synthesizable form): the [__newindex] target is a context variable
    of record-of-refs type [{k : ref Int}] (a [tloc] is runtime-only and not
    source-synthesizable). The checker accepts the write-fallback, result [nil]. *)
-Definition niwrite_syn : tm := tnewidx [] (tvar 0) "k" (tlit (LInt 5)).
+Definition niwrite_syn : tm := tnewidx [] (tvar 0) "k" (tlit (LInt)).
 Definition ni_ctx : list BTy := [BRec [("k"%string, BRef (BAtom AInt))]].
 Example newindex_synths :
   synth [] ni_ctx niwrite_syn = Some (BAtom ANil).
@@ -1911,7 +1911,7 @@ Proof. apply synth_sound. reflexivity. Qed.
 
 (* a write to a key NOT in the [__newindex] target's cells is REJECTED. *)
 Example newindex_absent_synth_None :
-  synth [] ni_ctx (tnewidx [] (tvar 0) "nope" (tlit (LInt 5))) = None.
+  synth [] ni_ctx (tnewidx [] (tvar 0) "nope" (tlit (LInt))) = None.
 Proof. reflexivity. Qed.
 
 (* METATABLE METAMETHOD FAMILY — __concat / __unm / __len algorithmic payoffs.
@@ -1969,7 +1969,7 @@ Proof. reflexivity. Qed.
 (* RAW WRITE to the OWN cell "k" (a context variable of record-of-refs type, since
    a [tloc] is runtime-only) synthesizes [nil] — the write targets OWN, not the
    prototype. *)
-Definition rawset_syn : tm := trawset [("k"%string, tvar 0)] (trec []) "k" (tlit (LInt 5)).
+Definition rawset_syn : tm := trawset [("k"%string, tvar 0)] (trec []) "k" (tlit (LInt)).
 Definition rawset_ctx : list BTy := [BRef (BAtom AInt)].
 Example rawset_synths :
   synth [] rawset_ctx rawset_syn = Some (BAtom ANil).
@@ -1981,7 +1981,7 @@ Proof. apply synth_sound. reflexivity. Qed.
 (* a raw write to a key NOT in OWN is REJECTED (no own cell; never dispatches to
    the prototype's [__newindex]). *)
 Example rawset_absent_own_synth_None :
-  synth [] rawset_ctx (trawset [("k"%string, tvar 0)] (trec []) "nope" (tlit (LInt 5))) = None.
+  synth [] rawset_ctx (trawset [("k"%string, tvar 0)] (trec []) "nope" (tlit (LInt))) = None.
 Proof. reflexivity. Qed.
 
 (* ===========================================================================

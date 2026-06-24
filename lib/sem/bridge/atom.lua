@@ -52,26 +52,28 @@ M.unobservable_atoms = {} --[[: { [string]: string } ]]
 --:: MVStr   = { head: "VStr" }
 --:: MVBool  = { head: "VBool", b: boolean }
 --:: MVNil   = { head: "VNil" }
---:: MVInt   = { head: "VInt", n: integer }
---:: MVFloat = { head: "VFloat", n: number }
+--:: MVInt   = { head: "VInt" }
+--:: MVFloat = { head: "VFloat" }
 --:: MVTable = { head: "VTable" }
 --:: MVFun   = { head: "VFun" }
 --:: ModelValue = MVStr | MVBool | MVNil | MVInt | MVFloat | MVTable | MVFun
 
--- The model's VStr is NULLARY (stage 1 of the inert-value-payload removal — the
--- string value is HEAD-ONLY; AStr membership reads only the head, never a
--- payload). There is exactly one model string value; its real image is a fixed
--- representative string literal (see value_to_lua_expr).
+-- The model's VStr/VInt/VFloat are all NULLARY (the inert-value-payload removal:
+-- stage 1 dropped VStr's payload, stage 2 dropped the number magnitude). Numbers
+-- are type-CLASSES with no magnitude: `VInt` is the `NRint` (integer-valued)
+-- class, `VFloat` is the `NRfrac` (non-integer) class. Membership is HEAD-ONLY
+-- (it reads only the head/class, never a payload). Each renders to a FIXED
+-- representative literal (see value_to_lua_expr).
 --: () -> ModelValue
 function M.vstr() return { head = "VStr" } end
 --: (boolean) -> ModelValue
 function M.vbool(b) return { head = "VBool", b = b } end
 --: () -> ModelValue
 function M.vnil() return { head = "VNil" } end
---: (integer) -> ModelValue
-function M.vint(n) return { head = "VInt", n = n } end
---: (number) -> ModelValue
-function M.vfloat(n) return { head = "VFloat", n = n } end
+--: () -> ModelValue
+function M.vint() return { head = "VInt" } end
+--: () -> ModelValue
+function M.vfloat() return { head = "VFloat" } end
 --: () -> ModelValue
 function M.vtable() return { head = "VTable" } end
 --: () -> ModelValue
@@ -82,7 +84,7 @@ function M.vfun() return { head = "VFun" } end
 --   AStr   ↔ match v with VStr  _  => True | _ => False
 --   ABool  ↔ match v with VBool _  => True | _ => False
 --   ANil   ↔ match v with VNil     => True | _ => False
---   AInt   ↔ match v with VNum (NRint _) => True | _ => False
+--   AInt   ↔ match v with VNum NRint => True | _ => False
 --   ANum   ↔ match v with VNum _ => True | _ => False
 --   AFloat ↔ match v with VNum _ => True | _ => False     (float ≡ number on 5.1)
 -- This port matches ONLY on the value HEAD/class, exactly as the model does (the
@@ -108,15 +110,15 @@ end
 -- ── model value → real-Lua source expression ────────────────────────────────
 -- Produce a Lua expression that, when evaluated by a REAL interpreter, yields
 -- the real value corresponding to this model value. This is the value half of
--- the correspondence. On the LuaJIT 5.1 model the number value is ONE double:
---   VInt n   (= NRint n, an integer-valued double) ↦ an integer-valued literal.
---   VFloat n (= NRfrac n, a GENUINELY non-integer double) ↦ a number with a
---             forced fractional part, so its real image is never integral — the
---             faithful image of the `NRfrac` class. (This is the value-domain
---             collapse made concrete: there is no model value whose real image
---             is `3.0` yet is a non-integer; `3.0`'s model value is the
---             integer-valued `VInt 3`. So the old `AInt VFloat 3` disagreement
---             cannot arise.)
+-- the correspondence. Numbers are type-CLASSES with NO magnitude, so each number
+-- class renders to a FIXED representative literal (membership is head-only):
+--   VInt   (= NRint, the integer-valued class) ↦ a fixed integer-valued literal "0".
+--   VFloat (= NRfrac, the non-integer class)   ↦ a fixed non-integer literal "0.5",
+--             so its real image is never integral — the faithful image of the
+--             `NRfrac` class. (There is no model value whose real image is `3.0`
+--             yet is a non-integer; the old `AInt VFloat 3` disagreement cannot
+--             arise. The representatives are immaterial to faithfulness — AInt
+--             reads only the head, ANum/AFloat accept every number.)
 --: (ModelValue) -> string
 function M.value_to_lua_expr(v)
 	if v.head == "VStr" then
@@ -127,11 +129,11 @@ function M.value_to_lua_expr(v)
 	end
 	if v.head == "VBool" then return v.b and "true" or "false" end
 	if v.head == "VNil" then return "nil" end
-	if v.head == "VInt" then return ("%d"):format(v.n) end
+	if v.head == "VInt" then return "0" end
 	if v.head == "VFloat" then
-		-- NRfrac: a genuinely non-integer double. Force a fractional part so the
-		-- real value is never == math.floor of itself, regardless of v.n.
-		return ("%.4f"):format(v.n + 0.5)
+		-- NRfrac: the genuinely-non-integer number class. A fixed fractional
+		-- representative, so the real value is never == math.floor of itself.
+		return "0.5"
 	end
 	if v.head == "VTable" then return "{}" end
 	if v.head == "VFun" then return "(function() end)" end

@@ -157,9 +157,9 @@ local function gen_field_value(rng, sz)
 	elseif which == 2 then
 		return atom.vbool(rng:bool())
 	elseif which == 3 then
-		return atom.vint(rng:int(-50, 50))
+		return atom.vint()
 	else
-		return atom.vfloat(rng:int(-50, 50))
+		return atom.vfloat()
 	end
 end
 

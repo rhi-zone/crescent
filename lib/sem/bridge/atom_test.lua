@@ -58,37 +58,37 @@ local function oracle()
 	local rows = {
 		-- AStr
 		{ atom = "AStr",  mk = function() return bridge.vstr() end,  coq = true,  desc = "AStr VStr" },
-		{ atom = "AStr",  mk = function() return bridge.vint(7) end,     coq = false, desc = "AStr VInt" },
+		{ atom = "AStr",  mk = function() return bridge.vint() end,     coq = false, desc = "AStr VInt" },
 		{ atom = "AStr",  mk = function() return bridge.vbool(true) end, coq = false, desc = "AStr VBool" },
 		{ atom = "AStr",  mk = function() return bridge.vnil() end,      coq = false, desc = "AStr VNil" },
 		-- ABool
 		{ atom = "ABool", mk = function() return bridge.vbool(true) end,  coq = true,  desc = "ABool VBool true" },
 		{ atom = "ABool", mk = function() return bridge.vbool(false) end, coq = true,  desc = "ABool VBool false" },
 		{ atom = "ABool", mk = function() return bridge.vstr() end,    coq = false, desc = "ABool VStr" },
-		{ atom = "ABool", mk = function() return bridge.vint(0) end,      coq = false, desc = "ABool VInt" },
+		{ atom = "ABool", mk = function() return bridge.vint() end,      coq = false, desc = "ABool VInt" },
 		-- ANil
 		{ atom = "ANil",  mk = function() return bridge.vnil() end,       coq = true,  desc = "ANil VNil" },
 		{ atom = "ANil",  mk = function() return bridge.vstr() end,    coq = false, desc = "ANil VStr" },
 		{ atom = "ANil",  mk = function() return bridge.vbool(false) end, coq = false, desc = "ANil VBool" },
-		{ atom = "ANil",  mk = function() return bridge.vfloat(3) end,    coq = false, desc = "ANil VFloat" },
+		{ atom = "ANil",  mk = function() return bridge.vfloat() end,    coq = false, desc = "ANil VFloat" },
 		-- ANum (number atom, 5.1 single-double) — verbatim from bridge_num_oracle.v
-		{ atom = "ANum",  mk = function() return bridge.vint(3) end,      coq = true,  desc = "ANum VInt 3" },
-		{ atom = "ANum",  mk = function() return bridge.vfloat(3) end,    coq = true,  desc = "ANum VFloat 3" },
-		{ atom = "ANum",  mk = function() return bridge.vint(0) end,      coq = true,  desc = "ANum VInt 0" },
+		{ atom = "ANum",  mk = function() return bridge.vint() end,      coq = true,  desc = "ANum VInt 3" },
+		{ atom = "ANum",  mk = function() return bridge.vfloat() end,    coq = true,  desc = "ANum VFloat 3" },
+		{ atom = "ANum",  mk = function() return bridge.vint() end,      coq = true,  desc = "ANum VInt 0" },
 		{ atom = "ANum",  mk = function() return bridge.vstr() end,    coq = false, desc = "ANum VStr" },
 		{ atom = "ANum",  mk = function() return bridge.vbool(true) end,  coq = false, desc = "ANum VBool" },
 		{ atom = "ANum",  mk = function() return bridge.vnil() end,       coq = false, desc = "ANum VNil" },
 		-- AFloat (= number type on 5.1; AInt <: AFloat). Accepts ALL numbers.
-		{ atom = "AFloat", mk = function() return bridge.vint(3) end,     coq = true,  desc = "AFloat VInt 3 (int IS a float)" },
-		{ atom = "AFloat", mk = function() return bridge.vfloat(3) end,   coq = true,  desc = "AFloat VFloat 3" },
-		{ atom = "AFloat", mk = function() return bridge.vint(0) end,     coq = true,  desc = "AFloat VInt 0" },
+		{ atom = "AFloat", mk = function() return bridge.vint() end,     coq = true,  desc = "AFloat VInt 3 (int IS a float)" },
+		{ atom = "AFloat", mk = function() return bridge.vfloat() end,   coq = true,  desc = "AFloat VFloat 3" },
+		{ atom = "AFloat", mk = function() return bridge.vint() end,     coq = true,  desc = "AFloat VInt 0" },
 		{ atom = "AFloat", mk = function() return bridge.vstr() end,   coq = false, desc = "AFloat VStr" },
 		{ atom = "AFloat", mk = function() return bridge.vnil() end,      coq = false, desc = "AFloat VNil" },
 		-- AInt (integer-valued refinement) — VFloat n is a GENUINELY non-integer
 		-- double, so FALSE in BOTH model and reality (no disagreement anymore).
-		{ atom = "AInt",  mk = function() return bridge.vint(3) end,      coq = true,  desc = "AInt VInt 3" },
-		{ atom = "AInt",  mk = function() return bridge.vint(0) end,      coq = true,  desc = "AInt VInt 0" },
-		{ atom = "AInt",  mk = function() return bridge.vfloat(3) end,    coq = false, desc = "AInt VFloat 3 (non-integer double, model AND real)" },
+		{ atom = "AInt",  mk = function() return bridge.vint() end,      coq = true,  desc = "AInt VInt 3" },
+		{ atom = "AInt",  mk = function() return bridge.vint() end,      coq = true,  desc = "AInt VInt 0" },
+		{ atom = "AInt",  mk = function() return bridge.vfloat() end,    coq = false, desc = "AInt VFloat 3 (non-integer double, model AND real)" },
 		{ atom = "AInt",  mk = function() return bridge.vstr() end,    coq = false, desc = "AInt VStr" },
 		{ atom = "AInt",  mk = function() return bridge.vbool(false) end, coq = false, desc = "AInt VBool" },
 	}
@@ -131,11 +131,11 @@ local function gen_model_value(rng, sz)
 	elseif which == 3 then
 		return bridge.vnil()
 	elseif which == 4 then
-		return bridge.vint(rng:int(-1000, 1000))
+		return bridge.vint()
 	elseif which == 5 then
 		-- the non-integer (NRfrac) number class; the renderer forces a fractional
 		-- part, so pass a plain integer payload (the class, not the value, matters).
-		return bridge.vfloat(rng:int(-1000, 1000))
+		return bridge.vfloat()
 	elseif which == 6 then
 		return bridge.vtable()
 	else
@@ -198,23 +198,24 @@ T.describe("sem reality-bridge: model atom-denotation vs real LuaJIT (unambiguou
 		T.eq(agreed, #rows, "every oracle row agrees with real LuaJIT")
 	end)
 
-	-- ── leg (1c): explicit witness — 3 and 3.0 are ONE integer-valued number ──
-	-- The value-domain collapse, pinned concretely. On LuaJIT 5.1 the integer
-	-- literal `3` and the float literal `3.0` are the SAME double (`==`, both
-	-- `type=="number"`, both `tostring`→"3"), and BOTH are integer-valued. So the
-	-- model represents this single value as `VInt 3` (= VNum (NRint 3)) — there is
-	-- one number value per double, and an integer-valued number IS a float. There
-	-- is no model value whose real image is `3.0` yet is a non-integer.
-	T.it("witness: 3 and 3.0 are one integer-valued double in real LuaJIT 5.1", function()
+	-- ── leg (1c): explicit witness — an int and its float form are ONE double ──
+	-- The value-domain collapse, pinned concretely. On LuaJIT 5.1 an integer
+	-- literal and its float form (e.g. `0` and `0.0`) are the SAME double (`==`,
+	-- both `type=="number"`), and BOTH are integer-valued. So the model represents
+	-- this single number class as `VInt` (= VNum NRint) — one value per number
+	-- class (no magnitude), and an integer-valued number IS a float.
+	T.it("witness: an int and its float form are one integer-valued double in real LuaJIT 5.1", function()
 		if not probe(caps, LUAJIT) then
 			T.skip("vendored LuaJIT not probeable; witness leg skipped (bare-clone safe)")
 			return
 		end
-		-- `a` is the int-literal image; `b` is an explicit float literal 3.0 — both
-		-- correspond to the SINGLE model value VInt 3 (integer-valued double).
-		local int_expr = bridge.value_to_lua_expr(bridge.vint(3)) --[[: string]]
+		-- `a` is the int-literal image (the fixed representative "0"); `b` is its
+		-- explicit float form — both correspond to the SINGLE model number class
+		-- VInt (integer-valued double; numbers have no magnitude, so the
+		-- representative is fixed).
+		local int_expr = bridge.value_to_lua_expr(bridge.vint()) --[[: string]]
 		local src = "local a = " .. int_expr .. "\n"
-			.. "local b = 3.0\n"
+			.. "local b = 0.0\n"
 			.. "io.write((a == b) and 'EQ' or 'NE', '|', type(a), '|', type(b),"
 			.. " '|', tostring(a), '|', tostring(b),"
 			.. " '|', (b == math.floor(b)) and 'INT' or 'FRAC')\n"

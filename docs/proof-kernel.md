@@ -111,26 +111,26 @@ logic over the denotation — no `sub` rule asserted, no axiom added.
   concrete value domain `V` with distinct constructor heads. **LuaJIT 5.1 number
   correction (fork A′):** numbers are ONE value — every 5.1 number is a single
   IEEE double (`3 == 3.0`, an integer-valued number IS a float). So `V` has a
-  single number constructor `VNum : NumRep -> V`, where `NumRep := NRint nat |
-  NRfrac nat` records (decidably) whether the double is integer-valued (`NRint`,
+  single number constructor `VNum : NumRep -> V`, where `NumRep := NRint |
+  NRfrac` records (decidably) whether the double is integer-valued (`NRint`,
   e.g. `3.0`) or genuinely non-integer (`NRfrac`, e.g. `1.5`). The full domain is
-  `VNum | VStr | VBool | VNil | VTable | VFun`. `VInt n`/`VFloat n` are NOTATIONS
-  for `VNum (NRint n)`/`VNum (NRfrac n)` — there is exactly ONE number value per
-  double, so `VInt 3` and `VFloat 3` are no longer distinct (the old two-number
-  design tagged integers like PUC 5.3/5.4 — deferred, version-parametric).
-  **Inert-value-payload removal (stage 1 of 2).** `VStr` is now a NULLARY
-  constructor (`VStr : V`) — its old `nat` payload was inert: `denote` is
-  head-determined (`denote_head`, below), every witness used `VStr 0`, and no
-  typing / progress / preservation obligation ever read it. Removing it makes
-  "types, not magnitudes" structural — there is one string value, head-only, so
-  there is no value-fidelity temptation to model concrete string contents. Stage
-  2 (the number payload) is a separate, larger step (it carries arithmetic and
-  the `NRint`/`NRfrac` class distinction, so it is deferred). This was the first
-  deliberate edit to the frozen, reality-validated core; the reality bridge was
-  re-validated afterward (`bin/cr test lib/sem/bridge/` green — 600/600 atom
-  differentials etc.).
+  `VNum | VStr | VBool | VNil | VTable | VFun`. `VInt`/`VFloat` are NOTATIONS
+  for `VNum NRint`/`VNum NRfrac` — there is exactly ONE number value per number
+  CLASS, so the int/frac distinction is the only number structure (the old
+  two-number design tagged integers like PUC 5.3/5.4 — deferred, version-parametric).
+  **Inert-value-payload removal (stage 2 of 2 — DONE).** Both `VStr` and the
+  number magnitude are removed. Stage 1 made `VStr` nullary (its `nat` payload was
+  inert). Stage 2 removed the number magnitude: `NRint`/`NRfrac`/`LInt` are now
+  NULLARY — numbers are two type-CLASSES with NO magnitude. The int/frac CLASS
+  distinction is KEPT (it is load-bearing for `AInt ⊊ AFloat`; collapsing to one
+  number would be unsound). `denote` is head-determined (`denote_head`, below), so
+  no typing / progress / preservation obligation ever read a magnitude. This makes
+  "types, not magnitudes" STRUCTURAL: there is one value per number class,
+  head-only, and arithmetic/comparison are ABSTRACT (see the primop section). The
+  reality bridge was re-validated after both stages (`bin/cr test lib/sem/bridge/`
+  green — 142 assertions, 600/600 atom differentials, 17/17 result-inhabits-type).
   `atom_denote` maps each atom to a value-set: `ANum` and `AFloat` BOTH accept
-  every `VNum _` (float ≡ number on 5.1), `AInt` accepts `{VNum (NRint _)}` — a
+  every `VNum _` (float ≡ number on 5.1), `AInt` accepts `{VNum NRint}` — a
   *literal subset*, so **`AInt <: AFloat` and `AInt <: ANum` hold definitionally**
   (proved as `AInt_sub_AFloat`, `AInt_sub_ANum`, with `AFloat_equiv_ANum`). No
   int/float disjointness. Unrelated atoms pick disjoint constructors, so their
@@ -479,7 +479,7 @@ is threaded but stays unconditionally sound):
   CORRECT non-subtypes with explicit witnesses:
   - `~ dsub (Int→Int) (Int→Str)` — codomain, witness `VFun [(VInt 0, VInt 0)]`;
   - `~ dsub (Int→Int) (Num→Int)` — domain contravariance, witness
-    `VFun [(VFloat 0, VStr 0)]` (vacuously in `Int→Int` since `VFloat ∉ Int`, but
+    `VFun [(VFloat, VStr)]` (vacuously in `Int→Int` since `VFloat ∉ Int`, but
     not in `Num→Int` since `VFloat ∈ Num` forces the `VStr` output into `Int`).
 - **DECOMPOSITION LAW — codomain intersection CLOSES; the rest DEFERRED.**
   `darrow_inter_cod : dequiv ((A→B) ∩ (A→C)) (A → (B∩C))` is proved both
@@ -1215,7 +1215,7 @@ truthiness. Modifies `proof/typing.v` + `proof/check.v`; `proof/subtype.v` and
   (the then-branch sees `var0 : ANum`); (b) `tt_payoff_rejected_WITHOUT_narrowing` —
   the SAME application under the un-narrowed `Str∪Num` is REJECTED at every type
   (`Str∪Num` is not `ssub ≤ ANum` — a string is not a number, refuted semantically at
-  `VStr 0`). `Compute`-level: `compute_typetest_payoff_synth` synthesizes the union,
+  `VStr`). `Compute`-level: `compute_typetest_payoff_synth` synthesizes the union,
   `compute_typetest_payoff_unnarrowed_None` is `None`; `tt_select_then`/`tt_select_else`
   witness the value-conditioned tag selection.
 - **HONEST SCOPE.** **POSITIVE (then-branch) tag narrowing** only. The ELSE-branch is
@@ -1799,7 +1799,7 @@ five required examples:
 3. **Field invariance (soundness).** `field_invariance_rejected`: writing a STRING
    into a `BRef Int` field is **rejected at EVERY type** — proved via the existing
    `rsub_ref_inv` (`BRef` invariance) composing the cell's true type `BRef Int`
-   through the projection and refuting semantically at `VStr 0`.
+   through the projection and refuting semantically at `VStr`.
    `field_invariance_accepted`: the well-typed `Int`-into-`Int` write IS accepted
    (yields `nil`). `field_cell_invariant`: `~ rsub (BRef Int) (BRef Num)` — a
    `BRef Int` field cannot be covariantly used as `BRef Num` even though
@@ -1852,48 +1852,54 @@ operators so programs actually compute. Arithmetic `+ - * /` and comparison
   classifiers `arith_op`/`cmp_op` (no name-keyed special-casing — the gate is
   ordinary data, and the two op-classes are provably disjoint, used in the
   preservation cross-cases).
-- **Operational semantics.** Left-to-right operand congruence (`SPrim1` reduces
-  the left operand; `SPrim2`, left a value, reduces the right), then COMPUTE. The
-  term literal language has a single number literal `LInt nat` (integer-valued —
-  the 5.1 number model has one number value per double), so number VALUES are
-  `tlit (LInt n)`. **Arithmetic** on two number literals `tlit (LInt m)`,
-  `tlit (LInt n)` yields `tlit (LInt (prim_arith op m n))` via NAT arithmetic
-  (`PAdd ↦ m+n`, `PSub ↦ m-n`, `PMul ↦ m*n`) — so `3 + 4` reduces concretely to
-  `7`. **`PDiv` uses `Nat.div`** (a representative integer-valued result): the
-  term literal language has no fractional literal, the value model abstracts the
-  exact double, and soundness needs only "the result is a number" — an
-  integer-valued representative is sound (`AInt <: ANum`). **Comparison** on two
-  number literals yields `tlit (LBool (prim_cmp op m n))` via the real nat
-  comparison (`PLt ↦ Nat.ltb`, `PLe ↦ Nat.leb`, `PEq ↦ Nat.eqb`) — so `3 < 4`
-  reduces concretely to `true`. A `tprim` on a NON-number operand is **STUCK** (a
-  type error the checker prevents — progress only fires on well-typed terms).
+- **Operational semantics — ABSTRACT (no value computation).** Left-to-right
+  operand congruence (`SPrim1` reduces the left operand; `SPrim2`, left a value,
+  reduces the right), then an ABSTRACT step. The term literal language has a single
+  number literal `LInt` (NULLARY, integer-valued, NO magnitude), so number VALUES
+  are `tlit LInt`. Numbers are type-CLASSES with no magnitude (the "types, not
+  magnitudes" refactor), so the result VALUE is not computed — only its TYPE is
+  known. **Arithmetic** (`SPrimArith`) on two number values steps to SOME number
+  value — `tlit LInt` (the only number literal), a `VInt`-headed number of type
+  `AInt <: ANum`, the declared arithmetic result type. **Comparison** steps
+  NON-DETERMINISTICALLY to `tlit (LBool true)` OR `tlit (LBool false)` (two rules,
+  `SPrimCmpTrue`/`SPrimCmpFalse`): without magnitudes the comparison result is
+  unknown, but both targets have a real `LBool` head (type `ABool`) so
+  `SIfTrue`/`SIfFalse`/`canon_bool` still fire and a `tif` guard may reduce either
+  way. There is NO determinism lemma in the dev, so the non-determinism is harmless
+  to soundness. The former `prim_arith`/`prim_cmp` nat-computation functions are
+  REMOVED. A `tprim` on a NON-number operand is **STUCK** (a type error the checker
+  prevents — progress only fires on well-typed terms).
 - **Progress + preservation re-proved, both `Qed`.** Progress: a well-typed
-  `tprim` has `ANum`-typed operands; by the new **canonical-forms lemma**
-  `canon_num` (a closed value of type `BAtom ANum` is a number literal
-  `tlit (LInt n)` — non-number literals refuted SEMANTICALLY via the value model,
-  lambdas/records/locations via the not-atom shape facts), if both operands are
-  values they are number literals and the operator COMPUTES (`SPrimArith` /
-  `SPrimCmp`); otherwise an operand steps (`SPrim1` / `SPrim2`). Preservation: the
-  arithmetic result `tlit (LInt _)` types at `AInt <: ANum` (then subsumed to the
-  goal); the comparison result `tlit (LBool _)` types at `ABool`; the congruence
-  cases recurse with store-weakening. `tprim` is threaded through every metatheory
-  lemma — the strong term-induction principle (`tm_rect_strong`), `lift`/`subst`,
-  `closed_at` + `closed_at_lift` + `has_type_closed`, `weakening`, `subst_lemma`,
-  `store_weakening`, and the new subsumption-transparent inversion lemma
-  `inv_prim` (concluding operands at `ANum` plus the arith/cmp result disjunction).
+  `tprim` has `ANum`-typed operands; by the **canonical-forms lemma** `canon_num`
+  (a closed value of type `BAtom ANum` is `tlit LInt` — non-number literals refuted
+  SEMANTICALLY via the value model, lambdas/records/locations via the not-atom
+  shape facts), if both operands are values they are number literals and a step
+  exists (`SPrimArith`, or `SPrimCmpTrue` for comparison — either non-det target
+  works); otherwise an operand steps (`SPrim1` / `SPrim2`). Preservation: the
+  arithmetic result `tlit LInt` types at `AInt <: ANum` (then subsumed to the
+  goal); each comparison result `tlit (LBool _)` types at `ABool` (both non-det
+  targets); the congruence cases recurse with store-weakening. `tprim` is threaded
+  through every metatheory lemma — the strong term-induction principle
+  (`tm_rect_strong`), `lift`/`subst`, `closed_at` + `closed_at_lift` +
+  `has_type_closed`, `weakening`, `subst_lemma`, `store_weakening`, and the
+  subsumption-transparent inversion lemma `inv_prim` (concluding operands at `ANum`
+  plus the arith/cmp result disjunction).
 - **Bidirectional checker (`check.v`).** `synth (tprim op a b)` CHECKS both
   operands against `ANum` (via `decide_ssub` at the mode switch), returning `ANum`
   (arithmetic) or `ABool` (comparison). `synth_sound` / `check_sound` re-proved
   `Qed` (the new case discharges its two domain obligations by `decide_ssub_sound`
   + `TSub`, then `TPrimArith`/`TPrimCmp`); `narrowing` and `proj_free` threaded.
-- **SANITY (`Compute` + proofs).** `3 + 4` types at `ANum` and steps to
-  `tlit (LInt 7)` (`ex_add_typed`/`ex_add_steps`); `3 < 4` types at the boolean
-  type and steps to `true` (`ex_lt_typed`/`ex_lt_steps`); the chain `(3 + 4) * 2`
-  types at `ANum` and **multi-steps to `14`** (`ex_chain_steps`, exercising the
-  operand congruence); `"s" + 1` is REJECTED at every type
-  (`ex_bad_add_untyped` : `~ has_type …`) and `synth = None`
-  (`compute_bad_add_None`). Checker sanity: `synth (3 + 4) = Some ANum`,
-  `synth (3 < 4) = Some ABool`, both `check` + `check_sound`.
+- **SANITY (`Compute` + proofs).** `3 + 4` types at `ANum` (`ex_add_typed`); `3 <
+  4` types at the boolean type (`ex_lt_typed`); the chain `(3 + 4) * 2` types at
+  `ANum` (`ex_chain_typed`); `ex_add_progress` (a step exists). The former
+  VALUE-COMPUTATION demos (`ex_add_steps`/`compute_add` → `7`,
+  `ex_lt_steps`/`compute_lt` → `true`, `ex_chain_steps` → `14`,
+  `ex_add_preservation`) were **DELETED** — the abstract magnitude-free primitives
+  no longer produce concrete computed results, and `tprim` soundness is carried by
+  the generic progress/preservation, not by these payoffs. `"s" + 1` is still
+  REJECTED at every type (`ex_bad_add_untyped`) and `synth = None`. Checker sanity:
+  `synth (3 + 4) = Some ANum`, `synth (3 < 4) = Some ABool`, both `check` +
+  `check_sound`.
 
 ### Honest scope / deferrals
 
@@ -1901,17 +1907,17 @@ operators so programs actually compute. Arithmetic `+ - * /` and comparison
 result types** (`Int+Int : AInt` — needs the arithmetic rule to track the
 integer-valued refinement through the operands; the sound `ANum` result is used
 now); **concat / modulo / `//` / bitwise / metamethod-dispatch operators**;
-**general structural `==`** (here equality is numbers-only). `PDiv` produces an
-integer-valued representative (the term literal language has no fractional
-literal); a faithful float result awaits a fractional number literal.
+**general structural `==`** (here equality is numbers-only). Arithmetic produces a
+number of type `ANum` ABSTRACTLY (no value); there is no faithful-float concern
+because there is no computed magnitude at all.
 
 `Print Assumptions` on `progress`, `preservation`, `ex_add_typed`,
-`ex_add_steps`, `ex_lt_typed`, `ex_lt_steps`, `ex_chain_steps`,
+`ex_lt_typed`, `ex_chain_typed`, `ex_add_progress`,
 `ex_bad_add_untyped` (typing.v) and `synth_sound`, `check_sound`,
 `compute_add_sound`, `compute_lt_sound`, `compute_bad_add_None` (check.v):
 **Closed under the global context** — no axioms, no `Admitted`, no `Classical`.
 Whole chain compiles (`coqc subtype.v && coqc typing.v && coqc ssub.v && coqc
-check.v`); `subtype.v` + `ssub.v` byte-unmodified.
+check.v`).
 
 ## Increment 21 — IMPERATIVE STATEMENT FORMS + a real while-loop (encoded; end-to-end imperative soundness)
 
@@ -1970,29 +1976,21 @@ quantified and no `TLoc` is used).
 **Number-typing note.** The cells are `BRef ANum`, not `BRef AInt`: arithmetic
 (`tprim PAdd`) produces `ANum` (the declared `TPrimArith` result), and a mutable
 `BRef` cell is INVARIANT, so storing `!s + !i : ANum` back requires a `Num` cell.
-The initial `LInt 0 : AInt` widens to `ANum` at allocation by subsumption. This is
+The initial `LInt : AInt` widens to `ANum` at allocation by subsumption. This is
 exactly Lua's single-number-type model.
 
-### It steps correctly (concrete bound, reduced end-to-end)
+### It TYPES (the end-to-end run was deleted)
 
-For a minimal concrete instance — a single-cell counter loop `while (!i<1) do i:=
-!i+1 end` with `i` at `tloc 0` starting at `0` — the reduction is machine-checked
-END-TO-END through the store:
-
-- `cinc_one_iter` : from store `[0]` the loop **unfolds**, the condition reads the
-  CURRENT store (`0 < 1` = true), the body **mutates** the cell (`i ↦ 1`), and
-  control returns to the loop — leaving store `[1]`. (The store-dependent condition
-  gating a store-mutating body is the dynamic crux.)
-- `cinc_terminates` : the SECOND unfold reads the NEW store `[1]`, the condition
-  `1 < 1` is FALSE, and the loop terminates with `nil`.
-- `cinc_loop_runs` (their composition) : from store `[0]` the loop runs to `nil` in
-  store `[1]` — a real imperative loop computed to its end. `cinc_loop_typed`
-  types it at `Tunit`.
-
-The full SUM loop reduces by the SAME mechanism (alloc, unfold, store-read
-condition, mutate, re-unfold, terminate, final read), only with more iterations and
-a second cell; its TYPING is the proved `sumloop_prog_typed`. The single-cell
-instance is reduced fully to keep the reduction trace honest about depth.
+The single-cell counter loop `while (!i<1) do i:= !i+1 end` (`i` at `tloc 0`) is
+proved well-typed at `Tunit` (`cinc_loop_typed`). The former END-TO-END run
+(`cinc_one_iter`/`cinc_terminates`/`cinc_loop_runs`, asserting concrete stores
+`[0] → [1]` and a computed `false` guard `1 < 1` to terminate) was **DELETED** under
+the "types, not magnitudes" refactor: it demonstrated concrete value computation —
+distinct same-class integers across store iterations and a computed guard boolean —
+which the abstract magnitude-free primitives no longer perform (comparison steps
+non-deterministically to either boolean, so the loop has no determinate
+termination). The loop's soundness is carried by its TYPING plus the generic
+progress/preservation. The full SUM loop's TYPING is the proved `sumloop_prog_typed`.
 
 ### Sequencing- and if-with-mutation
 
@@ -2023,7 +2021,7 @@ needs labelled exits / continuations) and numeric `for` + generic `for-in`
 
 `Print Assumptions` on `subst_lift_cancel`, `tseq_typed`, `tseq_step_value`,
 `twhile_unfold`, `twhile_typed`, `sumloop_prog_typed`, `sumloop_loop_typed`,
-`cinc_one_iter`, `cinc_terminates`, `cinc_loop_runs`, `cinc_loop_typed`,
+`cinc_loop_typed`,
 `seq_mutation_typed`, `seq_mutation_steps`, `if_mut_typed`, `if_mut_true_steps`,
 `if_mut_false_steps`, `while_true_typed`, `while_true_diverges`,
 `while_true_not_stuck`: **Closed under the global context** — no axioms, no
@@ -2076,18 +2074,18 @@ was checked — `inv_annot` gives `e : Ta` with `rsub Ta T`).
 ### THE FIX — the op-sem-bridge-surfaced synth gap on a real imperative loop
 
 The counting/sum loop (§ increment 20) allocates a counter + accumulator. WITHOUT
-an annotation, `talloc (tlit (LInt 0))` synthesizes `BRef AInt` (an Int cell); the
+an annotation, `talloc (tlit (LInt))` synthesizes `BRef AInt` (an Int cell); the
 body stores an arithmetic result `!s + !i : ANum` back, and a `BRef` cell is
 INVARIANT — `ANum` is NOT storable into a `BRef AInt` — so **`synth` of the whole
 un-annotated loop returns `None`** (`sumloop_unann_None`). This is exactly the
 bridge-surfaced incompleteness: a sound program the synthesizer cannot infer,
 because `talloc` commits the cell to the too-specific initialiser type. (Note: the
 `has_type`-side `sumloop_prog_typed` of increment 20 already typed the loop, by
-manually subsuming `LInt 0` to `ANum` at allocation — it is the SYNTHESIZER that
+manually subsuming `LInt` to `ANum` at allocation — it is the SYNTHESIZER that
 could not infer this without guidance.)
 
-WITH the cells annotated — `talloc (tannot (BAtom ANum) (tlit (LInt 0)))` — the
-cell synthesizes `BRef ANum` (the annotation ascends `LInt 0 : AInt` to `ANum`
+WITH the cells annotated — `talloc (tannot (BAtom ANum) (tlit (LInt)))` — the
+cell synthesizes `BRef ANum` (the annotation ascends `LInt : AInt` to `ANum`
 before `talloc` reads its type), able to hold the arithmetic result. The whole loop
 then synthesizes **`Some (BAtom ANum)`** (`sumloop_ann_synths`) and is sound
 (`sumloop_ann_sound` via `check_sound`). The annotation GUIDED the inference — the
@@ -2116,11 +2114,13 @@ axioms, no `Admitted`, no `Classical`. Whole chain compiles
 (`coqc subtype.v && coqc typing.v && coqc ssub.v && coqc check.v`); `subtype.v` +
 `ssub.v` byte-unmodified (only `typing.v` + `check.v` changed).
 
-**Deferred (separate gap, unchanged):** `PDiv` float-faithfulness — `prim_arith`'s
-`PDiv` uses `Nat.div` (a representative integer-valued result), not the exact Lua
-double-division semantics; the value model abstracts the exact double, so soundness
-needs only "the result is a number", but exact-`/`-faithfulness to real Lua remains
-a deferred reality-bridge gap (NOT closed by this increment).
+**`PDiv` float-faithfulness — RETIRED / MOOT (was a deferred gap).** The former
+gap (`prim_arith`'s `PDiv = Nat.div`, a nat-division value, vs real Lua float
+division) is moot by construction after the "types, not magnitudes" refactor:
+numbers have no magnitude and arithmetic is abstract, so there is NO model-computed
+number value to be faithful-or-unfaithful. The model commits only to the result
+TYPE (`ANum`); value-fidelity to real doubles is the version-parametric deferred
+value-fidelity design, orthogonal to this type-level calculus.
 
 ## Increment 22 — MULTI-RETURN VALUES: value-sequences + contextual adjustment (truncation + last-position spread)
 
@@ -2935,35 +2935,21 @@ never aliases a mutable outer `i`; the value it sees is the current counter, re-
 fetched each turn). Iteration continues while `(step>0 ∧ i≤limit) ∨ (step<0 ∧
 i≥limit)`; each turn runs `body` then `i := i + step`.
 
-**Step-sign / nat substrate (honest boundary, not a faked gap — verified against the
-core).** The number model is `nat`-backed at BOTH levels: the value `VNum` carries
-`NRint nat` / `NRfrac nat` (`subtype.v`, no negative number value), the only number
-literal is `LInt : nat` (`typing.v`), arithmetic is `nat` (`prim_arith`; note `PSub` is
-truncating, `5 - 7 = 0`), and `tunop UNeg` dispatches only on metatable values
-(`SUnMetaL`) — it is **stuck on a plain number**. Consequently **no term evaluates to a
-negative number**.
+**Step-sign / signed-number substrate — RETIRED / MOOT by construction.** The
+earlier note here recorded a substrate need for a SIGNED number model (so a single
+runtime-sign-dispatched numeric-for could decide direction at runtime). That need
+is **moot** under the "types, not magnitudes" refactor: numbers are type-CLASSES
+with NO magnitude (no `nat`/`Z` payload on `NRint`/`NRfrac`/`LInt`), and arithmetic
+/ comparison are ABSTRACT (no computed value, no sign). There is no number
+magnitude to be signed-or-unsigned; "ascending vs descending step" is no longer a
+value-level question this model can or should answer. The split is now purely the
+**static choice of update operator** (`tfor_up` uses `PAdd`, `tfor_down` uses
+`PSub`); both forms only need to TYPECHECK, not to compute a direction. Faithful
+signed/float magnitudes are the version-parametric deferred value-fidelity design,
+orthogonal to this type-level calculus.
 
-The blocker for a single runtime-sign-dispatched form is **not the guard**: a runtime
-sign test `0 < step` *is* expressible (`PLt` + `tif` both exist), but it is **vacuous** —
-every number value is `≥ 0`, so there is no negative step to dispatch on. The deeper
-blocker is the **update**: the faithful single-form Lua 5.1 body is `i := i + step` with
-a *signed* step (a negative step descends). Here `+` is `nat` addition, so `i := i + step`
-can **only ever ascend** for every representable step value. Descent is therefore carried
-**entirely** by switching the update operator to `PSub` (the `tfor_down` encoding) — a
-*static* choice, since there is no negative step value to select on at runtime. A
-"single form" that picked `+` vs `−` at runtime would just be the static-sign split moved
-inside one term, dispatching on a bit the substrate cannot supply.
-
-**Concrete blocked term:** `for i = 2, 1, c do body end` where `c` is intended to be `-1`
-at runtime. No term produces `-1` (`LInt` is `nat`; `tunop UNeg (tlit (LInt 1))` is stuck;
-`tprim PSub (tlit (LInt 0)) (tlit (LInt 1))` truncates to `0`), and `i := i + c` never
-descends for any representable `c`. Unifying the two forms requires a **signed `NumRep`**
-(a `Z` payload), a **signed `LInt`** (or a working `PNeg` on numbers), and a sign-aware
-`PSub` — recorded as the substrate need, **not faked**.
-
-The **faithful nat-substrate rendering resolves the step's sign STATICALLY** (as a real
-compiler does for a constant step) into two encodings, mirroring the while-loop's
-ascending `cinc` (`PAdd`/`PLt`):
+The two static-sign encodings mirror the while-loop's ascending `cinc`
+(`PAdd`/`PLt`):
 
 - **`tfor_up cnt limit step body`** (step > 0) :=
   `twhile (PLe (!cnt) limit) (tseq body (cnt := !cnt + step))` — guard `i ≤ limit`,
@@ -2973,17 +2959,16 @@ ascending `cinc` (`PAdd`/`PLt`):
   (i.e. `i ≥ limit`), decrement `i := !i - step` (the descent carried by the
   **subtraction direction**, since nat has no sign).
 
-This is the 3-value form (init, limit, step magnitude all explicit), faithful to 5.1
-modulo the nat number model. A **single** runtime form deciding direction needs a
-signed number model at both the value and term level (see the step-sign boundary above),
-recorded as a substrate need, **not faked**.
+This is the 3-value form (init, limit, step direction all explicit). Direction is a
+STATIC choice of operator; there is no number magnitude to dispatch on at runtime
+(numbers are type-classes — see the step-sign note above, now moot by construction).
 
 ### Loop-variable typing (the 5.1 number model)
 
 `i = !cnt` is typed at the **number type `ANum`**. The counter cell is a `BRef ANum`
 cell: the increment `i := !i + step` stores the arithmetic result, which `TPrimArith`
 gives type `ANum`, and a `BRef` cell is **invariant**, so the cell must be a `Num`
-cell; thus `!cnt : ANum`. The initial `LInt n : AInt` widens to `ANum` at allocation
+cell; thus `!cnt : ANum`. The initial `LInt : AInt` widens to `ANum` at allocation
 by subsumption (`AInt <: ANum`). This is **precise for this dev's number model**:
 arithmetic yields `ANum`; the precise `Int+Int : AInt` preservation is the **same
 deferred substrate** the while-loop's `sumloop` note records (needs Int-preserving
@@ -2996,43 +2981,36 @@ typed at `ANum`**. Exactly Lua's single-number model: `i` is a number, not an in
   counter + number `limit`/`step` + a unit-statement `body` ⇒ the loop is a unit
   statement (`Tunit`). Both proved straight through `twhile_typed`.
 
-### Payoffs (typed + stepped end-to-end)
+### Payoffs (TYPING only — value-computation runs deleted)
 
 1. **Counting-up sum loop** `sum = 0; for i = 1, 3, 1 do sum := sum + i end`
    (`sum` = loc 0, counter `i` = loc 1). `forsum_loop_typed` (types at `Tunit` under
-   store-typing `[Num; Num]`). `forsum_loop_runs` reduces it END-TO-END through the
-   store: `[0;1] → [1;2] → [3;3] → [6;4] → (i=4>3, stop) [6;4]`, i.e. **sum = 0+1+2+3
-   = 6** — three machine-checked store-driven iterations (`forsum_one_iter`, the
-   store-read guard gating a store-mutating body) then `forsum_terminates`.
+   store-typing `[Num; Num]`). The END-TO-END run (`forsum_one_iter`/
+   `forsum_terminates`/`forsum_loop_runs`, asserting sum 0+1+2+3 = 6 over distinct
+   stores) was **DELETED** — value computation the abstract magnitude-free
+   primitives no longer perform. The loop's soundness is carried by its typing +
+   generic progress/preservation.
 2. **Counting-down loop** `for i = 2, 1, -1 do () end` via `tfor_down`.
-   `fordown_loop_typed` (types at `Tunit`); `fordown_loop_runs` decrements `2 → 1 → 0`
-   and terminates when `1 ≤ 0` is false (`fordown_one_iter` + `fordown_terminates`) —
-   a negative-step loop computed to its end.
+   `fordown_loop_typed` (types at `Tunit`). The end-to-end decrement run
+   (`fordown_*`) was likewise **DELETED**.
 3. **Loop variable typed soundly as a number.** `for_var_typed_number` : `!i : ANum`
    (the number type). `for_var_not_int` : `~ (!i : AInt)` — the loop variable is NOT
-   an integer (a `VNum (NRfrac 0)` inhabits `ANum` but not `AInt`, refuting `ANum <:
+   an integer (a `VNum NRfrac` inhabits `ANum` but not `AInt`, refuting `ANum <:
    AInt` via `rsub_sound`), exactly 5.1's single-number model.
 
 ### Honest scope / deferrals
 
-Generic `for-in` (iterator protocols) is now landed (increment 29 below). A single
-runtime numeric-for form deciding step direction at runtime requires a **signed number
-model** (a signed
-`NumRep` / `LInt`, plus a sign-aware `PSub` or a working number `PNeg`) — not just at
-the term level: the deeper blocker is that the `nat` update `i := i + step` can never
-descend, so descent must switch operator statically (see the step-sign boundary above).
-The two-form static-sign rendering is the faithful nat-substrate model, recorded as the
-substrate need. The dynamic-metatable frontier is unaffected (untouched, per
+Generic `for-in` (iterator protocols) is landed (increment 29 below). Step direction
+is a STATIC operator choice (`tfor_up`/`tfor_down`); a single runtime-sign-dispatched
+form is moot by construction — numbers have no magnitude (see the step-sign note
+above). The dynamic-metatable frontier is unaffected (untouched, per
 `docs/decisions/metatable-representation.md`).
 
 `Print Assumptions` on `for_var_is_number`, `tfor_up_typed`, `tfor_down_typed`,
-`forsum_loop_typed`, `forsum_one_iter`, `forsum_terminates`, `forsum_loop_runs`,
-`fordown_loop_typed`, `fordown_one_iter`, `fordown_terminates`, `fordown_loop_runs`,
-`for_var_typed_number`, `for_var_not_int` (and the still-Closed `progress`,
-`preservation`, `synth_sound`, `check_sound`): **Closed under the global context** —
-no axioms, no `Admitted`, no `Classical`. `subtype.v` + `ssub.v` + `check.v`
-byte-unmodified (confirmed `git diff --stat`); whole chain compiles (`coqc
-proof/subtype.v` → `typing.v` → `ssub.v` → `check.v`).
+`forsum_loop_typed`, `fordown_loop_typed`, `for_var_typed_number`, `for_var_not_int`
+(and the still-Closed `progress`, `preservation`, `synth_sound`, `check_sound`):
+**Closed under the global context** — no axioms, no `Admitted`, no `Classical`.
+Whole chain compiles (`coqc proof/subtype.v` → `typing.v` → `ssub.v` → `check.v`).
 
 ## Increment 29 — GENERIC `for-in` LOOP `for v1,…,vn in explist do body end` (iterator protocol; encoded over `twhile` + `tmassign` + `tapp` + `tifn`)
 
@@ -3111,21 +3089,19 @@ flagged as a possible substrate gap, resolved within existing narrowing.
 
 ### Payoffs (machine-checked)
 
-1. **A concrete generic-for over a small explicit iterator that types and steps to
-   completion.** The iterator `forin_iter : (Num ∪ nil) → BTuple [Num ∪ nil]` narrows
-   its control to a number (`ttypetest TgNum`) and yields `c+1` while `c < 3`, else
-   nil — the finite sequence 1, 2, 3 then nil, driven by the control thread.
-   `forin_iter_typed` / `forin_loop_typed` TYPE it; `forin_loop_runs` STEPS it
-   end-to-end from `[cnt=0; v1=0; ctrl=0]`, three `forin_one_iter` (control 0→1→2→3,
-   accumulator `cnt` 0→1→2→3) then `forin_terminates` at control 3 — accumulating
-   `cnt = 3` and TERMINATING.
+1. **A concrete generic-for over a small explicit iterator that TYPES.** The
+   iterator `forin_iter : (Num ∪ nil) → BTuple [Num ∪ nil]` narrows its control to a
+   number (`ttypetest TgNum`) and yields a number while the control is a number, else
+   nil. `forin_iter_typed` / `forin_loop_typed` TYPE it. The former END-TO-END run
+   (`forin_one_iter`/`forin_terminates`/`forin_loop_runs`, accumulating `cnt = 3`
+   over distinct stores and computing guard booleans to terminate) was **DELETED**
+   under the "types, not magnitudes" refactor — value computation the abstract
+   magnitude-free primitives no longer perform. The loop's soundness is carried by
+   its TYPING plus the generic progress/preservation.
 2. **The first loop variable narrowed to non-nil inside the body.**
    `forin_v1_narrowed_nonnil` : `v1 : truthy_type` (de Bruijn 0 in the body context);
-   `forin_v1_not_nil` : `~ (v1 : ANil)` — a number `VNum (NRint 0)` inhabits
+   `forin_v1_not_nil` : `~ (v1 : ANil)` — a number `VNum NRint` inhabits
    `truthy_type` but not `ANil` (via `rsub_sound`), so the body's `v1` has shed nil.
-3. **The loop terminates when the iterator returns nil.** `forin_terminates`: at
-   control `c ≥ 3` the iterator yields nil (falsy), the guard is false, the loop ends
-   with nil.
 
 ### Honest scope / deferrals
 
@@ -3138,9 +3114,7 @@ types). The dynamic-metatable frontier is unaffected (untouched, per
 `docs/decisions/metatable-representation.md`).
 
 `Print Assumptions` on `tforin_typed`, `forin_guard_typed`, `forin_body_typed`,
-`forin_iter_typed`, `forin_loop_typed`, `forin_v1_narrowed_nonnil`, `forin_v1_not_nil`,
-`forin_one_iter`, `forin_terminates`, `forin_loop_runs` (and the still-Closed
-`progress`, `preservation`, `synth_sound`, `check_sound`): **Closed under the global
-context** — no axioms, no `Admitted`, no `Classical`. `subtype.v` + `ssub.v` +
-`check.v` byte-unmodified (confirmed `git diff --stat`); whole chain compiles (`coqc
-proof/subtype.v` → `typing.v` → `ssub.v` → `check.v`).
+`forin_iter_typed`, `forin_loop_typed`, `forin_v1_narrowed_nonnil`, `forin_v1_not_nil`
+(and the still-Closed `progress`, `preservation`, `synth_sound`, `check_sound`):
+**Closed under the global context** — no axioms, no `Admitted`, no `Classical`. Whole
+chain compiles (`coqc proof/subtype.v` → `typing.v` → `ssub.v` → `check.v`).

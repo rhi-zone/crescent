@@ -163,9 +163,9 @@ local function gen_scalar(rng, sz)
 	elseif which == 3 then
 		return atom.vnil()
 	elseif which == 4 then
-		return atom.vint(rng:int(-50, 50))
+		return atom.vint()
 	else
-		return atom.vfloat(rng:int(-50, 50))
+		return atom.vfloat()
 	end
 end
 

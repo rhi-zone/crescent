@@ -66,7 +66,7 @@ Definition tag_eq_dec (g1 g2 : tag) : {g1 = g2} + {g1 <> g2}.
 Proof. decide equality. Defined.
 
 Inductive lit : Type :=
-  | LInt  : nat -> lit          (* integer-valued number literal; type AInt   *)
+  | LInt  : lit                 (* integer-valued number literal (no magnitude); type AInt *)
   | LStr  : nat -> lit          (* string literal;                 type AStr   *)
   | LBool : bool -> lit         (* boolean literal;                type ABool  *)
   | LNil  : lit.                (* nil literal;                    type ANil   *)
@@ -83,7 +83,7 @@ Inductive primop : Type :=
   (* METATABLE OPERATOR — CONCATENATION ([..], metamethod [__concat]). [PConcat]
      is a binary operator carried by [tprim], BUT it has NO built-in numeric path:
      [arith_op PConcat = false] and [cmp_op PConcat = false], so [SPrimArith] /
-     [SPrimCmp] never fire on it. Its ONLY typing rule is the metamethod dispatch
+     [SPrimCmpTrue]/[SPrimCmpFalse] never fire on it. Its ONLY typing rule is the metamethod dispatch
      ([TPrimMetaL]/[SPrimMetaL] via [mm_binop PConcat = "__concat"]) — i.e. [..] is
      a PURE operator-metamethod here (plain-string concatenation is a separate,
      DEFERRED concern; the value model has no string-content concatenation). This
@@ -373,43 +373,22 @@ Definition tag_type (g : tag) : BTy :=
 (* The base type of a literal. *)
 Definition lit_type (l : lit) : BTy :=
   match l with
-  | LInt _  => BAtom AInt
+  | LInt    => BAtom AInt
   | LStr _  => BAtom AStr
   | LBool _ => BAtom ABool
   | LNil    => BAtom ANil
   end.
 
-(* INCREMENT 19 — primop classification + the (nat-level) computation. Arithmetic
-   ops produce a NUMBER, comparison ops a BOOLEAN. The TERM literal language has a
-   single number literal [LInt nat] (integer-valued), so number VALUES are
-   [tlit (LInt n)]; arithmetic computes via nat arithmetic. [PDiv] uses [Nat.div]
-   (a representative integer-valued result — the term literal language has no
-   fractional literal; the value model abstracts the exact double, and soundness
-   needs only "the result is a number", so an integer-valued representative is
-   sound — its type [AInt <: ANum] is the declared arithmetic result). Comparison
-   computes the real nat comparison so the sanity examples ([3 < 4 = true]) reduce
-   concretely. *)
+(* INCREMENT 19 — primop classification. Arithmetic ops produce a NUMBER,
+   comparison ops a BOOLEAN. There is NO value-level computation: numbers are
+   type-CLASSES with no magnitude (the "types, not magnitudes" stage-2 refactor),
+   so arithmetic/comparison are ABSTRACT operations (see [SPrimArith]/[SPrimCmp]).
+   [arith_op]/[cmp_op] only CLASSIFY the operator (which step rule fires); the
+   former [prim_arith]/[prim_cmp] nat-level computation functions are REMOVED. *)
 Definition arith_op (op : primop) : bool :=
   match op with PAdd | PSub | PMul | PDiv => true | _ => false end.
 Definition cmp_op (op : primop) : bool :=
   match op with PLt | PLe | PEq => true | _ => false end.
-
-Definition prim_arith (op : primop) (m n : nat) : nat :=
-  match op with
-  | PAdd => m + n
-  | PSub => m - n
-  | PMul => m * n
-  | PDiv => Nat.div m n
-  | _    => 0
-  end.
-
-Definition prim_cmp (op : primop) (m n : nat) : bool :=
-  match op with
-  | PLt => Nat.ltb m n
-  | PLe => Nat.leb m n
-  | PEq => Nat.eqb m n
-  | _   => false
-  end.
 
 (* ===========================================================================
    METATABLE METAMETHOD NAMES — the metamethod-name TABLE. This is ORDINARY DATA
@@ -1487,7 +1466,7 @@ Lemma value_truthy_or_falsy : forall v,
 Proof.
   intros v Hv. unfold truthy_value, falsy_value, is_multi.
   destruct Hv as [l | T b | fs Hfs | n | es Hes | own proto Hvo Hvp].
-  - destruct l as [n | n | [|] | ].
+  - destruct l as [| n | [|] | ].
     + left. split; [intros [H | H]; discriminate | intros [es H]; discriminate].
     + left. split; [intros [H | H]; discriminate | intros [es H]; discriminate].
     + left. split; [intros [H | H]; discriminate | intros [es H]; discriminate]. (* true *)
@@ -1515,7 +1494,7 @@ Proof. intros v [Ht _] Hf. exact (Ht Hf). Qed.
    together the total partition the type test selects on (used in progress). *)
 Definition has_tag (v : tm) (g : tag) : Prop :=
   match g, v with
-  | TgNum,   tlit (LInt _)  => True
+  | TgNum,   tlit LInt      => True
   | TgStr,   tlit (LStr _)  => True
   | TgBool,  tlit (LBool _) => True
   | TgNil,   tlit LNil      => True
@@ -1531,7 +1510,7 @@ Definition has_tag (v : tm) (g : tag) : Prop :=
 Lemma value_has_some_tag : forall v, value v -> exists g, has_tag v g.
 Proof.
   intros v Hv. destruct Hv as [l | T b | fs Hfs | n | es Hes | own proto Hvo Hvp].
-  - destruct l as [n | n | bb | ].
+  - destruct l as [| n | bb | ].
     + exists TgNum; exact I.
     + exists TgStr; exact I.
     + exists TgBool; exact I.
@@ -1605,24 +1584,38 @@ Inductive step : tm * store -> tm * store -> Prop :=
       value (trec fs) ->
       field_lookup k fs = Some v ->
       step (tproj (trec fs) k, st) (v, st)
-  (* INCREMENT 19 — PRIMITIVE operators. Left-to-right congruence reduces the
-     operands to values; then a fully-evaluated primop COMPUTES. Arithmetic on two
-     number values [tlit (LInt m)], [tlit (LInt n)] yields [tlit (LInt (prim_arith
-     op m n))] (nat arithmetic — [3 + 4 = 7]); comparison yields [tlit (LBool
-     (prim_cmp op m n))] (the real nat comparison — [3 < 4 = true]). A [tprim] on a
-     non-number operand is STUCK (a type error the checker prevents). *)
+  (* INCREMENT 19 — PRIMITIVE operators, ABSTRACT (no value computation).
+     Left-to-right congruence reduces the operands to values; then a
+     fully-evaluated primop steps ABSTRACTLY. Numbers are type-CLASSES with no
+     magnitude (the "types, not magnitudes" stage-2 refactor), so the result
+     VALUE is not computed — only its TYPE is known:
+     - [SPrimArith]: a fully-applied arithmetic primop on two number values steps
+       to SOME number value. The only number literal is [LInt] (integer-valued),
+       so the result is [tlit LInt] — a [VInt]-headed number of type [AInt <: ANum]
+       (the declared arithmetic result type). No magnitude is produced.
+     - [SPrimCmp]: a fully-applied comparison steps NON-DETERMINISTICALLY to
+       [tlit (LBool true)] OR [tlit (LBool false)] (two step rules). Without
+       magnitudes the comparison RESULT is unknown; both targets have a real
+       [LBool] head (type [ABool]) so [SIfTrue]/[SIfFalse]/[canon_bool] still fire
+       and a [tif] guard may reduce either way. There is NO determinism lemma in
+       the dev, so the non-determinism is harmless to soundness.
+     A [tprim] on a non-number operand is STUCK (a type error the checker prevents). *)
   | SPrim1 : forall op a a' b st st',
       step (a, st) (a', st') -> step (tprim op a b, st) (tprim op a' b, st')
   | SPrim2 : forall op v b b' st st',
       value v -> step (b, st) (b', st') -> step (tprim op v b, st) (tprim op v b', st')
-  | SPrimArith : forall op m n st,
+  | SPrimArith : forall op st,
       arith_op op = true ->
-      step (tprim op (tlit (LInt m)) (tlit (LInt n)), st)
-           (tlit (LInt (prim_arith op m n)), st)
-  | SPrimCmp : forall op m n st,
+      step (tprim op (tlit LInt) (tlit LInt), st)
+           (tlit LInt, st)
+  | SPrimCmpTrue : forall op st,
       cmp_op op = true ->
-      step (tprim op (tlit (LInt m)) (tlit (LInt n)), st)
-           (tlit (LBool (prim_cmp op m n)), st)
+      step (tprim op (tlit LInt) (tlit LInt), st)
+           (tlit (LBool true), st)
+  | SPrimCmpFalse : forall op st,
+      cmp_op op = true ->
+      step (tprim op (tlit LInt) (tlit LInt), st)
+           (tlit (LBool false), st)
   (* congruence / evaluation contexts (CBV, left-to-right) — store threaded *)
   | SApp1 : forall f f' a st st', step (f, st) (f', st') -> step (tapp f a, st) (tapp f' a, st')
   | SApp2 : forall v a a' st st', value v -> step (a, st) (a', st') -> step (tapp v a, st) (tapp v a', st')
@@ -2559,9 +2552,9 @@ Proof.
   intro a. destruct a.
   - exists VNil; simpl; exact I.
   - exists (VBool true); simpl; exact I.
-  - exists (VInt 0); simpl; exact I.
-  - exists (VInt 0); simpl; exact I.
-  - exists (VInt 0); simpl; exact I.
+  - exists (VInt); simpl; exact I.
+  - exists (VInt); simpl; exact I.
+  - exists (VInt); simpl; exact I.
   - exists (VStr); simpl; exact I.
 Qed.
 
@@ -3503,18 +3496,18 @@ Proof.
 Qed.
 
 (* INCREMENT 19 — canonical forms for NUMBER: a closed value of type [BAtom ANum]
-   is an integer-valued number literal [tlit (LInt n)] (the only number literal in
-   the term language; the 5.1 number model has one number value per double).
+   is THE integer-valued number literal [tlit LInt] (the only number literal in
+   the term language; numbers are type-CLASSES with no magnitude).
    Non-number literals are excluded SEMANTICALLY (their atom has a member outside
    [ANum]); lambdas/records/locations by the arrow/record/ref-not-atom shape facts.
    This is the progress crux for [tprim]: a well-typed primop's operands, when
-   values, are number literals, so the operator computes. *)
+   values, are number literals, so the operator steps (abstractly). *)
 Lemma canon_num : forall S e,
-  has_type S [] e (BAtom ANum) -> value e -> exists n, e = tlit (LInt n).
+  has_type S [] e (BAtom ANum) -> value e -> e = tlit LInt.
 Proof.
   intros S e Hty Hv. destruct Hv as [l | T b | fs Hfs | n | es Hes | own proto Hvo Hvp].
   - apply inv_lit in Hty. destruct l; simpl in Hty.
-    + exists n; reflexivity.
+    + reflexivity.
     + exfalso. apply rsub_sound in Hty. pose proof (Hty (VStr) I) as Hbad. exact Hbad.
     + exfalso. apply rsub_sound in Hty. pose proof (Hty (VBool b) I) as Hbad. exact Hbad.
     + exfalso. apply rsub_sound in Hty. pose proof (Hty VNil I) as Hbad. exact Hbad.
@@ -3562,7 +3555,7 @@ Lemma canon_bool : forall S e,
 Proof.
   intros S e Hty Hv. destruct Hv as [l | T b | fs Hfs | n | es Hes | own proto Hvo Hvp].
   - apply inv_lit in Hty. destruct l; simpl in Hty.
-    + exfalso. apply rsub_sound in Hty. pose proof (Hty (VInt 0) I) as Hbad. exact Hbad.
+    + exfalso. apply rsub_sound in Hty. pose proof (Hty (VInt) I) as Hbad. exact Hbad.
     + exfalso. apply rsub_sound in Hty. pose proof (Hty (VStr) I) as Hbad. exact Hbad.
     + exists b; reflexivity.
     + exfalso. apply rsub_sound in Hty. pose proof (Hty VNil I) as Hbad. exact Hbad.
@@ -3604,9 +3597,9 @@ Proof.
   intros S v U Hty Hv [Hnf Hnm]. unfold truthy_type.
   destruct Hv as [l | T b | fs Hfs | n | es Hes | own proto Hvo Hvp].
   - (* literal: truthy ⇒ LInt / LStr / LBool true *)
-    destruct l as [n | n | [|] | ].
+    destruct l as [| n | [|] | ].
     + (* LInt : AInt ≤ ANum ≤ truthy_type *)
-      eapply TSub; [ apply (TLit S [] (LInt n)) | ]. apply RsSsub. simpl.
+      eapply TSub; [ apply (TLit S [] LInt) | ]. apply RsSsub. simpl.
       apply SsUnionInR. apply SsUnionInL. apply SsAtom. apply ALInt.
     + (* LStr : AStr ≤ truthy_type *)
       eapply TSub; [ apply (TLit S [] (LStr n)) | ]. apply RsSsub. simpl.
@@ -3686,10 +3679,10 @@ Lemma tag_narrows : forall S v U g,
 Proof.
   intros S v U g Hty Hv Hg. destruct Hv as [l | T b | fs Hfs | n | es Hes | own proto Hvo Hvp].
   - (* literal: the tag is forced by the literal kind *)
-    destruct l as [n | n | bb | ]; destruct g; simpl in Hg; try contradiction;
+    destruct l as [| n | bb | ]; destruct g; simpl in Hg; try contradiction;
       simpl tag_type.
     + (* LInt, TgNum : AInt ≤ ANum *)
-      eapply TSub; [ apply (TLit S [] (LInt n)) | ]. apply RsSsub. apply SsAtom. apply ALInt.
+      eapply TSub; [ apply (TLit S [] LInt) | ]. apply RsSsub. apply SsAtom. apply ALInt.
     + (* LStr, TgStr *) apply (TLit S [] (LStr n)).
     + (* LBool, TgBool *) apply (TLit S [] (LBool bb)).
     + (* LNil, TgNil *) apply (TLit S [] LNil).
@@ -5241,11 +5234,12 @@ Proof.
     exists S. split; [ apply extends_refl | split; [ | exact Hwt ] ].
     destruct Hres as [[_ Hd] | [Hcr _]].
     + eapply TSub;
-        [ eapply TSub; [ apply (TLit S [] (LInt (prim_arith op m n)))
+        [ eapply TSub; [ apply (TLit S [] LInt)
                        | apply RsSsub; apply SsAtom; apply ALInt ]
         | exact Hd ].
     + destruct op; simpl in H, Hcr; discriminate.
-  - (* SPrimCmp: both operands are number literals (NUMERIC path; both metamethods refuted). *)
+  - (* SPrimCmpTrue: both operands are number literals (NUMERIC path; both metamethods refuted).
+       The result is [tlit (LBool true)] : ABool — typed by [lit_type]. *)
     apply inv_prim in Hty.
     destruct Hty as [ [Ha [Hb Hres]]
                     | [ [ofs [proto [M [Self [Other [R [Ea _]]]]]]]
@@ -5254,7 +5248,17 @@ Proof.
     exists S. split; [ apply extends_refl | split; [ | exact Hwt ] ].
     destruct Hres as [[Har _] | [_ Hd]].
     + destruct op; simpl in H, Har; discriminate.
-    + eapply TSub; [ apply (TLit S [] (LBool (prim_cmp op m n))) | exact Hd ].
+    + eapply TSub; [ apply (TLit S [] (LBool true)) | exact Hd ].
+  - (* SPrimCmpFalse: symmetric; result [tlit (LBool false)] : ABool. *)
+    apply inv_prim in Hty.
+    destruct Hty as [ [Ha [Hb Hres]]
+                    | [ [ofs [proto [M [Self [Other [R [Ea _]]]]]]]
+                      | [al [ofs [proto [M [Other [R [Eb _]]]]] ] ] ] ];
+      [ | discriminate Ea | discriminate Eb ].
+    exists S. split; [ apply extends_refl | split; [ | exact Hwt ] ].
+    destruct Hres as [[Har _] | [_ Hd]].
+    + destruct op; simpl in H, Har; discriminate.
+    + eapply TSub; [ apply (TLit S [] (LBool false)) | exact Hd ].
   - (* SApp1: function steps (ARROW or METAMETHOD-table function) *)
     apply inv_app in Hty.
     destruct Hty as [ [A [B [Hf [Ha Hsub]]]] | [ofs [proto [M [Self [A [R [Ef [Htbl [Hin [Hself [Ha Hd]]]]]]]]]]] ].
@@ -6096,26 +6100,27 @@ Proof.
       destruct (IHa eq_refl st Hwt) as [Hva | [a' [sta Ha']]] end.
     + match goal with [ IHb : [] = [] -> forall st, _ -> value b \/ _ |- _ ] =>
         destruct (IHb eq_refl st Hwt) as [Hvb | [b' [stb Hb']]] end.
-      * (* both values: canonical-forms ⇒ number literals ⇒ COMPUTE *)
+      * (* both values: canonical-forms ⇒ number literals ⇒ step ABSTRACTLY *)
         match goal with [ Ha : has_type S [] a (BAtom ANum) |- _ ] =>
-          destruct (canon_num S a Ha Hva) as [m Ea] end.
+          pose proof (canon_num S a Ha Hva) as Ea end.
         match goal with [ Hb : has_type S [] b (BAtom ANum) |- _ ] =>
-          destruct (canon_num S b Hb Hvb) as [nn Eb] end.
-        subst a b. exists (tlit (LInt (prim_arith op m nn))), st.
+          pose proof (canon_num S b Hb Hvb) as Eb end.
+        subst a b. exists (tlit LInt), st.
         apply SPrimArith; assumption.
       * exists (tprim op a b'), stb. apply SPrim2; assumption.
     + exists (tprim op a' b), sta. apply SPrim1; exact Ha'.
-  - (* TPrimCmp *) intros st Hwt. right.
+  - (* TPrimCmp — pick the [true] target (non-determinism: either fires) *)
+    intros st Hwt. right.
     match goal with [ IHa : [] = [] -> forall st, _ -> value a \/ _ |- _ ] =>
       destruct (IHa eq_refl st Hwt) as [Hva | [a' [sta Ha']]] end.
     + match goal with [ IHb : [] = [] -> forall st, _ -> value b \/ _ |- _ ] =>
         destruct (IHb eq_refl st Hwt) as [Hvb | [b' [stb Hb']]] end.
       * match goal with [ Ha : has_type S [] a (BAtom ANum) |- _ ] =>
-          destruct (canon_num S a Ha Hva) as [m Ea] end.
+          pose proof (canon_num S a Ha Hva) as Ea end.
         match goal with [ Hb : has_type S [] b (BAtom ANum) |- _ ] =>
-          destruct (canon_num S b Hb Hvb) as [nn Eb] end.
-        subst a b. exists (tlit (LBool (prim_cmp op m nn))), st.
-        apply SPrimCmp; assumption.
+          pose proof (canon_num S b Hb Hvb) as Eb end.
+        subst a b. exists (tlit (LBool true)), st.
+        apply SPrimCmpTrue; assumption.
       * exists (tprim op a b'), stb. apply SPrim2; assumption.
     + exists (tprim op a' b), sta. apply SPrim1; exact Ha'.
   - (* TApp *) intros st Hwt. right.
@@ -6491,21 +6496,21 @@ Lemma store_well_typed_nil : store_well_typed [] [].
 Proof. split; [ reflexivity | intros n T Hn; destruct n; simpl in Hn; discriminate ]. Qed.
 
 (* (λx:Int. x) 3 is well typed at Int and steps (in any store) to the literal 3. *)
-Definition ex_id_app : tm := tapp (tlam (BAtom AInt) (tvar 0)) (tlit (LInt 3)).
+Definition ex_id_app : tm := tapp (tlam (BAtom AInt) (tvar 0)) (tlit (LInt)).
 
 Example ex_id_app_typed : has_type [] [] ex_id_app (BAtom AInt).
 Proof. eapply TApp; [ apply TLam; apply TVar; reflexivity | apply TLit ]. Qed.
 
-Example ex_id_app_steps : forall st, step (ex_id_app, st) (tlit (LInt 3), st).
+Example ex_id_app_steps : forall st, step (ex_id_app, st) (tlit (LInt), st).
 Proof.
   intro st. unfold ex_id_app.
-  replace (tlit (LInt 3)) with (subst 0 (tlit (LInt 3)) (tvar 0)) by reflexivity.
+  replace (tlit (LInt)) with (subst 0 (tlit (LInt)) (tvar 0)) by reflexivity.
   apply SBeta. apply VLit.
 Qed.
 
 (* {a = 7, b = true}.a is well typed at Int and steps to 7. *)
 Definition ex_rec : tm :=
-  trec [("a"%string, tlit (LInt 7)); ("b"%string, tlit (LBool true))].
+  trec [("a"%string, tlit (LInt)); ("b"%string, tlit (LBool true))].
 Definition ex_proj : tm := tproj ex_rec "a".
 
 Example ex_proj_typed : has_type [] [] ex_proj (BAtom AInt).
@@ -6524,23 +6529,23 @@ Example ex_progress : value ex_id_app \/ exists e' st', step (ex_id_app, []) (e'
 Proof. apply (progress [] ex_id_app (BAtom AInt) [] ex_id_app_typed store_well_typed_nil). Qed.
 
 Example ex_preservation :
-  exists S', extends S' [] /\ has_type S' [] (tlit (LInt 3)) (BAtom AInt) /\ store_well_typed S' [].
+  exists S', extends S' [] /\ has_type S' [] (tlit (LInt)) (BAtom AInt) /\ store_well_typed S' [].
 Proof.
-  apply (preservation [] ex_id_app (BAtom AInt) [] (tlit (LInt 3)) []
+  apply (preservation [] ex_id_app (BAtom AInt) [] (tlit (LInt)) []
            ex_id_app_typed store_well_typed_nil (ex_id_app_steps [])).
 Qed.
 
 (* a genuinely UNION-typed conditional that STEPS. *)
-Definition ex_if : tm := tif (tlit (LBool true)) (tlit (LInt 3)) (tlit (LStr 0)).
+Definition ex_if : tm := tif (tlit (LBool true)) (tlit (LInt)) (tlit (LStr 0)).
 
 Example ex_if_typed : has_type [] [] ex_if (BUnion (BAtom AInt) (BAtom AStr)).
 Proof. unfold ex_if. apply TIf; [ apply TLit | apply TLit | apply TLit ]. Qed.
 
-Example ex_if_steps : forall st, step (ex_if, st) (tlit (LInt 3), st).
+Example ex_if_steps : forall st, step (ex_if, st) (tlit (LInt), st).
 Proof. intro st. unfold ex_if. apply SIfTrue. Qed.
 
 (* ILL-TYPED term rejected: projecting field "a" off the integer 3. *)
-Definition ex_bad : tm := tproj (tlit (LInt 3)) "a".
+Definition ex_bad : tm := tproj (tlit (LInt)) "a".
 
 Example ex_bad_untyped : forall S T, ~ has_type S [] ex_bad T.
 Proof.
@@ -6551,7 +6556,7 @@ Proof.
 Qed.
 
 (* applying a non-function. *)
-Definition ex_bad2 : tm := tapp (tlit (LInt 3)) (tlit (LInt 0)).
+Definition ex_bad2 : tm := tapp (tlit (LInt)) (tlit (LInt)).
 
 Example ex_bad2_untyped : forall S T, ~ has_type S [] ex_bad2 T.
 Proof.
@@ -6568,17 +6573,17 @@ Qed.
    same use WITHOUT narrowing is REJECTED.
    =========================================================================== *)
 
-Definition g_consumer : tm := tlam truthy_type (tlit (LInt 0)).
+Definition g_consumer : tm := tlam truthy_type (tlit (LInt)).
 
 Example g_consumer_typed : has_type [] [] g_consumer (BArrow truthy_type (BAtom AInt)).
-Proof. apply TLam. apply (TLit [] (truthy_type :: []) (LInt 0)). Qed.
+Proof. apply TLam. apply (TLit [] (truthy_type :: []) (LInt)). Qed.
 
 Definition payoff_term : tm :=
   tlet g_consumer
-    (tlet (tlit (LInt 5))
+    (tlet (tlit (LInt))
       (tifn (tvar 0)
         (tapp (tvar 2) (tvar 0))
-        (tlit (LInt 0)))).
+        (tlit (LInt)))).
 
 Example payoff_types_WITH_narrowing :
   has_type [] [] payoff_term (BUnion (BAtom AInt) (BAtom AInt)).
@@ -6586,14 +6591,14 @@ Proof.
   unfold payoff_term.
   eapply TLet; [ apply g_consumer_typed | ].
   eapply TLet.
-  - eapply TSub; [ apply (TLit [] _ (LInt 5))
+  - eapply TSub; [ apply (TLit [] _ (LInt))
                  | apply RsSsub; apply (ssub_union_inl (BAtom AInt) (BAtom ANil)) ].
   - eapply TIfn.
     + apply TVar. reflexivity.
     + eapply TApp.
       * apply (TVar _ _ 2). reflexivity.
       * apply (TVar _ _ 0). reflexivity.
-    + apply (TLit _ _ (LInt 0)).
+    + apply (TLit _ _ (LInt)).
 Qed.
 
 Example payoff_rejected_WITHOUT_narrowing :
@@ -6621,17 +6626,17 @@ Qed.
    INCREMENT 15 — THE TYPE-TEST NARROWING PAYOFF (Σ-threaded).
    =========================================================================== *)
 
-Definition h_consumer : tm := tlam (BAtom ANum) (tlit (LInt 0)).
+Definition h_consumer : tm := tlam (BAtom ANum) (tlit (LInt)).
 
 Example h_consumer_typed : has_type [] [] h_consumer (BArrow (BAtom ANum) (BAtom AInt)).
-Proof. apply TLam. apply (TLit [] (BAtom ANum :: []) (LInt 0)). Qed.
+Proof. apply TLam. apply (TLit [] (BAtom ANum :: []) (LInt)). Qed.
 
 Definition tt_payoff_term : tm :=
   tlet h_consumer
-    (tlet (tlit (LInt 5))
+    (tlet (tlit (LInt))
       (ttypetest TgNum (tvar 0)
         (tapp (tvar 2) (tvar 0))
-        (tlit (LInt 0)))).
+        (tlit (LInt)))).
 
 Example tt_payoff_types_WITH_narrowing :
   has_type [] [] tt_payoff_term (BUnion (BAtom AInt) (BAtom AInt)).
@@ -6639,14 +6644,14 @@ Proof.
   unfold tt_payoff_term.
   eapply TLet; [ apply h_consumer_typed | ].
   eapply TLet.
-  - eapply TSub; [ apply (TLit [] _ (LInt 5)) | ].
+  - eapply TSub; [ apply (TLit [] _ (LInt)) | ].
     apply RsSsub. apply SsUnionInR. apply SsAtom. apply ALInt.
   - eapply (TTypeTest _ _ TgNum _ _ _ (BUnion (BAtom AStr) (BAtom ANum))).
     + apply TVar. reflexivity.
     + eapply TApp.
       * apply (TVar _ _ 2). reflexivity.
       * apply (TVar _ _ 0). reflexivity.
-    + apply (TLit _ _ (LInt 0)).
+    + apply (TLit _ _ (LInt)).
 Qed.
 
 Example tt_payoff_rejected_WITHOUT_narrowing :
@@ -6668,8 +6673,8 @@ Qed.
 
 (* type-test selection by runtime tag. *)
 Example tt_select_then : forall st,
-  step (ttypetest TgNum (tlit (LInt 5)) (tvar 0) (tlit (LInt 9)), st)
-       (subst 0 (tlit (LInt 5)) (tvar 0), st).
+  step (ttypetest TgNum (tlit (LInt)) (tvar 0) (tlit (LInt)), st)
+       (subst 0 (tlit (LInt)) (tvar 0), st).
 Proof. intro st. apply STtTrue; [ apply VLit | exact I ]. Qed.
 
 (* ===========================================================================
@@ -6701,7 +6706,7 @@ Proof. apply (progress [] diverge (BAtom AInt) [] diverge_typed store_well_typed
    =========================================================================== *)
 
 (* (1) A REFERENCE HOLDING A RECORD. [alloc {a = 7}] : BRef (BRec [("a",Int)]). *)
-Definition ref_of_rec : tm := talloc (trec [("a"%string, tlit (LInt 7))]).
+Definition ref_of_rec : tm := talloc (trec [("a"%string, tlit (LInt))]).
 
 Example ref_of_rec_typed :
   has_type [] [] ref_of_rec (BRef (BRec [("a"%string, BAtom AInt)])).
@@ -6898,7 +6903,7 @@ Qed.
    [tlet (t.x := 9) (t.x)] is well typed at Int. *)
 Example mutation_typed :
   has_type [ BAtom AInt ] []
-    (tlet (tassign (tproj (mtable_val 0) "x"%string) (tlit (LInt 9)))
+    (tlet (tassign (tproj (mtable_val 0) "x"%string) (tlit (LInt)))
           (tderef (tproj (mtable_val 0) "x"%string)))
     (BAtom AInt).
 Proof.
@@ -6917,10 +6922,10 @@ Qed.
    (3) the read: proj ⇒ loc 0, then deref ⇒ 9. *)
 Example mutation_steps :
   multistep
-    (tlet (tassign (tproj (mtable_val 0) "x"%string) (tlit (LInt 9)))
+    (tlet (tassign (tproj (mtable_val 0) "x"%string) (tlit (LInt)))
           (tderef (tproj (mtable_val 0) "x"%string)),
-     [tlit (LInt 7)])
-    (tlit (LInt 9), [tlit (LInt 9)]).
+     [tlit (LInt)])
+    (tlit (LInt), [tlit (LInt)]).
 Proof.
   (* write: project the field to its location 0 (store unchanged) *)
   eapply MSstep.
@@ -6955,7 +6960,7 @@ Qed.
 Definition alias_prog : tm :=
   tlet (mtable_val 0)                                    (* a := <table>           *)
     (tlet (tvar 0)                                       (* b := a                 *)
-      (tlet (tassign (tproj (tvar 1) "x"%string) (tlit (LInt 9)))  (* a.x := 9     *)
+      (tlet (tassign (tproj (tvar 1) "x"%string) (tlit (LInt)))  (* a.x := 9     *)
             (tderef (tproj (tvar 1) "x"%string)))).      (* b.x  (reads via alias) *)
 
 (* In this program, after the binders, de Bruijn [tvar 1] in the innermost body
@@ -6979,7 +6984,7 @@ Qed.
 (* STEPS: from store [7], the aliasing program multi-steps to 9 — the write
    through [a] is observed by the read through [b] (both touch location 0). *)
 Example aliasing_steps :
-  multistep (alias_prog, [tlit (LInt 7)]) (tlit (LInt 9), [tlit (LInt 9)]).
+  multistep (alias_prog, [tlit (LInt)]) (tlit (LInt), [tlit (LInt)]).
 Proof.
   unfold alias_prog.
   (* bind a := <table value> (a value already) *)
@@ -7047,7 +7052,7 @@ Qed.
    the unit/nil result type. *)
 Example field_invariance_accepted :
   has_type [ BAtom AInt ] []
-    (tassign (tproj (mtable_val 0) "x"%string) (tlit (LInt 9))) (BAtom ANil).
+    (tassign (tproj (mtable_val 0) "x"%string) (tlit (LInt))) (BAtom ANil).
 Proof.
   eapply TAssign; [ apply mtable_proj_x; reflexivity | apply TLit ].
 Qed.
@@ -7059,9 +7064,9 @@ Example field_cell_invariant :
   ~ rsub (BRef (BAtom AInt)) (BRef (BAtom ANum)).
 Proof.
   intro H. apply rsub_ref_inv in H. destruct H as [_ HNumInt].
-  (* HNumInt : rsub Num Int — would make every number an Int; refute at VFloat 0. *)
+  (* HNumInt : rsub Num Int — would make every number an Int; refute at VFloat. *)
   apply rsub_sound in HNumInt.
-  pose proof (HNumInt (VFloat 0) I) as Hbad. simpl in Hbad. exact Hbad.
+  pose proof (HNumInt (VFloat) I) as Hbad. simpl in Hbad. exact Hbad.
 Qed.
 
 (* ===========================================================================
@@ -7129,8 +7134,8 @@ Qed.
 (* The full reassignable-local program (un-allocated form): allocate the cell, bind
    it as [x] (de Bruijn 0), reassign 9, then read. Built with [tlet]s. *)
 Definition reassign_local_prog : tm :=
-  tlet (talloc (tlit (LInt 7)))                 (* local x = 7  (x : BRef Int)        *)
-    (tlet (tassign (tvar 0) (tlit (LInt 9)))    (* x := 9                             *)
+  tlet (talloc (tlit (LInt)))                 (* local x = 7  (x : BRef Int)        *)
+    (tlet (tassign (tvar 0) (tlit (LInt)))    (* x := 9                             *)
           (tderef (tvar 1))).                   (* read x  (de Bruijn 1 past the nil) *)
 
 (* TYPING at Int: the local cell is [BRef Int]; reassigning 9 is well typed
@@ -7150,7 +7155,7 @@ Qed.
 (* STEPS: from the EMPTY store, the program multi-steps to 9 — the reassignment
    wrote the cell, the read observes the NEW value. *)
 Example reassign_local_steps :
-  multistep (reassign_local_prog, []) (tlit (LInt 9), [tlit (LInt 9)]).
+  multistep (reassign_local_prog, []) (tlit (LInt), [tlit (LInt)]).
 Proof.
   unfold reassign_local_prog.
   (* alloc 7: append the cell, location 0, store [] -> [7] *)
@@ -7175,82 +7180,47 @@ Qed.
    true; "s" + 1 is REJECTED (operand not a number); a well-typed arithmetic chain.
    =========================================================================== *)
 
-(* [3 + 4] is well typed at [ANum] and steps (single step) to [7]. *)
-Definition ex_add : tm := tprim PAdd (tlit (LInt 3)) (tlit (LInt 4)).
+(* [3 + 4] is well typed at [ANum]. (The operational value-computation demos
+   [ex_add_steps]/[compute_add]/[ex_lt_steps]/[compute_lt]/[ex_chain_steps]/
+   [ex_add_preservation] were DELETED in the "types, not magnitudes" stage-2
+   refactor — they asserted concrete computed results [7]/[true]/[14], which the
+   abstract (magnitude-free) primitives no longer produce. Soundness of [tprim]
+   is carried by the generic progress/preservation, not by these payoffs.) *)
+Definition ex_add : tm := tprim PAdd (tlit LInt) (tlit LInt).
 
 Example ex_add_typed : has_type [] [] ex_add (BAtom ANum).
 Proof.
   unfold ex_add. apply TPrimArith; [ reflexivity | | ];
-    (eapply TSub; [ apply (TLit [] [] (LInt _)) | apply RsSsub; apply SsAtom; apply ALInt ]).
+    (eapply TSub; [ apply (TLit [] [] LInt) | apply RsSsub; apply SsAtom; apply ALInt ]).
 Qed.
 
-Example ex_add_steps : forall st,
-  step (ex_add, st) (tlit (LInt 7), st).
-Proof.
-  intro st. unfold ex_add.
-  replace (tlit (LInt 7)) with (tlit (LInt (prim_arith PAdd 3 4))) by reflexivity.
-  apply SPrimArith. reflexivity.
-Qed.
-
-(* and via [Compute] the arithmetic genuinely reduces. *)
-Example compute_add : prim_arith PAdd 3 4 = 7. Proof. reflexivity. Qed.
-
-(* [3 < 4] types at the boolean type and steps to [true]. *)
-Definition ex_lt : tm := tprim PLt (tlit (LInt 3)) (tlit (LInt 4)).
+(* [3 < 4] types at the boolean type. *)
+Definition ex_lt : tm := tprim PLt (tlit LInt) (tlit LInt).
 
 Example ex_lt_typed : has_type [] [] ex_lt (BAtom ABool).
 Proof.
   unfold ex_lt. apply TPrimCmp; [ reflexivity | | ];
-    (eapply TSub; [ apply (TLit [] [] (LInt _)) | apply RsSsub; apply SsAtom; apply ALInt ]).
+    (eapply TSub; [ apply (TLit [] [] LInt) | apply RsSsub; apply SsAtom; apply ALInt ]).
 Qed.
 
-Example ex_lt_steps : forall st,
-  step (ex_lt, st) (tlit (LBool true), st).
-Proof.
-  intro st. unfold ex_lt.
-  replace (tlit (LBool true)) with (tlit (LBool (prim_cmp PLt 3 4))) by reflexivity.
-  apply SPrimCmp. reflexivity.
-Qed.
-
-Example compute_lt : prim_cmp PLt 3 4 = true. Proof. reflexivity. Qed.
-
-(* a WELL-TYPED arithmetic chain: [(3 + 4) * 2] types at [ANum] and multi-steps to
-   [14]. Exercises the operand congruence (the inner [3+4] reduces first). *)
+(* a WELL-TYPED arithmetic chain: [(3 + 4) * 2] types at [ANum]. *)
 Definition ex_chain : tm :=
-  tprim PMul (tprim PAdd (tlit (LInt 3)) (tlit (LInt 4))) (tlit (LInt 2)).
+  tprim PMul (tprim PAdd (tlit LInt) (tlit LInt)) (tlit LInt).
 
 Example ex_chain_typed : has_type [] [] ex_chain (BAtom ANum).
 Proof.
   unfold ex_chain. apply TPrimArith; [ reflexivity | apply ex_add_typed | ].
-  eapply TSub; [ apply (TLit [] [] (LInt 2)) | apply RsSsub; apply SsAtom; apply ALInt ].
+  eapply TSub; [ apply (TLit [] [] LInt) | apply RsSsub; apply SsAtom; apply ALInt ].
 Qed.
 
-Example ex_chain_steps :
-  multistep (ex_chain, []) (tlit (LInt 14), []).
-Proof.
-  unfold ex_chain.
-  (* reduce the inner [3 + 4] to [7] under the left operand *)
-  eapply MSstep. { apply SPrim1. apply SPrimArith. reflexivity. }
-  (* now [7 * 2] computes to [14] *)
-  eapply MSstep. { apply SPrimArith. reflexivity. }
-  simpl. apply MSrefl.
-Qed.
-
-(* progress + preservation instantiated on [3 + 4] (a sanity smoke-test). *)
+(* progress instantiated on [3 + 4] (a sanity smoke-test — a step exists). *)
 Example ex_add_progress :
   value ex_add \/ exists e' st', step (ex_add, []) (e', st').
 Proof. apply (progress [] ex_add (BAtom ANum) [] ex_add_typed store_well_typed_nil). Qed.
 
-Example ex_add_preservation :
-  exists S', extends S' [] /\ has_type S' [] (tlit (LInt 7)) (BAtom ANum) /\ store_well_typed S' [].
-Proof.
-  apply (preservation [] ex_add (BAtom ANum) [] (tlit (LInt 7)) []
-           ex_add_typed store_well_typed_nil (ex_add_steps [])).
-Qed.
-
 (* ILL-TYPED: [ "s" + 1 ] is REJECTED — the string operand is not a number. Proved
    at EVERY type (a string [: AStr] is not [rsub]-below [ANum]). *)
-Definition ex_bad_add : tm := tprim PAdd (tlit (LStr 0)) (tlit (LInt 1)).
+Definition ex_bad_add : tm := tprim PAdd (tlit (LStr 0)) (tlit (LInt)).
 
 Example ex_bad_add_untyped : forall S T, ~ has_type S [] ex_bad_add T.
 Proof.
@@ -7461,27 +7431,27 @@ Qed.
    NUMBER TYPING NOTE. The cells are [BRef ANum], not [BRef AInt]: arithmetic
    ([tprim PAdd]) produces [ANum] (the declared arithmetic result type — see
    [TPrimArith]), and a mutable [BRef] cell is INVARIANT, so to store [!s + !i :
-   ANum] back into the cell the cell must be a [Num] cell. The initial [LInt 0]
+   ANum] back into the cell the cell must be a [Num] cell. The initial [LInt]
    (which types at [AInt]) widens to [ANum] by subsumption at allocation. This is
    exactly Lua's number model: there is one number type. *)
    (* =========================================================================== *)
 
 (* the loop condition  [ !i < n ]  with [i] at de Bruijn 2 (under fix + 2 lets). *)
 Definition sumloop_cond (n : nat) : tm :=
-  tprim PLt (tderef (tvar 2)) (tlit (LInt n)).
+  tprim PLt (tderef (tvar 2)) (tlit (LInt)).
 
 (* the loop body  [ s := !s + !i ; i := !i + 1 ]  ([s]=dB1, [i]=dB2). *)
 Definition sumloop_body : tm :=
   tseq
     (tassign (tvar 1) (tprim PAdd (tderef (tvar 1)) (tderef (tvar 2))))
-    (tassign (tvar 2) (tprim PAdd (tderef (tvar 2)) (tlit (LInt 1)))).
+    (tassign (tvar 2) (tprim PAdd (tderef (tvar 2)) (tlit (LInt)))).
 
 (* the whole program (un-allocated): alloc i, alloc s, the while, then read s.
    Outside the fix the cells are [s]=dB0, [i]=dB1; the final [!s] reads dB1 (past
    the unit result of the while if we sequence it — here we sequence while ; !s). *)
 Definition sumloop_prog (n : nat) : tm :=
-  tlet (talloc (tlit (LInt 0)))           (* local i = ref 0   (i = dB0)        *)
-    (tlet (talloc (tlit (LInt 0)))        (* local s = ref 0   (s = dB0, i=dB1) *)
+  tlet (talloc (tlit (LInt)))           (* local i = ref 0   (i = dB0)        *)
+    (tlet (talloc (tlit (LInt)))        (* local s = ref 0   (s = dB0, i=dB1) *)
       (tseq (twhile (sumloop_cond n) sumloop_body)   (* while ... end          *)
             (tderef (tvar 0)))).          (* !s  (s = dB0 here)                 *)
 
@@ -7497,7 +7467,7 @@ Proof.
   - (* condition  !i < n : Bool. [i] = de Bruijn 2 under [Tunit :: BRef Num :: BRef Num]. *)
     unfold sumloop_cond. apply TPrimCmp; [ reflexivity | | ].
     + apply TDeref with (T := BAtom ANum). apply TVar. reflexivity.
-    + eapply TSub; [ apply (TLit _ _ (LInt n)) | apply RsSsub; apply SsAtom; apply ALInt ].
+    + eapply TSub; [ apply (TLit _ _ (LInt)) | apply RsSsub; apply SsAtom; apply ALInt ].
   - (* body : two assignments sequenced, each a unit statement. *)
     unfold sumloop_body. eapply tseq_typed.
     + (* s := !s + !i  ([s]=dB1, [i]=dB2) : nil — the Num sum into the Num cell *)
@@ -7511,7 +7481,7 @@ Proof.
       * apply TVar. reflexivity.
       * apply TPrimArith; [ reflexivity | | ].
         -- apply TDeref with (T := BAtom ANum). apply TVar. reflexivity.
-        -- eapply TSub; [ apply (TLit _ _ (LInt 1)) | apply RsSsub; apply SsAtom; apply ALInt ].
+        -- eapply TSub; [ apply (TLit _ _ (LInt)) | apply RsSsub; apply SsAtom; apply ALInt ].
 Qed.
 
 (* THE KEY RESULT: the whole imperative program TYPES at [ANum]. (The body's
@@ -7524,14 +7494,14 @@ Proof.
   (* The cells are reached purely through de Bruijn VARIABLES ([tvar]), never
      through a [tloc] literal, so the store-typing [S] is never consulted and can
      stay [[]] for the WHOLE program: [TAlloc] produces [BRef Num] directly from
-     the contained value's type, no [S] lookup. The initial [LInt 0 : AInt] widens
+     the contained value's type, no [S] lookup. The initial [LInt : AInt] widens
      to [ANum] at alloc (Lua's single number type). *)
   apply TLet with (A := BRef (BAtom ANum)).
   { apply TAlloc with (T := BAtom ANum).
-    eapply TSub; [ apply (TLit [] [] (LInt 0)) | apply RsSsub; apply SsAtom; apply ALInt ]. }
+    eapply TSub; [ apply (TLit [] [] (LInt)) | apply RsSsub; apply SsAtom; apply ALInt ]. }
   apply TLet with (A := BRef (BAtom ANum)).
   { apply TAlloc with (T := BAtom ANum).
-    eapply TSub; [ apply (TLit [] _ (LInt 0)) | apply RsSsub; apply SsAtom; apply ALInt ]. }
+    eapply TSub; [ apply (TLit [] _ (LInt)) | apply RsSsub; apply SsAtom; apply ALInt ]. }
   (* now in context [BRef Num (s, dB0) ; BRef Num (i, dB1)], type [while ; !s].
      [sumloop_loop_typed] needs store entries at 0,1 — but the loop reads its cells
      via [tvar] (de Bruijn), not [tloc], so those [S] hypotheses are vacuously
@@ -7544,30 +7514,26 @@ Proof.
 Qed.
 
 (* ===========================================================================
-   EXAMPLE 7 — THE LOOP STEPS CORRECTLY (concrete small bound).
+   EXAMPLE 7 — THE COUNTER LOOP TYPES (a unit statement).
 
-   We take a MINIMAL concrete instance and reduce it END-TO-END through the store:
-   a single-cell counter loop  [ while (!i < 1) do i := !i + 1 end ]  with [i]
-   starting at 0. The loop unfolds, the condition reads the CURRENT store (0 < 1 =
-   true), the body MUTATES the cell (i ↦ 1), it re-unfolds, the condition is now
-   false (1 < 1 = false), and the loop terminates with the unit value. This
-   exhibits the load-bearing dynamics: store-dependent condition, mutating body,
-   store-driven termination.
-
-   (The full SUM loop [sumloop_prog] reduces by the SAME mechanism — alloc, unfold,
-   store-read condition, mutate, re-unfold, terminate, final read — only with more
-   iterations and a second cell; the typing of that full program is proved above
-   in [sumloop_prog_typed]. We reduce the single-cell instance fully to keep the
-   reduction trace machine-checked end-to-end and honest about depth.)
+   A single-cell counter loop  [ while (!i < 1) do i := !i + 1 end ]. We prove only
+   that it is WELL-TYPED ([cinc_loop_typed]). The former end-to-end reduction
+   (store-driven condition, mutating body, store-driven termination) was a
+   VALUE-COMPUTATION demo — it depended on computed guard booleans and distinct
+   same-class integers across store iterations — and is DELETED under the "types,
+   not magnitudes" stage-2 refactor (numbers have no magnitude; comparison is
+   abstract/non-deterministic). The loop's soundness is carried by its typing plus
+   the generic progress/preservation. (The full SUM loop [sumloop_prog] is likewise
+   only TYPED, in [sumloop_prog_typed] above.)
    =========================================================================== *)
 
 (* the counter loop body  [ i := !i + 1 ]  with [i] at de Bruijn 0 (under just the
    fix self-ref binder, i.e. the cell is the only surrounding local — but here we
    keep [i] as a closed LOCATION [tloc 0] so the reduction is concrete in the
    store; the loop has no free locals, the self-ref is dB0). *)
-Definition cinc_cond (n : nat) : tm := tprim PLt (tderef (tloc 0)) (tlit (LInt n)).
+Definition cinc_cond (n : nat) : tm := tprim PLt (tderef (tloc 0)) (tlit (LInt)).
 Definition cinc_body : tm :=
-  tassign (tloc 0) (tprim PAdd (tderef (tloc 0)) (tlit (LInt 1))).
+  tassign (tloc 0) (tprim PAdd (tderef (tloc 0)) (tlit (LInt))).
 Definition cinc_loop (n : nat) : tm := twhile (cinc_cond n) cinc_body.
 
 (* since [cinc_cond]/[cinc_body] are CLOSED (only [tloc 0], a value), the fix-
@@ -7577,62 +7543,14 @@ Proof. intros n s. reflexivity. Qed.
 Lemma cinc_body_closed : forall s, subst 0 s cinc_body = cinc_body.
 Proof. intro s. reflexivity. Qed.
 
-(* ONE FULL ITERATION, store-driven, machine-checked: from store [0], the loop
-   unfolds, the condition [0 < 1] reads the store and is TRUE, the body runs and
-   MUTATES the cell to [1], and control returns to the loop — leaving store [1].
-   This is the increment's dynamic crux: a store-dependent condition gating a
-   store-mutating body. *)
-Lemma cinc_one_iter :
-  multistep (cinc_loop 1, [tlit (LInt 0)])
-            (cinc_loop 1, [tlit (LInt 1)]).
-Proof.
-  unfold cinc_loop.
-  (* unfold the fixpoint *)
-  eapply MSstep. { apply twhile_unfold. }
-  rewrite cinc_cond_closed, cinc_body_closed.
-  (* evaluate the condition  !(loc 0) < 1 : read the store -> 0 < 1 *)
-  eapply MSstep. { apply SIf1. apply SPrim1. apply SDeref. }
-  simpl.
-  eapply MSstep. { apply SIf1. apply SPrimCmp. reflexivity. }
-  (* 0 < 1 = true: select the then-branch (body ; loop) *)
-  eapply MSstep. { apply SIfTrue. }
-  (* run the body  loc0 := !loc0 + 1 : read 0, add 1, write 1 -> store [1] *)
-  eapply MSstep. { apply tseq_step1. apply SAssign2; [ apply VLoc | apply SPrim1; apply SDeref ]. }
-  simpl.
-  eapply MSstep. { apply tseq_step1. apply SAssign2; [ apply VLoc | apply SPrimArith; reflexivity ]. }
-  simpl.
-  eapply MSstep. { apply tseq_step1. apply SAssign. apply VLit. }
-  (* the body finished (nil); the sequence discards it and yields the loop. *)
-  eapply MSstep. { apply tseq_step_value. apply VLit. }
-  apply MSrefl.
-Qed.
-
-(* TERMINATION (concrete): after the mutating iteration, the SECOND unfold reads
-   the NEW store [1], the condition [1 < 1] is FALSE, and the loop terminates with
-   the unit value [nil]. Composed with [cinc_one_iter], the whole loop from store
-   [0] runs to [nil] in store [1] — a real imperative loop computed to its end. *)
-Lemma cinc_terminates :
-  multistep (cinc_loop 1, [tlit (LInt 1)])
-            (tlit LNil, [tlit (LInt 1)]).
-Proof.
-  unfold cinc_loop.
-  eapply MSstep. { apply twhile_unfold. }
-  rewrite cinc_cond_closed, cinc_body_closed.
-  eapply MSstep. { apply SIf1. apply SPrim1. apply SDeref. }
-  simpl.
-  eapply MSstep. { apply SIf1. apply SPrimCmp. reflexivity. }
-  (* 1 < 1 = false: select the else-branch (nil) — the loop ENDS. *)
-  eapply MSstep. { apply SIfFalse. }
-  apply MSrefl.
-Qed.
-
-(* THE WHOLE COUNTER LOOP, end-to-end: from store [0] it runs to the unit value in
-   store [1] (one mutating iteration, then store-driven termination). *)
-Example cinc_loop_runs :
-  multistep (cinc_loop 1, [tlit (LInt 0)]) (tlit LNil, [tlit (LInt 1)]).
-Proof.
-  eapply multistep_trans; [ apply cinc_one_iter | apply cinc_terminates ].
-Qed.
+(* The end-to-end operational run of the counter loop ([cinc_one_iter],
+   [cinc_terminates], [cinc_loop_runs]) was DELETED in the "types, not magnitudes"
+   stage-2 refactor: it asserted concrete computed stores ([0]→[1]) and computed a
+   [false] guard ([1 < 1]) to terminate — value computation the abstract,
+   magnitude-free primitives no longer perform (a comparison steps
+   non-deterministically to either boolean, so the loop has no determinate
+   termination). The loop's SOUNDNESS is carried by [cinc_loop_typed] below plus
+   the generic progress/preservation, not by an end-to-end run. *)
 
 (* and the counter loop TYPES (a unit statement) under the store-typing [Num]
    (the cell is a Num cell — arithmetic result type, invariant cell). *)
@@ -7642,12 +7560,12 @@ Proof.
   unfold cinc_loop. apply twhile_typed.
   - unfold cinc_cond. apply TPrimCmp; [ reflexivity | | ].
     + apply TDeref with (T := BAtom ANum). apply TLoc. reflexivity.
-    + eapply TSub; [ apply (TLit _ _ (LInt 1)) | apply RsSsub; apply SsAtom; apply ALInt ].
+    + eapply TSub; [ apply (TLit _ _ (LInt)) | apply RsSsub; apply SsAtom; apply ALInt ].
   - unfold cinc_body. eapply TAssign with (T := BAtom ANum).
     + apply TLoc. reflexivity.
     + apply TPrimArith; [ reflexivity | | ].
       * apply TDeref with (T := BAtom ANum). apply TLoc. reflexivity.
-      * eapply TSub; [ apply (TLit _ _ (LInt 1)) | apply RsSsub; apply SsAtom; apply ALInt ].
+      * eapply TSub; [ apply (TLit _ _ (LInt)) | apply RsSsub; apply SsAtom; apply ALInt ].
 Qed.
 
 (* ===========================================================================
@@ -7657,7 +7575,7 @@ Qed.
 
 Example seq_mutation_typed :
   has_type [ BAtom AInt ] []
-    (tseq (tassign (tproj (mtable_val 0) "x"%string) (tlit (LInt 9)))
+    (tseq (tassign (tproj (mtable_val 0) "x"%string) (tlit (LInt)))
           (tderef (tproj (mtable_val 0) "x"%string)))
     (BAtom AInt).
 Proof.
@@ -7668,10 +7586,10 @@ Qed.
 
 Example seq_mutation_steps :
   multistep
-    (tseq (tassign (tproj (mtable_val 0) "x"%string) (tlit (LInt 9)))
+    (tseq (tassign (tproj (mtable_val 0) "x"%string) (tlit (LInt)))
           (tderef (tproj (mtable_val 0) "x"%string)),
-     [tlit (LInt 7)])
-    (tlit (LInt 9), [tlit (LInt 9)]).
+     [tlit (LInt)])
+    (tlit (LInt), [tlit (LInt)]).
 Proof.
   (* write: proj -> loc 0, assign 9 -> nil, store [7] -> [9] *)
   eapply MSstep. { apply tseq_step1. apply SAssign1. apply mtable_proj_x_steps. }
@@ -7694,8 +7612,8 @@ Qed.
 Definition if_mut_prog (b : bool) : tm :=
   tseq
     (tif (tlit (LBool b))
-         (tassign (tloc 0) (tlit (LInt 1)))
-         (tassign (tloc 0) (tlit (LInt 2))))
+         (tassign (tloc 0) (tlit (LInt)))
+         (tassign (tloc 0) (tlit (LInt))))
     (tderef (tloc 0)).
 
 Example if_mut_typed : forall b,
@@ -7715,7 +7633,7 @@ Qed.
 
 (* TRUE branch taken: [r := 1] then [!r] reads 1, store [0] -> [1]. *)
 Example if_mut_true_steps :
-  multistep (if_mut_prog true, [tlit (LInt 0)]) (tlit (LInt 1), [tlit (LInt 1)]).
+  multistep (if_mut_prog true, [tlit (LInt)]) (tlit (LInt), [tlit (LInt)]).
 Proof.
   unfold if_mut_prog.
   eapply MSstep. { apply tseq_step1. apply SIfTrue. }
@@ -7727,7 +7645,7 @@ Qed.
 
 (* FALSE branch taken: [r := 2] then [!r] reads 2, store [0] -> [2]. *)
 Example if_mut_false_steps :
-  multistep (if_mut_prog false, [tlit (LInt 0)]) (tlit (LInt 2), [tlit (LInt 2)]).
+  multistep (if_mut_prog false, [tlit (LInt)]) (tlit (LInt), [tlit (LInt)]).
 Proof.
   unfold if_mut_prog.
   eapply MSstep. { apply tseq_step1. apply SIfFalse. }
@@ -7830,7 +7748,7 @@ Proof.
 Qed.
 
 (* the multi-return CALL [f 3] : (Int, Bool) — a multivalue. *)
-Definition mr_call : tm := tapp mr_f (tlit (LInt 3)).
+Definition mr_call : tm := tapp mr_f (tlit (LInt)).
 
 Example mr_call_typed : has_type [] [] mr_call mr_tup.
 Proof.
@@ -7848,7 +7766,7 @@ Qed.
 (* The TRUNCATION step: the call reduces to the multivalue, then [tfst] takes the
    head [3] — the first return value (the [Bool] return is discarded). *)
 Example mr_truncate_steps : forall st,
-  multistep (tfst mr_call, st) (tlit (LInt 3), st).
+  multistep (tfst mr_call, st) (tlit (LInt), st).
 Proof.
   intro st. unfold mr_call, mr_f.
   (* beta: (λx:Int. (return x,true)) 3 ⤳ (return 3, true) — a multivalue value *)
@@ -7864,7 +7782,7 @@ Qed.
 (* ---- (2) LAST-POSITION SPREAD: [g (f 3)] with g : (Int,Bool) -> Int spreads ALL
    of [f 3]'s values into g (the consumer binds the whole sequence). Result [AInt].
    The SAME [f 3] — spread here, truncated above. *)
-Definition mr_g : tm := tlam mr_tup (tlit (LInt 0)).
+Definition mr_g : tm := tlam mr_tup (tlit (LInt)).
 
 Example mr_g_typed : has_type [] [] mr_g (BArrow mr_tup (BAtom AInt)).
 Proof. unfold mr_g. apply TLam. apply TLit. Qed.
@@ -7878,7 +7796,7 @@ Qed.
 (* The SPREAD step: the call reduces to the multivalue [return 3, true], then the
    whole sequence is spliced into g (g binds the tuple), and g returns 0. *)
 Example mr_spread_steps : forall st,
-  multistep (tappspread mr_g mr_call, st) (tlit (LInt 0), st).
+  multistep (tappspread mr_g mr_call, st) (tlit (LInt), st).
 Proof.
   intro st. unfold mr_call, mr_f, mr_g.
   (* reduce the multivalue argument: beta the inner call to [return 3, true] *)
@@ -7953,7 +7871,7 @@ Qed.
 
 (* the variadic CALL: fixed arg [7], trailing actuals [3, true] packed into [...]. *)
 Definition va_first_call : tm :=
-  tvapp va_first (tlit (LInt 7)) [ tlit (LInt 3) ; tlit (LBool true) ].
+  tvapp va_first (tlit (LInt)) [ tlit (LInt) ; tlit (LBool true) ].
 
 Example va_first_call_typed : has_type [] [] va_first_call (BAtom AInt).
 Proof.
@@ -7968,7 +7886,7 @@ Qed.
    [return 3, true], binds it as [...], and the body truncates it to its head [3]
    (the extra [true] is discarded). *)
 Example va_first_call_steps :
-  multistep (va_first_call, []) (tlit (LInt 3), []).
+  multistep (va_first_call, []) (tlit (LInt), []).
 Proof.
   unfold va_first_call, va_first, va_rest.
   (* PACK: trailing args collected into [tret [3; true]], applied to fixed arg 7 *)
@@ -8000,7 +7918,7 @@ Qed.
 Definition va_fwd : tm :=
   tlam (BAtom AInt)
     (tlam va_rest
-      (tappspread (tlam va_rest (tlit (LInt 0))) (tvar 0))).
+      (tappspread (tlam va_rest (tlit (LInt))) (tvar 0))).
 
 Example va_fwd_typed :
   has_type [] [] va_fwd (BArrow (BAtom AInt) (BArrow va_rest (BAtom AInt))).
@@ -8012,7 +7930,7 @@ Proof.
 Qed.
 
 Definition va_fwd_call : tm :=
-  tvapp va_fwd (tlit (LInt 7)) [ tlit (LInt 3) ; tlit (LBool true) ].
+  tvapp va_fwd (tlit (LInt)) [ tlit (LInt) ; tlit (LBool true) ].
 
 Example va_fwd_call_typed : has_type [] [] va_fwd_call (BAtom AInt).
 Proof.
@@ -8026,7 +7944,7 @@ Qed.
 (* The SPREAD/FORWARD step: the call packs the trailing args, binds them as [...],
    and the body spreads the WHOLE rest into [g], which returns 0. *)
 Example va_fwd_call_steps :
-  multistep (va_fwd_call, []) (tlit (LInt 0), []).
+  multistep (va_fwd_call, []) (tlit (LInt), []).
 Proof.
   unfold va_fwd_call, va_fwd, va_rest.
   (* PACK trailing args, apply to fixed arg 7 *)
@@ -8079,7 +7997,7 @@ Proof. apply (progress [] va_fwd_call (BAtom AInt) [] va_fwd_call_typed store_we
    RHS is the multi-return call [mr_call = f 3], typed [(Int, Bool)]. Arity matches
    (2 = 2), so no truncation or padding — the producer/consumer symmetry exactly. *)
 Definition ma_S : list BTy := [ BAtom AInt ; BAtom ABool ].
-Definition ma_st : store := [ tlit (LInt 0) ; tlit (LBool false) ].
+Definition ma_st : store := [ tlit (LInt) ; tlit (LBool false) ].
 
 Lemma ma_store_wt : store_well_typed ma_S ma_st.
 Proof.
@@ -8112,7 +8030,7 @@ Qed.
    store becomes [3; true] and the form yields [nil]. *)
 Example ma_call_steps :
   multistep (ma_call, ma_st)
-            (tlit LNil, [ tlit (LInt 3) ; tlit (LBool true) ]).
+            (tlit LNil, [ tlit (LInt) ; tlit (LBool true) ]).
 Proof.
   unfold ma_call, ma_st, mr_call, mr_f.
   (* step the RHS: (λx:Int. return x,true) 3 ⤳ return 3, true *)
@@ -8137,7 +8055,7 @@ Proof. apply (progress ma_S ma_call (BAtom ANil) ma_st ma_call_typed ma_store_wt
    admits [nil]). RHS [tret [5; false]] has arity 2; [pad_ty [Int;Bool] 3 =
    [Int;Bool;Nil]], pointwise rsub-below the targets — the [nil]-pad direction. *)
 Definition mp_S : list BTy := [ BAtom AInt ; BAtom ABool ; BAtom ANil ].
-Definition mp_st : store := [ tlit (LInt 0) ; tlit (LBool false) ; tlit LNil ].
+Definition mp_st : store := [ tlit (LInt) ; tlit (LBool false) ; tlit LNil ].
 
 Lemma mp_store_wt : store_well_typed mp_S mp_st.
 Proof.
@@ -8150,7 +8068,7 @@ Proof.
 Qed.
 
 Definition mp_assign : tm :=
-  tmassign [ tloc 0 ; tloc 1 ; tloc 2 ] (tret [ tlit (LInt 5) ; tlit (LBool false) ]).
+  tmassign [ tloc 0 ; tloc 1 ; tloc 2 ] (tret [ tlit (LInt) ; tlit (LBool false) ]).
 
 Example mp_assign_typed : has_type mp_S [] mp_assign (BAtom ANil).
 Proof.
@@ -8173,7 +8091,7 @@ Qed.
    it is the PADDED write, not a no-op: [pad_tm [5;false] 3 = [5; false; nil]]). *)
 Example mp_assign_steps :
   multistep (mp_assign, mp_st)
-            (tlit LNil, [ tlit (LInt 5) ; tlit (LBool false) ; tlit LNil ]).
+            (tlit LNil, [ tlit (LInt) ; tlit (LBool false) ; tlit LNil ]).
 Proof.
   unfold mp_assign, mp_st.
   eapply MSstep.
@@ -8189,7 +8107,7 @@ Qed.
    the truncation direction (the extra [99] is discarded, exactly as [tfst]). *)
 Definition md_assign : tm :=
   tmassign [ tloc 0 ; tloc 1 ]
-    (tret [ tlit (LInt 7) ; tlit (LBool true) ; tlit (LInt 99) ]).
+    (tret [ tlit (LInt) ; tlit (LBool true) ; tlit (LInt) ]).
 
 Example md_assign_typed : has_type ma_S [] md_assign (BAtom ANil).
 Proof.
@@ -8209,7 +8127,7 @@ Qed.
    [b := true]; the extra [99] is discarded. Store becomes [7; true]. *)
 Example md_assign_steps :
   multistep (md_assign, ma_st)
-            (tlit LNil, [ tlit (LInt 7) ; tlit (LBool true) ]).
+            (tlit LNil, [ tlit (LInt) ; tlit (LBool true) ]).
 Proof.
   unfold md_assign, ma_st.
   eapply MSstep.
@@ -8369,19 +8287,19 @@ Qed.
 
 (* APPLYING the callable table to [3] is well typed at [Int] — via [TCallMeta],
    the [__call] metamethod's final codomain. *)
-Example call_payoff_typed : has_type [] [] (tapp cobj (tlit (LInt 3))) (BAtom AInt).
+Example call_payoff_typed : has_type [] [] (tapp cobj (tlit (LInt))) (BAtom AInt).
 Proof.
   eapply TCallMeta.
   - apply call_obj_typed.
   - unfold cobj_M, merge_fields, mm_call. simpl. left; reflexivity.
   - apply RsSsub. apply SsTop.
-  - apply (TLit [] [] (LInt 3)).
+  - apply (TLit [] [] (LInt)).
 Qed.
 
 (* and it COMPUTES: [cobj 3] dispatches to [(cobj.__call) cobj 3] (the metamethod
    resolved through the [__index] chain), two betas, reaching [3]. *)
 Example call_payoff_steps : forall st,
-  multistep (tapp cobj (tlit (LInt 3)), st) (tlit (LInt 3), st).
+  multistep (tapp cobj (tlit (LInt)), st) (tlit (LInt), st).
 Proof.
   intro st. unfold cobj, call_mm.
   eapply multistep_trans.
@@ -8404,7 +8322,7 @@ Qed.
 (* ---- __add: OPERATOR OVERLOADING. [vobj] carries an [__add] metamethod
    [BTop -> BTop -> Int]; [vobj + vobj] dispatches to it, result type [Int]. This
    is real Lua operator overloading, machine-checked at the type level. *)
-Definition add_mm : tm := tlam BTop (tlam BTop (tlit (LInt 7))).
+Definition add_mm : tm := tlam BTop (tlam BTop (tlit (LInt))).
 Definition vobj : tm := tmeta [("__add"%string, add_mm)] (trec []).
 Definition vobj_M : list (string * BTy) :=
   merge_fields [("__add"%string, BArrow BTop (BArrow BTop (BAtom AInt)))] [].
@@ -8412,7 +8330,7 @@ Definition vobj_M : list (string * BTy) :=
 Example add_obj_typed : has_type [] [] vobj (BRec vobj_M).
 Proof.
   unfold vobj, vobj_M, add_mm. eapply TMeta.
-  - apply HFcons; [ apply TLam; apply TLam; apply (TLit [] [BTop; BTop] (LInt 7)) | apply HFnil ].
+  - apply HFcons; [ apply TLam; apply TLam; apply (TLit [] [BTop; BTop] (LInt)) | apply HFnil ].
   - repeat constructor; simpl; intuition discriminate.
   - apply TRec; [ apply HFnil | constructor ].
   - constructor.
@@ -8434,7 +8352,7 @@ Qed.
 (* and it COMPUTES: [vobj + vobj] dispatches to [(vobj.__add) vobj vobj], reaching
    the metamethod's result [7]. *)
 Example add_payoff_steps : forall st,
-  multistep (tprim PAdd vobj vobj, st) (tlit (LInt 7), st).
+  multistep (tprim PAdd vobj vobj, st) (tlit (LInt), st).
 Proof.
   intro st. unfold vobj, add_mm.
   eapply multistep_trans.
@@ -8456,7 +8374,7 @@ Qed.
    operand's metamethod. [robj] carries an [__add] metamethod whose LEFT domain is
    [BAtom ANum] (it accepts the scalar left operand) and result [Int]; [1 + robj]
    dispatches via [TPrimMetaR]/[SPrimMetaR] to [(robj.__add) 1 robj]. *)
-Definition radd_mm : tm := tlam (BAtom AInt) (tlam BTop (tlit (LInt 8))).
+Definition radd_mm : tm := tlam (BAtom AInt) (tlam BTop (tlit (LInt))).
 Definition robj : tm := tmeta [("__add"%string, radd_mm)] (trec []).
 
 Example radd_obj_typed : has_type [] [] robj
@@ -8464,7 +8382,7 @@ Example radd_obj_typed : has_type [] [] robj
     [("__add"%string, BArrow (BAtom AInt) (BArrow BTop (BAtom AInt)))] [])).
 Proof.
   unfold robj, radd_mm. eapply TMeta.
-  - apply HFcons; [ apply TLam; apply TLam; apply (TLit [] [BTop; BAtom AInt] (LInt 8)) | apply HFnil ].
+  - apply HFcons; [ apply TLam; apply TLam; apply (TLit [] [BTop; BAtom AInt] (LInt)) | apply HFnil ].
   - repeat constructor; simpl; intuition discriminate.
   - apply TRec; [ apply HFnil | constructor ].
   - constructor.
@@ -8474,10 +8392,10 @@ Qed.
    left operand [1 : BAtom ANum] inhabits the metamethod's left domain, the right
    operand [robj] provides the [__add] metamethod. *)
 Example add_right_payoff_typed :
-  has_type [] [] (tprim PAdd (tlit (LInt 1)) robj) (BAtom AInt).
+  has_type [] [] (tprim PAdd (tlit (LInt)) robj) (BAtom AInt).
 Proof.
   eapply TPrimMetaR.
-  - apply (TLit [] [] (LInt 1)).
+  - apply (TLit [] [] (LInt)).
   - apply radd_obj_typed.
   - unfold merge_fields. simpl. unfold mm_binop. left; reflexivity.
   - apply RsSsub. apply SsTop.
@@ -8486,7 +8404,7 @@ Qed.
 (* and it COMPUTES: [1 + robj] dispatches to [(robj.__add) 1 robj] ⤳ the result [8],
    exercising [SPrimMetaR] (the mirror of [SPrimMetaL]). *)
 Example add_right_payoff_steps : forall st,
-  multistep (tprim PAdd (tlit (LInt 1)) robj, st) (tlit (LInt 8), st).
+  multistep (tprim PAdd (tlit (LInt)) robj, st) (tlit (LInt), st).
 Proof.
   intro st. unfold robj, radd_mm.
   eapply multistep_trans.
@@ -8507,7 +8425,7 @@ Qed.
    [robj] is not a number; LEFT path fails — [1] is not a metatable; RIGHT path
    fails — no [__sub] in [robj]'s interface). *)
 Example sub_right_absent_rejected : forall T,
-  ~ has_type [] [] (tprim PSub (tlit (LInt 1)) robj) T.
+  ~ has_type [] [] (tprim PSub (tlit (LInt)) robj) T.
 Proof.
   intros T H. apply inv_prim in H.
   destruct H as [ [_ [Hb _]]
@@ -8598,7 +8516,7 @@ Qed.
    the write goes through to [ni]'s cell for [k]. With [ni = { k = loc0 }] over a
    store [[0]] typed [[Int]], writing [5] yields [nil] and store [[5]]. *)
 Definition ni_target : tm := trec [("k"%string, tloc 0)].
-Definition niwrite : tm := tnewidx [] ni_target "k" (tlit (LInt 5)).
+Definition niwrite : tm := tnewidx [] ni_target "k" (tlit (LInt)).
 
 (* the write is well typed at [nil] ([ANil]) under store typing [[Int]]. *)
 Example newindex_payoff_typed :
@@ -8606,7 +8524,7 @@ Example newindex_payoff_typed :
 Proof.
   unfold niwrite, ni_target.
   eapply (TNewIdx [BAtom AInt] [] [] (trec [("k"%string, tloc 0)])
-            [] [("k"%string, BRef (BAtom AInt))] "k" (tlit (LInt 5)) (BAtom AInt)).
+            [] [("k"%string, BRef (BAtom AInt))] "k" (tlit (LInt)) (BAtom AInt)).
   - apply HFnil.
   - constructor.
   - reflexivity.                         (* key_in "k" [] = false *)
@@ -8614,14 +8532,14 @@ Proof.
                 | repeat constructor; simpl; intuition discriminate ].
   - repeat constructor; simpl; intuition discriminate.
   - left; reflexivity.                   (* ("k", BRef Int) in Pf *)
-  - apply (TLit [BAtom AInt] [] (LInt 5)).
+  - apply (TLit [BAtom AInt] [] (LInt)).
 Qed.
 
 (* and it WRITES THROUGH: the [__newindex] dispatch becomes [tassign (ni.k) 5],
    which assigns [5] into the cell [loc0]; from store [[0]] the result is [nil] and
    store [[5]]. The records-of-refs write-fallback, computed end-to-end. *)
 Example newindex_payoff_steps :
-  multistep (niwrite, [tlit (LInt 0)]) (tlit LNil, [tlit (LInt 5)]).
+  multistep (niwrite, [tlit (LInt)]) (tlit LNil, [tlit (LInt)]).
 Proof.
   unfold niwrite, ni_target.
   (* dispatch: SNewIdx ([k] absent from own []) ⤳ tassign (tproj ni "k") 5 *)
@@ -8644,7 +8562,7 @@ Qed.
    [__newindex] target's cells is REJECTED (no cell to write through to). Here the
    target [ni] has only cell [k], so [tnewidx [] ni "nope" 5] does not type. *)
 Example newindex_absent_cell_rejected : forall T,
-  ~ has_type [BAtom AInt] [] (tnewidx [] ni_target "nope" (tlit (LInt 5))) T.
+  ~ has_type [BAtom AInt] [] (tnewidx [] ni_target "nope" (tlit (LInt))) T.
 Proof.
   intros T H. apply inv_newidx in H.
   destruct H as [Town [Pf [U [Hfs [_ [_ [Hp [_ [Hin [_ _]]]]]]]]]].
@@ -8722,7 +8640,7 @@ Qed.
 (* RAW WRITE — to OWN's cell, bypassing [__newindex]. Own field [k] is a writable
    [BRef Int] cell [loc0]; the prototype is irrelevant to the write. *)
 Definition rawset_own : list (string * tm) := [("k"%string, tloc 0)].
-Definition rawsetw : tm := trawset rawset_own (trec []) "k" (tlit (LInt 5)).
+Definition rawsetw : tm := trawset rawset_own (trec []) "k" (tlit (LInt)).
 
 (* the raw write is well typed at [nil] under store typing [[Int]]. *)
 Example rawset_payoff_typed :
@@ -8730,20 +8648,20 @@ Example rawset_payoff_typed :
 Proof.
   unfold rawsetw, rawset_own.
   eapply (TRawSet [BAtom AInt] [] [("k"%string, tloc 0)] (trec [])
-            [("k"%string, BRef (BAtom AInt))] [] "k" (tlit (LInt 5)) (BAtom AInt)).
+            [("k"%string, BRef (BAtom AInt))] [] "k" (tlit (LInt)) (BAtom AInt)).
   - apply HFcons; [ apply (TLoc [BAtom AInt] [] 0); reflexivity | apply HFnil ].
   - repeat constructor; simpl; intuition discriminate.
   - left; reflexivity.                       (* ("k", BRef Int) in OWN *)
   - apply TRec; [ apply HFnil | constructor ].
   - constructor.
-  - apply (TLit [BAtom AInt] [] (LInt 5)).
+  - apply (TLit [BAtom AInt] [] (LInt)).
 Qed.
 
 (* and it WRITES THROUGH OWN's cell (never the prototype): the dispatch becomes
    [tassign loc0 5], assigning [5] into [loc0]; from store [[0]] the result is
    [nil] and store [[5]]. The records-of-refs write to OWN, end-to-end. *)
 Example rawset_payoff_steps :
-  multistep (rawsetw, [tlit (LInt 0)]) (tlit LNil, [tlit (LInt 5)]).
+  multistep (rawsetw, [tlit (LInt)]) (tlit LNil, [tlit (LInt)]).
 Proof.
   unfold rawsetw, rawset_own.
   eapply multistep_trans.
@@ -8760,7 +8678,7 @@ Qed.
    which writes through the prototype for an absent-from-own key). Here own has
    only "k", so [trawset] for "nope" does not type at any type. *)
 Example rawset_absent_own_rejected : forall T,
-  ~ has_type [BAtom AInt] [] (trawset rawset_own (trec []) "nope" (tlit (LInt 5))) T.
+  ~ has_type [BAtom AInt] [] (trawset rawset_own (trec []) "nope" (tlit (LInt))) T.
 Proof.
   intros T H. apply inv_rawset in H.
   destruct H as [Town [Pf [U [Hfs [_ [Hin [_ [_ [_ _]]]]]]]]].
@@ -8827,7 +8745,7 @@ Qed.
 (* ---- __unm / __len: UNARY metamethods. [uobj] carries BOTH [__unm] and [__len]
    metamethods [BTop -> BTop -> Int]; [-uobj] dispatches to [__unm], [#uobj] to
    [__len] (the operand passed TWICE — Lua's unary calling convention). *)
-Definition un_mm : tm := tlam BTop (tlam BTop (tlit (LInt 9))).
+Definition un_mm : tm := tlam BTop (tlam BTop (tlit (LInt))).
 Definition uobj : tm := tmeta [("__unm"%string, un_mm); ("__len"%string, un_mm)] (trec []).
 
 Lemma uobj_typed : has_type [] [] uobj
@@ -8836,8 +8754,8 @@ Lemma uobj_typed : has_type [] [] uobj
      ("__len"%string, BArrow BTop (BArrow BTop (BAtom AInt)))] [])).
 Proof.
   unfold uobj, un_mm. eapply TMeta.
-  - apply HFcons; [ apply TLam; apply TLam; apply (TLit [] [BTop; BTop] (LInt 9)) | ].
-    apply HFcons; [ apply TLam; apply TLam; apply (TLit [] [BTop; BTop] (LInt 9)) | apply HFnil ].
+  - apply HFcons; [ apply TLam; apply TLam; apply (TLit [] [BTop; BTop] (LInt)) | ].
+    apply HFcons; [ apply TLam; apply TLam; apply (TLit [] [BTop; BTop] (LInt)) | apply HFnil ].
   - repeat constructor; simpl; intuition discriminate.
   - apply TRec; [ apply HFnil | constructor ].
   - constructor.
@@ -8865,7 +8783,7 @@ Qed.
 
 (* and [-uobj] COMPUTES: dispatch to [(uobj.__unm) uobj uobj] ⤳ the result [9]. *)
 Example unm_payoff_steps : forall st,
-  multistep (tunop UNeg uobj, st) (tlit (LInt 9), st).
+  multistep (tunop UNeg uobj, st) (tlit (LInt), st).
 Proof.
   intro st. unfold uobj, un_mm.
   eapply multistep_trans.
@@ -8939,42 +8857,26 @@ Qed.
      - Iteration continues while  (step>0 /\ i<=limit) \/ (step<0 /\ i>=limit);
        each iteration runs [body] then  i := i + step.
 
-   STEP-SIGN / NAT SUBSTRATE (honest boundary, NOT a faked gap — verified against the
-   core). The number model is [nat]-backed at BOTH levels: the value [VNum] carries
-   [NRint nat] / [NRfrac nat] (subtype.v — no negative number value), the only number
-   literal is [LInt : nat], arithmetic is [nat] ([prim_arith]; [PSub] is TRUNCATING,
-   [5 - 7 = 0]), and [tunop UNeg] dispatches only on metatable values ([SUnMetaL]) — it
-   is STUCK on a plain number. Hence NO term evaluates to a negative number.
-
-   The blocker for a single runtime-sign-dispatched form is NOT the guard: a runtime
-   sign test [0 < step] IS expressible ([PLt] + [tif] both exist), but it is VACUOUS —
-   every number value is [>= 0], so there is no negative step to dispatch on. The deeper
-   blocker is the UPDATE: the faithful single-form Lua 5.1 body is [i := i + step] with a
-   SIGNED step (negative descends); here [+] is [nat] addition, so [i := i + step] can
-   ONLY ascend for every representable step. Descent is therefore carried ENTIRELY by
-   switching the update operator to [PSub] (the [tfor_down] encoding) — a STATIC choice,
-   since no negative step value exists to select on at runtime.
-
-   CONCRETE BLOCKED TERM: [for i = 2, 1, c do body end] with [c] meant to be [-1] — no
-   term produces [-1] ([LInt] is [nat]; [tunop UNeg (tlit (LInt 1))] is stuck;
-   [tprim PSub (tlit (LInt 0)) (tlit (LInt 1))] truncates to [0]), and [i := i + c] never
-   descends. The FAITHFUL nat-substrate rendering resolves the step's SIGN STATICALLY (as
-   a real compiler does for a constant step) into one of two encodings, mirroring the
-   while-loop's ascending [cinc] (PAdd / PLt) :
-     - [tfor_up]   : step>0 — guard [!i <= limit], increment [i := !i + step].
-     - [tfor_down] : step<0 — guard [limit <= !i] (i.e. [i >= limit]), decrement
-                     [i := !i - step] (step the POSITIVE magnitude; the descent is
-                     carried by the subtraction direction, since nat has no sign).
-   This is the 3-value form (init, limit, step magnitude all explicit), faithful to
-   5.1 modulo the nat number model. A single runtime form deciding direction needs a
-   SIGNED number model (signed [NumRep] / [LInt] + a sign-aware [PSub] or working number
-   [PNeg]) — recorded as a substrate need, not faked.
+   STEP-SIGN / SIGNED-NUMBER SUBSTRATE — RETIRED / MOOT BY CONSTRUCTION. The earlier
+   note here recorded a substrate need for a SIGNED number model (so a single
+   runtime-sign-dispatched numeric-for could decide direction at runtime). That need
+   is moot under the "types, not magnitudes" stage-2 refactor: numbers are type-
+   CLASSES with NO magnitude at all (no nat payload on [NRint]/[NRfrac]/[LInt]),
+   arithmetic and comparison are ABSTRACT (no computed value/sign). There is no
+   number magnitude to be signed-or-unsigned; the distinction "ascending vs
+   descending step" is no longer a value-level question this model can or should
+   answer. The ascending/descending split is now purely the STATIC choice of update
+   operator ([tfor_up] uses [PAdd], [tfor_down] uses [PSub]); both forms only need to
+   TYPECHECK (proved in [tfor_up_typed]/[tfor_down_typed]), not to compute a
+   direction. Faithful signed/float magnitudes are the version-parametric DEFERRED
+   value-fidelity design (see docs/reality-bridge.md), orthogonal to this type-level
+   calculus.
 
    LOOP-VARIABLE TYPING (5.1).  [i = !cnt] is typed at the NUMBER type [ANum]. The
    counter cell is a [BRef ANum] cell: the increment [i := !i + step] stores the
    arithmetic result, which [TPrimArith] gives type [ANum], and a [BRef] cell is
    INVARIANT, so the cell must be a [Num] cell; thus [!cnt : ANum]. The initial
-   [LInt n : AInt] widens to [ANum] at allocation by subsumption ([AInt <: ANum]).
+   [LInt : AInt] widens to [ANum] at allocation by subsumption ([AInt <: ANum]).
    This is precise FOR THIS DEV'S NUMBER MODEL: arithmetic yields [ANum]; the
    precise [Int+Int : AInt] preservation is the SAME deferred substrate the while-
    loop's [sumloop] note records (needs Int-preserving arithmetic result types),
@@ -9055,7 +8957,7 @@ Qed.
 Definition forsum_body : tm :=
   tassign (tloc 0) (tprim PAdd (tderef (tloc 0)) (tderef (tloc 1))).
 Definition forsum_loop : tm :=
-  tfor_up (tloc 1) (tlit (LInt 3)) (tlit (LInt 1)) forsum_body.
+  tfor_up (tloc 1) (tlit (LInt)) (tlit (LInt)) forsum_body.
 
 (* it TYPES at [Tunit] under store-typing [Num; Num] (both cells are Num cells). *)
 Example forsum_loop_typed :
@@ -9063,8 +8965,8 @@ Example forsum_loop_typed :
 Proof.
   unfold forsum_loop. apply tfor_up_typed.
   - apply TLoc. reflexivity.                                   (* counter loc1 : Num cell *)
-  - eapply TSub; [ apply (TLit _ _ (LInt 3)) | apply RsSsub; apply SsAtom; apply ALInt ].
-  - eapply TSub; [ apply (TLit _ _ (LInt 1)) | apply RsSsub; apply SsAtom; apply ALInt ].
+  - eapply TSub; [ apply (TLit _ _ (LInt)) | apply RsSsub; apply SsAtom; apply ALInt ].
+  - eapply TSub; [ apply (TLit _ _ (LInt)) | apply RsSsub; apply SsAtom; apply ALInt ].
   - unfold forsum_body. eapply TAssign with (T := BAtom ANum).
     + apply TLoc. reflexivity.
     + apply TPrimArith; [ reflexivity | | ].
@@ -9075,84 +8977,22 @@ Qed.
 (* the counter/condition/body are CLOSED (only [tloc]s, values), so the fix-unfold
    substitution leaves them unchanged. *)
 Lemma forsum_cond_closed : forall s,
-  subst 0 s (tprim PLe (tderef (tloc 1)) (tlit (LInt 3))) =
-  tprim PLe (tderef (tloc 1)) (tlit (LInt 3)).
+  subst 0 s (tprim PLe (tderef (tloc 1)) (tlit (LInt))) =
+  tprim PLe (tderef (tloc 1)) (tlit (LInt)).
 Proof. reflexivity. Qed.
 Lemma forsum_step_closed : forall s,
   subst 0 s (tseq forsum_body (tassign (tloc 1)
-               (tprim PAdd (tderef (tloc 1)) (tlit (LInt 1))))) =
+               (tprim PAdd (tderef (tloc 1)) (tlit (LInt))))) =
   tseq forsum_body (tassign (tloc 1)
-               (tprim PAdd (tderef (tloc 1)) (tlit (LInt 1)))).
+               (tprim PAdd (tderef (tloc 1)) (tlit (LInt)))).
 Proof. reflexivity. Qed.
 
-(* ONE ITERATION at counter value [c] (with [c <= 3] so the guard is true), store
-   [sum=s ; i=c]: the loop unfolds, reads [c <= 3 = true], runs the body (sum ->
-   s+c), then increments the counter (i -> c+1) — leaving control back at the loop
-   with store [s+c ; c+1]. Machine-checked, store-driven. *)
-Lemma forsum_one_iter : forall s c,
-  Nat.leb c 3 = true ->
-  multistep (forsum_loop, [tlit (LInt s) ; tlit (LInt c)])
-            (forsum_loop, [tlit (LInt (s + c)) ; tlit (LInt (c + 1))]).
-Proof.
-  intros s c Hle. unfold forsum_loop, tfor_up.
-  eapply MSstep. { apply twhile_unfold. }
-  rewrite forsum_cond_closed, forsum_step_closed.
-  (* condition  !(loc1) <= 3 : read the counter c, then compute  c <= 3 = true *)
-  eapply MSstep. { apply SIf1. apply SPrim1. apply SDeref. } simpl.
-  eapply MSstep. { apply SIf1. apply SPrimCmp. reflexivity. }
-  unfold prim_cmp. rewrite Hle.
-  eapply MSstep. { apply SIfTrue. }
-  (* body  sum := !sum + !i : read s, read c, add, write s+c -> store [s+c ; c] *)
-  unfold forsum_body.
-  eapply MSstep. { apply tseq_step1. apply tseq_step1.
-                   apply SAssign2; [ apply VLoc | apply SPrim1; apply SDeref ]. } simpl.
-  eapply MSstep. { apply tseq_step1. apply tseq_step1.
-                   apply SAssign2; [ apply VLoc | apply SPrim2; [ apply VLit | apply SDeref ] ]. } simpl.
-  eapply MSstep. { apply tseq_step1. apply tseq_step1.
-                   apply SAssign2; [ apply VLoc | apply SPrimArith; reflexivity ]. } simpl.
-  eapply MSstep. { apply tseq_step1. apply tseq_step1. apply SAssign. apply VLit. } simpl.
-  (* the body finished (nil); discard it and run the increment *)
-  eapply MSstep. { apply tseq_step1. apply tseq_step_value. apply VLit. }
-  (* increment  i := !i + 1 : read c, add 1, write c+1 -> store [s+c ; c+1] *)
-  eapply MSstep. { apply tseq_step1.
-                   apply SAssign2; [ apply VLoc | apply SPrim1; apply SDeref ]. } simpl.
-  eapply MSstep. { apply tseq_step1.
-                   apply SAssign2; [ apply VLoc | apply SPrimArith; reflexivity ]. } simpl.
-  eapply MSstep. { apply tseq_step1. apply SAssign. apply VLit. } simpl.
-  (* the increment finished (nil); the outer sequence yields the loop again *)
-  eapply MSstep. { apply tseq_step_value. apply VLit. }
-  apply MSrefl.
-Qed.
-
-(* TERMINATION: at counter value [c] with [c > 3] (guard false), the loop reads the
-   store, the condition is FALSE, and the loop ends with [nil] — store unchanged. *)
-Lemma forsum_terminates : forall s c,
-  Nat.leb c 3 = false ->
-  multistep (forsum_loop, [tlit (LInt s) ; tlit (LInt c)])
-            (tlit LNil, [tlit (LInt s) ; tlit (LInt c)]).
-Proof.
-  intros s c Hgt. unfold forsum_loop, tfor_up.
-  eapply MSstep. { apply twhile_unfold. }
-  rewrite forsum_cond_closed, forsum_step_closed.
-  eapply MSstep. { apply SIf1. apply SPrim1. apply SDeref. } simpl.
-  eapply MSstep. { apply SIf1. apply SPrimCmp. reflexivity. }
-  unfold prim_cmp. rewrite Hgt.
-  eapply MSstep. { apply SIfFalse. }
-  apply MSrefl.
-Qed.
-
-(* THE WHOLE LOOP, END-TO-END: from [sum=0 ; i=1] it runs three iterations
-   (i=1,2,3) and terminates at i=4, computing  sum = 0+1+2+3 = 6.  Store
-   [0;1] -> [1;2] -> [3;3] -> [6;4] -> (i=4>3, stop) [6;4]. *)
-Example forsum_loop_runs :
-  multistep (forsum_loop, [tlit (LInt 0) ; tlit (LInt 1)])
-            (tlit LNil, [tlit (LInt 6) ; tlit (LInt 4)]).
-Proof.
-  eapply multistep_trans. { apply (forsum_one_iter 0 1). reflexivity. } simpl.
-  eapply multistep_trans. { apply (forsum_one_iter 1 2). reflexivity. } simpl.
-  eapply multistep_trans. { apply (forsum_one_iter 3 3). reflexivity. } simpl.
-  apply (forsum_terminates 6 4). reflexivity.
-Qed.
+(* The end-to-end run of the sum loop ([forsum_one_iter], [forsum_terminates],
+   [forsum_loop_runs]) was DELETED in the "types, not magnitudes" stage-2 refactor:
+   it asserted concrete computed stores (sum 0+1+2+3 = 6, counter 1→4) and computed
+   guard booleans to drive/terminate the iteration — value computation the abstract,
+   magnitude-free primitives no longer perform. The loop's soundness is carried by
+   [forsum_loop_typed] plus the generic progress/preservation. *)
 
 (* ---------------------------------------------------------------------------
    PAYOFF 2 — A COUNTING-DOWN LOOP THAT TERMINATES:  for i = 2, 1, -1 do () end.
@@ -9164,7 +9004,7 @@ Qed.
    --------------------------------------------------------------------------- *)
 
 Definition fordown_loop : tm :=
-  tfor_down (tloc 0) (tlit (LInt 1)) (tlit (LInt 1)) (tlit LNil).
+  tfor_down (tloc 0) (tlit (LInt)) (tlit (LInt)) (tlit LNil).
 
 (* it TYPES at [Tunit] under a single [Num] cell. *)
 Example fordown_loop_typed :
@@ -9172,75 +9012,28 @@ Example fordown_loop_typed :
 Proof.
   unfold fordown_loop. apply tfor_down_typed.
   - apply TLoc. reflexivity.
-  - eapply TSub; [ apply (TLit _ _ (LInt 1)) | apply RsSsub; apply SsAtom; apply ALInt ].
-  - eapply TSub; [ apply (TLit _ _ (LInt 1)) | apply RsSsub; apply SsAtom; apply ALInt ].
+  - eapply TSub; [ apply (TLit _ _ (LInt)) | apply RsSsub; apply SsAtom; apply ALInt ].
+  - eapply TSub; [ apply (TLit _ _ (LInt)) | apply RsSsub; apply SsAtom; apply ALInt ].
   - apply (TLit _ _ LNil).
 Qed.
 
 Lemma fordown_cond_closed : forall s,
-  subst 0 s (tprim PLe (tlit (LInt 1)) (tderef (tloc 0))) =
-  tprim PLe (tlit (LInt 1)) (tderef (tloc 0)).
+  subst 0 s (tprim PLe (tlit (LInt)) (tderef (tloc 0))) =
+  tprim PLe (tlit (LInt)) (tderef (tloc 0)).
 Proof. reflexivity. Qed.
 Lemma fordown_step_closed : forall s,
   subst 0 s (tseq (tlit LNil)
-               (tassign (tloc 0) (tprim PSub (tderef (tloc 0)) (tlit (LInt 1))))) =
+               (tassign (tloc 0) (tprim PSub (tderef (tloc 0)) (tlit (LInt))))) =
   tseq (tlit LNil)
-       (tassign (tloc 0) (tprim PSub (tderef (tloc 0)) (tlit (LInt 1)))).
+       (tassign (tloc 0) (tprim PSub (tderef (tloc 0)) (tlit (LInt)))).
 Proof. reflexivity. Qed.
 
-(* ONE DECREMENTING ITERATION at counter [c] with guard [1 <= c] true: the loop
-   reads the store, runs the (empty) body, then decrements  i := c - 1. *)
-Lemma fordown_one_iter : forall c,
-  Nat.leb 1 c = true ->
-  multistep (fordown_loop, [tlit (LInt c)])
-            (fordown_loop, [tlit (LInt (c - 1))]).
-Proof.
-  intros c Hge. unfold fordown_loop, tfor_down.
-  eapply MSstep. { apply twhile_unfold. }
-  rewrite fordown_cond_closed, fordown_step_closed.
-  (* condition  1 <= !(loc0) : read c, compute  1 <= c = true *)
-  eapply MSstep. { apply SIf1. apply SPrim2; [ apply VLit | apply SDeref ]. } simpl.
-  eapply MSstep. { apply SIf1. apply SPrimCmp. reflexivity. }
-  unfold prim_cmp. rewrite Hge.
-  eapply MSstep. { apply SIfTrue. }
-  (* the loop body [body ; decrement] : the body is the unit value [nil], the inner
-     sequence discards it, leaving the decrement. *)
-  eapply MSstep. { apply tseq_step1. apply tseq_step_value. apply VLit. }
-  (* decrement  i := !i - 1 : read c, subtract 1, write c-1 *)
-  eapply MSstep. { apply tseq_step1.
-                   apply SAssign2; [ apply VLoc | apply SPrim1; apply SDeref ]. } simpl.
-  eapply MSstep. { apply tseq_step1.
-                   apply SAssign2; [ apply VLoc | apply SPrimArith; reflexivity ]. } simpl.
-  eapply MSstep. { apply tseq_step1. apply SAssign. apply VLit. } simpl.
-  (* the decrement finished (nil); the outer sequence yields the loop again *)
-  eapply MSstep. { apply tseq_step_value. apply VLit. }
-  apply MSrefl.
-Qed.
-
-(* TERMINATION: at counter [c] with guard [1 <= c] FALSE (c = 0), the loop ends. *)
-Lemma fordown_terminates : forall c,
-  Nat.leb 1 c = false ->
-  multistep (fordown_loop, [tlit (LInt c)]) (tlit LNil, [tlit (LInt c)]).
-Proof.
-  intros c Hlt. unfold fordown_loop, tfor_down.
-  eapply MSstep. { apply twhile_unfold. }
-  rewrite fordown_cond_closed, fordown_step_closed.
-  eapply MSstep. { apply SIf1. apply SPrim2; [ apply VLit | apply SDeref ]. } simpl.
-  eapply MSstep. { apply SIf1. apply SPrimCmp. reflexivity. }
-  unfold prim_cmp. rewrite Hlt.
-  eapply MSstep. { apply SIfFalse. }
-  apply MSrefl.
-Qed.
-
-(* THE WHOLE COUNTING-DOWN LOOP, END-TO-END: from [i=2] it decrements 2 -> 1 -> 0
-   and terminates (1 <= 0 false). A negative-step loop computed to its end. *)
-Example fordown_loop_runs :
-  multistep (fordown_loop, [tlit (LInt 2)]) (tlit LNil, [tlit (LInt 0)]).
-Proof.
-  eapply multistep_trans. { apply (fordown_one_iter 2). reflexivity. } simpl.
-  eapply multistep_trans. { apply (fordown_one_iter 1). reflexivity. } simpl.
-  apply (fordown_terminates 0). reflexivity.
-Qed.
+(* The end-to-end run of the counting-down loop ([fordown_one_iter],
+   [fordown_terminates], [fordown_loop_runs]) was DELETED in the "types, not
+   magnitudes" stage-2 refactor: it asserted concrete computed stores (2→1→0) and
+   computed guard booleans to terminate — value computation the abstract,
+   magnitude-free primitives no longer perform. The loop's soundness is carried by
+   [fordown_loop_typed] plus the generic progress/preservation. *)
 
 (* ---------------------------------------------------------------------------
    PAYOFF 3 — THE LOOP VARIABLE IS TYPED SOUNDLY AS A NUMBER. In the [forsum]
@@ -9268,8 +9061,8 @@ Proof.
   apply rsub_ref_inv in HsubR. destruct HsubR as [Hsu Hus].
   pose proof (rsub_trans _ _ _ Hsu Hsub) as Hbad.   (* ANum <: AInt *)
   apply rsub_sound in Hbad.
-  (* a NON-integer number [VNum (NRfrac 0)] inhabits ANum but NOT AInt. *)
-  pose proof (Hbad (VNum (NRfrac 0)) I) as Hcontra. simpl in Hcontra. exact Hcontra.
+  (* a NON-integer number [VFloat] inhabits ANum but NOT AInt. *)
+  pose proof (Hbad (VFloat) I) as Hcontra. simpl in Hcontra. exact Hcontra.
 Qed.
 
 (* ===========================================================================
@@ -9440,8 +9233,8 @@ Definition forin_iter : tm :=
   tlam forin_V1
     (tret [ ttypetest TgNum (tvar 0)
               (* c : Num  ==>  if c < 3 then c+1 else nil *)
-              (tif (tprim PLt (tvar 0) (tlit (LInt 3)))
-                   (tprim PAdd (tvar 0) (tlit (LInt 1)))
+              (tif (tprim PLt (tvar 0) (tlit (LInt)))
+                   (tprim PAdd (tvar 0) (tlit (LInt)))
                    (tlit LNil))
               (* c : nil (or non-number) ==> nil *)
               (tlit LNil) ]).
@@ -9454,7 +9247,7 @@ Definition forin_call : tm := tapp forin_iter (tderef (tloc 2)).
    intersection-narrowing gap); it demonstrates the loop running to completion and
    accumulating. The narrowed [v1] (de Bruijn 0) is in scope but unused here. *)
 Definition forin_user_body : tm :=
-  tassign (tloc 0) (tprim PAdd (tderef (tloc 0)) (tlit (LInt 1))).
+  tassign (tloc 0) (tprim PAdd (tderef (tloc 0)) (tlit (LInt))).
 
 Definition forin_loop : tm :=
   tforin [ tloc 1 ] (tloc 2) (tloc 1) forin_call forin_user_body.
@@ -9475,9 +9268,9 @@ Proof.
     + (* then: c : Num (tag_type TgNum = ANum at db0). if c<3 then c+1 else nil *)
       eapply TIf.
       * apply TPrimCmp; [ reflexivity | apply TVar; reflexivity
-        | eapply TSub; [ apply (TLit forin_S _ (LInt 3)) | apply RsSsub; apply SsAtom; apply ALInt ] ].
+        | eapply TSub; [ apply (TLit forin_S _ (LInt)) | apply RsSsub; apply SsAtom; apply ALInt ] ].
       * apply TPrimArith; [ reflexivity | apply TVar; reflexivity
-        | eapply TSub; [ apply (TLit forin_S _ (LInt 1)) | apply RsSsub; apply SsAtom; apply ALInt ] ].
+        | eapply TSub; [ apply (TLit forin_S _ (LInt)) | apply RsSsub; apply SsAtom; apply ALInt ] ].
       * apply (TLit forin_S _ LNil).
     + (* else: nil *) apply (TLit forin_S _ LNil).
   - (* (Num ∪ nil) ∪ nil  ⊑  Num ∪ nil *)
@@ -9514,7 +9307,7 @@ Proof.
       * apply TLoc. reflexivity.
       * apply TPrimArith; [ reflexivity | | ].
         -- eapply TDeref. apply TLoc. reflexivity.
-        -- eapply TSub; [ apply (TLit forin_S _ (LInt 1)) | apply RsSsub; apply SsAtom; apply ALInt ].
+        -- eapply TSub; [ apply (TLit forin_S _ (LInt)) | apply RsSsub; apply SsAtom; apply ALInt ].
 Qed.
 
 (* ---------------------------------------------------------------------------
@@ -9541,164 +9334,15 @@ Proof.
   intro H. apply inv_var in H. destruct H as [U [Hnth Hsub]].
   simpl in Hnth. injection Hnth as <-.
   (* Hsub : truthy_type <: ANil.  But truthy_type denotes every non-nil value;
-     a number [VNum (NRint 0)] inhabits truthy_type and NOT ANil. *)
+     a number [VInt] inhabits truthy_type and NOT ANil. *)
   apply rsub_sound in Hsub.
   (* Hsub : dsub truthy_type ANil. A number inhabits truthy_type (the ANum arm)
      but not ANil, contradicting the supposed inclusion. *)
-  pose proof (Hsub (VNum (NRint 0))) as Hbad.
+  pose proof (Hsub (VInt)) as Hbad.
   unfold truthy_type in Hbad. simpl in Hbad.
   apply Hbad. right. left. exact I.
 Qed.
 
-(* ---------------------------------------------------------------------------
-   PAYOFF 3 (operational) — ONE TRUTHY ITERATION steps, and the loop TERMINATES
-   when the iterator returns nil.
-   --------------------------------------------------------------------------- *)
-
-(* the guard and body are CLOSED at the fix self-ref binder (only [tloc]s and the
-   tifn-bound de Bruijn 0, which is BELOW the fix binder), so the fix-unfold
-   substitution [subst 0 (loop)] leaves them unchanged. *)
-Lemma forin_guard_closed : forall s,
-  subst 0 s (forin_guard [ tloc 1 ] (tloc 1) forin_call) =
-  forin_guard [ tloc 1 ] (tloc 1) forin_call.
-Proof. reflexivity. Qed.
-Lemma forin_body_closed : forall s,
-  subst 0 s (forin_body (tloc 2) (tloc 1) forin_user_body) =
-  forin_body (tloc 2) (tloc 1) forin_user_body.
-Proof. reflexivity. Qed.
-
-(* ONE ITERATION at control [c] with [c < 3] (so the iterator yields [c+1], truthy):
-   from store [cnt ; v1 ; c] the loop calls the iterator (→ c+1), binds it into
-   v1cell, the guard is TRUE, advances ctrl := c+1, runs the body (cnt := cnt+1),
-   leaving control back at the loop with store [cnt+1 ; c+1 ; c+1]. *)
-Lemma forin_one_iter : forall cnt v c,
-  Nat.ltb c 3 = true ->
-  multistep (forin_loop, [ tlit (LInt cnt) ; tlit (LInt v) ; tlit (LInt c) ])
-            (forin_loop, [ tlit (LInt (cnt + 1)) ; tlit (LInt (c + 1)) ; tlit (LInt (c + 1)) ]).
-Proof.
-  intros cnt v c Hlt. unfold forin_loop, tforin.
-  eapply MSstep. { apply twhile_unfold. }
-  rewrite forin_guard_closed, forin_body_closed.
-  (* GUARD: tseq (tmassign [v1cell] (iter (!ctrl))) (tifn (!v1cell) true false) *)
-  unfold forin_guard, forin_call, forin_iter, forin_V1.
-  (* step the iterator call: read ctrl c, beta, the ttypetest on a number, the
-     inner [if c<3] true ⇒ c+1; RHS becomes [tret [c+1]]. *)
-  eapply MSstep. { apply SIf1. apply tseq_step1. apply SMAssign2.
-                   - apply Forall_cons; [ apply VLoc | apply Forall_nil ].
-                   - apply SApp2; [ apply VLam | apply SDeref ]. } simpl.
-  eapply MSstep. { apply SIf1. apply tseq_step1. apply SMAssign2.
-                   - apply Forall_cons; [ apply VLoc | apply Forall_nil ].
-                   - apply SBeta. apply VLit. } simpl.
-  (* the returned element: ttypetest TgNum (LInt c) ... : c IS a number ⇒ then *)
-  eapply MSstep. { apply SIf1. apply tseq_step1. apply SMAssign2.
-                   - apply Forall_cons; [ apply VLoc | apply Forall_nil ].
-                   - apply SRet with (pre := []); [ apply Forall_nil
-                     | apply STtTrue; [ apply VLit | exact I ] ]. } simpl.
-  eapply MSstep. { apply SIf1. apply tseq_step1. apply SMAssign2.
-                   - apply Forall_cons; [ apply VLoc | apply Forall_nil ].
-                   - apply SRet with (pre := []); [ apply Forall_nil
-                     | apply SIf1; apply SPrimCmp; reflexivity ]. } simpl.
-  unfold prim_cmp. rewrite Hlt.
-  eapply MSstep. { apply SIf1. apply tseq_step1. apply SMAssign2.
-                   - apply Forall_cons; [ apply VLoc | apply Forall_nil ].
-                   - apply SRet with (pre := []); [ apply Forall_nil | apply SIfTrue ]. } simpl.
-  eapply MSstep. { apply SIf1. apply tseq_step1. apply SMAssign2.
-                   - apply Forall_cons; [ apply VLoc | apply Forall_nil ].
-                   - apply SRet with (pre := []); [ apply Forall_nil | apply SPrimArith; reflexivity ]. } simpl.
-  (* now RHS is [tret [c+1]] a value multivalue; the multi-write binds v1cell := c+1 *)
-  eapply MSstep. { apply SIf1. apply tseq_step1. apply SMAssign.
-                   - apply Forall_cons; [ apply VLoc | apply Forall_nil ].
-                   - apply Forall_cons; [ apply VLit | apply Forall_nil ]. } simpl.
-  (* the tmassign yielded nil; discard it, evaluate the truthiness test *)
-  eapply MSstep. { apply SIf1. apply tseq_step_value. apply VLit. }
-  (* tifn (!v1cell) true false : read v1cell = c+1 (a number, truthy) ⇒ true *)
-  eapply MSstep. { apply SIf1. apply SIfn1. apply SDeref. } simpl.
-  eapply MSstep. { apply SIf1. apply SIfnTrue.
-                   - apply VLit.
-                   - split; [ intros [F|F]; discriminate | intros [es F]; discriminate ]. } simpl.
-  (* guard true ⇒ run the then-branch [tseq (forin_body) (loop)] *)
-  eapply MSstep. { apply SIfTrue. }
-  (* BODY (the OUTER tseq sequences [forin_body] then the recursive loop). The body
-     [forin_body] is itself [tseq (ctrl := !v1cell) (tifn (!v1cell) user_body nil)]. *)
-  unfold forin_body, forin_user_body.
-  (* advance ctrl := !v1cell = c+1  (outer tseq_step1 + inner tseq_step1) *)
-  eapply MSstep. { apply tseq_step1. apply tseq_step1.
-                   apply SAssign2; [ apply VLoc | apply SDeref ]. } simpl.
-  eapply MSstep. { apply tseq_step1. apply tseq_step1. apply SAssign. apply VLit. } simpl.
-  eapply MSstep. { apply tseq_step1. apply tseq_step_value. apply VLit. }
-  (* tifn (!v1cell) user_body nil : v1cell = c+1 truthy ⇒ run user body (subst) *)
-  eapply MSstep. { apply tseq_step1. apply SIfn1. apply SDeref. } simpl.
-  eapply MSstep. { apply tseq_step1. apply SIfnTrue.
-                   - apply VLit.
-                   - split; [ intros [F|F]; discriminate | intros [es F]; discriminate ]. } simpl.
-  (* user body [cnt := !cnt + 1] : read cnt, add 1, write cnt+1 *)
-  eapply MSstep. { apply tseq_step1. apply SAssign2; [ apply VLoc | apply SPrim1; apply SDeref ]. } simpl.
-  eapply MSstep. { apply tseq_step1. apply SAssign2; [ apply VLoc | apply SPrimArith; reflexivity ]. } simpl.
-  eapply MSstep. { apply tseq_step1. apply SAssign. apply VLit. } simpl.
-  (* the body finished (nil); the outer sequence yields the loop again *)
-  eapply MSstep. { apply tseq_step_value. apply VLit. }
-  apply MSrefl.
-Qed.
-
-(* TERMINATION: at control [c] with [c >= 3] the iterator yields nil (falsy); the
-   guard is FALSE and the loop ends with [nil]. The store: v1cell is overwritten
-   with nil, ctrl is unchanged (advance only happens in the body, which the false
-   guard skips), cnt unchanged. *)
-Lemma forin_terminates : forall cnt v c,
-  Nat.ltb c 3 = false ->
-  multistep (forin_loop, [ tlit (LInt cnt) ; tlit (LInt v) ; tlit (LInt c) ])
-            (tlit LNil, [ tlit (LInt cnt) ; tlit LNil ; tlit (LInt c) ]).
-Proof.
-  intros cnt v c Hge. unfold forin_loop, tforin.
-  eapply MSstep. { apply twhile_unfold. }
-  rewrite forin_guard_closed, forin_body_closed.
-  unfold forin_guard, forin_call, forin_iter, forin_V1.
-  eapply MSstep. { apply SIf1. apply tseq_step1. apply SMAssign2.
-                   - apply Forall_cons; [ apply VLoc | apply Forall_nil ].
-                   - apply SApp2; [ apply VLam | apply SDeref ]. } simpl.
-  eapply MSstep. { apply SIf1. apply tseq_step1. apply SMAssign2.
-                   - apply Forall_cons; [ apply VLoc | apply Forall_nil ].
-                   - apply SBeta. apply VLit. } simpl.
-  eapply MSstep. { apply SIf1. apply tseq_step1. apply SMAssign2.
-                   - apply Forall_cons; [ apply VLoc | apply Forall_nil ].
-                   - apply SRet with (pre := []); [ apply Forall_nil
-                     | apply STtTrue; [ apply VLit | exact I ] ]. } simpl.
-  eapply MSstep. { apply SIf1. apply tseq_step1. apply SMAssign2.
-                   - apply Forall_cons; [ apply VLoc | apply Forall_nil ].
-                   - apply SRet with (pre := []); [ apply Forall_nil
-                     | apply SIf1; apply SPrimCmp; reflexivity ]. } simpl.
-  unfold prim_cmp. rewrite Hge.
-  eapply MSstep. { apply SIf1. apply tseq_step1. apply SMAssign2.
-                   - apply Forall_cons; [ apply VLoc | apply Forall_nil ].
-                   - apply SRet with (pre := []); [ apply Forall_nil | apply SIfFalse ]. } simpl.
-  (* RHS is [tret [nil]] a value multivalue; bind v1cell := nil *)
-  eapply MSstep. { apply SIf1. apply tseq_step1. apply SMAssign.
-                   - apply Forall_cons; [ apply VLoc | apply Forall_nil ].
-                   - apply Forall_cons; [ apply VLit | apply Forall_nil ]. } simpl.
-  eapply MSstep. { apply SIf1. apply tseq_step_value. apply VLit. }
-  (* tifn (!v1cell) true false : v1cell = nil (falsy) ⇒ false *)
-  eapply MSstep. { apply SIf1. apply SIfn1. apply SDeref. } simpl.
-  eapply MSstep. { apply SIf1. apply SIfnFalse.
-                   - apply VLit.
-                   - right; reflexivity. } simpl.
-  (* guard false ⇒ the loop ends with nil *)
-  eapply MSstep. { apply SIfFalse. }
-  apply MSrefl.
-Qed.
-
-(* THE WHOLE LOOP, END-TO-END: from [cnt=0 ; v1=0 ; ctrl=0] the iterator yields
-   1, 2, 3 (control 0→1→2→3, cnt 0→1→2→3), then at control 3 yields nil and the
-   loop TERMINATES — accumulating [cnt = 3] (three iterations). A generic-for over
-   an explicit finite iterator, run to completion. *)
-Example forin_loop_runs :
-  multistep (forin_loop, [ tlit (LInt 0) ; tlit (LInt 0) ; tlit (LInt 0) ])
-            (tlit LNil, [ tlit (LInt 3) ; tlit LNil ; tlit (LInt 3) ]).
-Proof.
-  eapply multistep_trans. { apply (forin_one_iter 0 0 0). reflexivity. } simpl.
-  eapply multistep_trans. { apply (forin_one_iter 1 1 1). reflexivity. } simpl.
-  eapply multistep_trans. { apply (forin_one_iter 2 2 2). reflexivity. } simpl.
-  apply (forin_terminates 3 3 3). reflexivity.
-Qed.
 
 (* ===========================================================================
    ASSUMPTION AUDIT — closed under the global context.
@@ -9740,10 +9384,7 @@ Print Assumptions rawset_payoff_steps.
 Print Assumptions rawset_absent_own_rejected.
 Print Assumptions preservation.
 Print Assumptions ex_add_typed.
-Print Assumptions ex_add_steps.
 Print Assumptions ex_lt_typed.
-Print Assumptions ex_lt_steps.
-Print Assumptions ex_chain_steps.
 Print Assumptions ex_bad_add_untyped.
 Print Assumptions truthy_narrows.
 Print Assumptions falsy_narrows.
@@ -9777,9 +9418,6 @@ Print Assumptions twhile_unfold.
 Print Assumptions twhile_typed.
 Print Assumptions sumloop_prog_typed.
 Print Assumptions sumloop_loop_typed.
-Print Assumptions cinc_one_iter.
-Print Assumptions cinc_terminates.
-Print Assumptions cinc_loop_runs.
 Print Assumptions cinc_loop_typed.
 Print Assumptions seq_mutation_typed.
 Print Assumptions seq_mutation_steps.
@@ -9825,13 +9463,7 @@ Print Assumptions for_var_is_number.
 Print Assumptions tfor_up_typed.
 Print Assumptions tfor_down_typed.
 Print Assumptions forsum_loop_typed.
-Print Assumptions forsum_one_iter.
-Print Assumptions forsum_terminates.
-Print Assumptions forsum_loop_runs.
 Print Assumptions fordown_loop_typed.
-Print Assumptions fordown_one_iter.
-Print Assumptions fordown_terminates.
-Print Assumptions fordown_loop_runs.
 Print Assumptions for_var_typed_number.
 Print Assumptions for_var_not_int.
 (* GENERIC FOR-IN LOOP — encoded over [twhile] + [tmassign] + [tapp] + [tifn]:
@@ -9846,6 +9478,3 @@ Print Assumptions forin_iter_typed.
 Print Assumptions forin_loop_typed.
 Print Assumptions forin_v1_narrowed_nonnil.
 Print Assumptions forin_v1_not_nil.
-Print Assumptions forin_one_iter.
-Print Assumptions forin_terminates.
-Print Assumptions forin_loop_runs.

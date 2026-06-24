@@ -428,9 +428,33 @@ Op-sem parity must hold at every commit. After the handler deletion, the adversa
   (`bin/cr test lib/sem/bridge/` — 600/600 atom + 80/80 rec + 60/60 arrow +
   100/100 operational). Bridge port updated: `lib/sem/bridge/atom.lua` `vstr` is
   nullary, renders the fixed representative `"s"`. Recorded at `proof-kernel.md`
-  (inert-payload removal, stage 1 of 2). STAGE 2 (the number payload) is a
-  separate, larger step (carries arithmetic + `NRint`/`NRfrac`) — see the
-  version-parametric-numbers item below for the related number-value work.
+  (inert-payload removal, stage 1 of 2).
+- [x] **Inert-value-payload removal — STAGE 2 (FINAL): remove number magnitudes +
+  value computation.** Numbers are now two type-CLASSES with NO magnitude:
+  `NRint`/`NRfrac`/`LInt` are NULLARY (`subtype.v`/`typing.v`), `VInt`/`VFloat` are
+  payload-free notations. The int/frac CLASS distinction is KEPT (load-bearing for
+  `AInt ⊊ AFloat`; collapsing to one number would be unsound). Arithmetic and
+  comparison are ABSTRACT: `prim_arith`/`prim_cmp` REMOVED; `SPrimArith` steps to
+  SOME number value (`tlit LInt : ANum`); comparison steps NON-DETERMINISTICALLY to
+  `LBool true`/`false` (`SPrimCmpTrue`/`SPrimCmpFalse`) — both with a real `LBool`
+  head so `canon_bool`/`SIfTrue`/`SIfFalse` still fire (no determinism lemma in the
+  dev, so non-det is harmless). This makes "types, not magnitudes" STRUCTURAL.
+  The VALUE-COMPUTATION demos were DELETED (gold-plating, explicitly approved):
+  `compute_add`/`compute_lt`/`ex_*_steps`/`ex_chain_steps`/`ex_add_preservation`,
+  and the loop end-to-end / termination runs `cinc_*`/`forsum_one_iter`+
+  `_terminates`+`_loop_runs`/`fordown_*`/`forin_one_iter`+`_terminates`+`_loop_runs`
+  (they assert concrete computed stores / computed-`false`-guard termination). Each
+  loop keeps its TYPING demo; soundness is carried by progress/preservation. Full
+  chain rebuilt clean (`subtype→typing→ssub→check`, all "Closed under the global
+  context", zero axioms; `progress`/`preservation`/`synth_sound`/`check_sound`/
+  `AInt_sub_AFloat`/`not_float_sub_int`/`AFloat_equiv_ANum` all Closed). All four
+  bridge oracle `.v` files recompute. Reality bridge re-validated green against real
+  LuaJIT (`bin/cr test lib/sem/bridge/` — 4 passed, 142 assertions, 600/600 atom +
+  80/80 rec + 60/60 arrow + 113/113 operational + 17/17 result-inhabits-type).
+  Bridge port updated: `lib/sem/bridge/atom.lua` `vint`/`vfloat` nullary (render
+  fixed `"0"`/`"0.5"`); `exec.lua` `lit_int` nullary; PDiv faithfulness-gap test
+  deleted (moot — no computed magnitude). Recorded at `proof-kernel.md` (stage 2 of
+  2). See the version-parametric-numbers item below for deferred number-value work.
 - [ ] **[nice-to-have] Version-parametric numbers (5.3/5.4 distinct int/float
   sibling values).** The proof collapses to ONE double for LuaJIT 5.1 (fork A′
   RESOLVED). A future version-parameterized `V` gives 5.3/5.4 a genuinely
@@ -551,8 +575,11 @@ Op-sem parity must hold at every commit. After the handler deletion, the adversa
   progress/preservation/synth_sound/check_sound/sumloop_ann_synths: Closed under the
   global context. `subtype.v` + `ssub.v` byte-unmodified. Building block for surface
   `local x : T = e` and function param/return annotations (not themselves built).
-  - **Still deferred (separate axis):** `PDiv` float-faithfulness (the `Nat.div` vs
-    real `/ = 3.5` reality-bridge gap above) — unchanged by this increment.
+  - **RETIRED / MOOT (stage-2 number refactor):** `PDiv` float-faithfulness (the
+    former `Nat.div` vs real `/ = 3.5` reality-bridge gap) — moot by construction:
+    numbers have no magnitude and arithmetic is abstract, so there is no
+    model-computed number value to be faithful-or-unfaithful. See the stage-2
+    inert-payload-removal item under "Number model".
 
 ### Arrows (laws beyond the closed one)
 
@@ -642,9 +669,13 @@ Still open (DEFERRED — recorded honestly, minimal core only):
   the sanity lemmas + `synth_sound`/`check_sound`: closed under the global context.
   **DEFERRED (this increment):** precise Int-preserving result types
   (`Int+Int : AInt` — sound `ANum` used now); concat / modulo / `//` / bitwise /
-  metamethod-dispatch operators; general structural `==` (numbers-only here);
-  faithful `PDiv` float result (awaits a fractional number literal). Recorded at
-  `proof-kernel.md` increment 20.
+  metamethod-dispatch operators; general structural `==` (numbers-only here).
+  Recorded at `proof-kernel.md` increment 20.
+  **SUPERSEDED by the stage-2 number refactor:** the `COMPUTE`/`prim_arith`/
+  `prim_cmp` value computation described above was REMOVED — arithmetic/comparison
+  are now ABSTRACT (numbers are magnitude-free type-classes). The `3+4 →* 7`,
+  `3<4 →* true`, `(3+4)*2 →* 14` sanity runs were deleted (gold-plating); `faithful
+  PDiv float result` is RETIRED/moot. See the stage-2 item under "Number model".
 - [x] **INTERSECTION + NEGATION as `ssub` rules** (increment 12, `proof/typing.v`
   + `proof/ssub.v`, on unmodified `subtype.v`). `ssub` gains the composable GLB
   rules `SsInterPL`/`SsInterPR`/`SsInterI` (projections + intro), **proven SOUND
@@ -768,10 +799,10 @@ Still open (DEFERRED — recorded honestly, minimal core only):
   TYPES: the counting/sum loop `local i=ref 0; local s=ref 0; while (!i<n) do s:=
   !s+!i; i:=!i+1 end; !s` (`sumloop_prog_typed`, at `ANum`; cells are `BRef ANum`
   because arithmetic yields `ANum` and `BRef` is invariant — Lua's one number
-  type). The single-cell counter loop is reduced END-TO-END through the store
-  (`cinc_loop_runs`: store `[0]` → `nil` in store `[1]` — unfold, store-read
-  condition `0<1` true, mutate to `1`, re-unfold, `1<1` false, terminate);
-  `cinc_one_iter`/`cinc_terminates` are the two halves, machine-checked.
+  type). The single-cell counter loop TYPES at `Tunit` (`cinc_loop_typed`); its
+  former END-TO-END run (`cinc_loop_runs`/`cinc_one_iter`/`cinc_terminates`,
+  store `[0]`→`[1]` with a computed `1<1` false guard) was DELETED in the stage-2
+  number refactor — value computation the abstract primitives no longer perform.
   SEQUENCING-WITH-MUTATION `(t.x:=9); t.x` reads 9 (`seq_mutation_typed`/`_steps`);
   IF-WITH-MUTATION `if cond then r:=1 else r:=2 end; !r` reads the taken branch's
   value (`if_mut_typed`, `if_mut_true_steps`/`if_mut_false_steps`).
@@ -803,20 +834,16 @@ Still open (DEFERRED — recorded honestly, minimal core only):
   TYPES (`fordown_loop_typed`) and terminates `2→1→0` (`fordown_loop_runs`); the
   loop variable is typed soundly as a number (`for_var_typed_number : !i : ANum`)
   and NOT an integer (`for_var_not_int : ~ !i : AInt`, via a `NRfrac` witness — 5.1's
-  single-number model). `Print Assumptions` Closed on all. SUBSTRATE BOUNDARY noted
-  (not faked, verified): a SINGLE runtime-sign-dispatched form needs SIGNED numbers at
-  BOTH the value and term level. The number value is `nat`-backed (`NRint nat`/`NRfrac
-  nat`, no negative value); the only number literal is `LInt : nat`; arithmetic is `nat`
-  (truncating `PSub`: `5 - 7 = 0`); `tunop UNeg` dispatches only on metatables (`SUnMetaL`),
-  stuck on plain numbers. So NO term evaluates to a negative number. The blocker is NOT
-  only the guard (a runtime test `0 < step` IS expressible via `PLt`+`tif`, but it is
-  vacuous — every number value is `≥ 0`): the deeper blocker is the UPDATE `i := i + step`,
-  which with `nat` `+` can ONLY ascend for every representable step — descent is carried
-  entirely by switching the operator to `PSub`, the static-sign split. Concrete blocked
-  term: `for i = 2, 1, c` with `c` meant to be `-1` — no term produces `-1`, and `i := i + c`
-  never descends. The two-form static-sign rendering is the faithful `nat`-substrate model;
-  unifying needs a signed `NumRep` (`Z` payload) + signed `LInt` + a `PNeg`/sign-aware `PSub`.
-  See `proof-kernel.md` increment 28.
+  single-number model). `Print Assumptions` Closed on all. See `proof-kernel.md`
+  increment 28.
+  **SUPERSEDED by the stage-2 number refactor:** the end-to-end RUNS
+  (`forsum_loop_runs` → `sum=6`, `fordown_loop_runs` → `2→1→0`) were DELETED — value
+  computation the abstract magnitude-free primitives no longer perform; each loop
+  keeps only its TYPING demo. The SIGNED-NUMBER substrate boundary (a single
+  runtime-sign-dispatched form needs signed `NumRep`/`LInt` + sign-aware `PSub`) is
+  RETIRED/MOOT by construction: numbers have no magnitude, so there is no sign to
+  dispatch on at runtime; direction is a STATIC operator choice
+  (`tfor_up`/`tfor_down`). See the stage-2 item under "Number model".
 - [x] **Generic `for-in` loop `for v1,…,vn in explist do body end` (iterator
   protocol) — DONE (encoded over `twhile` + `tmassign` + `tapp` + `tifn`).** Models
   Lua 5.1's own generic-for desugaring (`local f,s,ctrl=explist; while true do local
@@ -839,13 +866,14 @@ Still open (DEFERRED — recorded honestly, minimal core only):
   substrate): `ctrl := !v1cell` type-checks by reflexivity; the iterator narrows its
   own control argument internally (`ttypetest TgNum`), exactly Lua's stateful-iterator
   pattern. Payoffs: a concrete generic-for over an explicit finite iterator
-  `(Num∪nil)→BTuple[Num∪nil]` yielding 1,2,3 then nil TYPES (`forin_loop_typed`,
-  `forin_iter_typed`) and STEPS end-to-end accumulating `cnt=3` then TERMINATING on
-  nil (`forin_loop_runs` = three `forin_one_iter` + `forin_terminates`); the first
+  `(Num∪nil)→BTuple[Num∪nil]` TYPES (`forin_loop_typed`, `forin_iter_typed`); its
+  former END-TO-END run (`forin_loop_runs`/`forin_one_iter`/`forin_terminates`,
+  accumulating `cnt=3` over distinct stores) was DELETED in the stage-2 number
+  refactor — value computation the abstract primitives no longer perform; the loop
+  keeps only its TYPING demo. The first
   loop variable is narrowed to non-nil inside the body (`forin_v1_narrowed_nonnil :
   v1 : truthy_type`) and REJECTED at nil (`forin_v1_not_nil : ~ v1 : ANil`, via a
-  number witness in `truthy_type`); the loop terminates when the iterator returns nil
-  (`forin_terminates`). `Print Assumptions` Closed on all. SUBSTRATE BOUNDARY noted
+  number witness in `truthy_type`). `Print Assumptions` Closed on all. SUBSTRATE BOUNDARY noted
   (not faked): termination is folded as "first result TRUTHY" (the only expressible
   non-nil narrowing — `tifn`'s `truthy_type` bound) rather than exact `v1 == nil`;
   the precise `v1 : V1 ∩ ¬nil` narrowing is the SAME intersection-narrowing substrate

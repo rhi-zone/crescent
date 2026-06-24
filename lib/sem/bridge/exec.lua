@@ -80,8 +80,10 @@ local M = {}
 --:: TWhile = { tag: "while", c: Term, body: Term }
 --:: Term = TLit | TVar | TPrim | TLam | TApp | TLet | TRec | TProj | TIf | TAlloc | TDeref | TAssign | TSeq | TWhile
 
---: (integer) -> Term
-function M.lit_int(n) return { tag = "lit", lit = { k = "int", n = n } } end
+-- The number literal carries NO magnitude (numbers are type-CLASSES; the "types,
+-- not magnitudes" refactor). It renders to a FIXED integer-valued representative.
+--: () -> Term
+function M.lit_int() return { tag = "lit", lit = { k = "int" } } end
 --: (boolean) -> Term
 function M.lit_bool(b) return { tag = "lit", lit = { k = "bool", b = b } } end
 --: () -> Term
@@ -114,14 +116,13 @@ function M.seq(a, b) return { tag = "seq", a = a, b = b } end
 function M.while_(c, body) return { tag = "while", c = c, body = body } end
 
 -- ── primop → Lua binary operator ─────────────────────────────────────────────
--- The arithmetic ops map to Lua `+ - * /`; comparisons to `< <= ==`. NOTE the
--- FAITHFULNESS GAP at PDiv: the proof's PDiv is `Nat.div` (INTEGER division,
--- 7/2 = 3) but real Lua `/` is FLOAT division (7/2 = 3.5). Both 3 and 3.5
--- inhabit the inferred type ANum, so the RESULT-INHABITS-TYPE assertion still
--- holds — but the VALUES disagree. The bridge surfaces this as a sound-but-
--- unfaithful model choice (see docs/reality-bridge.md). We translate PDiv to
--- the real Lua `/` (the honest real-interpreter operator); the disagreement is
--- exposed by comparing the proof's nat-div value against the real result.
+-- The arithmetic ops map to Lua `+ - * /`; comparisons to `< <= ==`. The model's
+-- arithmetic is now ABSTRACT (numbers are type-CLASSES with no magnitude; the
+-- "types, not magnitudes" refactor), so there is NO model-computed value to
+-- compare against — the former PDiv nat-div-vs-float faithfulness gap is moot by
+-- construction. What the bridge validates is purely the TYPE claim: a well-typed
+-- term, run on real LuaJIT, yields a value INHABITING its inferred type. We
+-- translate each primop to the honest real-interpreter operator.
 local PRIMOP_LUA = {
 	PAdd = "+", PSub = "-", PMul = "*", PDiv = "/",
 	PLt = "<", PLe = "<=", PEq = "==",
@@ -145,7 +146,7 @@ end
 local function tr(t, stack, ng)
 	if t.tag == "lit" then
 		local l = t.lit
-		if l.k == "int" then return ("%d"):format(l.n) end
+		if l.k == "int" then return "0" end
 		if l.k == "bool" then return l.b and "true" or "false" end
 		if l.k == "nil" then return "nil" end
 		error("exec: unknown lit kind " .. tostring(l.k))
