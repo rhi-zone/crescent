@@ -362,6 +362,35 @@ Op-sem parity must hold at every commit. After the handler deletion, the adversa
   BTop` and returns `BTop` (vs `tmeta`'s exact type). PREREQUISITE for
   function-valued metamethods on the dynamic-metatable frontier. See
   `docs/decisions/metatable-representation.md` (substrate prerequisite 3).
+- [ ] **[substrate] Precise POSITIVE intersection narrowing (`U ∩ Pos`) — proof
+  dev.** Narrow a conditional's scrutinee to `U ∩ Pos` so the narrowed binding is
+  consumed at its REAL type (dissolving the `truthy_type ⊑ Num` wall). SPLIT BY
+  CONSTRUCT:
+  (a) **`ttypetest`-positive narrowing is SOUND and LANDABLE NOW** — a READY
+  increment. Binder `BInter U (tag_type g)` with the RAW scrutinee type `U` works
+  because `ttypetest` does NOT truncate (no `STtMulti*` rules; a multivalue is
+  tested by `TgMulti`, `tag_type TgMulti = BTop`, and substituted WHOLE via
+  `STtTrue`). Reusable proven pieces: `RsInterI` in `rsub` (`subtype.v`/`ssub.v`
+  unmodified; `rsub_sound` via `dinter_glb`), merged bridge lemmas
+  `tag_narrows_inter`/`truthy_narrows_inter` generic over the bound `W`. `tifn`
+  POSITIVE narrowing for DIRECT (non-multivalue) scrutinees is also sound in
+  isolation (`SIfnTrue` + the merged bridge at `W:=U`).
+  (b) **`tifn`-truthiness precise narrowing is BLOCKED on the multivalue-model
+  fork.** A uniform `tifn` rule with binder `BInter (trunc1 U) Pos` is UNSOUND under
+  `SIfnMultiCons`: `inv_ifn`/`inv_ret` expose the scrutinee at a LOOSE,
+  subsumption-chosen supertype `U` (e.g. `BTop` via `SsTop`), but after truncation
+  the head has the first-COMPONENT type, which bears NO subtyping relation to `U` /
+  `trunc1 U` (degenerates at `U=BTop`; FAILS for non-flat
+  `BTuple[BTuple[AInt]]`). ROOT CAUSE: the multivalue model permits loose-supertype
+  subsumption before the conditional AND non-flat multivalues. OPEN DESIGN FORK
+  (no-default, design-it-twice candidate, gated): **Option 1** flat-multivalue model
+  (components single-valued; `trunc1` idempotent); **Option 2** truncate-in-rule at
+  `TIfn` (type the condition as truncate-to-one via `tfst`/`TFst` at a TIGHT type so
+  subsumption can't loosen it); **Option 3** context-narrowing + canonical scrutinee
+  typing is INSUFFICIENT alone (recorded NON-solution). FRAMING: this wall is a
+  COMPLETENESS limit, not soundness — over-approximation (bind the bound-alone
+  `truthy_type`/`tag_type`) stays sound. Full finding:
+  `docs/decisions/precise-narrowing-and-the-multivalue-model.md`.
 - [ ] **[gated graft] `setmetatable`/`getmetatable` via a reserved `__meta` ref
   field — proof dev.** Modellable WITHOUT any new core constructor and WITHOUT
   touching `subtype.v`: `setmetatable(t,mt) ≈ tassign (tproj t "__meta") mt`
@@ -654,6 +683,13 @@ Still open (DEFERRED — recorded honestly, minimal core only):
   (3) **Type-test narrowing** `type(x)=="number"` — DONE in increment 15 (see the
   completed entry below); the NEGATIVE (else-branch) precision `U ∩ ¬tag_type g`
   remains deferred (over-approximated to `U`), same intersection/negation wall as (1).
+  Precise NEGATIVE narrowing is separately GATED on DECIDER ROUTING (`decide_ssub`
+  vs `gdecide` — the N5 inter-left non-distributive frontier, witness
+  `((Int∪Str)∩Bool)(Int∪Str)`; see the [BLOCKING] inter-left distributivity item
+  above) — a design-it-twice candidate, DISTINCT from the multivalue fork below. The
+  POSITIVE side (`U ∩ tag_type g`) is now characterized as sound + landable for
+  `ttypetest`; see the `[substrate] Precise POSITIVE intersection narrowing` item
+  above and `docs/decisions/precise-narrowing-and-the-multivalue-model.md`.
   (4) **Narrowing on non-variable paths** (`x.f`, `x[i]`).
   (5) **Distributive simplification** `(T∪nil)∩¬nil <: T` — `dsub`-true, `ssub`-false
   (the N5 non-distributive frontier); routing it needs the `gdecide` emptiness path.
