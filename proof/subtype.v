@@ -706,7 +706,12 @@ Inductive NumRep : Type :=
 
 Inductive V : Type :=
   | VNum   : NumRep -> V       (* the one number value (a double); see NumRep *)
-  | VStr   : nat -> V          (* a string value:  inhabits AStr only       *)
+  | VStr   : V                 (* THE string value (nullary): inhabits AStr only.
+                                  The old [nat] payload was inert — every witness
+                                  used [VStr] and no [denote]/typing/progress/
+                                  preservation obligation ever read it (head-only,
+                                  see [denote_head]). Removed in the "types, not
+                                  magnitudes" payload-removal (stage 1). *)
   | VBool  : bool -> V         (* a boolean value: inhabits ABool only      *)
   | VNil   : V                 (* nil:             inhabits ANil only        *)
   (* INCREMENT 5 — table values. A FINITE assoc-list of string keys to
@@ -773,7 +778,7 @@ Section V_ind_strong.
   Variable Pt : list V -> Prop.
   Hypothesis HInt   : forall n, P (VInt n).
   Hypothesis HFloat : forall n, P (VFloat n).
-  Hypothesis HStr   : forall n, P (VStr n).
+  Hypothesis HStr   : P VStr.
   Hypothesis HBool  : forall b, P (VBool b).
   Hypothesis HNil   : P VNil.
   Hypothesis HTable : forall l, Pl l -> P (VTable l).
@@ -791,7 +796,7 @@ Section V_ind_strong.
     match v with
     | VNum (NRint n)  => HInt n
     | VNum (NRfrac n) => HFloat n
-    | VStr n   => HStr n
+    | VStr     => HStr
     | VBool b  => HBool b
     | VNil     => HNil
     | VRef n   => HRef n
@@ -836,7 +841,7 @@ Definition atom_denote (a : Atom) (v : V) : Prop :=
   | AInt   => match v with VNum (NRint _) => True | _ => False end
   | ANum   => match v with VNum _ => True | _ => False end
   | AFloat => match v with VNum _ => True | _ => False end
-  | AStr   => match v with VStr _  => True | _ => False end
+  | AStr   => match v with VStr    => True | _ => False end
   end.
 
 (* ---- The denotation: types are predicates over V (i.e. sets of values) ---- *)
@@ -1322,14 +1327,14 @@ Proof. exists (VInt 0); simpl; exact I. Qed.
 Theorem num_inhabited  : exists v, denote (BAtom ANum) v.
 Proof. exists (VFloat 0); simpl; exact I. Qed.
 Theorem str_inhabited  : exists v, denote (BAtom AStr) v.
-Proof. exists (VStr 0); simpl; exact I. Qed.
+Proof. exists (VStr); simpl; exact I. Qed.
 
 (* Subtyping is NOT trivial — concrete NON-subtypes, each with a witness value
    that is in the LHS denotation but not the RHS. *)
 
 Theorem not_str_sub_int : ~ dsub (BAtom AStr) (BAtom AInt).
 Proof.
-  unfold dsub; intro H. specialize (H (VStr 0)). simpl in H.
+  unfold dsub; intro H. specialize (H (VStr)). simpl in H.
   apply H. exact I.
 Qed.
 
@@ -1421,7 +1426,7 @@ Definition head (v : V) : V :=
   match v with
   | VInt _   => VInt 0
   | VFloat _ => VFloat 0
-  | VStr _   => VStr 0
+  | VStr     => VStr
   | VBool _  => VBool false
   | VNil     => VNil
   (* All tables collapse to the canonical empty table. This is SOUND ONLY for
@@ -1452,7 +1457,7 @@ Definition head (v : V) : V :=
   end.
 
 Definition head_reps : list V :=
-  VInt 0 :: VFloat 0 :: VStr 0 :: VBool false :: VNil :: VTable [] :: VFun [] :: VRef 0 :: VTup [] :: nil.
+  VInt 0 :: VFloat 0 :: VStr :: VBool false :: VNil :: VTable [] :: VFun [] :: VRef 0 :: VTup [] :: nil.
 
 (* [head v] is always one of the seven representatives. *)
 Lemma head_in_reps : forall v, In (head v) head_reps.
@@ -4338,22 +4343,22 @@ Proof.
 Qed.
 
 (* DOMAIN contravariance non-subtype: Int->Int </: Num->Int. Witness
-   [VFun [(VFloat 0, VStr 0)]]: it is VACUOUSLY in Int->Int (VFloat 0 ∉ Int, so the
+   [VFun [(VFloat 0, VStr)]]: it is VACUOUSLY in Int->Int (VFloat 0 ∉ Int, so the
    constraint is vacuous), but NOT in Num->Int (VFloat 0 ∈ Num, forcing the output
-   VStr 0 ∈ Int — false). This is exactly the contravariance witness. *)
+   VStr ∈ Int — false). This is exactly the contravariance witness. *)
 Theorem not_arrow_int_int_sub_num_int :
   ~ dsub (BArrow (BAtom AInt) (BAtom AInt)) (BArrow (BAtom ANum) (BAtom AInt)).
 Proof.
   unfold dsub. intro H.
-  specialize (H (VFun [(VFloat 0, VStr 0)])).
-  assert (Hpre : denote (BArrow (BAtom AInt) (BAtom AInt)) (VFun [(VFloat 0, VStr 0)])).
-  { apply denote_arrow_iff. exists [(VFloat 0, VStr 0)]. split; [reflexivity|].
+  specialize (H (VFun [(VFloat 0, VStr)])).
+  assert (Hpre : denote (BArrow (BAtom AInt) (BAtom AInt)) (VFun [(VFloat 0, VStr)])).
+  { apply denote_arrow_iff. exists [(VFloat 0, VStr)]. split; [reflexivity|].
     intros i o Hin Hi. simpl in Hin. destruct Hin as [Heq|[]].
     injection Heq as <- <-. simpl in Hi. contradiction.   (* VFloat 0 ∉ Int *) }
   specialize (H Hpre). apply denote_arrow_iff in H.
   destruct H as [g [Hv Hall]]. injection Hv as <-.
-  (* input VFloat 0 ∈ Num, so output VStr 0 must be ∈ Int — false *)
-  pose proof (Hall (VFloat 0) (VStr 0) (or_introl eq_refl) I) as Ho. simpl in Ho. exact Ho.
+  (* input VFloat 0 ∈ Num, so output VStr must be ∈ Int — false *)
+  pose proof (Hall (VFloat 0) (VStr) (or_introl eq_refl) I) as Ho. simpl in Ho. exact Ho.
 Qed.
 
 (* ---- DECISION PROCEDURE STAYS SOUND WITH ARROWS (sanity) -------------------
@@ -4680,11 +4685,11 @@ Qed.
 
 (* NON-VACUITY: a concrete two-element sequence inhabits its tuple type. *)
 Theorem tuple_inhabited :
-  denote (BTuple [BAtom AInt; BAtom AStr]) (VTup [VInt 0; VStr 0]).
-Proof. apply denote_tuple_iff. exists [VInt 0; VStr 0]. split; [reflexivity|].
+  denote (BTuple [BAtom AInt; BAtom AStr]) (VTup [VInt 0; VStr]).
+Proof. apply denote_tuple_iff. exists [VInt 0; VStr]. split; [reflexivity|].
   split; [reflexivity|]. intros [|[|[|i]]] T Hnth; simpl in Hnth; try discriminate Hnth.
   - injection Hnth as <-. exists (VInt 0); split; [reflexivity| exact I].
-  - injection Hnth as <-. exists (VStr 0); split; [reflexivity| exact I].
+  - injection Hnth as <-. exists (VStr); split; [reflexivity| exact I].
 Qed.
 
 (* LENGTH MISMATCH is a GENUINE non-subtyping (positional, exact-length — not

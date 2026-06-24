@@ -57,39 +57,39 @@ end
 local function oracle()
 	local rows = {
 		-- AStr
-		{ atom = "AStr",  mk = function() return bridge.vstr("hi") end,  coq = true,  desc = "AStr VStr" },
+		{ atom = "AStr",  mk = function() return bridge.vstr() end,  coq = true,  desc = "AStr VStr" },
 		{ atom = "AStr",  mk = function() return bridge.vint(7) end,     coq = false, desc = "AStr VInt" },
 		{ atom = "AStr",  mk = function() return bridge.vbool(true) end, coq = false, desc = "AStr VBool" },
 		{ atom = "AStr",  mk = function() return bridge.vnil() end,      coq = false, desc = "AStr VNil" },
 		-- ABool
 		{ atom = "ABool", mk = function() return bridge.vbool(true) end,  coq = true,  desc = "ABool VBool true" },
 		{ atom = "ABool", mk = function() return bridge.vbool(false) end, coq = true,  desc = "ABool VBool false" },
-		{ atom = "ABool", mk = function() return bridge.vstr("x") end,    coq = false, desc = "ABool VStr" },
+		{ atom = "ABool", mk = function() return bridge.vstr() end,    coq = false, desc = "ABool VStr" },
 		{ atom = "ABool", mk = function() return bridge.vint(0) end,      coq = false, desc = "ABool VInt" },
 		-- ANil
 		{ atom = "ANil",  mk = function() return bridge.vnil() end,       coq = true,  desc = "ANil VNil" },
-		{ atom = "ANil",  mk = function() return bridge.vstr("x") end,    coq = false, desc = "ANil VStr" },
+		{ atom = "ANil",  mk = function() return bridge.vstr() end,    coq = false, desc = "ANil VStr" },
 		{ atom = "ANil",  mk = function() return bridge.vbool(false) end, coq = false, desc = "ANil VBool" },
 		{ atom = "ANil",  mk = function() return bridge.vfloat(3) end,    coq = false, desc = "ANil VFloat" },
 		-- ANum (number atom, 5.1 single-double) — verbatim from bridge_num_oracle.v
 		{ atom = "ANum",  mk = function() return bridge.vint(3) end,      coq = true,  desc = "ANum VInt 3" },
 		{ atom = "ANum",  mk = function() return bridge.vfloat(3) end,    coq = true,  desc = "ANum VFloat 3" },
 		{ atom = "ANum",  mk = function() return bridge.vint(0) end,      coq = true,  desc = "ANum VInt 0" },
-		{ atom = "ANum",  mk = function() return bridge.vstr("x") end,    coq = false, desc = "ANum VStr" },
+		{ atom = "ANum",  mk = function() return bridge.vstr() end,    coq = false, desc = "ANum VStr" },
 		{ atom = "ANum",  mk = function() return bridge.vbool(true) end,  coq = false, desc = "ANum VBool" },
 		{ atom = "ANum",  mk = function() return bridge.vnil() end,       coq = false, desc = "ANum VNil" },
 		-- AFloat (= number type on 5.1; AInt <: AFloat). Accepts ALL numbers.
 		{ atom = "AFloat", mk = function() return bridge.vint(3) end,     coq = true,  desc = "AFloat VInt 3 (int IS a float)" },
 		{ atom = "AFloat", mk = function() return bridge.vfloat(3) end,   coq = true,  desc = "AFloat VFloat 3" },
 		{ atom = "AFloat", mk = function() return bridge.vint(0) end,     coq = true,  desc = "AFloat VInt 0" },
-		{ atom = "AFloat", mk = function() return bridge.vstr("x") end,   coq = false, desc = "AFloat VStr" },
+		{ atom = "AFloat", mk = function() return bridge.vstr() end,   coq = false, desc = "AFloat VStr" },
 		{ atom = "AFloat", mk = function() return bridge.vnil() end,      coq = false, desc = "AFloat VNil" },
 		-- AInt (integer-valued refinement) — VFloat n is a GENUINELY non-integer
 		-- double, so FALSE in BOTH model and reality (no disagreement anymore).
 		{ atom = "AInt",  mk = function() return bridge.vint(3) end,      coq = true,  desc = "AInt VInt 3" },
 		{ atom = "AInt",  mk = function() return bridge.vint(0) end,      coq = true,  desc = "AInt VInt 0" },
 		{ atom = "AInt",  mk = function() return bridge.vfloat(3) end,    coq = false, desc = "AInt VFloat 3 (non-integer double, model AND real)" },
-		{ atom = "AInt",  mk = function() return bridge.vstr("x") end,    coq = false, desc = "AInt VStr" },
+		{ atom = "AInt",  mk = function() return bridge.vstr() end,    coq = false, desc = "AInt VStr" },
 		{ atom = "AInt",  mk = function() return bridge.vbool(false) end, coq = false, desc = "AInt VBool" },
 	}
 	return rows
@@ -123,8 +123,9 @@ end
 local function gen_model_value(rng, sz)
 	local which = rng:int(1, 7)
 	if which == 1 then
-		local s = gen.string({ max = math.min(sz, 8) }).generate(rng, sz) --[[: string]]
-		return bridge.vstr(s)
+		-- The model has a SINGLE (nullary) string value; AStr membership is
+		-- head-only, so no payload is generated.
+		return bridge.vstr()
 	elseif which == 2 then
 		return bridge.vbool(rng:bool())
 	elseif which == 3 then

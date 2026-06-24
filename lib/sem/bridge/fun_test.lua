@@ -134,18 +134,18 @@ local function arrow_oracle()
 			desc = "Int->Int (empty graph: vacuous)" },
 		{ mk = function() return g(p(vi(1), vi(2)), p(vi(3), vi(4))) end, dom = "AInt", cod = "AInt", coq = true,
 			desc = "Int->Int [(1,2),(3,4)]" },
-		{ mk = function() return g(p(vi(1), vi(2)), p(vs("x"), vs("y"))) end, dom = "AInt", cod = "AInt", coq = true,
+		{ mk = function() return g(p(vi(1), vi(2)), p(vs(), vs())) end, dom = "AInt", cod = "AInt", coq = true,
 			desc = "Int->Int [(1,2),(\"x\",\"y\")] (non-int input vacuous)" },
-		{ mk = function() return g(p(vs("k"), vb(true))) end, dom = "AStr", cod = "ABool", coq = true,
+		{ mk = function() return g(p(vs(), vb(true))) end, dom = "AStr", cod = "ABool", coq = true,
 			desc = "Str->Bool [(\"k\",true)]" },
 		{ mk = function() return g(p(vi(5), vi(6))) end, dom = "ANum", cod = "ANum", coq = true,
 			desc = "Num->Num [(5,6)] (AInt <: ANum)" },
 		-- NON-member cases
-		{ mk = function() return g(p(vi(1), vs("s"))) end, dom = "AInt", cod = "AInt", coq = false,
+		{ mk = function() return g(p(vi(1), vs())) end, dom = "AInt", cod = "AInt", coq = false,
 			desc = "Int->Int [(1,\"s\")] — int input -> str output (NON-member)" },
 		{ mk = function() return g(p(vi(1), vf(2))) end, dom = "AInt", cod = "AInt", coq = false,
 			desc = "Int->Int [(1,2.5)] — int -> non-integer (NON-member)" },
-		{ mk = function() return g(p(vs("k"), vi(9))) end, dom = "AStr", cod = "ABool", coq = false,
+		{ mk = function() return g(p(vs(), vi(9))) end, dom = "AStr", cod = "ABool", coq = false,
 			desc = "Str->Bool [(\"k\",9)] — str input -> int output (NON-member)" },
 	}
 	return rows
@@ -156,8 +156,8 @@ end
 local function gen_scalar(rng, sz)
 	local which = rng:int(1, 5)
 	if which == 1 then
-		local s = gen.string({ max = math.min(sz, 6) }).generate(rng, sz) --[[: string]]
-		return atom.vstr(s)
+		-- single (nullary) model string value; AStr membership is head-only.
+		return atom.vstr()
 	elseif which == 2 then
 		return atom.vbool(rng:bool())
 	elseif which == 3 then

@@ -413,6 +413,24 @@ Op-sem parity must hold at every commit. After the handler deletion, the adversa
 
 ### Number model
 
+- [x] **Inert-value-payload removal — STAGE 1: drop the `VStr` payload.** `VStr`
+  is now a NULLARY constructor (`VStr : V`, was `VStr : nat -> V`). The payload
+  was inert: `denote` is head-determined (`denote_head`), every witness used
+  `VStr 0`, and no typing/progress/preservation obligation read it (premise
+  verified by grep — no destruct/match ever inspects a `VStr` payload; record
+  keys are Coq `string`, unaffected; no proof needs two distinct string values).
+  Makes "types, not magnitudes" structural — one string value, head-only,
+  foreclosing the value-fidelity temptation by construction. First deliberate
+  edit to the frozen reality-validated core; full chain rebuilt clean
+  (`subtype→typing→ssub→check`, all "Closed under the global context", zero
+  axioms), all four bridge oracle `.v` files recompute the expected verdicts, and
+  the reality bridge differential tests re-ran green against real LuaJIT
+  (`bin/cr test lib/sem/bridge/` — 600/600 atom + 80/80 rec + 60/60 arrow +
+  100/100 operational). Bridge port updated: `lib/sem/bridge/atom.lua` `vstr` is
+  nullary, renders the fixed representative `"s"`. Recorded at `proof-kernel.md`
+  (inert-payload removal, stage 1 of 2). STAGE 2 (the number payload) is a
+  separate, larger step (carries arithmetic + `NRint`/`NRfrac`) — see the
+  version-parametric-numbers item below for the related number-value work.
 - [ ] **[nice-to-have] Version-parametric numbers (5.3/5.4 distinct int/float
   sibling values).** The proof collapses to ONE double for LuaJIT 5.1 (fork A′
   RESOLVED). A future version-parameterized `V` gives 5.3/5.4 a genuinely

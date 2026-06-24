@@ -2547,9 +2547,9 @@ Proof.
   intro a. destruct a.
   - exists (VBool true); simpl; auto.
   - exists VNil; simpl; auto.
-  - exists (VStr 0); simpl; auto.
-  - exists (VStr 0); simpl; auto.
-  - exists (VStr 0); simpl; auto.
+  - exists (VStr); simpl; auto.
+  - exists (VStr); simpl; auto.
+  - exists (VStr); simpl; auto.
   - exists VNil; simpl; auto.
 Qed.
 
@@ -2562,7 +2562,7 @@ Proof.
   - exists (VInt 0); simpl; exact I.
   - exists (VInt 0); simpl; exact I.
   - exists (VInt 0); simpl; exact I.
-  - exists (VStr 0); simpl; exact I.
+  - exists (VStr); simpl; exact I.
 Qed.
 
 
@@ -3515,7 +3515,7 @@ Proof.
   intros S e Hty Hv. destruct Hv as [l | T b | fs Hfs | n | es Hes | own proto Hvo Hvp].
   - apply inv_lit in Hty. destruct l; simpl in Hty.
     + exists n; reflexivity.
-    + exfalso. apply rsub_sound in Hty. pose proof (Hty (VStr 0) I) as Hbad. exact Hbad.
+    + exfalso. apply rsub_sound in Hty. pose proof (Hty (VStr) I) as Hbad. exact Hbad.
     + exfalso. apply rsub_sound in Hty. pose proof (Hty (VBool b) I) as Hbad. exact Hbad.
     + exfalso. apply rsub_sound in Hty. pose proof (Hty VNil I) as Hbad. exact Hbad.
   - apply inv_lam in Hty. destruct Hty as [Tb [_ Hsub]].
@@ -3563,7 +3563,7 @@ Proof.
   intros S e Hty Hv. destruct Hv as [l | T b | fs Hfs | n | es Hes | own proto Hvo Hvp].
   - apply inv_lit in Hty. destruct l; simpl in Hty.
     + exfalso. apply rsub_sound in Hty. pose proof (Hty (VInt 0) I) as Hbad. exact Hbad.
-    + exfalso. apply rsub_sound in Hty. pose proof (Hty (VStr 0) I) as Hbad. exact Hbad.
+    + exfalso. apply rsub_sound in Hty. pose proof (Hty (VStr) I) as Hbad. exact Hbad.
     + exists b; reflexivity.
     + exfalso. apply rsub_sound in Hty. pose proof (Hty VNil I) as Hbad. exact Hbad.
   - apply inv_lam in Hty. destruct Hty as [Tb [_ Hsub]].
@@ -6662,8 +6662,8 @@ Proof.
   apply inv_var in Ha. destruct Ha as [Sa [Hla Hsa]]. simpl in Hla. injection Hla as <-.
   pose proof (RsTrans _ _ _ Hsa Hdom) as Hbad.
   apply rsub_sound in Hbad. unfold dsub in Hbad.
-  assert (HstrU : denote (BUnion (BAtom AStr) (BAtom ANum)) (VStr 0)) by (simpl; left; exact I).
-  pose proof (Hbad (VStr 0) HstrU) as Hstr_num. simpl in Hstr_num. exact Hstr_num.
+  assert (HstrU : denote (BUnion (BAtom AStr) (BAtom ANum)) (VStr)) by (simpl; left; exact I).
+  pose proof (Hbad (VStr) HstrU) as Hstr_num. simpl in Hstr_num. exact Hstr_num.
 Qed.
 
 (* type-test selection by runtime tag. *)
@@ -6768,10 +6768,10 @@ Proof.
   apply inv_loc in Hr. destruct Hr as [W [Hn Href]]. simpl in Hn. injection Hn as <-.
   apply rsub_ref_inv in Href. destruct Href as [HWU HUW].
   (* the value is a string [: AStr] subsumed to U; combined with U ≡ Int (= W),
-     a string would inhabit Int — refute semantically at [VStr 0]. *)
+     a string would inhabit Int — refute semantically at [VStr]. *)
   apply inv_lit in He. simpl in He.
   pose proof (RsTrans _ _ _ He HUW) as Hbad.   (* rsub AStr W, W = BAtom AInt *)
-  apply rsub_sound in Hbad. pose proof (Hbad (VStr 0) I) as Hcontra.
+  apply rsub_sound in Hbad. pose proof (Hbad (VStr) I) as Hcontra.
   simpl in Hcontra. exact Hcontra.
 Qed.
 
@@ -7031,15 +7031,15 @@ Proof.
      store entry is Int) and supplies the demanded [W] ([HsubTf : ssub Tf W]);
      [Href : rsub W (BRef U)]. Compose the chain: BRef Int <: Tf <: W <: BRef U,
      so by INVARIANCE U ≡ Int. The value [He : rsub AStr U]: a string would inhabit
-     Int — refute at [VStr 0]. *)
+     Int — refute at [VStr]. *)
   pose proof (RsTrans _ _ _ Hlsub
                 (RsTrans _ _ _ (RsSsub _ _ HsubTf) Href)) as HrefInt.  (* rsub (BRef Int) (BRef U) *)
   apply rsub_ref_inv in HrefInt. destruct HrefInt as [HIntU HUInt].
   apply inv_lit in He. simpl in He.  (* He : rsub AStr U *)
   apply rsub_sound in He.            (* dsub AStr U *)
   apply rsub_sound in HUInt.         (* dsub U Int *)
-  pose proof (He (VStr 0) I) as HUstr.
-  pose proof (HUInt (VStr 0) HUstr) as Hbad.
+  pose proof (He (VStr) I) as HUstr.
+  pose proof (HUInt (VStr) HUstr) as Hbad.
   simpl in Hbad. exact Hbad.
 Qed.
 
@@ -7260,7 +7260,7 @@ Proof.
                   | [al [ofs [proto [M [Other [R [Eb _]]]]]] ] ] ];
     [ | discriminate Ea | discriminate Eb ].
   apply inv_lit in Ha. simpl in Ha.   (* Ha : rsub AStr ANum *)
-  apply rsub_sound in Ha. pose proof (Ha (VStr 0) I) as Hbad. exact Hbad.
+  apply rsub_sound in Ha. pose proof (Ha (VStr) I) as Hbad. exact Hbad.
 Qed.
 
 (* ===========================================================================

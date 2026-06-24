@@ -1199,7 +1199,7 @@ Proof.
           | exact (H (VBool true) I)
           | exact (H (VInt 0) I)
           | exact (H (VNum (NRfrac 0)) I)
-          | exact (H (VStr 0) I) ] ].
+          | exact (H (VStr) I) ] ].
 Qed.
 
 (* COINCIDENCE on the AFloat-free atom fragment: ssub = dsub there. *)

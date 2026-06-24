@@ -118,6 +118,17 @@ logic over the denotation — no `sub` rule asserted, no axiom added.
   for `VNum (NRint n)`/`VNum (NRfrac n)` — there is exactly ONE number value per
   double, so `VInt 3` and `VFloat 3` are no longer distinct (the old two-number
   design tagged integers like PUC 5.3/5.4 — deferred, version-parametric).
+  **Inert-value-payload removal (stage 1 of 2).** `VStr` is now a NULLARY
+  constructor (`VStr : V`) — its old `nat` payload was inert: `denote` is
+  head-determined (`denote_head`, below), every witness used `VStr 0`, and no
+  typing / progress / preservation obligation ever read it. Removing it makes
+  "types, not magnitudes" structural — there is one string value, head-only, so
+  there is no value-fidelity temptation to model concrete string contents. Stage
+  2 (the number payload) is a separate, larger step (it carries arithmetic and
+  the `NRint`/`NRfrac` class distinction, so it is deferred). This was the first
+  deliberate edit to the frozen, reality-validated core; the reality bridge was
+  re-validated afterward (`bin/cr test lib/sem/bridge/` green — 600/600 atom
+  differentials etc.).
   `atom_denote` maps each atom to a value-set: `ANum` and `AFloat` BOTH accept
   every `VNum _` (float ≡ number on 5.1), `AInt` accepts `{VNum (NRint _)}` — a
   *literal subset*, so **`AInt <: AFloat` and `AInt <: ANum` hold definitionally**
@@ -163,7 +174,10 @@ proven `= true <-> dsub`.
 - **The head-class reduction (the lemma the decider rests on).** For the current
   atoms, `denote t v` depends only on `v`'s *classification class* — the number
   class (`NRint` vs `NRfrac` inside the single `VNum`) plus the other heads
-  (`VStr`/`VBool`/`VNil`), never on the `nat` payload. (The two number classes
+  (`VStr`/`VBool`/`VNil`), never on any payload. (`VStr` is now nullary precisely
+  because this lemma proves its payload was never read — see the inert-payload
+  removal above; `VBool` keeps its `bool` because `atom_denote` does not, but the
+  class is the head.) (The two number classes
   exist because `atom_denote AInt` distinguishes integer-valued `NRint` from
   non-integer `NRfrac`.) `atom_denote` matches only this class; the connectives
   (`Union`/`Inter`/`Neg`/`Top`/`Bot`) preserve head-dependence. Formalized as

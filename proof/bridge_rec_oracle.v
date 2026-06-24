@@ -35,11 +35,11 @@ Definition R_empty : BTy := BRec [].
 
 (* ---- sample table values (string-keyed scalar assoc lists) ----------------- *)
 Definition t_x3      : V := VTable [("x", VInt 3)].
-Definition t_x3_y_s  : V := VTable [("x", VInt 3); ("y", VStr 0)].
-Definition t_y_s_x3  : V := VTable [("y", VStr 0); ("x", VInt 3)].   (* reordered *)
+Definition t_x3_y_s  : V := VTable [("x", VInt 3); ("y", VStr)].
+Definition t_y_s_x3  : V := VTable [("y", VStr); ("x", VInt 3)].   (* reordered *)
 Definition t_x3_extra: V := VTable [("x", VInt 3); ("z", VBool true)]. (* extra key z *)
-Definition t_only_y  : V := VTable [("y", VStr 0)].                    (* missing x *)
-Definition t_x_str   : V := VTable [("x", VStr 0)].                    (* x wrong type *)
+Definition t_only_y  : V := VTable [("y", VStr)].                    (* missing x *)
+Definition t_x_str   : V := VTable [("x", VStr)].                    (* x wrong type *)
 
 (* ---- member cases --------------------------------------------------------- *)
 (* every table is in the empty record. *)
@@ -60,4 +60,4 @@ Compute (memb Rx_Int t_only_y).               (* false *)
 Compute (memb Rx_Int t_x_str).                (* false *)
 (* a scalar value is not a record (table). *)
 Compute (memb Rx_Int (VInt 3)).               (* false *)
-Compute (memb Rx_Int (VStr 0)).               (* false *)
+Compute (memb Rx_Int (VStr)).               (* false *)

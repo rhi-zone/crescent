@@ -117,7 +117,7 @@ local function rec_oracle()
 		{ mk = function() return tbl(e("x", vi(3))) end, fields = { f("x", "AInt") }, coq = true,
 			desc = "{x:Int} ∋ {x=3} (exact)" },
 		-- exact two fields.
-		{ mk = function() return tbl(e("x", vi(3)), e("y", vs("s"))) end,
+		{ mk = function() return tbl(e("x", vi(3)), e("y", vs())) end,
 			fields = { f("x", "AInt"), f("y", "AStr") }, coq = true,
 			desc = "{x:Int,y:Str} ∋ {x=3,y=\"s\"} (exact)" },
 		-- EXTRA field present (z) — still a member: OPEN / width.
@@ -125,15 +125,15 @@ local function rec_oracle()
 			fields = { f("x", "AInt") }, coq = true,
 			desc = "{x:Int} ∋ {x=3,z=true} (EXTRA field z — OPEN/width)" },
 		-- field ORDER irrelevant — the table lists y before x.
-		{ mk = function() return tbl(e("y", vs("s")), e("x", vi(3))) end,
+		{ mk = function() return tbl(e("y", vs()), e("x", vi(3))) end,
 			fields = { f("x", "AInt"), f("y", "AStr") }, coq = true,
 			desc = "{x:Int,y:Str} ∋ {y=\"s\",x=3} (field order irrelevant)" },
 		-- ── NON-member cases ────────────────────────────────────────────────────
 		-- missing field x.
-		{ mk = function() return tbl(e("y", vs("s"))) end, fields = { f("x", "AInt") }, coq = false,
+		{ mk = function() return tbl(e("y", vs())) end, fields = { f("x", "AInt") }, coq = false,
 			desc = "{x:Int} ∌ {y=\"s\"} (missing field x — NON-member)" },
 		-- wrong field type: x is a string, not an int.
-		{ mk = function() return tbl(e("x", vs("s"))) end, fields = { f("x", "AInt") }, coq = false,
+		{ mk = function() return tbl(e("x", vs())) end, fields = { f("x", "AInt") }, coq = false,
 			desc = "{x:Int} ∌ {x=\"s\"} (wrong field type — NON-member)" },
 	}
 	return rows
@@ -152,8 +152,8 @@ end
 local function gen_field_value(rng, sz)
 	local which = rng:int(1, 4)
 	if which == 1 then
-		local s = gen.string({ max = math.min(sz, 6) }).generate(rng, sz) --[[: string]]
-		return atom.vstr(s)
+		-- single (nullary) model string value; AStr membership is head-only.
+		return atom.vstr()
 	elseif which == 2 then
 		return atom.vbool(rng:bool())
 	elseif which == 3 then

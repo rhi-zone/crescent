@@ -49,7 +49,7 @@ M.unobservable_atoms = {} --[[: { [string]: string } ]]
 -- non-unambiguous heads (VInt/VFloat/VTable/VFun) so the harness can assert they
 -- are correctly REJECTED by every unambiguous atom — but their membership in
 -- AInt/ANum etc. is out of scope here (the int/float fork).
---:: MVStr   = { head: "VStr", s: string }
+--:: MVStr   = { head: "VStr" }
 --:: MVBool  = { head: "VBool", b: boolean }
 --:: MVNil   = { head: "VNil" }
 --:: MVInt   = { head: "VInt", n: integer }
@@ -58,8 +58,12 @@ M.unobservable_atoms = {} --[[: { [string]: string } ]]
 --:: MVFun   = { head: "VFun" }
 --:: ModelValue = MVStr | MVBool | MVNil | MVInt | MVFloat | MVTable | MVFun
 
---: (string) -> ModelValue
-function M.vstr(s) return { head = "VStr", s = s } end
+-- The model's VStr is NULLARY (stage 1 of the inert-value-payload removal — the
+-- string value is HEAD-ONLY; AStr membership reads only the head, never a
+-- payload). There is exactly one model string value; its real image is a fixed
+-- representative string literal (see value_to_lua_expr).
+--: () -> ModelValue
+function M.vstr() return { head = "VStr" } end
 --: (boolean) -> ModelValue
 function M.vbool(b) return { head = "VBool", b = b } end
 --: () -> ModelValue
@@ -116,8 +120,10 @@ end
 --: (ModelValue) -> string
 function M.value_to_lua_expr(v)
 	if v.head == "VStr" then
-		-- %q gives a Lua-safe quoted string literal.
-		return ("%q"):format(v.s)
+		-- The single model string value renders to a FIXED representative string
+		-- literal. AStr membership is head-only, so the choice of representative is
+		-- immaterial to faithfulness — any string literal is in `type=="string"`.
+		return '"s"'
 	end
 	if v.head == "VBool" then return v.b and "true" or "false" end
 	if v.head == "VNil" then return "nil" end
