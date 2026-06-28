@@ -1,0 +1,136 @@
+-- lib/type/v9/type_defs.lua
+-- Annotation-only module: the v9 SEAM CONTRACTS as types.
+--
+-- This file defines NO runtime behavior. It declares the interface types every
+-- v9 seam is programmed against. Implementations conform to these; consumers
+-- depend on these, never on a concrete impl. See ARCHITECTURE.md for the prose
+-- contract + the proof relation each seam mirrors.
+
+-- ===========================================================================
+-- Type representation (seam: type_rep). Proof oracle: BTy / denote (subtype.v).
+--
+-- `Ty` is an OPAQUE HANDLE. Consumers receive `unknown` and may ONLY inspect a
+-- value through the `TypeRep` interface functions below — never by field
+-- access. This is what makes the representation hot-swappable: the
+-- immutable-structural impl and the (reserved) interned-arena impl can store
+-- handles however they like, because no consumer can observe the shape.
+--:: Ty = unknown
+
+-- The constructor + destructor interface. Each `kind` string mirrors a `BTy`
+-- constructor head. Accessors are partial: calling `arrow_dom` on a non-arrow
+-- is a programmer error (the decider always guards on `kind` first).
+--:: Field = { key: string, type: Ty }
+--:: TypeRep = {
+--::   atom: (string) -> Ty,
+--::   top: () -> Ty,
+--::   bot: () -> Ty,
+--::   union: (Ty, Ty) -> Ty,
+--::   inter: (Ty, Ty) -> Ty,
+--::   neg: (Ty) -> Ty,
+--::   arrow: (Ty, Ty) -> Ty,
+--::   rec: ({ [integer]: Field }) -> Ty,
+--::   ref: (Ty) -> Ty,
+--::   anyref: () -> Ty,
+--::   tuple: ({ [integer]: Ty }) -> Ty,
+--::   kind: (Ty) -> string,
+--::   atom_name: (Ty) -> string,
+--::   union_left: (Ty) -> Ty,
+--::   union_right: (Ty) -> Ty,
+--::   inter_left: (Ty) -> Ty,
+--::   inter_right: (Ty) -> Ty,
+--::   neg_of: (Ty) -> Ty,
+--::   arrow_dom: (Ty) -> Ty,
+--::   arrow_cod: (Ty) -> Ty,
+--::   ref_of: (Ty) -> Ty,
+--::   tuple_items: (Ty) -> { [integer]: Ty },
+--::   rec_fields: (Ty) -> { [integer]: Field },
+--::   equal: (Ty, Ty) -> boolean,
+--::   show: (Ty) -> string,
+--:: }
+
+-- ===========================================================================
+-- Subtyping decider (seam: subtype). Three-valued, HONEST deferral.
+-- Proof oracle: decide_ssub / ssub (ssub.v) and gdecide / dsub (subtype.v).
+-- A definite answer ("sub"/"notsub") is a proof commitment; "unknown" is
+-- explicit deferral, never a fail-optimistic guess.
+--:: Decision = "sub" | "notsub" | "unknown"
+--:: SubtypeDecider = { name: string, decide: (TypeRep, Ty, Ty) -> Decision }
+
+-- ===========================================================================
+-- IR / AST (seam: ir). De-Bruijn CANONICAL core mirrors `tm` (typing.v).
+-- Source names live in `names` as NON-SEMANTIC metadata for diagnostics;
+-- alpha-stable identity comes from the de-Bruijn `index`, never the name.
+--:: Lit = { kind: "int" } | { kind: "str", value: string } | { kind: "bool", value: boolean } | { kind: "nil" }
+--:: Names = { source?: string }
+--:: IrLit = { tag: "lit", lit: Lit, names: Names }
+--:: IrVar = { tag: "var", index: integer, names: Names }
+--:: IrLam = { tag: "lam", param_type: Ty, body: IrNode, names: Names }
+--:: IrApp = { tag: "app", fn: IrNode, arg: IrNode, names: Names }
+--:: IrLet = { tag: "let", value: IrNode, body: IrNode, names: Names }
+--:: IrNode = IrLit | IrVar | IrLam | IrApp | IrLet
+
+-- ===========================================================================
+-- Inference strategy (seam: infer). Bidirectional synth/check (check.v).
+-- CRITICAL: synth/check expose their DERIVATION as a first-class output, so a
+-- certificate emitter can be added later with no re-engineering. `premises`
+-- carries the sub-derivations; `rule` names the `has_type` constructor applied.
+--:: Deriv = { node: IrNode, type: Ty, rule: string, premises: { [integer]: Deriv } }
+--:: Context = { [integer]: Ty }
+--:: Caps = { rep: TypeRep, sub: SubtypeDecider, diag: Diagnostics }
+--:: Inference = {
+--::   synth: (Caps, Context, IrNode) -> (Deriv | nil, Diag | nil),
+--::   check: (Caps, Context, IrNode, Ty) -> (Deriv | nil, Diag | nil),
+--:: }
+
+-- ===========================================================================
+-- Narrowing / facts (seam: facts). Flow facts over de-Bruijn places.
+-- Proof oracle: increments 13/15 (tifn / ttypetest narrowing). Immutable map
+-- impl; not exercised by the minimal slice (no conditionals yet) but the seam
+-- exists so adding `tif`/`tifn` later is a LOCAL change.
+--:: FactStore = { [integer]: Ty }
+--:: Facts = {
+--::   empty: () -> FactStore,
+--::   assume: (FactStore, integer, Ty) -> FactStore,
+--::   lookup: (FactStore, integer) -> (Ty | nil),
+--:: }
+
+-- ===========================================================================
+-- Diagnostics (seam: diagnostics). Errors as data, never thrown.
+--:: Diag = { code: string, message: string, expected?: string, actual?: string }
+--:: Diagnostics = {
+--::   mismatch: (TypeRep, Ty, Ty, string) -> Diag,
+--::   unprovable: (TypeRep, Ty, Ty, string) -> Diag,
+--::   make: (string, string) -> Diag,
+--:: }
+
+-- ===========================================================================
+-- Certificate emitter (seam: certificate). Reserved; no-op impl now. Consumes
+-- the synth/check Deriv (already first-class) and emits replayable evidence.
+--:: Cert = { kind: string, root?: Deriv }
+--:: CertEmitter = { name: string, emit: (Deriv) -> (Cert | nil, string | nil) }
+
+-- ===========================================================================
+-- Parser -> IR (seam: parser). Source -> surface AST -> de-Bruijn IR.
+-- The surface AST is a generic s-expression tree; `lower` interprets it and
+-- resolves names to de-Bruijn indices (names kept only as IR metadata).
+--:: SExprAtom = { kind: "atom", value: string }
+--:: SExprList = { kind: "list", items: { [integer]: SExpr } }
+--:: SExpr = SExprAtom | SExprList
+--:: SurfaceNode = SExpr
+--:: Parser = {
+--::   parse: (string) -> (SurfaceNode | nil, string | nil),
+--::   lower: (TypeRep, SurfaceNode) -> (IrNode | nil, string | nil),
+--::   parse_type: (TypeRep, string) -> (Ty | nil, string | nil),
+--:: }
+
+-- ===========================================================================
+-- Top-level assembled checker.
+--:: Impls = { rep: TypeRep, sub: SubtypeDecider, infer: Inference, diag: Diagnostics, cert: CertEmitter, parser: Parser }
+--:: CheckResult = { type: Ty, deriv: Deriv, cert: Cert | nil }
+--:: Checker = {
+--::   impls: Impls,
+--::   check_source: (string) -> (CheckResult | nil, Diag | nil),
+--::   check_source_against: (string, string) -> (CheckResult | nil, Diag | nil),
+--:: }
+
+return {}
