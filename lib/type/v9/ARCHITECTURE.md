@@ -1,173 +1,246 @@
-# v9 — modular Lua typechecker: SEAM CONTRACTS
+# v9 — the engine core: a monotone-fixpoint analysis engine
 
-v9 is the runnable typechecker built against the mechanized proof-dev
-(`proof/*.v`) as its **proven spec and parity oracle**. Its one non-negotiable
-property is **Dependency Inversion everywhere**: every part is a SEAM behind an
-interface with swappable implementations. Interfaces are the load-bearing,
-must-be-right-forever part; implementations are cheap, swappable, grown
-incrementally — "implement as little or as much as we want and keep adding as we
-go." Adding a typing rule or a new impl is a LOCAL change behind an interface,
-never a cross-cutting edit.
+v9 is built around ONE validated idea (settled by the engine-core experiment —
+`experiments/v9-spikes/{A-term-core,B-cfg-dataflow,C-constraint-graph}`, commits
+`4aaee144`, `11a33cac`, `1e234cb3`):
 
-Motivation and the fresh-vs-salvage decision: `docs/decisions/v9-versions-survey.md`.
-The survey's key finding — **the proof-dev already is the seam map**: each Coq
-relation becomes one Lua interface, with the proof as the parity oracle.
+> **The engine is a monotone worklist fixpoint over lattice CELLS, parameterized
+> by `(per-cell lattice, transfer functions, dependency structure)`. "Constraint
+> solving" and "dataflow" are not two modes — both are monotone fixpoints over
+> cells.** Type INFERENCE is the instance where cells are UNKNOWNS (type
+> variables whose lattice is type-bounds and whose transfer is subtyping
+> propagation → annotation-free principal types). Flow analyses (liveness,
+> constant propagation, narrowing) are instances where cells are program points.
 
-The interface contracts live as types in `type_defs.lua` (annotation-only). This
-document is the prose contract: for each seam, the interface, its proof oracle,
-how multiple impls plug in, and why adding a rule/feature stays local.
+So the central seam is **NOT** "type representation + subtyping". It is the
+**engine** (domain-agnostic, knows zero type/liveness vocabulary) and the
+**domain interface** `(lattice, transfer, dependencies)`. Type-representation and
+subtyping are *one domain's lattice+transfer*, not the architecture.
 
-## What we are NOT doing (the documented rot — avoided by construction)
+This re-cut replaces the previous "type-checker seam" framing (a bidirectional
+`synth`/`check` over a de-Bruijn IR as the centre). That code is **retained but
+repositioned** — see "Legacy type-checking seams" below.
 
-- **No `ctx._foo` message-bus fields.** Cross-phase data rides on the IR and on
-  the first-class `Deriv` (typed payloads), never on a mutable context. The
-  `Caps` bundle is a READ-ONLY capability record (function tables), not scratch.
-- **No if-elif-on-tag dispatch as the architecture.** Dispatch is local to one
-  seam's impl and keyed on the proof's node/type families; adding a family does
-  not edit a shared decider.
-- **No fail-optimistic deciders.** The subtyping decider is THREE-VALUED;
-  `unknown` is explicit deferral (the proof's `gdecide` DUnknown), never a guess.
-- **No stateful solver singletons.** Impls are pure modules; the only state is a
-  pure interning cache in the (optional) interned rep, which cannot affect verdicts.
-- **No globals.** Every dependency is injected (caps-first). Inference receives
-  `Caps = { rep, sub, diag }`; the checker is assembled in `init.new(impls)`.
+## Why this shape (the evidence)
 
-## The DIP mechanism
+The three spikes were thrown at the question "is the proof's `tm`/typing core
+secretly type-shaped, or does it generalize to a multi-domain engine?". Their
+NOTES are the evidence; the load-bearing findings:
 
-A `Checker` is **assembled** from an `Impls` record (`init.new(impls)`); pass
-`nil` for `defaults()`. Every seam is a field; swapping one (a different rep, a
-different subtyping backend, a constraint engine, a real certificate emitter)
-touches nothing else. The proof that this is real, not aspirational, is
-`parity_test.lua`: tagged-vs-interned reps and structural-vs-reflexive deciders
-swap behind one interface, and a full pipeline assembled from swapped impls runs.
+- **Spike A (term-core).** A term-recursive evaluator hosts forward types + a
+  join-at-merge for flow-sensitivity *for free*, but **cannot express loops'
+  back-edges** and smuggles a forward domain's per-expression value through a
+  "result register". Verdict: *keep the term as a lowering input, replace the
+  iteration structure with a worklist/CFG.* v9 does exactly this — the surface
+  AST is a lowering input; the iteration is the worklist.
+- **Spike B (cfg-dataflow).** A worklist over a CFG hosts forward types AND
+  backward liveness with **direction as a single predecessors-vs-successors
+  swap**, never a special-case in the loop. v9's `dataflow.lua` is this swap, and
+  *only* this swap.
+- **Spike C (constraint-graph).** Cells-as-unknowns + constraints (reads/writes/
+  apply) over one worklist hosts annotation-free inference (SSA/phi → union
+  types) and gen/kill liveness as nothing but `(cells, lattice, constraints)`.
+  v9's engine IS this loop. Crucially C showed **gen/kill's set-MINUS lives
+  inside a transfer's `apply`, not in the lattice** — which is why the domain
+  interface is *monotone transfer functions over a lattice*, not "subtyping
+  constraints". A subtyping-constraint framing would have forced liveness's
+  `kill` to hide somewhere dishonest; transfer-functions subsume BOTH
+  subtyping-propagation and gen/kill.
 
----
+The one gap all three shared: they *coincidentally* used set-union lattices. v9
+closes it with a third domain on a genuinely different lattice (constant
+propagation, below).
 
-## Seam 1 — Type representation (`type_rep/`)
+## The engine contract (`engine/engine.lua`)
 
-- **Proof oracle:** `BTy` + `denote` (`subtype.v:645`). Each `kind` string is a
-  `BTy` constructor head (`atom/top/bot/union/inter/neg/arrow/rec/ref/anyref/tuple`).
-- **Interface (`TypeRep`):** constructors (`atom`, `top`, `bot`, `union`, `inter`,
-  `neg`, `arrow`, `rec`, `ref`, `anyref`, `tuple`), a destructor `kind`, partial
-  accessors (`atom_name`, `union_left/right`, `inter_left/right`, `neg_of`,
-  `arrow_dom/cod`, `ref_of`, `tuple_items`, `rec_fields`), and `equal` / `show`.
-- **Opacity (the load-bearing contract):** `Ty = unknown`. A consumer holds an
-  opaque handle and may ONLY inspect it through `TypeRep` functions — never by
-  field access. This is what lets two impls coexist without the consumer knowing
-  which is in use.
-- **Two impls admitted:** `tagged.lua` (immutable-structural, DEFAULT — built
-  now) and `interned.lua` (arena-interned, the start of the reserved
-  interned-arena impl — different internal node shape + atom hash-consing). They
-  give byte-identical verdicts under any consumer (`parity_test.lua`), proving
-  the seam does not leak.
-- **Adding a feature stays local:** a new `BTy` former = one `kind` + its
-  constructor/accessors in each rep impl, plus arms in the decider/show. No
-  consumer changes shape.
+```
+solve(graph) -> (Solution | nil, errmsg)
+  graph    = { lattice, rules }
+  Solution = { values : { cellid -> value }, steps }
+```
 
-## Seam 2 — Subtyping decider (`subtype/`)
+The engine seeds a worklist with every rule; pops a rule, runs its `apply`,
+**joins** each proposed value into the target cell, and — if a cell changed —
+re-schedules every rule that **reads** that cell. Termination is guaranteed by a
+monotone `join` over an ascending chain; a step budget converts a non-monotone
+domain (a bug) into an honest `(nil, errmsg)` rather than a hang.
 
-- **Proof oracle:** `decide_ssub` / `ssub` (`ssub.v`, structural decider, total +
-  sound/complete vs `ssub`) and `gdecide` / `dsub` (`subtype.v`, semantic
-  value-set decider, three-valued `DSub | DNotSub | DUnknown`).
-- **Interface (`SubtypeDecider`):** `{ name, decide(rep, a, b) -> Decision }`
-  where `Decision = "sub" | "notsub" | "unknown"`. THREE-VALUED by contract:
-  honest deferral, never fail-optimistic. The decider takes `rep` so it is
-  representation-agnostic (DIP both ways).
-- **Dual-engine admitted:** the contract admits BOTH proof backends
-  (`decide_ssub` structural and `gdecide` semantic) — two independent impls
-  cross-checked for parity. Built now: `structural.lua` (mirrors `decide_ssub`
-  with the `subtype.v` atom base order, connective routing, arrow variance,
-  record width; defers ref/anyref/tuple/neg as `unknown` — exactly the `gdecide`
-  DUnknown cases). Reserved: the semantic `gdecide` backend, slotting in behind
-  the same interface. `reflexive.lua` is a third, trivial backend proving the
-  seam swaps.
-- **Adding a rule stays local:** a new decidable shape = one arm in the decider
-  impl; nothing else moves. Deferral is the safe default, so an unhandled shape
-  is `unknown`, never wrong.
+Properties that are load-bearing, not incidental:
 
-## Seam 3 — IR / AST (`ir.lua`)
+- **Zero domain vocabulary.** The engine mentions no atom, no "live"/"dead", no
+  type, no direction. Grep it: the only domain words are in comments saying what
+  it does *not* know.
+- **Pure function of its graph.** `cells`/`work` are solve-local scratch, never a
+  cross-call coordination channel. No singleton, no message bus, no stateful
+  solver instance (the documented legacy rot — `docs/decisions/v9-versions-survey.md`).
+- **Direction is not an engine concept.** Dependencies are explicit in each
+  rule's `reads`/`writes`. "Forward vs backward" is a property of how a *flow*
+  domain wires its rules (see the adapter), so the engine stays direction-free.
+  This is a deliberate sharpening of the validated spec: the cell model
+  *subsumes* direction (Spike C's insight), so direction is a lowering parameter,
+  not an engine mode — which makes "both directions are instances of one engine"
+  literally true rather than a special-case in the loop.
 
-- **Proof oracle:** `tm` de-Bruijn term + `step` (`typing.v:109`). The lowering
-  target is the de-Bruijn core.
-- **Interface (`IrNode`):** tagged de-Bruijn nodes (`lit/var/lam/app/let` now,
-  mirroring the `tm` subset). The CANONICAL semantic identity is the de-Bruijn
-  structure; source names ride in `names` as NON-SEMANTIC metadata for
-  diagnostics. `var.index` 0 = innermost binder (`nth_error G n`).
-- **Contract:** alpha-equivalent terms have identical IR up to `names` — renaming
-  a binder never changes typing (`slice_test.lua` asserts this).
-- **Adding a former stays local:** a constructor here + a `synth`/`check` arm.
+## The domain interface (`engine/defs.lua`)
 
-## Seam 4 — Inference strategy (`infer/`)
+This is the century-load-bearing seam. A **domain** provides:
 
-- **Proof oracle:** `synth` / `check` (`check.v:187`), proven `synth_sound` /
-  `check_sound` vs `has_type`, `synth_principal` (least type).
-- **Interface (`Inference`):** `synth(caps, ctx, e)` and `check(caps, ctx, e, T)`,
-  each returning `(Deriv | nil, Diag | nil)`. Bidirectional now.
-- **CRITICAL — evidence is first-class (cannot be deferred):** every result
-  carries a `Deriv = { node, type, rule, premises }` — the derivation tree naming
-  which `has_type` rule fired over which premises. There is no consumer yet, but
-  this is precisely what lets a certificate emitter be added later with ZERO
-  re-engineering. Deferring it would force re-plumbing the whole engine.
-- **Swap not precluded:** a constraint-based engine is a different module with the
-  same `Inference` contract; `Caps` is injected, so consumers are untouched.
-- **Adding a rule stays local:** one arm in `synth` (and its `Deriv`), citing the
-  `has_type` constructor it implements.
+```
+Lattice    = { bottom, join, equal }            -- a join-semilattice over cell values
+Rule       = { reads, writes, apply }           -- one monotone transfer; apply(get) -> { cell -> value }
+FlowDomain = { lattice, direction, boundary, transfer }   -- a flow analysis (lowered to Rules by dataflow)
+```
 
-## Seam 5 — Narrowing / facts (`facts.lua`)
+- `Lattice` is the per-cell lattice. `join` is the engine's merge; `equal` is the
+  fixpoint test; `bottom` is every cell's start value. A multi-input merge needs
+  **no fold** — emit one proposal `Rule` per input and the engine's monotone
+  `join` over proposals IS the least-upper-bound.
+- `Rule.apply` is the transfer function. It reads cells via `get` and proposes
+  new cell values. Set-minus, arithmetic, subtyping propagation, gen/kill — all
+  live *inside* `apply`; the lattice only ever sees `join`/`equal`/`bottom`.
+- `FlowDomain` is the convenience shape for classical dataflow: `direction`
+  selects the preds/succs swap, `transfer` is the per-block transfer, `boundary`
+  is the entry (forward) / exit (backward) value. `dataflow.to_graph` lowers it
+  to `Rule`s. A domain that is not block-structured (the type domain) skips this
+  and builds `Rule`s directly.
 
-- **Proof oracle:** truthiness narrowing `tifn` (increment 13) and type-test
-  narrowing `ttypetest` (increment 15).
-- **Interface (`Facts`):** immutable `empty` / `assume` / `lookup` over de-Bruijn
-  places. Present but unexercised by the minimal slice (no conditionals yet); the
-  seam exists so adding `tif`/`tifn` is a local change (a fact assumption at the
-  binder + a synth arm).
+### Why the cell type is `unknown`, not a generic parameter
 
-## Seam 6 — Diagnostics (`diagnostics.lua`)
+The cleanest interface would be generic: `Lattice<V>`, `Graph<V>`, `solve<V>`.
+The crescent typechecker cannot support that across this module layout, and that
+is a genuine substrate finding, not a preference:
 
-- **Proof oracle:** none (diagnostics are outside the proof).
-- **Interface (`Diagnostics`):** `mismatch` (definite `notsub`), `unprovable`
-  (honest `unknown` surfaced, not silently accepted), `make`. Errors are DATA,
-  returned as `(nil, diag)`, never thrown.
+1. **Generics do not survive `require`.** A `solve<V>`/`to_graph<V>` imported into
+   another module fails to instantiate `V` from a concrete argument — `V` stays
+   an abstract skolem (minimal repro confirmed). Every domain is a separate
+   module, so every call would cross this boundary.
+2. **No force-casts, no `unknown`→record checked-casts.** `--[[:! T]]` is a hard
+   error here; `--[[: T]]` from `unknown` is rejected ("must narrow first").
 
-## Seam 7 — Certificate emitter (`certificate.lua`)
+So the engine is **monomorphic over an opaque `unknown` cell value** — which is
+exactly idiomatic `unknown` (the engine shuttles values it must not inspect) —
+and each domain **narrows `unknown` to its concrete lattice type at its own
+boundary via a type predicate** (`--: (x: unknown) -> x is LiveSet`). This is
+force-cast-free and keeps the engine genuinely opaque. The narrowing is a few
+lines per domain (`as_live`/`as_env`/`as_atoms`). This is the single place the
+substrate dictated the interface's shape; it is recorded, not papered over.
 
-- **Proof oracle:** the `synth`/`check` derivation DAG (`check.v`).
-- **Interface (`CertEmitter`):** `{ name, emit(deriv) -> (Cert | nil, errmsg) }`.
-  RESERVED; `noop` impl now (echoes the Deriv). A real emitter serializes the
-  first-class `Deriv` into a content-addressed, replayable certificate — added
-  HERE with no change to inference.
+## How Lua lowers into cells / CFG (`engine/surface.lua`, `engine/cfg.lua`)
 
-## Seam 8 — Parser → IR (`parser.lua`)
+The **pinned cell/op vocabulary (fork 1)** — the initial surface, deliberately
+small and extensible toward full Lua:
 
-- **Proof oracle:** the lowering target `tm` (`typing.v`).
-- **Interface (`Parser`):** `parse(src) -> SExpr`, `lower(rep, sexpr) -> IrNode`
-  (resolves names to de-Bruijn, keeping names as metadata), `parse_type(rep, src)
-  -> Ty`. A deliberately tiny Lisp-style surface; the frontend is swappable.
+- Expressions: `int` / `str` / `bool` / `nil` literals, `var` use, `add` (one
+  binary op).
+- Statements: `local`, `assign`, `if`/`else`, `call`, `return`.
 
----
+`surface.lua` defines the constructors + ONE shared sample program. Lowering has
+two paths, both from this single surface:
 
-## Genuinely under-determined seam contracts (flagged, not invented)
+- **Flow analyses** lower the statement list to a **CFG of basic blocks**
+  (`cfg.lua`); `dataflow.to_graph` wires each block's `in`/`out` cells into engine
+  `Rule`s, doing the preds/succs swap once.
+- **Type inference** walks the surface **directly**, minting an SSA cell per value
+  and phi cells at `if`-merges, emitting engine `Rule`s. Cells are type unknowns;
+  no CFG needed.
 
-These are open forks from the survey (§"Open design forks") that the SKELETON
-does not resolve; it picks a minimal default and leaves the seam able to take the
-other branch. Calling them out rather than hardcoding a choice:
+The vocabulary grows by adding a former in `surface.lua` (+ a `cfg.lua` arm if it
+affects control flow) and a transfer arm in each interested domain — a local
+change, never a cross-cutting edit. Loops (`while`/`for`) are the next increment:
+a back-edge is just another `succs`/`preds` entry and the worklist already
+iterates to fixpoint — the engine does not change.
 
-1. **Three-valued vs two-valued public API.** The decider seam is three-valued
-   internally (correct, matches `gdecide`). What the *top-level checker* should do
-   with `unknown` — surface it (current: `subtype_unprovable`) vs first fall to a
-   semantic backend before any verdict — is undecided. Current behavior surfaces
-   it; the survey's lean is "try semantic backend first." Not resolved because the
-   semantic backend is not built yet.
-2. **Atom naming.** The skeleton uses lowercase atom names (`"int"`, `"num"`,
-   `"float"`, `"str"`, `"bool"`, `"nil"`) mapping to the proof's `AInt/ANum/...`.
-   This string-keyed atom table is a convention, not derived from the proof; if
-   atoms grow, a non-string atom representation may be warranted.
-3. **Certificate schema.** Reserved. The `Deriv` shape is fixed (first-class), but
-   the serialized `Cert` format (content addressing, replay protocol — cf.
-   v7_mr0) is undetermined and deliberately a no-op until the engine stabilizes.
-4. **Context representation.** De-Bruijn context is a Lua array (last = index 0),
-   O(n) functional extend. An interned/persistent context is a valid swap behind
-   the same `Context` shape; not chosen because the slice does not need it.
+## The three domains (the interface pressure-test)
 
-These are recorded so a future increment fills the substrate, never papers over
-it with a special case.
+All three run end-to-end on the SAME annotation-free program
+(`engine/engine_test.lua`, 17 assertions):
+
+| Domain (`engine/domain/`) | cells | lattice | direction | transfer |
+|---|---|---|---|---|
+| `types.lua` | type unknowns (SSA + phi) | atom-set, union | n/a (direct) | subtyping propagation (flow into assigned cell) |
+| `liveness.lua` | program points | live-name set | **backward** | gen/kill (set-minus inside `apply`) |
+| `constprop.lua` | program points | **⊥ / Num(n) / ⊤** | **forward** | abstract eval + fold |
+
+- **Type inference is genuine and annotation-free.** `x : int | str` falls out of
+  the engine's `join` at the phi cell of the `if`; `y = x + 1` infers `int`; the
+  return type is inferred `int | str`. No annotation appears in the program.
+- **The pressure test passed without flexing the interface.** Constant
+  propagation is the case the spikes never ran: a **non-set-union** lattice with a
+  real ⊤ and a join that **loses information** (`join(Num 1, Num 2) = ⊤`), plus a
+  transfer that genuinely **computes** (`1 + 1 → Num 2`). It plugged into the SAME
+  engine and the SAME `dataflow` adapter with **zero engine/interface changes** —
+  the only domain-specific code is its lattice + transfer + the `as_env` narrowing
+  predicate every domain has. This is the evidence that the interface is general,
+  not type-shaped.
+
+The one place the substrate (not the *interface*) flexed: the `unknown`-cell
+decision above, forced by the checker's generics/`require` limitation. The
+interface's *shape* — `(lattice, transfer, dependencies)` — did not change.
+
+### Decoupling (shown, not asserted)
+
+- No domain imports another (`grep` the `domain/` dir: zero cross-imports).
+- The engine imports only `defs` (annotation-only); it names domain vocabulary
+  only in comments describing what it does not know.
+- The test drives ALL THREE lowered graphs through the SAME `engine.solve`.
+
+## Adding a domain or a rule (incremental, local)
+
+- **New analysis (new domain):** a new module under `engine/domain/` providing a
+  `Lattice` + either a `FlowDomain` (block-structured: get the preds/succs swap
+  for free) or direct `Rule` construction (cells-as-unknowns). Add a narrowing
+  predicate for its value type. Nothing else moves; the engine is untouched.
+- **New rule / transfer case:** one arm in a domain's `transfer`/`apply`. The
+  engine and other domains do not change.
+- **New surface former:** a constructor in `surface.lua` (+ `cfg.lua` arm if it
+  affects control flow) + a transfer arm in each interested domain.
+
+## Seam map
+
+| Seam | File | Swappable behind | Knows about |
+|---|---|---|---|
+| **Engine** | `engine/engine.lua` | `Graph` = `(Lattice, Rule[])` | cells only — zero domain vocabulary |
+| **Domain interface** | `engine/defs.lua` | `Lattice` / `Rule` / `FlowDomain` | the contract; no impls |
+| **Flow adapter** | `engine/dataflow.lua` | `FlowDomain` → `Graph` | CFG (block/preds/succs/in/out); the direction swap; no analysis vocabulary |
+| **Lowering** | `engine/surface.lua`, `engine/cfg.lua` | the surface AST → CFG / SSA | the cell/op vocabulary |
+| **Type domain** | `engine/domain/types.lua` | a `Lattice` + SSA `Rule`s | atoms, unions, subtyping |
+| **Liveness domain** | `engine/domain/liveness.lua` | a `FlowDomain` | live sets, gen/kill |
+| **Constprop domain** | `engine/domain/constprop.lua` | a `FlowDomain` | the const lattice |
+
+Every box is swappable; the engine depends only on the domain interface (DIP).
+Multiple impls behind one interface is real: the three domains are three
+independent `Lattice`/transfer instances over one engine, and a fourth (a
+different inference lattice, an interval analysis, a must-analysis) is a new
+module, not an engine edit.
+
+## Legacy type-checking seams (retained, repositioned)
+
+The previous skeleton's bidirectional checker — `ir.lua` (de-Bruijn `tm`-shaped
+IR with names-as-metadata), `subtype/` (the three-valued `DSub|DNotSub|DUnknown`
+decider), `type_rep/`, `infer/bidir.lua`, `init.lua`, `type_defs.lua`,
+`parity_test.lua` — is **retained** as the designated substrate the *type
+domain's lattice will grow into*. The minimal type domain here uses an atom-set
+lattice to prove the engine; a production type domain replaces that lattice's
+`join`/transfer with the real subtyping decider and a richer `BTy`-shaped value,
+behind the SAME `Lattice`/`Rule` interface. The de-Bruijn binder discipline
+(names are non-semantic metadata) and the three-valued honest-deferral decider
+are the ideas mined forward; they are not yet wired to the engine, and are fenced
+here as legacy until that increment.
+
+## Genuinely under-determined (flagged, not invented)
+
+1. **Type-domain lattice depth.** The atom-set lattice is the minimal genuine
+   inference lattice. The real one (records / arrows / negation / the proof's
+   `BTy`, the three-valued decider as `equal`/`join`) is a domain-local upgrade —
+   not designed here, because the engine validation does not need it.
+2. **Cell-id scheme.** String cell ids (`ty:…#n`, `in:…`/`out:…`) are a
+   convention; an integer/interned id scheme is a valid swap behind the engine
+   (which treats ids opaquely).
+3. **Generic engine.** If the checker gains `require`-surviving generic
+   instantiation, `Lattice<V>`/`solve<V>` would remove the per-domain narrowing
+   predicates. Until then `unknown` + predicate-narrowing is the force-cast-free
+   bridge. Recorded as a substrate need, not worked around.
+4. **Worklist order / widening.** FIFO worklist, no widening (the lattices here
+   have finite height). An infinite-height lattice (intervals) would need a
+   widening operator — a domain-local addition to the `Lattice` it needs it for,
+   not an engine change.
