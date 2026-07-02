@@ -1,4 +1,4 @@
-# Decision: v9 product definition — strict discipline enforcer, total semantics / bounded dynamism, owner-held power dial
+# Decision: v9 product definition — TypeScript-but-sound and stricter, total semantics / bounded dynamism, owner-held power dial
 
 **Status:** resolved — July 2026 (owner rulings, recorded verbatim in spirit).
 **Purpose:** the durable identity card for v9. Future sessions read this before
@@ -7,19 +7,28 @@ by fixing **what the product is**.
 
 ---
 
-## Identity: NOT a typechecker in the permissive-inference sense
+## Identity: "TypeScript-but-sound, and stricter"
 
-v9 is a **strict static discipline enforcer**. Owner: "we aren't trying to be a
-typechecker, we're trying to be way, way stricter."
+Owner (correcting an earlier, overstated recording of this section): "we want
+to be stricter than typescript-but-sound, and want flow typing etc"; "we just
+don't want to have to reach into dependent types or refinement types because,
+well, duh?"
 
-Permissive inference — the MLsub/TypeScript-style stance of "find *some* type
-that makes it sound" — is the **inverted philosophy**: it stretches the type
-language until almost everything checks. v9 does the opposite. **If code
-requires an exotic type to check, that is a signal the code is too dynamic, and
-the checker ERRORS.**
+TypeScript's expressiveness class is the **floor, not the enemy**: structural /
+set-theoretic types (unions, intersections, negation, structural
+records/functions), flow typing, narrowing, contextual typing — all wanted, at
+full inference power. Inference power within the type language is a feature.
+What is deleted relative to TS is **every unsoundness**: no `any`, no
+bivariance, no unsound escape hatches; casts are checked. Strictness =
+soundness without exceptions, not reluctance to infer.
 
-Inference exists for **propagation** (so users don't write annotations), never
-for **absolution** (stretching the type language to bless dubious code).
+**The ceiling is the type LANGUAGE, not the inference.** The type language is
+fixed at sound set-theoretic types + flow narrowing (roughly the proof-dev's
+`BTy` class) and deliberately stops BEFORE dependent types and refinement types
+— that is where decidability and annotation-free checking end (halting-oracle
+territory). The dynamism boundary = code whose correctness argument requires
+**value-dependent reasoning**. THERE the checker errors. Within the language,
+check as precisely as possible.
 
 ---
 
@@ -78,12 +87,13 @@ The requirement:
   same rule shape.
 - **No per-construct special-case branches** in the solver/engine. (This is
   the code-level form of the repo-wide no-special-casing hard constraint.)
-- **MLsub / Simple-sub (Dolan, Parreaux) is PRIOR ART to mine for machinery**
-  — uniform constraint generation, type variables as lattice cells (which the
-  validated v9 engine already embodies: commits `37894772` / `f16005d6`),
-  biunification / polar types — while **REJECTING its maximal-permissiveness
-  acceptance philosophy** per the Identity section above. Mine the mechanism,
-  not the stance.
+- **MLsub / Simple-sub (Dolan, Parreaux) is PRIOR ART to mine for machinery
+  AND inference power, without hedging** — uniform constraint generation, type
+  variables as lattice cells (which the validated v9 engine already embodies:
+  commits `37894772` / `f16005d6`), biunification / polar types,
+  flow-sensitive inference within the fixed language: exactly right. The only
+  rejected part of Dolan's program is growing the type language until every
+  program checks; v9's language is fixed, and errors happen outside it.
 
 ---
 
@@ -115,8 +125,9 @@ to it.
 
 ## Anti-goals
 
-- **No maximal-permissiveness inference.** Never stretch the type language so
-  code checks; error instead.
+- **No growing the type language into dependent/refinement territory to bless
+  dynamic code.** The type language is fixed; beyond it the checker errors.
+  Powerful inference *within* the language is a goal, not an anti-goal.
 - **No per-construct special-casing** in the solver/engine — one rule shape
   for everything.
 - **No silent passes on unsupported dynamism.** Beyond the decidable boundary
@@ -124,3 +135,8 @@ to it.
   acceptance.
 - **No halting-oracle territory.** No whole-program dynamism analysis built to
   bless dynamic code; that boundary is where the product errors by design.
+
+---
+
+Amended: identity corrected from "reject exotic types / inference never for
+absolution" to "TS-but-sound + fixed type-language ceiling" per owner.
