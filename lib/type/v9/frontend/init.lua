@@ -22,9 +22,11 @@
 -- syntax errors; this seam pcall-fences it.
 --
 -- NOT lifted: lib/type/static/ann.lua (the annotation-string parser) — it is
--- entangled with the legacy type algebra. Annotations reach v9 later, behind
--- their own seam; until then `--:`/`--::` strings ride along unparsed on the
--- lexer and NODE_CAST_EXPR carries a raw annotation id.
+-- entangled with the legacy type algebra. The lexer's captured `--:`/`--::`
+-- strings are attached RAW to the returned chunk as `chunk.annotations`
+-- (keyed by line; block-cast entries are re-keyed to the negative ids that
+-- NODE_CAST_EXPR.annotation_id references). Parsing that grammar is the
+-- v9 annotation seam's job (lib/type/v9/annot), not this frontend's.
 
 if not package.path:find("?/init.lua", 1, true) then
     package.path = "./?/init.lua;" .. package.path
@@ -52,6 +54,9 @@ M.is_list = is_list
 -- Narrow the legacy parser's arena result at the seam boundary.
 --: (x: unknown) -> x is { nodes: unknown, lists: unknown, pool: unknown, root: integer, lexer: unknown, ... }
 local function is_parse_result(x) return type(x) == "table" end
+
+--: (x: unknown) -> x is { annotations: unknown, ... }
+local function is_lexer(x) return type(x) == "table" end
 
 -- All 30 node kinds, named for diagnostics and for totality checks. This is
 -- the closed roster a total consumer must cover — kebab-case names double as
@@ -113,6 +118,12 @@ function M.parse(source, filename)
     if not ok2 then return nil, filename .. ": decode error: " .. tostring(decoded) end
     local dec = decoded --: unknown
     if not is_node(dec) then return nil, filename .. ": decoder returned a non-node" end
+    -- Attach the lexer's raw annotation captures to the chunk (see header).
+    local lex = raw.lexer --: unknown
+    if is_lexer(lex) then
+        local anns = lex.annotations --: unknown
+        if type(anns) == "table" then dec.annotations = anns end
+    end
     return dec, nil
 end
 

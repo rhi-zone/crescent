@@ -528,10 +528,12 @@ fn_leq = function(fa, fb)
 end
 
 -- Initialization ordering: like leq, but record FIELDS compare covariantly
--- on the read face only. Sound ONLY for a syntactically FRESH constructor
--- ascribed at its construction site — the constructor's field refs have no
--- other alias yet, so the ascription re-types them (nested positions use
--- full leq; only the top layer is initialization).
+-- on the read face only, and a field the constructor does not mention IS
+-- nil (a fresh table genuinely has nil there — the optional-field idiom
+-- `z?: T` is satisfied by absence). Sound ONLY for a syntactically FRESH
+-- constructor ascribed at its construction site — the constructor's field
+-- refs have no other alias yet, so the ascription re-types them (nested
+-- positions use full leq; only the top layer is initialization).
 --: (Val, Val) -> boolean
 local function leq_init(a, b)
     if has_unknown(a) then return has_unknown(b) end
@@ -541,8 +543,11 @@ local function leq_init(a, b)
     if ra ~= nil and rb ~= nil then
         for name, fb in pairs(rb.fields) do
             local fa = ra.fields[name]
-            if fa == nil then return false end
-            if not leq(fa.r, fb.r) then return false end
+            if fa == nil then
+                if not leq(single("nil"), fb.r) then return false end
+            elseif not leq(fa.r, fb.r) then
+                return false
+            end
         end
         -- atoms + fn still compare as usual, minus the record component.
         local a2 = { atoms = a.atoms, rec = nil, fn = a.fn } --: Val

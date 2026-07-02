@@ -64,7 +64,7 @@ local engine = require("lib.type.v9.engine.engine")
 local lattice = require("lib.type.v9.lattice")
 
 --:: Diag = { code: string, severity: string, message: string, line: integer, col: integer }
---:: Obligation = { kind: string, cell: string, allow: Val | nil, field: string | nil, base: string | nil, args: { [integer]: string } | nil, init: boolean | nil, code: string, what: string, line: integer, col: integer }
+--:: Obligation = { kind: string, cell: string, allow: Val | nil, field: string | nil, base: string | nil, args: { [integer]: string } | nil, inits: { [integer]: boolean } | nil, init: boolean | nil, code: string, what: string, line: integer, col: integer }
 --:: Policy = { [string]: string }
 --:: Caps = { read_file: (string) -> (string | nil, string | nil) }
 --:: CheckOpts = { policy: Policy | nil, mode: string | nil }
@@ -238,13 +238,22 @@ local function evaluate_obligation(diags, values, ob)
                     avv = av
                     missing = false
                 end
-                if not (not missing and lattice.is_bottom(avv)) then
+                if not (not missing and lattice.is_bottom(avv)) and not lattice.is_unknown(pin) then
+                    -- a direct-constructor argument is a fresh construction
+                    -- ascribed by the pin: initialization ordering.
+                    local inits = ob.inits
+                    local ok = false
+                    if inits ~= nil and inits[i] == true then
+                        ok = lattice.leq_init(avv, pin)
+                    else
+                        ok = lattice.leq(avv, pin)
+                    end
                     if lattice.is_unknown(avv) then
                         emit(diags, "use-before-narrow", ob.line, ob.col,
                             "argument #" .. tostring(i) .. " to " .. ob.what
                                 .. " has type `unknown` — the parameter expects `"
                                 .. lattice.show(pin) .. "`; narrow it first")
-                    elseif not lattice.leq(avv, pin) then
+                    elseif not ok then
                         local got = lattice.show(avv)
                         if missing then got = got .. " (missing argument)" end
                         emit(diags, ob.code, ob.line, ob.col,
@@ -283,6 +292,9 @@ local function evaluate_obligation(diags, values, ob)
         -- is the can't-verify class, not a disagreement.
         local allow = ob.allow
         if allow == nil then return nil end
+        -- a ⊤ bound is vacuous: everything satisfies it, and an unknown
+        -- VALUE against it is not a finding either.
+        if lattice.is_unknown(allow) then return nil end
         if lattice.is_unknown(v) then
             emit(diags, "use-before-narrow", ob.line, ob.col,
                 ob.what .. " has type `unknown` — `" .. lattice.show(allow)

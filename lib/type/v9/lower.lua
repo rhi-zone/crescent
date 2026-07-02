@@ -46,6 +46,38 @@
 -- `unsupported:unconstrained-param` (the body was checked against no
 -- inputs) instead of a per-use unknown flood — same honesty, right shape.
 --
+-- ANNOTATIONS (the v9 annot seam, lib/type/v9/annot) are read here and
+-- nowhere else. The discipline is PIN + CHECK — an annotation is BOTH a
+-- seed and an upper-bound obligation; inference must AGREE with it, never
+-- be overridden by it:
+--
+--   local x = e --: T     x's cell is SEEDED T (readers see the interface);
+--                         e gets an `ann` obligation e ⊑ T. A direct table
+--                         constructor is initialization: the ascription
+--                         re-types the fresh constructor's field refs
+--                         (leq_init), which is what lets `f = nil --: T|nil`
+--                         fields accept later in-bound writes.
+--   x = e                 (x annotated) e ⊑ pin obligation; x's cell rebinds
+--                         to e's cell — assignment NARROWING survives the pin.
+--   --: (a: T) -> R       (preceding line) pins the function's param cells
+--   local function f(a)   (seed T; call args are checked against the pin at
+--                         the CALL site, not flowed) and its result cells
+--                         (each return statement is obligated per position).
+--   f = nil, --: T        a table-constructor field or field-write on the
+--                         same line pins that field's ref type.
+--   --[[: T]]             checked cast: obligation expr ⊑ T (cast-mismatch;
+--                         `unknown` sources are the use-before-narrow class)
+--                         AND the flow continues at T.
+--   --[[:! T]]            force cast: the named `force-cast` policy
+--                         (default error); the flow continues at T.
+--   --:: Name = T         module-level alias, resolved inside annotations.
+--
+-- Every annotation feature the v9 lattice cannot express routes to a named
+-- `unsupported:annotation-<feature>` bucket — honest, dialable, per bucket.
+-- HAVOC of an annotated variable resets it to its PIN, not to unknown: the
+-- annotation is the contract the unchecked region is trusted against
+-- (stated; the write inside the region gets checked when loops land).
+--
 -- Flow-sensitivity is SSA-style versioning: assignments rebind a variable's
 -- cell; `if` merges make phi cells that receive each branch version as a
 -- separate proposal — the engine's monotone join IS the union at the merge.
@@ -64,18 +96,21 @@ end
 
 --:: require "lib.type.v9.engine.defs"
 --:: require "lib.type.v9.lattice"
+--:: require "lib.type.v9.annot"
 
 local defs = require("lib.type.static.defs")
 local engine = require("lib.type.v9.engine.engine")
 local lattice = require("lib.type.v9.lattice")
 local frontend = require("lib.type.v9.frontend")
+local annot = require("lib.type.v9.annot")
 
 --:: Ast = { tag: integer, line: integer, col: integer, ... }
 --:: Diag = { code: string, severity: string, message: string, line: integer, col: integer }
---:: Obligation = { kind: string, cell: string, allow: Val | nil, field: string | nil, base: string | nil, args: { [integer]: string } | nil, code: string, what: string, line: integer, col: integer }
+--:: Obligation = { kind: string, cell: string, allow: Val | nil, field: string | nil, base: string | nil, args: { [integer]: string } | nil, inits: { [integer]: boolean } | nil, init: boolean | nil, code: string, what: string, line: integer, col: integer }
 --:: LowerResult = { graph: Graph, obligations: { [integer]: Obligation }, diags: { [integer]: Diag }, vars: { [string]: string } }
---:: Decl = { id: string, name: string, line: integer, col: integer, read: boolean, cell: string }
+--:: Decl = { id: string, name: string, line: integer, col: integer, read: boolean, cell: string, pin: Val | nil }
 --:: Scope = { map: { [string]: Decl }, order: { [integer]: Decl } }
+--:: Ann = { kind: integer, content: string, col: integer, force_cast: boolean | nil, line: integer | nil, consumed: boolean | nil }
 
 local M = {}
 
@@ -154,7 +189,7 @@ function M.lower(chunk)
     -- return statement records its per-position cells; the function wires
     -- them into result-position cells once the max arity is known.
     --:: Ret = { cells: { [integer]: string }, spread: boolean, line: integer, col: integer }
-    --:: Frame = { returns: { [integer]: Ret } }
+    --:: Frame = { returns: { [integer]: Ret }, pins: { [integer]: Val } | nil }
     local ret_frames = {} --: { [integer]: Frame }
     local ret_depth = 0
 
@@ -232,7 +267,7 @@ function M.lower(chunk)
     --: (cell: string, allow: Val, code: string, what: string, line: integer, col: integer) -> nil
     local function obligate(cell, allow, code, what, line, col)
         obligations[#obligations + 1] = {
-            kind = "bound", cell = cell, allow = allow, field = nil, base = nil, args = nil,
+            kind = "bound", cell = cell, allow = allow, field = nil, base = nil, args = nil, inits = nil, init = nil,
             code = code, what = what, line = line, col = col,
         }
         return nil
@@ -244,7 +279,7 @@ function M.lower(chunk)
     --: (cell: string, field: string, what: string, line: integer, col: integer) -> nil
     local function obligate_field_read(cell, field, what, line, col)
         obligations[#obligations + 1] = {
-            kind = "field-read", cell = cell, allow = nil, field = field, base = nil, args = nil,
+            kind = "field-read", cell = cell, allow = nil, field = field, base = nil, args = nil, inits = nil, init = nil,
             code = "missing-field", what = what, line = line, col = col,
         }
         return nil
@@ -257,7 +292,7 @@ function M.lower(chunk)
     --: (cell: string, base: string, field: string, line: integer, col: integer) -> nil
     local function obligate_field_write(cell, base, field, line, col)
         obligations[#obligations + 1] = {
-            kind = "field-write", cell = cell, allow = nil, field = field, base = base, args = nil,
+            kind = "field-write", cell = cell, allow = nil, field = field, base = base, args = nil, inits = nil, init = nil,
             code = "field-write-mismatch", what = "field '" .. field .. "'", line = line, col = col,
         }
         return nil
@@ -270,7 +305,7 @@ function M.lower(chunk)
     --: (cell: string, name: string, line: integer, col: integer) -> nil
     local function obligate_param_witness(cell, name, line, col)
         obligations[#obligations + 1] = {
-            kind = "param-witness", cell = cell, allow = nil, field = nil, base = nil, args = nil,
+            kind = "param-witness", cell = cell, allow = nil, field = nil, base = nil, args = nil, inits = nil, init = nil,
             code = "unsupported:unconstrained-param", what = "parameter '" .. name .. "'",
             line = line, col = col,
         }
@@ -280,14 +315,250 @@ function M.lower(chunk)
     -- "each argument at this call site must satisfy the callee's param PINS"
     -- — evaluated post-solve against the callee's function component; only
     -- pinned (annotated) params are checked here, inferred params take their
-    -- evidence from the argument flow instead.
-    --: (cell: string, args: { [integer]: string }, what: string, line: integer, col: integer) -> nil
-    local function obligate_call(cell, args, what, line, col)
+    -- evidence from the argument flow instead. `inits[i]` marks an argument
+    -- that is a direct table constructor (a fresh construction ascribed by
+    -- the pin: initialization ordering, as for annotated locals).
+    --: (cell: string, args: { [integer]: string }, inits: { [integer]: boolean }, what: string, line: integer, col: integer) -> nil
+    local function obligate_call(cell, args, inits, what, line, col)
         obligations[#obligations + 1] = {
             kind = "call", cell = cell, allow = nil, field = nil, base = nil, args = args,
-            code = "call-mismatch", what = what, line = line, col = col,
+            inits = inits, init = nil, code = "call-mismatch", what = what, line = line, col = col,
         }
         return nil
+    end
+
+    -- "the value in `cell` must satisfy the annotated type" — the CHECK half
+    -- of pin+check. `init` marks a directly-ascribed fresh constructor
+    -- (leq_init: the ascription re-types the constructor's field refs).
+    --: (cell: string, allow: Val, init: boolean, code: string, what: string, line: integer, col: integer) -> nil
+    local function obligate_ann(cell, allow, init, code, what, line, col)
+        obligations[#obligations + 1] = {
+            kind = "ann", cell = cell, allow = allow, field = nil, base = nil, args = nil, inits = nil,
+            init = init, code = code, what = what, line = line, col = col,
+        }
+        return nil
+    end
+
+    -- ── annotations (the annot seam, wired) ────────────────────────────────
+
+    -- The lexer's raw captures, attached by the frontend: line-keyed for
+    -- `--:`/`--::` comments, negative-id-keyed for `--[[: ]]` casts.
+    local anns = {} --: { [integer]: Ann }
+    do
+        local raw = chunk.annotations --: unknown
+        --: (x: unknown) -> x is { [integer]: Ann }
+        local function is_anns(x) return type(x) == "table" end
+        if is_anns(raw) then anns = raw end
+    end
+
+    -- Alias environment from the file's `--:: Name = T` declarations
+    -- (collected up front: aliases resolve regardless of position). Non-alias
+    -- `--::` forms are classified in the entry pre-pass below.
+    --:: Alias = { content: string | nil, feature: string | nil }
+    local aliases = {} --: { [string]: Alias }
+
+    --: (string) -> (string | nil, string | nil)
+    local function resolve_alias(name)
+        local a = aliases[name]
+        if a == nil then return nil, nil end
+        return a.content, a.feature
+    end
+
+    -- Parse one ANN_TYPE annotation: named buckets become diags here; a
+    -- hard parse failure is its own bucket. Returns the At (nil when
+    -- unusable). `quiet` suppresses diags AND consumption for probe reads
+    -- (the preceding-line function-annotation check).
+    --: (ann: Ann, line: integer, quiet: boolean) -> unknown
+    local function parse_ann(ann, line, quiet)
+        local ok, at, buckets, perr = pcall(annot.parse, ann.content, resolve_alias)
+        if not ok then
+            diag("internal", line, ann.col, "annotation parser crashed: " .. tostring(at))
+            return nil
+        end
+        if quiet then return at end
+        if buckets ~= nil then
+            for i = 1, #buckets do
+                diag("unsupported:annotation-" .. buckets[i], line, ann.col,
+                    "annotation uses `" .. buckets[i]
+                        .. "` — outside the v0 annotation subset (that part reads as unknown)")
+            end
+        end
+        if at == nil then
+            diag("unsupported:annotation-parse", line, ann.col,
+                "annotation does not parse: " .. (perr or "?"))
+        end
+        return at
+    end
+
+    --: (x: unknown) -> x is At
+    local function is_at(x) return type(x) == "table" end
+
+    -- Consume the ANN_TYPE annotation at `key` (a line, usually), if any.
+    --: (key: integer) -> unknown
+    local function read_ann(key)
+        local ann = anns[key]
+        if ann == nil or ann.consumed == true then return nil end
+        if ann.kind ~= defs.ANN_TYPE then return nil end
+        ann.consumed = true
+        return parse_ann(ann, key, false)
+    end
+
+    -- Probe-then-consume for the PRECEDING-LINE function annotation: only a
+    -- type that parses as an arrow belongs to the function (a non-arrow on
+    -- the preceding line is someone else's); an unparsable one is consumed
+    -- loudly (it is an annotation of SOME kind, and silence would hide it).
+    --: (key: integer) -> unknown
+    local function read_fn_ann(key)
+        local ann = anns[key]
+        if ann == nil or ann.consumed == true then return nil end
+        if ann.kind ~= defs.ANN_TYPE then return nil end
+        local probe = parse_ann(ann, key, true)
+        if is_at(probe) and probe.k ~= "fn" then return nil end
+        ann.consumed = true
+        return parse_ann(ann, key, false)
+    end
+
+    -- At -> lattice Val. Function types mint fresh, pin-seeded param cells
+    -- (the annotation's contravariant face lives in the pins; the cells give
+    -- the arrow its identity). Bucketed subtrees read as unknown, or the
+    -- `table` atom where table-ness is certain.
+    local at_val
+    --: (unknown) -> Val
+    at_val = function(at)
+        if not is_at(at) then return UNKNOWN_VAL end
+        local k = at.k
+        if k == "atom" then
+            local name = at.name
+            if type(name) == "string" then return lattice.single(name) end
+            return UNKNOWN_VAL
+        elseif k == "unknown" then
+            return UNKNOWN_VAL
+        elseif k == "never" then
+            return lattice.of({})
+        elseif k == "union" then
+            local parts = at.parts
+            local v = lattice.of({}) --: Val
+            if is_tbl(parts) then
+                for i = 1, #parts do
+                    local pv = lattice.lattice.join(v, at_val(parts[i]))
+                    if lattice.as_val(pv) then v = pv end
+                end
+            end
+            return v
+        elseif k == "record" then
+            local fields = {} --: { [string]: Field }
+            local fs = at.fields
+            if is_tbl(fs) then
+                for i = 1, #fs do
+                    local f = fs[i]
+                    if is_tbl(f) then
+                        local fv = at_val(f.at)
+                        if f.optional == true then
+                            local j = lattice.lattice.join(fv, NIL_VAL)
+                            if lattice.as_val(j) then fv = j end
+                        end
+                        local w = fv --: Val
+                        if f.readonly == true then w = lattice.of({}) end
+                        local name = f.name
+                        if type(name) == "string" then
+                            fields[name] = { r = fv, w = w }
+                        end
+                    end
+                end
+            end
+            return lattice.record_rw(fields)
+        elseif k == "fn" then
+            local params = {} --: { [integer]: Param }
+            local ps = at.params
+            if is_tbl(ps) then
+                for i = 1, #ps do
+                    local p0 = ps[i]
+                    if is_tbl(p0) then
+                        local pat = p0.at
+                        local pv = at_val(pat)
+                        if p0.optional == true then
+                            local j = lattice.lattice.join(pv, NIL_VAL)
+                            if lattice.as_val(j) then pv = j end
+                        end
+                        local c = fresh("annp")
+                        -- a pin that DEGRADED to unknown (bucketed feature)
+                        -- carries no checking value: leave the param
+                        -- unpinned so argument inference proceeds. Explicit
+                        -- `unknown` stays a real pin (that is its meaning).
+                        if lattice.is_unknown(pv) and not (is_at(pat) and pat.k == "unknown") then
+                            params[#params + 1] = { cell = c, pin = nil }
+                        else
+                            seed(c, pv)
+                            params[#params + 1] = { cell = c, pin = pv }
+                        end
+                    end
+                end
+            end
+            local results = {} --: { [integer]: Val }
+            local rs = at.results
+            if is_tbl(rs) then
+                for i = 1, #rs do results[i] = at_val(rs[i]) end
+            end
+            local rest = nil --: Val | nil
+            if at.rest ~= nil then rest = at_val(at.rest) end
+            return lattice.fn_val(params, results, at.vararg == true, rest, at.open == true)
+        elseif k == "opaque" then
+            if at.approx == "table" then return lattice.single("table") end
+            return UNKNOWN_VAL
+        end
+        -- a tuple outside result position, or an unexpected node: honest top.
+        return UNKNOWN_VAL
+    end
+
+    -- The contravariant seeding for an fn-typed VALUE annotation: whatever
+    -- flows into `src` must accept the annotation's params — seed the pin
+    -- types into the inflowing arrow's UNPINNED param cells so its body is
+    -- checked against them (pinned params are checked by fn_leq in the ann
+    -- obligation instead).
+    --: (src: string, pinval: Val) -> nil
+    local function ann_flow(src, pinval)
+        local pfn = pinval.fn
+        if pfn == nil then return nil end
+        rules[#rules + 1] = engine.rule({ src }, {}, function(get)
+            local out = {} --: { [string]: unknown }
+            local v = get(src)
+            if lattice.as_val(v) then
+                local afn = v.fn
+                if afn ~= nil then
+                    for j = 1, #afn.params do
+                        local ap = afn.params[j]
+                        if ap.pin == nil then
+                            local pj = pfn.params[j]
+                            if pj ~= nil and pj.pin ~= nil then
+                                out[ap.cell] = pj.pin
+                            end
+                        end
+                    end
+                end
+            end
+            return out
+        end)
+        return nil
+    end
+
+    -- A cell fixed at an annotated type (the PIN half of pin+check).
+    --: (tag: string, pinval: Val) -> string
+    local function pinned_cell(tag, pinval)
+        local c = fresh("pin-" .. tag)
+        seed(c, pinval)
+        return c
+    end
+
+    -- Is this annotation USABLE as a pin? An explicit `unknown` is — that
+    -- IS its meaning (callers must narrow). A type that merely DEGRADED to
+    -- unknown through a bucket (unreadable alias, generic, ...) is NOT: a
+    -- ⊤ pin carries no checking value, and seeding it would DESTROY the
+    -- inference the cell already has. The bucket diag names the boundary;
+    -- inference proceeds.
+    --: (at: unknown, pinval: Val) -> boolean
+    local function usable_pin(at, pinval)
+        if not lattice.is_unknown(pinval) then return true end
+        return is_at(at) and at.k == "unknown"
     end
 
     -- ── scopes / versions ──────────────────────────────────────────────────
@@ -316,7 +587,7 @@ function M.lower(chunk)
     --: (name: string, line: integer, col: integer, cell: string, read: boolean) -> Decl
     local function declare(name, line, col, cell, read)
         counter = counter + 1
-        local d = { id = name .. "#" .. counter, name = name, line = line, col = col, read = read, cell = cell } --: Decl
+        local d = { id = name .. "#" .. counter, name = name, line = line, col = col, read = read, cell = cell, pin = nil } --: Decl
         local s = scopes[depth]
         s.map[name] = d
         s.order[#s.order + 1] = d
@@ -402,6 +673,22 @@ function M.lower(chunk)
         return nil
     end
 
+    -- Havoc one variable: an ANNOTATED variable resets to its PIN (the
+    -- annotation is the contract the unchecked region is trusted against —
+    -- stated in the header); an unannotated one to unknown.
+    --: (Decl) -> nil
+    local function havoc_decl(d)
+        local pin = d.pin
+        if pin ~= nil then
+            local c = fresh("havoc-pin-" .. d.name)
+            seed(c, pin)
+            d.cell = c
+        else
+            d.cell = unknown_cell("havoc-" .. d.name)
+        end
+        return nil
+    end
+
     --: (unknown) -> nil
     local function havoc_scan(x)
         if not is_tbl(x) then return nil end
@@ -420,7 +707,7 @@ function M.lower(chunk)
                         local nm = target_root_name(t)
                         if nm ~= nil then
                             local d = resolve(nm)
-                            if d ~= nil then d.cell = unknown_cell("havoc-" .. nm) end
+                            if d ~= nil then havoc_decl(d) end
                         end
                     end
                 end
@@ -428,7 +715,7 @@ function M.lower(chunk)
                 local nm = target_root_name(x.name)
                 if nm ~= nil then
                     local d = resolve(nm)
-                    if d ~= nil then d.cell = unknown_cell("havoc-" .. nm) end
+                    if d ~= nil then havoc_decl(d) end
                 end
             end
         end
@@ -450,9 +737,26 @@ function M.lower(chunk)
     -- cell BEFORE the body lowers, so `local function f` sees its own arrow.
     --: (Ast, Decl | nil) -> string
     local function lower_function(n, recurse_decl)
+        -- The definition-site annotation: `--: (a: T) -> R` on the line
+        -- ABOVE the `function` keyword (the house grammar's only
+        -- param/return form). Pins params and result positions.
+        local fnat = read_fn_ann(n.line - 1)
+        local anp = nil --: unknown
+        local anr = nil --: unknown
+        local an_rest = nil --: unknown
+        local an_vararg = false
+        local an_open = false
+        if is_at(fnat) and fnat.k == "fn" then
+            anp = fnat.params
+            anr = fnat.results
+            an_rest = fnat.rest
+            an_vararg = fnat.vararg == true
+            an_open = fnat.open == true
+        end
+
         push_scope()
         ret_depth = ret_depth + 1
-        local frame = { returns = {} } --: Frame
+        local frame = { returns = {}, pins = nil } --: Frame
         ret_frames[ret_depth] = frame
         local params = {} --: { [integer]: Param }
         local nparams = n.params
@@ -460,13 +764,58 @@ function M.lower(chunk)
             for i = 1, #nparams do
                 local nm = nparams[i].name
                 if type(nm) == "string" then
+                    -- the pin for this position: the annotation's param i;
+                    -- past the annotation's arity the callee receives nil
+                    -- (Lua) unless the annotation is vararg (then its rest
+                    -- bound, or unknown when unstated).
+                    local pin = nil --: Val | nil
+                    if is_tbl(anp) then
+                        local ap = anp[i]
+                        if is_tbl(ap) then
+                            local p = at_val(ap.at)
+                            if ap.optional == true then
+                                local j = lattice.lattice.join(p, NIL_VAL)
+                                if lattice.as_val(j) then p = j end
+                            end
+                            -- a degraded-to-unknown pin carries no checking
+                            -- value: leave the param to inference.
+                            if usable_pin(ap.at, p) then pin = p end
+                        elseif an_vararg then
+                            if an_rest ~= nil then pin = at_val(an_rest) else pin = UNKNOWN_VAL end
+                        else
+                            pin = NIL_VAL
+                        end
+                    end
                     local c = fresh("param-" .. nm)
                     -- params are exempt from unused-local (read = true):
                     -- callbacks legitimately ignore params.
-                    declare(nm, n.line, n.col, c, true)
-                    params[#params + 1] = { cell = c, pin = nil }
-                    obligate_param_witness(c, nm, n.line, n.col)
+                    local d = declare(nm, n.line, n.col, c, true)
+                    if pin ~= nil then
+                        seed(c, pin)
+                        d.pin = pin
+                        params[#params + 1] = { cell = c, pin = pin }
+                    else
+                        params[#params + 1] = { cell = c, pin = nil }
+                        obligate_param_witness(c, nm, n.line, n.col)
+                    end
                 end
+            end
+        end
+        -- annotated returns pin the frame BEFORE the body lowers: each
+        -- return statement checks per position against these. A result list
+        -- that degraded ENTIRELY to unknown pins nothing — inference keeps
+        -- its precision (`-> ()` is informative: zero results).
+        local pins = nil --: { [integer]: Val } | nil
+        if is_tbl(anr) then
+            local ps = {} --: { [integer]: Val }
+            local any_usable = #anr == 0
+            for i = 1, #anr do
+                ps[i] = at_val(anr[i])
+                if usable_pin(anr[i], ps[i]) then any_usable = true end
+            end
+            if any_usable then
+                pins = ps
+                frame.pins = pins
             end
         end
         local fcell = fresh("fn")
@@ -474,9 +823,25 @@ function M.lower(chunk)
         local body = n.body
         if is_list(body) then lower_stmts(body) end
 
-        -- Wire returns into result-position cells. A return shorter than the
-        -- max arity pads with nil (Lua call semantics); a call/vararg spread
-        -- in last position contributes unknown AND marks the arrow OPEN.
+        local vararg = n.vararg == true or an_vararg
+        local rest = nil --: Val | nil
+        if an_rest ~= nil then rest = at_val(an_rest) end
+        if pins ~= nil then
+            -- PINNED results: the arrow's interface IS the annotation
+            -- (returns were obligated per position at each return site).
+            local fnv = lattice.fn_val(params, pins, vararg, rest, an_open)
+            rules[#rules + 1] = engine.rule({}, { fcell }, function(get)
+                return { [fcell] = fnv }
+            end)
+            ret_depth = ret_depth - 1
+            pop_scope()
+            return fcell
+        end
+
+        -- INFERRED results: wire returns into result-position cells. A
+        -- return shorter than the max arity pads with nil (Lua call
+        -- semantics); a call/vararg spread in last position contributes
+        -- unknown AND marks the arrow OPEN.
         local returns = frame.returns
         local maxk = 0
         local open = false
@@ -500,7 +865,6 @@ function M.lower(chunk)
                 end
             end
         end
-        local vararg = n.vararg == true
         rules[#rules + 1] = engine.rule(rcells, { fcell }, function(get)
             local results = {} --: { [integer]: Val }
             for i = 1, maxk do
@@ -511,7 +875,7 @@ function M.lower(chunk)
                     results[i] = NIL_VAL
                 end
             end
-            return { [fcell] = lattice.fn_val(params, results, vararg, nil, open) }
+            return { [fcell] = lattice.fn_val(params, results, vararg, rest, open) }
         end)
         ret_depth = ret_depth - 1
         pop_scope()
@@ -593,8 +957,8 @@ function M.lower(chunk)
     -- nil-extension per Lua call semantics; result-open arrows and the
     -- `function` top yield unknown). Plus the callee-shape and per-argument
     -- obligations. Returns the result-position cells.
-    --: (cc: string, argcells: { [integer]: string }, want: integer, what: string, line: integer, col: integer) -> { [integer]: string }
-    local function call_core(cc, argcells, want, what, line, col)
+    --: (cc: string, argcells: { [integer]: string }, inits: { [integer]: boolean }, want: integer, what: string, line: integer, col: integer) -> { [integer]: string }
+    local function call_core(cc, argcells, inits, want, what, line, col)
         local rcells = {} --: { [integer]: string }
         for i = 1, want do rcells[i] = fresh("call" .. i) end
         local reads = { cc } --: { [integer]: string }
@@ -661,7 +1025,7 @@ function M.lower(chunk)
             return out
         end)
         obligate(cc, FUNC, "call-non-function", what, line, col)
-        obligate_call(cc, argcells, what, line, col)
+        obligate_call(cc, argcells, inits, what, line, col)
         return rcells
     end
 
@@ -692,10 +1056,14 @@ function M.lower(chunk)
             end
             local cc = lower_expr(callee)
             local acells = {} --: { [integer]: string }
+            local inits = {} --: { [integer]: boolean }
             if is_list(args) then
-                for i = 1, #args do acells[i] = lower_expr(args[i]) end
+                for i = 1, #args do
+                    acells[i] = lower_expr(args[i])
+                    inits[i] = args[i].tag == defs.NODE_TABLE_EXPR
+                end
             end
-            return call_core(cc, acells, want, "called value", n.line, n.col)
+            return call_core(cc, acells, inits, want, "called value", n.line, n.col)
         end
         -- t:m(...) = a field read of `m` + a call with the receiver as the
         -- implicit first argument (`function T:m` declared self the same way).
@@ -710,11 +1078,15 @@ function M.lower(chunk)
         local tc = lower_expr(recv)
         local mc = field_read_from(tc, method, "method '" .. method .. "'", n.line, n.col)
         local acells = { tc } --: { [integer]: string }
+        local inits = { false } --: { [integer]: boolean }
         local args = n.args
         if is_list(args) then
-            for i = 1, #args do acells[#acells + 1] = lower_expr(args[i]) end
+            for i = 1, #args do
+                acells[#acells + 1] = lower_expr(args[i])
+                inits[#inits + 1] = args[i].tag == defs.NODE_TABLE_EXPR
+            end
         end
-        return call_core(mc, acells, want, "method '" .. method .. "'", n.line, n.col)
+        return call_core(mc, acells, inits, want, "method '" .. method .. "'", n.line, n.col)
     end
 
     -- A field WRITE (`t.x = v`, `t["x"] = v`, `function M.f()`). When the
@@ -919,6 +1291,25 @@ function M.lower(chunk)
                     if fk == "named" then
                         local k = f.key
                         if type(k) == "string" then
+                            -- a same-line `--: T` pins this field's ref type
+                            -- (`body = nil, --: string | nil`); it belongs
+                            -- to the LAST field starting on the line.
+                            local nxt = fields[i + 1]
+                            if nxt == nil or nxt.line ~= f.line then
+                                local at = read_ann(f.line)
+                                if is_at(at) then
+                                    local pinval = at_val(at)
+                                    if usable_pin(at, pinval) then
+                                        if type(vc) == "string" then
+                                            local init = is_node(v) and v.tag == defs.NODE_TABLE_EXPR
+                                            obligate_ann(vc, pinval, init, "annotation-mismatch",
+                                                "field '" .. k .. "'", f.line, f.col)
+                                            if pinval.fn ~= nil then ann_flow(vc, pinval) end
+                                        end
+                                        vc = pinned_cell("field-" .. k, pinval)
+                                    end
+                                end
+                            end
                             if type(vc) == "string" then
                                 entries[#entries + 1] = { name = k, cell = vc }
                             end
@@ -952,12 +1343,47 @@ function M.lower(chunk)
             return unknown_cell("vararg")
         elseif tag == defs.NODE_CAST_EXPR then
             local inner = n.expr
-            if is_node(inner) then lower_expr(inner) end
-            -- the annotation string is not parsed yet (ann.lua is fenced
-            -- legacy); the cast's asserted type cannot be checked, so the
-            -- result is unknown — honest, sound, and loud.
-            unsupported(n, "cast-annotation")
-            return unknown_cell("cast")
+            local ic = "" --: string
+            local has_inner = false
+            if is_node(inner) then
+                ic = lower_expr(inner)
+                has_inner = true
+            end
+            local ann = nil --: Ann | nil
+            local aid = n.annotation_id
+            if type(aid) == "number" then ann = anns[aid] end
+            if ann == nil then
+                internal(n, "cast without a captured annotation")
+                return unknown_cell("cast")
+            end
+            ann.consumed = true
+            local at = parse_ann(ann, n.line, false)
+            if not is_at(at) then return unknown_cell("cast") end
+            local pinval = at_val(at)
+            if n.force == true then
+                -- `--[[:! T]]`: the named force-cast policy (default error;
+                -- per conventions force casts are almost never correct).
+                diag("force-cast", n.line, n.col,
+                    "force cast to `" .. lattice.show(pinval)
+                        .. "` — use a checked cast or fix the producer")
+            end
+            if not usable_pin(at, pinval) then
+                -- the asserted type degraded to unknown (bucketed feature):
+                -- the cast can neither check nor sharpen — keep the inner
+                -- flow rather than destroying it.
+                if has_inner then return ic end
+                return unknown_cell("cast")
+            end
+            if has_inner and n.force ~= true then
+                -- `--[[: T]]`: CHECKED — the expression must satisfy T
+                -- (an unknown source is the use-before-narrow class).
+                local init = is_node(inner) and inner.tag == defs.NODE_TABLE_EXPR
+                obligate_ann(ic, pinval, init, "cast-mismatch", "checked cast", n.line, n.col)
+                if pinval.fn ~= nil then ann_flow(ic, pinval) end
+            end
+            -- the flow continues at the asserted type (that is what a cast
+            -- is FOR); the obligation above keeps it honest.
+            return pinned_cell("cast", pinval)
         elseif tag == defs.NODE_MATCH_EXPR then
             -- walker-only synthetic; never parser-emitted. Routed anyway.
             unsupported(n, "match-expr")
@@ -1046,9 +1472,40 @@ function M.lower(chunk)
                 internal(n, "local without names")
                 return nil
             end
+            -- the same-line `--: T` annotation (single-name locals; consumed
+            -- BEFORE the value list so a constructor's fields on this line
+            -- cannot claim it). Multi-name annotated locals are ambiguous —
+            -- a named bucket, not a guess.
+            local at = nil --: unknown
+            if #names == 1 then
+                at = read_ann(n.line)
+            elseif anns[n.line] ~= nil and anns[n.line].kind == defs.ANN_TYPE
+                and anns[n.line].consumed ~= true then
+                anns[n.line].consumed = true
+                unsupported(n, "annotation-multi-local")
+            end
             local cells = {} --: { [integer]: string }
             if is_list(exprs) then
                 cells = lower_value_list(exprs, #names)
+            end
+            if is_at(at) then
+                -- PIN + CHECK: the local's cell is the annotation (readers
+                -- see the interface); the initializer must agree (leq_init
+                -- for a directly-ascribed fresh constructor).
+                local nm = names[1].name
+                local pinval = at_val(at)
+                if type(nm) == "string" and usable_pin(at, pinval) then
+                    if is_list(exprs) and #exprs >= 1 then
+                        local e1 = exprs[1]
+                        local init = e1.tag == defs.NODE_TABLE_EXPR
+                        obligate_ann(cells[1], pinval, init, "annotation-mismatch",
+                            "local '" .. nm .. "'", n.line, n.col)
+                        if pinval.fn ~= nil then ann_flow(cells[1], pinval) end
+                    end
+                    local d = declare(nm, n.line, n.col, pinned_cell(nm, pinval), false)
+                    d.pin = pinval
+                    return nil
+                end
             end
             for i = 1, #names do
                 local nm = names[i].name
@@ -1066,16 +1523,52 @@ function M.lower(chunk)
                 internal(n, "malformed assignment")
                 return nil
             end
+            -- the same-line `--: T` annotation (single-target; consumed
+            -- before the value list, as for locals).
+            local at = nil --: unknown
+            if #targets == 1 then
+                at = read_ann(n.line)
+            elseif anns[n.line] ~= nil and anns[n.line].kind == defs.ANN_TYPE
+                and anns[n.line].consumed ~= true then
+                anns[n.line].consumed = true
+                unsupported(n, "annotation-multi-target")
+            end
             local cells = lower_value_list(exprs, #targets)
             for i = 1, #targets do
                 local t = targets[i]
+                local init = exprs[i] ~= nil and exprs[i].tag == defs.NODE_TABLE_EXPR
                 if t.tag == defs.NODE_IDENTIFIER then
                     local nm = t.name
                     if type(nm) == "string" then
                         local d = resolve(nm)
                         if d ~= nil then
                             local c = cells[i]
-                            if c ~= nil then d.cell = c end
+                            if is_at(at) and usable_pin(at, at_val(at)) then
+                                -- annotated assignment: pin from here on.
+                                local pinval = at_val(at)
+                                if c ~= nil then
+                                    obligate_ann(c, pinval, init, "annotation-mismatch",
+                                        "assignment to '" .. nm .. "'", t.line, t.col)
+                                    if pinval.fn ~= nil then ann_flow(c, pinval) end
+                                end
+                                d.pin = pinval
+                                d.cell = pinned_cell(nm, pinval)
+                            else
+                                local dp = d.pin
+                                if dp ~= nil then
+                                    -- the variable's own annotation: the
+                                    -- value must agree; the cell REBINDS to
+                                    -- the value (assignment narrowing
+                                    -- survives the pin).
+                                    if c ~= nil then
+                                        obligate_ann(c, dp, init, "annotation-mismatch",
+                                            "assignment to '" .. nm .. "'", t.line, t.col)
+                                        d.cell = c
+                                    end
+                                elseif c ~= nil then
+                                    d.cell = c
+                                end
+                            end
                         else
                             diag("global-write", t.line, t.col,
                                 "write to undeclared global '" .. nm .. "'")
@@ -1084,6 +1577,18 @@ function M.lower(chunk)
                 elseif t.tag == defs.NODE_FIELD_EXPR or t.tag == defs.NODE_INDEX_EXPR then
                     local c = cells[i]
                     if c == nil then c = atom_cell("nil") end
+                    if is_at(at) then
+                        -- annotated field write: the field's ref type IS the
+                        -- annotation (`M._tier = nil --: string | nil`); the
+                        -- written value must agree.
+                        local pinval = at_val(at)
+                        if usable_pin(at, pinval) then
+                            obligate_ann(c, pinval, init, "annotation-mismatch",
+                                "annotated field write", t.line, t.col)
+                            if pinval.fn ~= nil then ann_flow(c, pinval) end
+                            c = pinned_cell("fieldw", pinval)
+                        end
+                    end
                     lower_field_write(t, c)
                 else
                     internal(t, "unexpected assignment target")
@@ -1116,11 +1621,42 @@ function M.lower(chunk)
             end
             return nil
         elseif tag == defs.NODE_RETURN_STMT then
-            -- record per-position cells on the enclosing frame; the function
-            -- wires them once the max return arity is known. A call in LAST
-            -- position forwards ALL its results in Lua — v0 carries its
-            -- first result and marks the arrow result-OPEN (positions beyond
-            -- are unknown); a trailing vararg likewise.
+            local frame_pins = nil --: unknown
+            if ret_depth >= 1 then frame_pins = ret_frames[ret_depth].pins end
+            --: (x: unknown) -> x is { [integer]: Val }
+            local function is_pins(x) return type(x) == "table" end
+            if is_pins(frame_pins) then
+                local pins = frame_pins
+                -- annotated function: each position is CHECKED against its
+                -- pin here (missing positions are Lua's nil pad; a spread
+                -- call's positions land per-position via lower_value_list);
+                -- returns beyond the annotated count must be nil.
+                local exprs = n.exprs
+                local elist = {} --: { [integer]: Ast }
+                if is_list(exprs) then elist = exprs end
+                local want = #pins
+                if #elist > want then want = #elist end
+                local cells = lower_value_list(elist, want)
+                for i = 1, #cells do
+                    local pin = pins[i]
+                    local init = elist[i] ~= nil and elist[i].tag == defs.NODE_TABLE_EXPR
+                    if pin ~= nil then
+                        obligate_ann(cells[i], pin, init, "annotation-mismatch",
+                            "return value #" .. tostring(i), n.line, n.col)
+                        if pin.fn ~= nil then ann_flow(cells[i], pin) end
+                    else
+                        obligate_ann(cells[i], NIL_VAL, false, "annotation-mismatch",
+                            "return value #" .. tostring(i) .. " (beyond the annotated results)",
+                            n.line, n.col)
+                    end
+                end
+                return nil
+            end
+            -- inferred function: record per-position cells on the enclosing
+            -- frame; the function wires them once the max return arity is
+            -- known. A call in LAST position forwards ALL its results in
+            -- Lua — v0 carries its first result and marks the arrow
+            -- result-OPEN (positions beyond are unknown); vararg likewise.
             local exprs = n.exprs
             local rec = { cells = {}, spread = false, line = n.line, col = n.col } --: Ret
             if is_list(exprs) then
@@ -1213,6 +1749,38 @@ function M.lower(chunk)
         return nil
     end
 
+    -- ── entry: annotation pre-pass ─────────────────────────────────────────
+    -- `--::` declarations are position-independent: aliases go into the
+    -- resolve environment up front; every non-alias form is a named bucket
+    -- (`require` is the cross-module boundary). `--:<T>` call-site type
+    -- arguments are their own bucket.
+    for key, ann in pairs(anns) do
+        local line = 0
+        if type(key) == "number" and key > 0 then line = math.floor(key) end
+        if ann.kind == defs.ANN_DECL then
+            local kind, a, b = annot.classify_decl(ann.content)
+            if kind == "alias" then
+                aliases[a] = { content = b, feature = nil }
+            elseif kind == "generic-alias" then
+                aliases[a] = { content = nil, feature = "generic" }
+                diag("unsupported:annotation-generic", line, ann.col,
+                    "generic alias `" .. a .. "` — outside the v0 annotation subset")
+            elseif kind == "feature" then
+                diag("unsupported:" .. a, line, ann.col,
+                    "`--:: " .. (ann.content:match("^%s*(%a+)") or "?")
+                        .. "` declarations are outside the v0 annotation subset")
+            else
+                diag("unsupported:annotation-decl-parse", line, ann.col,
+                    a .. ": `" .. ann.content:sub(1, 40) .. "`")
+            end
+            ann.consumed = true
+        elseif ann.kind == defs.ANN_TYPE_ARGS then
+            diag("unsupported:annotation-type-args", line, ann.col,
+                "call-site type arguments (`--:<T>`) are outside the v0 annotation subset")
+            ann.consumed = true
+        end
+    end
+
     -- ── entry: the chunk ───────────────────────────────────────────────────
     -- `vars` maps each top-level local to its FINAL cell — the readout for
     -- callers/tests that want inferred types by name.
@@ -1222,7 +1790,7 @@ function M.lower(chunk)
         ret_depth = 1
         -- the chunk's returns are recorded but unconsumed: the module
         -- summary (what `require` would see) is a later increment.
-        ret_frames[1] = { returns = {} }
+        ret_frames[1] = { returns = {}, pins = nil }
         local body = chunk.body
         if is_list(body) then lower_stmts(body) end
         local top = scopes[1]
@@ -1281,7 +1849,9 @@ ROUTE[defs.NODE_LABEL_STMT] = "boundary"
 ROUTE[defs.NODE_EXPR_STMT] = "checked"
 ROUTE[defs.NODE_FUNC_DECL] = "checked"
 ROUTE[defs.NODE_CHUNK] = "checked"
-ROUTE[defs.NODE_CAST_EXPR] = "boundary"
+-- CAST_EXPR: checked casts are obligations, force casts the named policy;
+-- unusable annotation strings are in-construct annotation-* buckets.
+ROUTE[defs.NODE_CAST_EXPR] = "checked"
 ROUTE[defs.NODE_MATCH_EXPR] = "boundary"
 M.ROUTE = ROUTE
 

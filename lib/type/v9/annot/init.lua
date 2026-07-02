@@ -1,0 +1,541 @@
+-- lib/type/v9/annot/init.lua
+-- The v9 ANNOTATION SEAM: the `--:` type-grammar STRING -> a small v9-owned
+-- tree (At). Deliberately NOT a lift of the legacy ann.lua (entangled with
+-- the legacy type algebra); this parser knows only the v9 lattice's
+-- vocabulary and names everything else honestly.
+--
+-- SUPPORTED in v0 (maps losslessly-enough onto the v9 lattice):
+--   atoms          nil boolean number string table function  (integer -> the
+--                  number atom; literal types -> their base atom — both are
+--                  stated UP-approximations: sound as seeds, wider as bounds)
+--   unknown, never
+--   unions         T | U | nil
+--   records        { x: T, y?: U, readonly z: V, ... }   (the `...` open
+--                  marker is a no-op: v9 records are always open)
+--   functions      (T, U) -> R   (a: T) -> R   () -> (R1, R2)   ...T rest
+--                  `x is T` predicates read as boolean results (the
+--                  narrowing power is a later increment, stated)
+--                  `-> ...(T)` result spread reads as a result-OPEN arrow
+--   aliases        Name        resolved through the injected `resolve` cap.
+--                  RECURSIVE aliases unroll once and CUT to `unknown` at
+--                  the knot — the same bounded-depth upper approximation as
+--                  lattice.clip (fields above the knot stay precise; the
+--                  annotation is fully read, not bucketed)
+--
+-- EVERYTHING ELSE routes to a NAMED bucket (returned in `buckets`; the
+-- caller prefixes `unsupported:annotation-`): generic / intrinsic / typeof /
+-- intersection / complement / index-signature / meta-slot / array / tuple /
+-- cdata / any / unknown-name / recursive-alias / parse. A bucketed subtree
+-- reads as `unknown` (or the `table` atom where table-ness is certain:
+-- index signatures, arrays) — honest, dialable, never a silent guess.
+--
+-- Errors are data at the public seam: `(nil, buckets, errmsg)`.
+
+if not package.path:find("?/init.lua", 1, true) then
+    package.path = "./?/init.lua;" .. package.path
+end
+
+local M = {}
+
+--:: At = { k: string, ... }
+--:: Tok = { t: string, v: string }
+--:: Resolve = (name: string) -> (string | nil, string | nil)
+--:: Ctx = { resolve: Resolve, buckets: { [integer]: string }, seen: { [string]: boolean }, visiting: { [string]: integer }, depth: integer }
+--:: P = { toks: { [integer]: Tok }, pos: integer, ctx: Ctx }
+
+-- Names that are types themselves, mapped to v9 atoms (integer is the
+-- number atom in v0 — no literal/int split in the lattice).
+local ATOM_NAMES = {
+    ["nil"] = "nil", boolean = "boolean", number = "number", integer = "number",
+    string = "string", table = "table", ["function"] = "function",
+    ["true"] = "boolean", ["false"] = "boolean",
+} --: { [string]: string }
+
+-- ── tokenizer ───────────────────────────────────────────────────────────────
+
+--: (string) -> ({ [integer]: Tok } | nil, string | nil)
+local function tokenize(s)
+    local toks = {} --: { [integer]: Tok }
+    local i = 1
+    local n = #s
+    while i <= n do
+        local c = s:sub(i, i)
+        if c == " " or c == "\t" or c == "\n" or c == "\r" then
+            i = i + 1
+        elseif c:match("[%a_]") then
+            local word = s:match("^[%w_]+", i) or c
+            toks[#toks + 1] = { t = "ident", v = word }
+            i = i + #word
+        elseif c:match("%d") then
+            local num = s:match("^%d[%w_.]*", i) or c
+            toks[#toks + 1] = { t = "num", v = num }
+            i = i + #num
+        elseif c == "\"" or c == "'" then
+            local j = i + 1
+            while j <= n do
+                local cj = s:sub(j, j)
+                if cj == "\\" then
+                    j = j + 2
+                elseif cj == c then
+                    break
+                else
+                    j = j + 1
+                end
+            end
+            if j > n then return nil, "unterminated string literal" end
+            toks[#toks + 1] = { t = "str", v = s:sub(i + 1, j - 1) }
+            i = j + 1
+        elseif s:sub(i, i + 2) == "..." then
+            toks[#toks + 1] = { t = "...", v = "..." }
+            i = i + 3
+        elseif s:sub(i, i + 1) == "->" then
+            toks[#toks + 1] = { t = "->", v = "->" }
+            i = i + 2
+        elseif c == "(" or c == ")" or c == "{" or c == "}" or c == "[" or c == "]"
+            or c == "<" or c == ">" or c == "," or c == ":" or c == "?" or c == "|"
+            or c == "&" or c == "~" or c == "$" or c == "#" or c == "." or c == "-"
+            or c == "=" then
+            toks[#toks + 1] = { t = c, v = c }
+            i = i + 1
+        else
+            return nil, "unexpected character `" .. c .. "`"
+        end
+    end
+    return toks, nil
+end
+
+-- ── parser plumbing ─────────────────────────────────────────────────────────
+
+--: (P) -> Tok | nil
+local function peek(p) return p.toks[p.pos] end
+
+--: (P, integer) -> Tok | nil
+local function peek_at(p, off) return p.toks[p.pos + off] end
+
+--: (P) -> Tok | nil
+local function advance(p)
+    local t = p.toks[p.pos]
+    p.pos = p.pos + 1
+    return t
+end
+
+--: (P, string) -> boolean
+local function at(p, t)
+    local tok = p.toks[p.pos]
+    return tok ~= nil and tok.t == t
+end
+
+--: (P, string) -> nil
+local function expect(p, t)
+    if not at(p, t) then
+        local tok = p.toks[p.pos]
+        error("expected `" .. t .. "`, got " .. (tok ~= nil and "`" .. tok.v .. "`" or "end"), 0)
+    end
+    p.pos = p.pos + 1
+    return nil
+end
+
+-- Record a named bucket (dedup) and return the opaque node for it.
+--: (P, feature: string, approx: string | nil) -> At
+local function bucket(p, feature, approx)
+    local ctx = p.ctx
+    if not ctx.seen[feature] then
+        ctx.seen[feature] = true
+        ctx.buckets[#ctx.buckets + 1] = feature
+    end
+    return { k = "opaque", feature = feature, approx = approx }
+end
+
+-- Skip a balanced bracket run starting at the CURRENT opener token.
+--: (P) -> nil
+local function skip_balanced(p)
+    local opener = advance(p)
+    if opener == nil then return nil end
+    local close = ")" --: string
+    if opener.t == "{" then close = "}" end
+    if opener.t == "[" then close = "]" end
+    if opener.t == "<" then close = ">" end
+    local depth = 1
+    while depth > 0 do
+        local tok = advance(p)
+        if tok == nil then error("unbalanced `" .. opener.t .. "`", 0) end
+        if tok.t == opener.t then depth = depth + 1 end
+        if tok.t == close then depth = depth - 1 end
+    end
+    return nil
+end
+
+local parse_type, parse_term
+
+-- ── records ─────────────────────────────────────────────────────────────────
+
+--:: RecField = { name: string, at: At, optional: boolean, readonly: boolean }
+
+--: (P) -> At
+local function parse_record(p)
+    expect(p, "{")
+    local fields = {} --: { [integer]: RecField }
+    local feature = nil --: string | nil
+    while not at(p, "}") do
+        if at(p, "...") then
+            -- the open marker; v9 records are always open. `...[%K]: %V`
+            -- match patterns ride the match bucket.
+            advance(p)
+            if at(p, "[") then
+                feature = "match"
+                skip_balanced(p)
+                if at(p, ":") then
+                    advance(p)
+                    parse_type(p)
+                end
+            end
+        elseif at(p, "#") then
+            -- meta slot (metamethods): outside the v0 lattice.
+            feature = "meta-slot"
+            advance(p)
+            if at(p, "...") then advance(p) end
+            while not at(p, ",") and not at(p, "}") and peek(p) ~= nil do
+                if at(p, "{") or at(p, "(") or at(p, "[") or at(p, "<") then
+                    skip_balanced(p)
+                else
+                    advance(p)
+                end
+            end
+        elseif at(p, "[") then
+            -- index signature: not expressible as a v9 open record.
+            feature = "index-signature"
+            skip_balanced(p)
+            expect(p, ":")
+            parse_type(p)
+        else
+            local ro = false
+            if at(p, "ident") then
+                local tok = peek(p)
+                if tok ~= nil and tok.v == "readonly" then
+                    local after = peek_at(p, 1)
+                    if after ~= nil and (after.t == "ident" or after.t == "str") then
+                        ro = true
+                        advance(p)
+                    end
+                end
+            end
+            local key = advance(p)
+            if key == nil or (key.t ~= "ident" and key.t ~= "str") then
+                error("expected a field name in record type", 0)
+            end
+            local opt = false
+            if at(p, "?") then
+                opt = true
+                advance(p)
+            end
+            expect(p, ":")
+            local fat = parse_type(p)
+            fields[#fields + 1] = { name = key.v, at = fat, optional = opt, readonly = ro }
+        end
+        if at(p, ",") then advance(p) elseif not at(p, "}") then break end
+    end
+    expect(p, "}")
+    if feature ~= nil then
+        -- table-ness is certain, field precision is not: the whole record
+        -- approximates to the `table` atom (stated, dialable).
+        return bucket(p, feature, "table")
+    end
+    return { k = "record", fields = fields }
+end
+
+-- ── function types / groups ─────────────────────────────────────────────────
+
+--:: FnParam = { at: At, optional: boolean }
+
+-- After `->`: a single type, a parenthesized result tuple, an `x is T`
+-- predicate (reads as boolean — narrowing is a later increment), or a
+-- `...(T)` result spread (reads as a result-OPEN arrow).
+--: (P) -> ({ [integer]: At }, boolean)
+local function parse_results(p)
+    if at(p, "...") then
+        advance(p)
+        if at(p, "(") then skip_balanced(p) else parse_term(p) end
+        bucket(p, "return-spread", nil)
+        return {}, true
+    end
+    local tok = peek(p)
+    local after = peek_at(p, 1)
+    if tok ~= nil and tok.t == "ident" and after ~= nil and after.t == "ident" and after.v == "is" then
+        advance(p)
+        advance(p)
+        parse_type(p)
+        return { { k = "atom", name = "boolean" } }, false
+    end
+    local t = parse_type(p)
+    if t.k == "tuple" then
+        local parts = t.parts --: { [integer]: At }
+        return parts, false
+    end
+    return { t }, false
+end
+
+-- A parenthesized group: function params (when `->` follows), a plain
+-- parenthesized type, or a result tuple (legal only after `->`; the caller
+-- buckets it elsewhere).
+--: (P) -> At
+local function parse_group(p)
+    expect(p, "(")
+    local params = {} --: { [integer]: FnParam }
+    local vararg = false
+    local rest = nil --: At | nil
+    while not at(p, ")") do
+        if at(p, "...") then
+            advance(p)
+            vararg = true
+            if not at(p, ")") and not at(p, ",") then
+                rest = parse_type(p)
+            end
+        else
+            local opt = false
+            local tok = peek(p)
+            local after = peek_at(p, 1)
+            if tok ~= nil and tok.t == "ident" and after ~= nil then
+                -- `name: T` or `name?: T` — a param label, positional in v0.
+                if after.t == ":" then
+                    advance(p)
+                    advance(p)
+                elseif after.t == "?" then
+                    local colon = peek_at(p, 2)
+                    if colon ~= nil and colon.t == ":" then
+                        opt = true
+                        advance(p)
+                        advance(p)
+                        advance(p)
+                    end
+                end
+            end
+            local pat = parse_type(p)
+            params[#params + 1] = { at = pat, optional = opt }
+        end
+        if at(p, ",") then advance(p) elseif not at(p, ")") then break end
+    end
+    expect(p, ")")
+    if at(p, "->") then
+        advance(p)
+        local results, open = parse_results(p)
+        return {
+            k = "fn", params = params, vararg = vararg, rest = rest,
+            results = results, open = open,
+        }
+    end
+    if #params == 1 and not vararg and not params[1].optional then
+        return params[1].at
+    end
+    local parts = {} --: { [integer]: At }
+    for i = 1, #params do parts[i] = params[i].at end
+    return { k = "tuple", parts = parts }
+end
+
+-- ── primaries / terms / unions ──────────────────────────────────────────────
+
+--: (P) -> At
+local function parse_prim(p)
+    local tok = peek(p)
+    if tok == nil then error("type expected, got end of annotation", 0) end
+    if tok.t == "(" then
+        return parse_group(p)
+    elseif tok.t == "{" then
+        return parse_record(p)
+    elseif tok.t == "~" then
+        advance(p)
+        parse_term(p)
+        return bucket(p, "complement", nil)
+    elseif tok.t == "<" then
+        -- generic prelude `<T>(...) -> ...`: skip the binder + the body.
+        skip_balanced(p)
+        parse_type(p)
+        return bucket(p, "generic", nil)
+    elseif tok.t == "$" then
+        advance(p)
+        if at(p, "ident") then advance(p) end
+        if at(p, "<") then skip_balanced(p) end
+        return bucket(p, "intrinsic", nil)
+    elseif tok.t == "str" then
+        -- literal string type: UP-approximated to the string atom (stated).
+        advance(p)
+        return { k = "atom", name = "string" }
+    elseif tok.t == "num" then
+        advance(p)
+        return { k = "atom", name = "number" }
+    elseif tok.t == "-" then
+        advance(p)
+        if at(p, "num") then advance(p) end
+        return { k = "atom", name = "number" }
+    elseif tok.t == "ident" then
+        local name = tok.v
+        if name == "typeof" then
+            advance(p)
+            while at(p, "ident") or at(p, ".") do advance(p) end
+            return bucket(p, "typeof", nil)
+        end
+        if name == "unknown" then
+            advance(p)
+            return { k = "unknown" }
+        end
+        if name == "never" then
+            advance(p)
+            return { k = "never" }
+        end
+        if name == "any" then
+            -- `any` does not exist in crescent (conventions); named loudly.
+            advance(p)
+            return bucket(p, "any", nil)
+        end
+        if name == "cdata" then
+            advance(p)
+            return bucket(p, "cdata", nil)
+        end
+        local atom = ATOM_NAMES[name]
+        if atom ~= nil then
+            advance(p)
+            return { k = "atom", name = atom }
+        end
+        -- alias / generic application / unknown name.
+        advance(p)
+        if at(p, "<") then
+            skip_balanced(p)
+            return bucket(p, "generic", nil)
+        end
+        local ctx = p.ctx
+        local content, feature = ctx.resolve(name)
+        if feature ~= nil then
+            return bucket(p, feature, nil)
+        end
+        if content == nil then
+            return bucket(p, "unknown-name", nil)
+        end
+        local count = ctx.visiting[name] or 0
+        if count >= 2 then
+            -- the knot: a recursive alias unrolls once, then cuts to
+            -- unknown (a bounded-depth UPPER approximation, like clip).
+            return { k = "unknown" }
+        end
+        if ctx.depth >= 24 then
+            return bucket(p, "recursive-alias", nil)
+        end
+        local toks, terr = tokenize(content)
+        if toks == nil then
+            error("alias `" .. name .. "`: " .. (terr or "tokenize error"), 0)
+        end
+        ctx.visiting[name] = count + 1
+        ctx.depth = ctx.depth + 1
+        local sub = { toks = toks, pos = 1, ctx = ctx } --: P
+        local t = parse_type(sub)
+        ctx.depth = ctx.depth - 1
+        ctx.visiting[name] = count
+        return t
+    end
+    error("type expected, got `" .. tok.v .. "`", 0)
+end
+
+-- postfix: `T[]` array sugar (an index signature — the table approximation).
+--: (P) -> At
+parse_term = function(p)
+    local t = parse_prim(p)
+    while at(p, "[") do
+        local after = peek_at(p, 1)
+        if after ~= nil and after.t == "]" then
+            advance(p)
+            advance(p)
+            t = bucket(p, "array", "table")
+        else
+            break
+        end
+    end
+    return t
+end
+
+--: (P) -> At
+parse_type = function(p)
+    local parts = { parse_term(p) } --: { [integer]: At }
+    local intersect = false
+    while at(p, "|") or at(p, "&") do
+        if at(p, "&") then intersect = true end
+        advance(p)
+        parts[#parts + 1] = parse_term(p)
+    end
+    if intersect then
+        return bucket(p, "intersection", nil)
+    end
+    local t = parts[1] --: At
+    if #parts > 1 then
+        t = { k = "union", parts = parts }
+    end
+    -- bare right-associative arrow sugar: `string -> integer`.
+    if at(p, "->") then
+        advance(p)
+        local results, open = parse_results(p)
+        local params = { { at = t, optional = false } } --: { [integer]: FnParam }
+        return { k = "fn", params = params, vararg = false, rest = nil, results = results, open = open }
+    end
+    return t
+end
+
+-- ── public seam ─────────────────────────────────────────────────────────────
+
+-- Parse one `--:` annotation string. `resolve(name)` is the alias cap:
+-- returns (alias content, nil), (nil, feature) for a name that exists but
+-- is outside v0 (a generic alias), or (nil, nil) for an unknown name.
+-- Returns (At | nil, buckets, errmsg): buckets are the named-boundary
+-- features encountered (dedup, in encounter order); a nil At means the
+-- string does not parse as a type at all.
+--: (content: string, resolve: Resolve) -> (At | nil, { [integer]: string }, string | nil)
+function M.parse(content, resolve)
+    local buckets = {} --: { [integer]: string }
+    local toks0, terr = tokenize(content)
+    local traw = toks0 --: unknown
+    --: (x: unknown) -> x is { [integer]: Tok }
+    local function is_toks(x) return type(x) == "table" end
+    if not is_toks(traw) then return nil, buckets, terr end
+    if #traw == 0 then return nil, buckets, "empty annotation" end
+    local ctx = { resolve = resolve, buckets = buckets, seen = {}, visiting = {}, depth = 0 } --: Ctx
+    local p = { toks = traw, pos = 1, ctx = ctx } --: P
+    local ok, res = pcall(parse_type, p)
+    if not ok then return nil, buckets, tostring(res) end
+    local t = res --: unknown
+    --: (x: unknown) -> x is At
+    local function is_at(x) return type(x) == "table" end
+    if not is_at(t) then return nil, buckets, "annotation parser returned a non-node" end
+    if p.pos <= #p.toks then
+        local tok = p.toks[p.pos]
+        return nil, buckets, "trailing `" .. tok.v .. "` after type"
+    end
+    return t, buckets, nil
+end
+
+-- Classify one `--::` declaration string. Returns one of:
+--   ("alias", name, body)      Name = <type grammar>
+--   ("feature", feature, nil)  a named non-v0 form: declare / module /
+--                              augment / newtype / template / unseal ->
+--                              annotation-<kw>; require -> the cross-module
+--                              boundary; generic aliases -> generic
+--   ("garbage", errmsg, nil)   does not classify
+-- The generic-alias NAME is reported through the second return so callers
+-- can map references to the generic bucket.
+--: (content: string) -> (string, string, string | nil)
+function M.classify_decl(content)
+    local name, body = content:match("^%s*([%a_][%w_]*)%s*=%s*(.*)$")
+    if name ~= nil and body ~= nil then
+        return "alias", name, body
+    end
+    local gname = content:match("^%s*([%a_][%w_]*)%s*<")
+    if gname ~= nil then
+        return "generic-alias", gname, nil
+    end
+    local kw = content:match("^%s*(%a+)")
+    if kw == "require" then
+        return "feature", "cross-module", nil
+    end
+    if kw == "declare" or kw == "module" or kw == "augment" or kw == "newtype"
+        or kw == "template" or kw == "unseal" then
+        return "feature", "annotation-" .. kw, nil
+    end
+    return "garbage", "unrecognized `--::` declaration", nil
+end
+
+return M
