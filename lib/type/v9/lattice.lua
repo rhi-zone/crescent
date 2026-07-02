@@ -92,6 +92,10 @@
 --
 -- `if`-narrowing uses them directly, and `and`/`or` are DERIVED, not
 -- hardcoded:  a and b : falsy(a) | type(b)     a or b : truthy(a) | type(b).
+-- The `type(x) == "…"` tag guards add two more of the SAME shape —
+-- tag_keep/tag_drop (the part of T whose type() is / is not the tag; from
+-- `unknown`, keep narrows to the tag's atom — the guard idiom's whole
+-- point — and drop stays unknown, an upper approximation).
 -- Field READS are one more monotone unary transfer, `project(v, name)`;
 -- field WRITES are the binary `set_field(v, name, fv)`. Both are legal
 -- engine transfers (monotone; proofs sketched at their definitions).
@@ -337,6 +341,9 @@ M.meet = meet_val
 
 --: (Val, Val) -> boolean
 equal_val = function(a, b)
+    -- identity fast path: shared immutable structure (alias-DAG values,
+    -- rec_copy-shared Fields) compares in O(1), not by deep walk.
+    if a == b then return true end
     for k, present in pairs(a.atoms) do if present and not b.atoms[k] then return false end end
     for k, present in pairs(b.atoms) do if present and not a.atoms[k] then return false end end
     local fa = a.fn
@@ -450,6 +457,9 @@ local leq, fn_leq
 
 --: (Val, Val) -> boolean
 leq = function(a, b)
+    -- identity fast path (leq is reflexive); shared immutable structure —
+    -- the alias-DAG case — stays O(shared nodes), not O(tree paths).
+    if a == b then return true end
     if has_unknown(a) then return has_unknown(b) end
     if has_unknown(b) then return true end
     for k, present in pairs(a.atoms) do
@@ -588,6 +598,70 @@ function M.falsy(v)
         if present and (k == "nil" or k == "boolean") then r[k] = true end
     end
     return { atoms = r, rec = nil, fn = nil }
+end
+
+-- ── type()-tag flow operations (the `type(x) == "…"` guard filters) ────────
+
+-- Lua's type() tags mapped to v9 atoms. Tags with no v0 atom (userdata /
+-- thread / cdata) are still VALID guards: their values only ever appear
+-- inside `unknown` in v0, so keep-from-known is bottom (dead branch) and
+-- drop-from-known is the identity — both sound.
+local TAG_ATOM = {
+    ["nil"] = "nil", boolean = "boolean", number = "number",
+    string = "string", table = "table", ["function"] = "function",
+} --: { [string]: string }
+
+--: (string) -> boolean
+function M.is_type_tag(name)
+    return TAG_ATOM[name] ~= nil or name == "userdata" or name == "thread"
+        or name == "cdata"
+end
+
+-- The part of `v` whose type() IS `tag`. Monotone: as v climbs (atoms grow,
+-- up to unknown) the kept part climbs (bounded by the tag's atom; from
+-- `unknown` it is exactly that atom — the narrowing that makes the guard
+-- useful — or unknown for atom-less tags).
+--: (unknown, string) -> unknown
+function M.tag_keep(v, tag)
+    if not as_val(v) then return bottom() end
+    local atom = TAG_ATOM[tag] --: string | nil
+    if has_unknown(v) then
+        if atom ~= nil then return single(atom) end
+        return single("unknown")
+    end
+    if atom == nil then return bottom() end
+    local r = {} --: { [string]: boolean }
+    if v.atoms[atom] then r[atom] = true end
+    local rec = nil --: Rec | nil
+    local fn = nil --: Fn | nil
+    if atom == "table" then
+        local vr = v.rec
+        if vr ~= nil then rec = rec_copy(vr) end
+    end
+    if atom == "function" then fn = v.fn end
+    return { atoms = r, rec = rec, fn = fn }
+end
+
+-- The part of `v` whose type() is NOT `tag`. Monotone (atoms grow up to
+-- unknown; `unknown` stays unknown — v0 cannot subtract from the top, an
+-- upper approximation, stated).
+--: (unknown, string) -> unknown
+function M.tag_drop(v, tag)
+    if not as_val(v) then return bottom() end
+    if has_unknown(v) then return single("unknown") end
+    local atom = TAG_ATOM[tag] --: string | nil
+    local r = {} --: { [string]: boolean }
+    for k, present in pairs(v.atoms) do
+        if present and k ~= atom then r[k] = true end
+    end
+    local rec = nil --: Rec | nil
+    if atom ~= "table" then
+        local vr = v.rec
+        if vr ~= nil then rec = rec_copy(vr) end
+    end
+    local fn = nil --: Fn | nil
+    if atom ~= "function" then fn = v.fn end
+    return { atoms = r, rec = rec, fn = fn }
 end
 
 -- ── Record transfers (field read / field write) ────────────────────────────

@@ -153,8 +153,19 @@ in histogram order, plus recorded debt:
   sound-imprecise); function bodies see upvalue record versions at DEFINITION order,
   not call order (`lib/bigint/init.lua:40` `M._mt` is the canonical false positive);
   `x == nil`-guard narrowing inside `or`-chains (aho_corasick:151).
-- [ ] **Stdlib/global declarations** — `undeclared-global` (22k): the no-ambient-globals
-  stance needs the explicit declaration surface reflected into v9 (require + declares).
+- [x] **Stdlib/global declarations** — DONE 2026-07-03. The globals seam
+  (`lib/type/v9/globals`): LuaJIT 5.1 globals as `--:: declare` DATA in v9's own
+  annotation grammar (mined from the legacy `lib/type/static/stdlib_types.lua`,
+  translated to v0 — generics/overloads widen, index signatures -> `table`,
+  pcall/find/match as result-OPEN arrows via the new `(T, U, ...)` tuple form;
+  ffi deliberately NOT declared — not a LuaJIT global, it rides require);
+  parsed once per process, shared At trees, per-file lazy At->Val conversion.
+  Per-file `--:: declare name = T` wired through the same path (shadows
+  stdlib). Reads resolve typed; writes stay global-write; `require(...)` stays
+  the cross-module boundary. `type(x) == "…"` tag guards landed as two more
+  lattice flow ops (tag_keep/tag_drop) behind the same cond_target/filter
+  shape. undeclared-global 19.5k -> genuine names only; use-before-narrow drops
+  with it (histogram in the ARCHITECTURE slice section).
 - [ ] **Loops via loop-head phi** — `for-num`/`for-in`/`while`/`repeat` (~11k): back-edges
   are native to the engine worklist; phi-at-loop-head is the same mechanism as the
   if-merge. Currently havoc-fenced (sound).
@@ -164,8 +175,12 @@ in histogram order, plus recorded debt:
 - [ ] **v9 unused-local is syntactic** (declared-never-read in the lowering walk),
   not wired to the backward liveness domain; flow-precise liveness (e.g.
   assigned-after-last-read) is a later wiring of the existing domain.
-- [ ] **Guard narrowing beyond bare `x` / `not x`** — `type(x) == "..."`, `==`-nil
-  comparisons, and/or in conditions; same `cond_target` seam in `lower.lua`.
+- [ ] **Guard narrowing beyond bare `x` / `not x` / `type(x) == "..."`** — `==`-nil
+  comparisons and and/or chains in conditions (same `cond_target` seam in
+  `lower.lua`); and EARLY-EXIT termination: `if type(x) ~= "s" then return end`
+  does not narrow the fall-through (the if-merge joins a branch that never
+  falls through — needs reachability at the merge, the same mechanism loops
+  will need). The guard-with-else form narrows correctly today.
 
 ## Typechecker soundness methodology — open fork
 

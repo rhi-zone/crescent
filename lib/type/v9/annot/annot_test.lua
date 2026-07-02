@@ -234,6 +234,39 @@ T.describe("v9 annot — aliases", function()
         local _, buckets = annot.parse("Gen", resolver)
         T.ok(has_bucket(buckets, "generic"), "a generic alias reference is the generic bucket")
     end)
+
+    T.it("mutually-recursive alias GRAPHS expand memoized (linear, not path-exponential)", function()
+        -- a dense mutual graph: naive path-wise unrolling is ~k^depth; the
+        -- per-parse memo makes it one expansion per alias. 8 aliases, each
+        -- referencing four neighbours (chains stay under the depth cap) —
+        -- completes instantly or not at all.
+        local n = 8
+        --: (string) -> (string | nil, string | nil)
+        local function graph(name)
+            local i = tonumber(name:match("^G(%d+)$"))
+            if i == nil then return nil, nil end
+            local parts = {} --: { [integer]: string }
+            for d = 1, 4 do
+                parts[#parts + 1] = ("a%d: G%d"):format(d, (i + d) % n)
+            end
+            return "{ " .. table.concat(parts, ", ") .. " }", nil
+        end
+        local at, buckets = annot.parse("G0", graph)
+        T.ok(is_at(at) and at.k == "record", "the graph root parses")
+        T.eq(#buckets, 0, "within budget: no bucket")
+    end)
+
+    T.it("a path-explosive graph hits the honest alias-budget bucket, never a hang", function()
+        -- every reference mints a FRESH name (memo never hits): the budget
+        -- is the backstop.
+        --: (string) -> (string | nil, string | nil)
+        local function explosive(name)
+            return "{ l: " .. name .. "l, r: " .. name .. "r }", nil
+        end
+        local at, buckets = annot.parse("X", explosive)
+        T.ok(at ~= nil, "still yields a usable approximate node")
+        T.ok(has_bucket(buckets, "alias-budget"), "the budget boundary is named")
+    end)
 end)
 
 T.describe("v9 annot — `--::` declaration classification", function()

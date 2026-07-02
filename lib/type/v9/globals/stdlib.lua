@@ -1,0 +1,212 @@
+-- lib/type/v9/globals/stdlib.lua
+-- LuaJIT 5.1 GLOBAL DECLARATIONS for v9, as DATA: `--:: declare name = T`
+-- lines in v9's OWN annotation grammar — the same grammar users write in
+-- their files (globals/init.lua runs each line through the same
+-- classify_decl/parse path a source file's `--::` lines take). MINED from
+-- the legacy checker's declaration source (lib/type/static/stdlib_types.lua
+-- — `declare`/`augment`/`module` lines validated against this tree),
+-- TRANSLATED into the v0 subset. The translations are stated
+-- UP-approximations, never silent guesses:
+--
+--   generics <T>(..)    -> the widest concrete arrow (`assert`, `rawget`,
+--                          `setmetatable` lose their identity typing)
+--   overloads (A) & (B) -> the single widest arrow (`math.max`,
+--                          `string.byte`, `select`)
+--   index signatures    -> the `table` atom (`package.loaded`)
+--   $-intrinsics/match  -> coarse honest types ($Require -> unknown;
+--                          $FindReturn/$PatternReturn -> result-open
+--                          `(number|nil, number|nil, ...)` / `(string|nil, ...)`)
+--   pairs/ipairs        -> concrete iterator-triple arrows (v0-honest;
+--                          for-in loops are still the loop boundary)
+--   pcall/xpcall        -> `(f: function, ...unknown) -> (boolean, ...)` —
+--                          variadic forwarding as a result-OPEN arrow
+--                          (positions beyond the boolean read as unknown)
+--
+-- Every line must stay INSIDE the checked v0 grammar: globals_test.lua
+-- asserts this file parses with ZERO buckets and zero errors. `integer`
+-- spellings are kept from the legacy source (they read as the number atom).
+--
+-- NOT declared, deliberately:
+--   ffi   — not a global in LuaJIT; it arrives via require("ffi"), which is
+--           the honest `unsupported:cross-module` boundary until module
+--           summaries land. (The legacy source types it as `module "ffi"`,
+--           also not a global.)
+--   _G reads/package.loaded contents — the `table` atom (fields unknown).
+--
+-- Loaded via require (no io, no caps): the data rides the module system;
+-- globals/init.lua parses it ONCE per process and shares the result across
+-- every checked file (the interning that keeps whole-tree solve time flat).
+
+return [==[
+--:: declare print = (...unknown) -> ()
+--:: declare tostring = (val: unknown) -> string
+--:: declare tonumber = (val: unknown, base: integer | nil) -> number | nil
+--:: declare type = (val: unknown) -> string
+--:: declare error = (msg: unknown, level: integer | nil) -> never
+--:: declare assert = (val: unknown, ...unknown) -> (unknown, ...)
+--:: declare pcall = (f: function, ...unknown) -> (boolean, ...)
+--:: declare xpcall = (f: function, handler: function, ...unknown) -> (boolean, ...)
+--:: declare require = (module: string) -> unknown
+--:: declare select = (n: integer | string, ...unknown) -> (...)
+--:: declare rawget = (t: table, k: unknown) -> unknown
+--:: declare rawset = (t: table, k: unknown, v: unknown) -> table
+--:: declare rawequal = (a: unknown, b: unknown) -> boolean
+--:: declare rawlen = (v: string | table) -> integer
+--:: declare unpack = (t: table, i: integer | nil, j: integer | nil) -> (...)
+--:: declare next = (t: table, k: unknown) -> (unknown, unknown)
+--:: declare pairs = (t: table) -> ((table, unknown) -> (unknown, unknown), table, nil)
+--:: declare ipairs = (t: table) -> ((table, integer) -> (integer | nil, unknown), table, integer)
+--:: declare setmetatable = (t: table, mt: table | nil) -> table
+--:: declare getmetatable = (v: unknown) -> table | nil
+--:: declare collectgarbage = (opt: string | nil, arg: number | nil) -> number | boolean
+--:: declare gcinfo = () -> integer
+--:: declare dofile = (filename: string | nil) -> (...)
+--:: declare loadfile = (filename: string | nil) -> (function | nil, string | nil)
+--:: declare loadstring = (s: string, chunkname: string | nil) -> (function | nil, string | nil)
+--:: declare load = (chunk: string | function, chunkname: string | nil, mode: string | nil, env: table | nil) -> (function | nil, string | nil)
+--:: declare newproxy = (mt: boolean | table | nil) -> unknown
+--:: declare rawprint = (s: string) -> ()
+--:: declare _VERSION = string
+--:: declare _G = table
+--:: declare arg = table
+--:: declare jit = { version: string, version_num: number, os: string, arch: string, status: () -> (boolean, ...), opt: table, on: (...unknown) -> (), off: (...unknown) -> (), flush: (...unknown) -> (), ... }
+--:: declare package = { path: string, cpath: string, config: string, loaded: table, preload: table, loaders: table, ... }
+--:: declare register_ffi_module = function | nil
+
+--:: BitLib = {
+--::   tobit: (x: number) -> integer,
+--::   tohex: (x: number, n: integer | nil) -> string,
+--::   bnot: (x: integer) -> integer,
+--::   band: (x: integer, ...integer) -> integer,
+--::   bor: (x: integer, ...integer) -> integer,
+--::   bxor: (x: integer, ...integer) -> integer,
+--::   lshift: (x: integer, n: integer) -> integer,
+--::   rshift: (x: integer, n: integer) -> integer,
+--::   arshift: (x: integer, n: integer) -> integer,
+--::   bswap: (x: integer) -> integer,
+--::   rol: (x: integer, n: integer) -> integer,
+--::   ror: (x: integer, n: integer) -> integer,
+--:: }
+--:: declare bit = BitLib
+
+--:: declare string = {
+--::   format: (fmt: string, ...unknown) -> string,
+--::   len: (s: string) -> integer,
+--::   sub: (s: string, i: integer, j: integer | nil) -> string,
+--::   find: (s: string, pattern: string, init: integer | nil, plain: boolean | nil) -> (integer | nil, integer | nil, ...),
+--::   match: (s: string, pattern: string, init: integer | nil) -> (string | nil, ...),
+--::   gmatch: (s: string, pattern: string) -> (() -> (string | nil, ...)),
+--::   gsub: (s: string, pattern: string, repl: string | function | table, n: integer | nil) -> (string, integer),
+--::   rep: (s: string, n: integer, sep: string | nil) -> string,
+--::   byte: (s: string, i: integer | nil, j: integer | nil) -> (integer | nil, ...),
+--::   char: (...integer) -> string,
+--::   upper: (s: string) -> string,
+--::   lower: (s: string) -> string,
+--::   reverse: (s: string) -> string,
+--::   dump: (fn: function, strip: boolean | nil) -> string,
+--:: }
+
+--:: declare table = {
+--::   insert: (t: table, ...unknown) -> (),
+--::   remove: (t: table, pos: integer | nil) -> unknown,
+--::   concat: (t: table, sep: string | nil, i: integer | nil, j: integer | nil) -> string,
+--::   sort: (t: table, comp: ((unknown, unknown) -> boolean) | nil) -> (),
+--::   unpack: (t: table, i: integer | nil, j: integer | nil) -> (...),
+--::   move: (a1: table, f: integer, e: integer, t: integer, a2: table | nil) -> table,
+--::   maxn: (t: table) -> integer,
+--:: }
+
+--:: declare math = {
+--::   floor: (x: number) -> integer,
+--::   ceil: (x: number) -> integer,
+--::   abs: (x: number) -> number,
+--::   sqrt: (x: number) -> number,
+--::   max: (x: number, ...number) -> number,
+--::   min: (x: number, ...number) -> number,
+--::   random: (m: integer | nil, n: integer | nil) -> number,
+--::   randomseed: (x: number) -> (),
+--::   sin: (x: number) -> number,
+--::   cos: (x: number) -> number,
+--::   tan: (x: number) -> number,
+--::   asin: (x: number) -> number,
+--::   acos: (x: number) -> number,
+--::   atan: (x: number) -> number,
+--::   atan2: (y: number, x: number) -> number,
+--::   exp: (x: number) -> number,
+--::   log: (x: number, base: number | nil) -> number,
+--::   log10: (x: number) -> number,
+--::   pow: (x: number, y: number) -> number,
+--::   fmod: (x: number, y: number) -> number,
+--::   modf: (x: number) -> (number, number),
+--::   frexp: (x: number) -> (number, integer),
+--::   ldexp: (m: number, e: integer) -> number,
+--::   huge: number,
+--::   pi: number,
+--::   max_integer: integer,
+--::   min_integer: integer,
+--::   rad: (x: number) -> number,
+--::   deg: (x: number) -> number,
+--::   tanh: (x: number) -> number,
+--::   sinh: (x: number) -> number,
+--::   cosh: (x: number) -> number,
+--:: }
+
+--:: File = {
+--::   read: (self: table, ...unknown) -> (string | nil, ...),
+--::   write: (self: table, ...unknown) -> (File | nil, string | nil),
+--::   close: (self: table) -> (boolean | nil, string | nil),
+--::   lines: (self: table, ...unknown) -> (() -> (string | nil)),
+--::   seek: (self: table, whence: string | nil, offset: integer | nil) -> (integer | nil, string | nil),
+--::   flush: (self: table) -> (boolean | nil, string | nil),
+--::   setvbuf: (self: table, mode: string, size: integer | nil) -> (boolean | nil, string | nil),
+--:: }
+
+--:: declare io = {
+--::   open: (path: string, mode: string | nil) -> (File | nil, string | nil),
+--::   close: (file: File | nil) -> (boolean | nil, string | nil),
+--::   read: (...unknown) -> (string | nil),
+--::   write: (...unknown) -> (File | nil, string | nil),
+--::   lines: (filename: string | nil) -> (() -> (string | nil)),
+--::   popen: (cmd: string, mode: string | nil) -> (File | nil, string | nil),
+--::   tmpfile: () -> (File | nil, string | nil),
+--::   flush: () -> (boolean | nil, string | nil),
+--::   input: (file: string | File | nil) -> File,
+--::   output: (file: string | File | nil) -> File,
+--::   stdin: File,
+--::   stdout: File,
+--::   stderr: File,
+--:: }
+
+--:: declare os = {
+--::   time: (t: table | nil) -> integer,
+--::   clock: () -> number,
+--::   date: (format: string | nil, time: integer | nil) -> string | table,
+--::   exit: (code: integer | boolean | nil, close: boolean | nil) -> (),
+--::   getenv: (name: string) -> string | nil,
+--::   difftime: (t2: number, t1: number) -> number,
+--::   rename: (oldname: string, newname: string) -> (boolean, string | nil),
+--::   remove: (path: string) -> (boolean, string | nil),
+--::   tmpname: () -> string,
+--::   execute: (cmd: string | nil) -> (boolean | nil, string | nil, integer | nil),
+--:: }
+
+--:: declare coroutine = {
+--::   create: (fn: function) -> unknown,
+--::   resume: (co: unknown, ...unknown) -> (boolean, ...),
+--::   yield: (...unknown) -> (...),
+--::   wrap: (fn: function) -> function,
+--::   status: (co: unknown) -> string,
+--::   running: () -> (unknown, boolean),
+--::   isyieldable: () -> boolean,
+--:: }
+
+--:: declare debug = {
+--::   getinfo: (thread_or_f: unknown, what: string | nil) -> table | nil,
+--::   traceback: (msg: unknown, level: integer | nil) -> string,
+--::   sethook: (...unknown) -> (),
+--::   getlocal: (level: integer, l: integer) -> (string | nil, unknown),
+--::   setlocal: (level: integer, l: integer, value: unknown) -> string | nil,
+--::   getmetatable: (v: unknown) -> table | nil,
+--::   setmetatable: (v: unknown, mt: unknown) -> unknown,
+--:: }
+]==]

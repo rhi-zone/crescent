@@ -18,6 +18,9 @@
 --   if x then …      then-branch x : truthy(x), else-branch x : falsy(x)
 --   a and b          : falsy(a) | type(b)   } derived from the SAME two ops,
 --   a or  b          : truthy(a) | type(b)  } never a hardcoded case
+--   if type(x) == "s" then   then-branch x : tag_keep(x, s), else-branch
+--                    x : tag_drop(x, s) — two more lattice flow ops of the
+--                    same shape (either operand order; ~= swaps branches)
 --
 -- RECORDS ride the same shape: a table constructor with named fields is one
 -- rule proposing `lattice.record_of` over its field cells; a field READ
@@ -71,6 +74,16 @@
 --   --[[:! T]]            force cast: the named `force-cast` policy
 --                         (default error); the flow continues at T.
 --   --:: Name = T         module-level alias, resolved inside annotations.
+--   --:: declare g = T    a GLOBAL declaration (the house no-ambient-globals
+--                         convention): reads of `g` resolve at T. File
+--                         declares shadow the STDLIB ENVIRONMENT (the
+--                         globals seam, lib/type/v9/globals — LuaJIT 5.1
+--                         globals as shared, interned declare-lines data);
+--                         only genuinely undeclared names diag. Global
+--                         WRITES stay the global-write policy diag either
+--                         way. `require(...)` calls stay the honest
+--                         `unsupported:cross-module` boundary even though
+--                         `require` itself is declared.
 --
 -- Every annotation feature the v9 lattice cannot express routes to a named
 -- `unsupported:annotation-<feature>` bucket — honest, dialable, per bucket.
@@ -97,12 +110,14 @@ end
 --:: require "lib.type.v9.engine.defs"
 --:: require "lib.type.v9.lattice"
 --:: require "lib.type.v9.annot"
+--:: require "lib.type.v9.globals"
 
 local defs = require("lib.type.static.defs")
 local engine = require("lib.type.v9.engine.engine")
 local lattice = require("lib.type.v9.lattice")
 local frontend = require("lib.type.v9.frontend")
 local annot = require("lib.type.v9.annot")
+local globals = require("lib.type.v9.globals")
 
 --:: Ast = { tag: integer, line: integer, col: integer, ... }
 --:: Diag = { code: string, severity: string, message: string, line: integer, col: integer }
@@ -215,17 +230,33 @@ function M.lower(chunk)
         return nil
     end
 
-    -- The ONE narrowing transfer: dst receives truthy(src) or falsy(src).
+    -- The ONE narrowing transfer shape: dst receives a lattice flow op of
+    -- src. Modes: "truthy" / "falsy" (bare guards, and/or) and
+    -- "keep:<tag>" / "drop:<tag>" (the `type(x) == "…"` guards) — all four
+    -- are the lattice's own monotone unary ops, never lowering logic.
     --: (string, string, string) -> nil
     local function filter_flow(src, dst, mode)
         if mode == "truthy" then
             rules[#rules + 1] = engine.rule({ src }, { dst }, function(get)
                 return { [dst] = lattice.truthy(get(src)) }
             end)
-        else
+        elseif mode == "falsy" then
             rules[#rules + 1] = engine.rule({ src }, { dst }, function(get)
                 return { [dst] = lattice.falsy(get(src)) }
             end)
+        else
+            local op, tag = mode:match("^(%a+):(%a+)$")
+            if op == "keep" and tag ~= nil then
+                local t = tag
+                rules[#rules + 1] = engine.rule({ src }, { dst }, function(get)
+                    return { [dst] = lattice.tag_keep(get(src), t) }
+                end)
+            elseif op == "drop" and tag ~= nil then
+                local t = tag
+                rules[#rules + 1] = engine.rule({ src }, { dst }, function(get)
+                    return { [dst] = lattice.tag_drop(get(src), t) }
+                end)
+            end
         end
         return nil
     end
@@ -357,6 +388,14 @@ function M.lower(chunk)
     --:: Alias = { content: string | nil, feature: string | nil }
     local aliases = {} --: { [string]: Alias }
 
+    -- The GLOBAL environment (the globals seam): per-file `--:: declare
+    -- name = T` annotation trees (collected in the entry pre-pass; they
+    -- shadow the stdlib) over the shared stdlib declarations. Global READS
+    -- resolve through it — one pinned cell per referenced global, minted
+    -- lazily (`global_cells`); WRITES stay the global-write policy diag.
+    local file_globals = {} --: { [string]: unknown }
+    local global_cells = {} --: { [string]: string }
+
     --: (string) -> (string | nil, string | nil)
     local function resolve_alias(name)
         local a = aliases[name]
@@ -364,30 +403,36 @@ function M.lower(chunk)
         return a.content, a.feature
     end
 
-    -- Parse one ANN_TYPE annotation: named buckets become diags here; a
+    -- Parse one type-grammar string: named buckets become diags here; a
     -- hard parse failure is its own bucket. Returns the At (nil when
-    -- unusable). `quiet` suppresses diags AND consumption for probe reads
-    -- (the preceding-line function-annotation check).
-    --: (ann: Ann, line: integer, quiet: boolean) -> unknown
-    local function parse_ann(ann, line, quiet)
-        local ok, at, buckets, perr = pcall(annot.parse, ann.content, resolve_alias)
+    -- unusable). `quiet` suppresses the bucket/parse diags for probe reads.
+    -- Shared by `--:` annotations, casts, and `--:: declare` bodies — ONE
+    -- parse shape for every place the type grammar appears.
+    --: (content: string, line: integer, col: integer, quiet: boolean) -> unknown
+    local function parse_type_string(content, line, col, quiet)
+        local ok, at, buckets, perr = pcall(annot.parse, content, resolve_alias)
         if not ok then
-            diag("internal", line, ann.col, "annotation parser crashed: " .. tostring(at))
+            diag("internal", line, col, "annotation parser crashed: " .. tostring(at))
             return nil
         end
         if quiet then return at end
         if buckets ~= nil then
             for i = 1, #buckets do
-                diag("unsupported:annotation-" .. buckets[i], line, ann.col,
+                diag("unsupported:annotation-" .. buckets[i], line, col,
                     "annotation uses `" .. buckets[i]
                         .. "` — outside the v0 annotation subset (that part reads as unknown)")
             end
         end
         if at == nil then
-            diag("unsupported:annotation-parse", line, ann.col,
+            diag("unsupported:annotation-parse", line, col,
                 "annotation does not parse: " .. (perr or "?"))
         end
         return at
+    end
+
+    --: (ann: Ann, line: integer, quiet: boolean) -> unknown
+    local function parse_ann(ann, line, quiet)
+        return parse_type_string(ann.content, line, ann.col, quiet)
     end
 
     --: (x: unknown) -> x is At
@@ -422,9 +467,27 @@ function M.lower(chunk)
     -- (the annotation's contravariant face lives in the pins; the cells give
     -- the arrow its identity). Bucketed subtrees read as unknown, or the
     -- `table` atom where table-ness is certain.
-    local at_val
+    --
+    -- MEMOIZED on At node identity: alias expansion shares subtrees (the At
+    -- is a DAG — see annot), so a naive walk is exponential on large alias
+    -- graphs. Shared At nodes convert once per file; the resulting Vals are
+    -- immutable and safe to share (a shared arrow shares its param cells —
+    -- one declared type, one identity).
+    local atval_memo = {}
+    local at_val_raw
+    --: (x: unknown) -> x is Val
+    local function is_val(x) return type(x) == "table" end
     --: (unknown) -> Val
-    at_val = function(at)
+    local function at_val(at)
+        if not is_at(at) then return UNKNOWN_VAL end
+        local hit = atval_memo[at] --: unknown
+        if is_val(hit) then return hit end
+        local v = at_val_raw(at)
+        atval_memo[at] = v
+        return v
+    end
+    --: (unknown) -> Val
+    at_val_raw = function(at)
         if not is_at(at) then return UNKNOWN_VAL end
         local k = at.k
         if k == "atom" then
@@ -559,6 +622,24 @@ function M.lower(chunk)
     local function usable_pin(at, pinval)
         if not lattice.is_unknown(pinval) then return true end
         return is_at(at) and at.k == "unknown"
+    end
+
+    -- Resolve a global READ through the global environment: per-file
+    -- `--:: declare` trees first, then the shared stdlib declarations.
+    -- One pinned cell per referenced global per file, minted lazily (the
+    -- shared At trees are converted only for globals this file touches —
+    -- the cheap side of the interning split; the parse side is shared
+    -- process-wide in the globals module). nil = genuinely undeclared.
+    --: (name: string) -> string | nil
+    local function global_cell(name)
+        local c = global_cells[name]
+        if c ~= nil then return c end
+        local at = file_globals[name]
+        if at == nil then at = globals.lookup(name) end
+        if at == nil then return nil end
+        local cell = pinned_cell("g-" .. name, at_val(at))
+        global_cells[name] = cell
+        return cell
     end
 
     -- ── scopes / versions ──────────────────────────────────────────────────
@@ -1142,23 +1223,77 @@ function M.lower(chunk)
         return nil
     end
 
-    -- If `cond` is narrowable in v0 (a bare local, or `not <local>`), return
-    -- its decl and whether the sense is negated. Richer guards (type(x) ==
-    -- "...", comparisons) are a later increment of the SAME mechanism.
-    --: (Ast) -> (Decl | nil, boolean)
+    -- The local a `type(<local>)` call tests, when the call is exactly that
+    -- shape and `type` is the stdlib global (not shadowed by a local).
+    --: (unknown) -> Decl | nil
+    local function type_call_target(e)
+        if not is_node(e) then return nil end
+        if e.tag ~= defs.NODE_CALL_EXPR then return nil end
+        local callee = e.callee
+        if not is_node(callee) then return nil end
+        if callee.tag ~= defs.NODE_IDENTIFIER then return nil end
+        if callee.name ~= "type" or resolve("type") ~= nil then return nil end
+        local args = e.args
+        if not is_list(args) then return nil end
+        if #args ~= 1 then return nil end
+        local a1 = args[1]
+        if not is_node(a1) then return nil end
+        if a1.tag ~= defs.NODE_IDENTIFIER then return nil end
+        local nm = a1.name
+        if type(nm) ~= "string" then return nil end
+        return resolve(nm)
+    end
+
+    -- The type()-tag string literal of an expression, nil otherwise.
+    --: (unknown) -> string | nil
+    local function tag_literal(e)
+        if not is_node(e) then return nil end
+        if e.tag ~= defs.NODE_LITERAL then return nil end
+        local lk = e.lit_kind
+        local v = e.value
+        if type(lk) == "number" and lk == defs.LIT_STRING and type(v) == "string"
+            and lattice.is_type_tag(v) then
+            return v
+        end
+        return nil
+    end
+
+    -- If `cond` is narrowable in v0, return the tested local's decl plus
+    -- the then/else FILTER MODES (filter_flow vocabulary). Recognized:
+    -- a bare local (truthy/falsy), `not <local>` (swapped), and the tag
+    -- guards `type(x) == "…"` / `type(x) ~= "…"` in either operand order
+    -- (keep:<tag> / drop:<tag>). Richer guards (`x == nil`, and/or chains)
+    -- are later increments of the SAME mechanism.
+    --: (Ast) -> (Decl | nil, string, string)
     local function cond_target(cond)
         if cond.tag == defs.NODE_IDENTIFIER then
             local nm = cond.name
-            if type(nm) == "string" then return resolve(nm), false end
+            if type(nm) == "string" then return resolve(nm), "truthy", "falsy" end
         elseif cond.tag == defs.NODE_UNARY_EXPR then
             local op = cond.op
             local operand = cond.operand
             if op == "not" and is_node(operand) and operand.tag == defs.NODE_IDENTIFIER then
                 local nm = operand.name
-                if type(nm) == "string" then return resolve(nm), true end
+                if type(nm) == "string" then return resolve(nm), "falsy", "truthy" end
+            end
+        elseif cond.tag == defs.NODE_BINARY_EXPR then
+            local op = cond.op
+            if op == "==" or op == "~=" then
+                local d = type_call_target(cond.lhs)
+                local tag = tag_literal(cond.rhs)
+                if d == nil or tag == nil then
+                    d = type_call_target(cond.rhs)
+                    tag = tag_literal(cond.lhs)
+                end
+                if d ~= nil and tag ~= nil then
+                    if op == "==" then
+                        return d, "keep:" .. tag, "drop:" .. tag
+                    end
+                    return d, "drop:" .. tag, "keep:" .. tag
+                end
             end
         end
-        return nil, false
+        return nil, "truthy", "falsy"
     end
 
     -- ── expressions ────────────────────────────────────────────────────────
@@ -1187,6 +1322,11 @@ function M.lower(chunk)
                 d.read = true
                 return d.cell
             end
+            -- declared globals (per-file `--:: declare` / the stdlib
+            -- environment) read at their declared type; only genuinely
+            -- undeclared names are the policy diag.
+            local g = global_cell(nm)
+            if g ~= nil then return g end
             diag("undeclared-global", n.line, n.col,
                 "undeclared global '" .. nm .. "' (crescent has no ambient globals; its type is unknown here)")
             return unknown_cell("g-" .. nm)
@@ -1409,12 +1549,13 @@ function M.lower(chunk)
         lower_expr(cond)
         local vis = visible()
         local pre = snapshot(vis)
-        local d, negated = cond_target(cond)
+        local d, then_mode, else_mode = cond_target(cond)
 
-        -- then-arm: cond is truthy (falsy when the condition is `not x`).
+        -- then-arm: the condition's filter (truthy for a bare guard;
+        -- keep/drop tag filters for `type(x) == "…"`).
         if d ~= nil then
             local nc = fresh(d.name .. "-then")
-            if negated then filter_flow(d.cell, nc, "falsy") else filter_flow(d.cell, nc, "truthy") end
+            filter_flow(d.cell, nc, then_mode)
             d.cell = nc
         end
         local body = clause.body
@@ -1429,7 +1570,7 @@ function M.lower(chunk)
         -- else-arm: the complementary filter, then the rest of the chain.
         if d ~= nil then
             local ec = fresh(d.name .. "-else")
-            if negated then filter_flow(d.cell, ec, "truthy") else filter_flow(d.cell, ec, "falsy") end
+            filter_flow(d.cell, ec, else_mode)
             d.cell = ec
         end
         if i < #clauses then
@@ -1571,7 +1712,7 @@ function M.lower(chunk)
                             end
                         else
                             diag("global-write", t.line, t.col,
-                                "write to undeclared global '" .. nm .. "'")
+                                "write to global '" .. nm .. "' (crescent has no ambient mutable globals)")
                         end
                     end
                 elseif t.tag == defs.NODE_FIELD_EXPR or t.tag == defs.NODE_INDEX_EXPR then
@@ -1697,7 +1838,7 @@ function M.lower(chunk)
                         else
                             lower_function(n, nil)
                             diag("global-write", n.line, n.col,
-                                "write to undeclared global '" .. nm .. "'")
+                                "write to global '" .. nm .. "' (crescent has no ambient mutable globals)")
                         end
                     end
                     return nil
@@ -1751,9 +1892,13 @@ function M.lower(chunk)
 
     -- ── entry: annotation pre-pass ─────────────────────────────────────────
     -- `--::` declarations are position-independent: aliases go into the
-    -- resolve environment up front; every non-alias form is a named bucket
-    -- (`require` is the cross-module boundary). `--:<T>` call-site type
-    -- arguments are their own bucket.
+    -- resolve environment up front; `declare name = T` bodies parse AFTER
+    -- the alias sweep (a declare may reference an alias declared below it)
+    -- into the file's global environment; every other form is a named
+    -- bucket (`require` is the cross-module boundary). `--:<T>` call-site
+    -- type arguments are their own bucket.
+    --:: PendingDecl = { name: string, body: string, line: integer, col: integer }
+    local pending_declares = {} --: { [integer]: PendingDecl }
     for key, ann in pairs(anns) do
         local line = 0
         if type(key) == "number" and key > 0 then line = math.floor(key) end
@@ -1761,6 +1906,9 @@ function M.lower(chunk)
             local kind, a, b = annot.classify_decl(ann.content)
             if kind == "alias" then
                 aliases[a] = { content = b, feature = nil }
+            elseif kind == "declare" then
+                pending_declares[#pending_declares + 1] =
+                    { name = a, body = b or "", line = line, col = ann.col }
             elseif kind == "generic-alias" then
                 aliases[a] = { content = nil, feature = "generic" }
                 diag("unsupported:annotation-generic", line, ann.col,
@@ -1778,6 +1926,18 @@ function M.lower(chunk)
             diag("unsupported:annotation-type-args", line, ann.col,
                 "call-site type arguments (`--:<T>`) are outside the v0 annotation subset")
             ann.consumed = true
+        end
+    end
+    for i = 1, #pending_declares do
+        local pd = pending_declares[i]
+        -- the same parse shape as `--:` annotations: buckets are named
+        -- per feature; an unusable body still DECLARES the name (reads
+        -- are unknown — declared-but-unreadable is not undeclared).
+        local at = parse_type_string(pd.body, pd.line, pd.col, false)
+        if is_at(at) then
+            file_globals[pd.name] = at
+        else
+            file_globals[pd.name] = { k = "unknown" }
         end
     end
 

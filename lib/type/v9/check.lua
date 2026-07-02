@@ -32,10 +32,14 @@
 --                               absence evidence is warn, not error; dial up
 --                               once annotations land)
 --   use-before-narrow   warn    unknown used dynamically — v0 cannot narrow
---                               it yet (annotations/stdlib decls are the
---                               roadmap); the dial makes the debt visible
---   undeclared-global   warn    no ambient globals (stdlib decls pending)
---   global-write        warn    write to an undeclared global
+--                               it yet (cross-module summaries / index
+--                               signatures are the roadmap); the dial makes
+--                               the debt visible
+--   undeclared-global   warn    no ambient globals: fires only for names
+--                               NEITHER the stdlib environment (the globals
+--                               seam) nor a per-file `--:: declare` covers
+--   global-write        warn    write to a global (declared or not —
+--                               crescent has no ambient MUTABLE globals)
 --   unused-local        warn    declared, never read (syntactic in v0)
 --   new-field-on-write  off     a write CREATED a field on an open record —
 --                               the Lua module idiom, admitted by default.
@@ -263,8 +267,13 @@ local function evaluate_obligation(diags, values, ob)
                 end
             end
         end
+        -- a ⊤ rest bound is vacuous (everything satisfies `...unknown`,
+        -- and an unknown value against it is not a finding) — same rule as
+        -- the ann obligation's ⊤ check. Without this, every argument to a
+        -- `(...unknown)`-declared stdlib fn (print, string.format) would
+        -- flood use-before-narrow.
         local rest = fn.rest
-        if fn.vararg and rest ~= nil then
+        if fn.vararg and rest ~= nil and not lattice.is_unknown(rest) then
             for i = #params + 1, #args do
                 local av = values[args[i]]
                 if av ~= nil and as_val(av) and not lattice.is_bottom(av) then

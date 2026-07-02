@@ -28,7 +28,8 @@
 -- EVERYTHING ELSE routes to a NAMED bucket (returned in `buckets`; the
 -- caller prefixes `unsupported:annotation-`): generic / intrinsic / typeof /
 -- intersection / complement / index-signature / meta-slot / array / tuple /
--- cdata / any / unknown-name / recursive-alias / parse. A bucketed subtree
+-- cdata / any / unknown-name / recursive-alias / alias-budget / parse. A
+-- bucketed subtree
 -- reads as `unknown` (or the `table` atom where table-ness is certain:
 -- index signatures, arrays) — honest, dialable, never a silent guess.
 --
@@ -43,8 +44,17 @@ local M = {}
 --:: At = { k: string, ... }
 --:: Tok = { t: string, v: string }
 --:: Resolve = (name: string) -> (string | nil, string | nil)
---:: Ctx = { resolve: Resolve, buckets: { [integer]: string }, seen: { [string]: boolean }, visiting: { [string]: integer }, depth: integer }
+--:: Ctx = { resolve: Resolve, buckets: { [integer]: string }, seen: { [string]: boolean }, visiting: { [string]: integer }, depth: integer, memo: { [string]: At }, expansions: integer }
 --:: P = { toks: { [integer]: Tok }, pos: integer, ctx: Ctx }
+
+-- Alias-expansion budget per parse: a MUTUALLY-recursive alias graph can
+-- make path-wise unrolling exponential (each path re-expands every alias it
+-- has not seen twice — the js_types DOM graph hangs a naive walk). Two
+-- guards: expansions are MEMOIZED per parse (an alias expands once; later
+-- references share the immutable subtree — the At becomes a DAG), and a
+-- hard budget converts any residual pathology into the honest
+-- `alias-budget` bucket instead of a hang.
+local MAX_EXPANSIONS = 512
 
 -- Names that are types themselves, mapped to v9 atoms (integer is the
 -- number atom in v0 — no literal/int split in the lattice).
@@ -414,6 +424,13 @@ local function parse_prim(p)
         if content == nil then
             return bucket(p, "unknown-name", nil)
         end
+        -- memoized expansion: an alias expands ONCE per parse; later
+        -- references share the immutable subtree (the At is a DAG). This is
+        -- what keeps mutually-recursive alias graphs linear instead of
+        -- exponential-in-paths. (A memo hit computed under a knot cut is a
+        -- sound upper approximation for any other position.)
+        local hit = ctx.memo[name]
+        if hit ~= nil then return hit end
         local count = ctx.visiting[name] or 0
         if count >= 2 then
             -- the knot: a recursive alias unrolls once, then cuts to
@@ -422,6 +439,11 @@ local function parse_prim(p)
         end
         if ctx.depth >= 24 then
             return bucket(p, "recursive-alias", nil)
+        end
+        ctx.expansions = ctx.expansions + 1
+        if ctx.expansions > MAX_EXPANSIONS then
+            -- the budget backstop: an honest named boundary, never a hang.
+            return bucket(p, "alias-budget", nil)
         end
         local toks, terr = tokenize(content)
         if toks == nil then
@@ -433,6 +455,7 @@ local function parse_prim(p)
         local t = parse_type(sub)
         ctx.depth = ctx.depth - 1
         ctx.visiting[name] = count
+        ctx.memo[name] = t
         return t
     end
     error("type expected, got `" .. tok.v .. "`", 0)
@@ -498,7 +521,7 @@ function M.parse(content, resolve)
     local function is_toks(x) return type(x) == "table" end
     if not is_toks(traw) then return nil, buckets, terr end
     if #traw == 0 then return nil, buckets, "empty annotation" end
-    local ctx = { resolve = resolve, buckets = buckets, seen = {}, visiting = {}, depth = 0 } --: Ctx
+    local ctx = { resolve = resolve, buckets = buckets, seen = {}, visiting = {}, depth = 0, memo = {}, expansions = 0 } --: Ctx
     local p = { toks = traw, pos = 1, ctx = ctx } --: P
     local ok, res = pcall(parse_type, p)
     if not ok then return nil, buckets, tostring(res) end
