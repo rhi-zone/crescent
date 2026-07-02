@@ -222,27 +222,34 @@ the engine, and emit line/col diagnostics.
 | Seam | File | Contract |
 |---|---|---|
 | **Frontend** | `frontend/init.lua` | source -> plain-table AST (line/col on every node), `(nil, errmsg)` on syntax errors. Wraps the proven legacy parser (`lib/type/static/{lex,parse}`) + the v4 arena decoder, required in place — swappable behind this seam. The s-expr `parser.lua` is fenced as proof-oracle-only. |
-| **v0 lattice** | `lattice.lua` | atoms (nil/boolean/number/string + table/function tops) + STRUCTURAL OPEN RECORDS (width-subtyped; per-field read/write split — r joins up, w meets down — the engine-lattice encoding of the proof-dev's records-of-refs, making mutation sound: see the file header) + finite unions + absorbing `unknown`. `truthy`/`falsy` are the flow operations; `if`-narrowing and `and`/`or` both derive from them (`a and b : falsy(a) | type(b)`) — the historic hardcoded-`boolean|nil` bug is structurally impossible and pinned by tests. Field access adds `project`/`set_field`, two more monotone transfers behind the same interface. |
-| **Total lowering** | `lower.lua` | AST -> engine `Graph` + `Obligation`s + structural diags in ONE walk, ONE rule shape (seed / flow / filter / project / set_field + obligations). ALL 30 node kinds routed: v0-checked, or `unsupported:<construct>` with line/col (`M.ROUTE` is the roster; tests assert totality). Field reads (`t.x`, `t["x"]`, `t:m()` receivers), field writes (incl. the `function M.f()` module idiom, SSA-rebinding the base), and named-field constructors are CHECKED; non-literal keys are `unsupported:dynamic-index`, constructor array parts `unsupported:table-array-part`. Unsupported subtrees are havoc-fenced (reads marked, assigned outer locals — including field-write BASES — -> unknown) so the checked region stays sound at the boundary. |
-| **Runner** | `check.lua` | `check_source`/`check_file` (caps-first) -> policy-stamped, position-sorted diags. THE POWER DIAL: named policy rules (`op-mismatch=error`, `field-write-mismatch=error`, `missing-field=warn`, `new-field-on-write=off` — the ONE named open-record concession, dialable to error to close the alias hole — per-bucket `unsupported:*`; "off" suppresses) — strictness is owner-decidable data, in one place. |
-| **Smoke** | `smoke.lua` | tool entry: whole-`lib/` totality run + diagnostic histogram (the coverage roadmap). July 2026, with records: 1,557 files, ZERO crashes, full solve ~7s. |
+| **v0 lattice** | `lattice.lua` | atoms (nil/boolean/number/string + table/function tops) + STRUCTURAL OPEN RECORDS (width-subtyped; per-field read/write split — r joins up, w meets down — the engine-lattice encoding of the proof-dev's records-of-refs, making mutation sound: see the file header) + FUNCTION TYPES (`(params...) -> (results...)`: params as CELL IDS + annotation PINS — the contravariant face lives in pins/obligations because a meet-polarity component cannot ride the engine's join (the arrow analogue of the record r/w split); results as VALUES, covariant, rebuilt monotonically; join of two different arrows collapses to the `function` top; `clip` bounds recursion-created value cycles) + finite unions + absorbing `unknown`. `truthy`/`falsy` are the flow operations; `if`-narrowing and `and`/`or` both derive from them (`a and b : falsy(a) | type(b)`) — the historic hardcoded-`boolean|nil` bug is structurally impossible and pinned by tests. Field access adds `project`/`set_field`; ordering adds `leq` (fn_leq: params contravariant / results covariant) and `leq_init` (initialization ascription for fresh constructors: field refs re-typed, absent fields read as nil). |
+| **Annotation seam** | `annot/init.lua` | the `--:`/`--::` type-grammar STRING -> a v9-owned tree (NOT a lift of legacy `ann.lua`). Parses: atoms (integer -> number; literals UP-approximated to base atoms), `unknown`/`never`, unions, records (optional `x?:` / `readonly` / open `...`), function types (named params, multi-return, `...T` rest, `x is T` predicates as boolean results), `--:: Name = T` aliases (recursive ones unroll ONCE and cut to unknown at the knot — the clip discipline). Everything else is a NAMED per-feature bucket (`unsupported:annotation-{generic, intrinsic, typeof, intersection, complement, index-signature, array, meta-slot, cdata, any, unknown-name, ...}`); `--:: require` and runtime `require(...)` are `unsupported:cross-module`. |
+| **Total lowering** | `lower.lua` | AST -> engine `Graph` + `Obligation`s + structural diags in ONE walk, ONE rule shape (seed / flow / filter / project / set_field / call / fn-rebuild + obligations). ALL 30 node kinds routed: v0-checked, or `unsupported:<construct>` with line/col (`M.ROUTE` is the roster; tests assert totality). Records: field reads/writes (incl. the `function M.f()` module idiom) and named-field constructors CHECKED; non-literal keys `unsupported:dynamic-index`. Functions: param cells seeded from call sites (cells-as-unknowns) AND/OR annotation pins; per-position multi-return with Lua truncation/nil-extension; recursion via bind-before-body + clip; a parameter with NO evidence (no call, no pin) is ONE `unsupported:unconstrained-param`, not a per-use flood. Annotations are PIN + CHECK (a pin is both a seed and an upper-bound obligation; inference must AGREE): locals/assignments/table-fields/field-writes pin cells; preceding-line arrow annotations pin params (checked per call site, incl. nil pads and contravariant callback seeding) and returns (per-position, at the return line); `--[[: T]]` checked casts narrow the flow, `--[[:! T]]` is the force-cast policy. A pin that DEGRADED to unknown through a bucket pins nothing (⊤ carries no checking value; explicit `unknown` stays a pin). Havoc resets annotated variables to their PIN (the annotation-trust boundary), unannotated to unknown. |
+| **Runner** | `check.lua` | `check_source`/`check_file` (caps-first) -> policy-stamped, position-sorted diags. THE POWER DIAL: named policy rules (`op-mismatch` / `call-non-function` / `call-mismatch` / `field-write-mismatch` / `annotation-mismatch` / `cast-mismatch` / `force-cast` = error; `missing-field` / `use-before-narrow` = warn; `new-field-on-write` = off — the ONE named open-record concession; per-bucket `unsupported:*`; "off" suppresses) — strictness is owner-decidable data, in one place. |
+| **Smoke** | `smoke.lua` | tool entry: whole-`lib/` totality run + diagnostic histogram (the coverage roadmap). July 2026, with functions + annotations: 1,560 files, ZERO crashes, full solve ~34s. |
 
-The histogram is the prioritized roadmap. With records (July 2026) the
-field/table family — `unsupported:{field-expr 200k, table-constructor 44k,
-method-call 33k, field-assign 21k, index-expr 16k}` ≈ 314k diagnostics, 58%
-of the total — is retired; what remains of it is the honest dynamic-key
-boundary (`unsupported:dynamic-index` 22k, `table-array-part` 12k,
-`string-method` 0.4k) plus REAL findings (`missing-field` 0.5k,
-`field-write-mismatch`). The dominant bucket is now `use-before-narrow`
-(444k): field reads whose TARGET is untyped because it crossed a function
-boundary (`require` results, params, call returns) — i.e. the roadmap's next
-increments are function types + annotations + stdlib declarations, in that
-order. Known v0 imprecision: no true/false literal atoms (the `cond and a or
-b` idiom types as `boolean | X`); record tracking is intraprocedural
-(fields accreted through one alias or inside a callee are invisible through
-another — reads report missing-field, sound but imprecise); function bodies
-see upvalue record versions at DEFINITION order, not call order. All are
-domain-local lattice/lowering upgrades, not engine changes.
+The histogram is the prioritized roadmap. With records (July 2026) the 314k
+field/table family is retired. With FUNCTION TYPES + ANNOTATIONS (July 2026)
+the totals moved 521,517 -> 495,478 and `use-before-narrow` 444,422 ->
+389,417; `unsupported:cast-annotation` (6.7k) retired into checked/force
+casts + per-feature annotation buckets; the two known
+pending-annotations findings (keyring `_tier`, server_ws `res.body`)
+resolve. What `use-before-narrow` now measures is dominated by STDLIB
+GLOBALS (`string.*` / `math.*` / `package.*` reads through undeclared
+globals) — the roadmap's next increment is stdlib declarations, then
+cross-module summaries (`unsupported:cross-module` 3.2k +
+`annotation-unknown-name` 3.2k), then index signatures in the lattice
+(`annotation-index-signature` 7.6k approximates to the `table` atom today).
+Known v0 imprecision: no true/false literal atoms (the `cond and a or b`
+idiom types as `boolean | X` — now also surfacing as annotation-mismatch on
+pinned returns, e.g. astar's `dr > dc and dr or dc`); guard narrowing only
+handles bare `x` / `not x` (compound `x == nil or ...` chains and
+`type(x) == ...` are later increments of the same seam); constructor
+freshness is syntactic (a constructor routed through a local checks under
+full leq, not initialization ascription); record tracking is
+intraprocedural. All are domain-local lattice/lowering upgrades, not engine
+changes — the engine has absorbed records, arrows, and annotations with
+ZERO changes (third consecutive data point).
 
 ## Legacy type-checking seams (retained, repositioned)
 

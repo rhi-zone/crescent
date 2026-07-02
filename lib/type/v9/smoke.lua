@@ -10,7 +10,8 @@
 --
 -- The histogram (counts by diagnostic code) is the honest coverage state
 -- and the prioritized roadmap: which `unsupported:<construct>` buckets
--- dominate, and what the supported discipline finds. This file is a TOOL
+-- dominate, and what the supported discipline finds. (July 2026, functions
+-- + annotations: 1,560 files, zero crashes, full solve ~34s.) This is a TOOL
 -- entry point (the edge), so it constructs its io caps here; the library it
 -- drives (check.lua) only ever sees injected caps.
 

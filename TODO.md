@@ -114,12 +114,35 @@ in histogram order, plus recorded debt:
   `field-write-mismatch`). Named concession: `new-field-on-write` (policy, default
   off). Note: went straight into `lattice.lua` rather than growing into the fenced
   `type_rep`/`subtype` seams — those stay fenced for the arrow/negation upgrade.
-- [ ] **Annotations + function types** — `use-before-narrow` (now 444k, THE dominant
-  bucket: field reads whose target crossed an untyped function boundary — `require`
-  results, params, call returns) is mostly un-annotated params and shallow call
-  results; wiring `--:`/`--::` (behind a NEW annotation seam, not the legacy
-  `ann.lua`) + arrow types in the domain turns them into checked types.
-  `unsupported:cast-annotation` (6.7k) folds into the same seam.
+- [x] **Annotations + function types** — DONE 2026-07-03. Arrow values in the
+  lattice (params as CELLS + annotation pins, results as VALUES — the polarity
+  split; contravariant/covariant fn_leq; clip bounds recursion cycles);
+  intra-file inference (params from call sites, per-position multi-return,
+  result-open spread) in the one rule shape; the annot seam
+  (`lib/type/v9/annot`) parses `--:`/`--::` into v9 types with per-feature
+  `unsupported:annotation-*` buckets; pin+check wiring for locals /
+  assignments / fields / fn definitions / checked + force casts. 521,517 ->
+  495,478 total; use-before-narrow 444,422 -> 389,417; the two known
+  pending-annotations findings (keyring:778, server_ws:56) resolve.
+  `unsupported:cast-annotation` (6.7k) retired into cast-mismatch/force-cast +
+  annotation buckets. Remainder of use-before-narrow is dominated by stdlib
+  globals (`string.*`, `math.*`, `package.*` reads) — the next item below.
+- [ ] **Index signatures in the lattice** — `{ [string]: T }` /`{ [integer]: T }`/
+  `T[]` annotations (9.3k bucket diags) approximate to the `table` atom; field
+  reads through them are use-before-narrow noise. An indexer component on Rec
+  is a domain-local upgrade (needed before the annotation seam can express
+  the house map/array idioms).
+- [ ] **Cross-module summaries** — `unsupported:cross-module` (3.2k: `require`
+  calls + `--:: require` type imports) + `unsupported:annotation-unknown-name`
+  (3.2k: aliases imported from other modules). Module summary = the chunk's
+  recorded returns (already collected per-frame in lower.lua) + exported alias
+  env.
+- [ ] **Constructor freshness through locals** — `local t = {...}; f(t)` checks
+  under full leq (w-contravariance + absence-is-not-nil) even when t is
+  provably unaliased; direct-constructor arguments/initializers already use
+  leq_init. A local-freshness pass (no alias taken, no escape before use)
+  would extend initialization ascription and burn down a chunk of
+  call-mismatch/annotation-mismatch imprecision (bin_packing:698 class).
 - [ ] **Optional fields in records** — `{ x = cond and v or nil }`-shaped and
   conditionally-assigned fields intersect away at phi joins; reads then report
   missing-field (e.g. the `body.generationConfig = body.generationConfig or {}`
