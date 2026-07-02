@@ -138,8 +138,8 @@ T.describe("v9 lowering — structural records", function()
 
     T.it("the module idiom: `function M.f()` accretes fields flow-sensitively", function()
         local tys, diags = infer("local M = {}\nfunction M.f() return 1 end\nM.g = 2\nlocal h = M.f\nreturn M, h\n")
-        T.eq(tys.M, "{ f: function, g: number }", "field writes extend the open record")
-        T.eq(tys.h, "function", "reading an accreted field")
+        T.eq(tys.M, "{ f: () -> number, g: number }", "field writes extend the open record (arrows precise)")
+        T.eq(tys.h, "() -> number", "reading an accreted field keeps the arrow")
         T.eq(find_diag(diags, "unsupported:field-assign"), nil, "field-assign is no longer a boundary bucket")
     end)
 
@@ -192,6 +192,74 @@ T.describe("v9 lowering — structural records", function()
     end)
 end)
 
+T.describe("v9 lowering — function types + intra-file inference", function()
+    T.it("params are inferred from call sites (cells-as-unknowns)", function()
+        local tys = infer("local function f(a) return a end\nlocal x = f(1)\nlocal y = f('s')\nreturn x, y\n")
+        T.eq(tys.f, "(?) -> number | string", "param cell joins the call-site arguments")
+        T.eq(tys.x, "number | string", "the result flows back out")
+    end)
+
+    T.it("return types are inferred from return statements", function()
+        local tys = infer("local c = true\nlocal function f()\n  if c then return 1 end\n  return 's'\nend\nlocal r = f()\nreturn r\n")
+        T.eq(tys.f, "() -> number | string", "both returns join at the result cell")
+        T.eq(tys.r, "number | string", "call result is the arrow's result")
+    end)
+
+    T.it("multi-return: contextual truncation + nil extension", function()
+        local src = "local function f() return 1, 's' end\n"
+            .. "local a = f()\nlocal b, c, d = f()\nreturn a, b, c, d\n"
+        local tys = infer(src)
+        T.eq(tys.f, "() -> (number, string)", "two result positions")
+        T.eq(tys.a, "number", "expression position truncates to the first result")
+        T.eq(tys.b, "number", "spread position 1")
+        T.eq(tys.c, "string", "spread position 2")
+        T.eq(tys.d, "nil", "past the arity: Lua pads with nil, NOT unknown")
+    end)
+
+    T.it("mixed return arities pad the short return with nil", function()
+        local tys = infer("local c = true\nlocal function f()\n  if c then return 1 end\n  return 1, 's'\nend\nlocal _, b = f()\nreturn b\n")
+        T.eq(tys.f, "() -> (number, nil | string)", "position 2 is nil on the short path")
+    end)
+
+    T.it("a call in last return position marks the arrow result-OPEN", function()
+        local src = "local function g() return 1 end\nlocal function f() return g() end\n"
+            .. "local a, b = f()\nreturn a, b\n"
+        local tys = infer(src)
+        T.eq(tys.a, "number", "the forwarded first result is precise")
+        T.eq(tys.b, "unknown", "positions beyond are unknown (forwarding is open), not nil")
+    end)
+
+    T.it("arguments beyond the param list are checked-lowered but dropped; missing args pad nil", function()
+        local tys = infer("local function f(a, b) return b end\nlocal r = f(1)\nreturn r\n")
+        T.eq(tys.r, "nil", "the missing argument reaches the body as nil")
+    end)
+
+    T.it("`require(...)` is the honest cross-module boundary", function()
+        local _, diags = infer("local m = require('lib.foo')\nreturn m\n")
+        local d = find_diag(diags, "unsupported:cross-module")
+        T.ok(d ~= nil, "require flagged as the module boundary")
+        T.eq(find_diag(diags, "undeclared-global"), nil,
+            "not double-reported as an undeclared global")
+        local tys = infer("local m = require('lib.foo')\nreturn m\n")
+        T.eq(tys.m, "unknown", "the required module's type is unknown (no summaries yet)")
+    end)
+
+    T.it("phi of two different functions collapses to the function top (calls unchecked but flagged)", function()
+        local src = "local c = true\nlocal function f(a) return 1 end\nlocal function g(a) return 's' end\n"
+            .. "local h = nil\nif c then h = f else h = g end\nlocal r = h(1)\nreturn r\n"
+        local tys = infer(src)
+        T.eq(tys.h, "function", "different arrows join to the function top")
+        T.eq(tys.r, "unknown", "calls through the top are unknown (narrow to check)")
+    end)
+
+    T.it("higher-order flow: a function passed as an argument is callable inside", function()
+        local src = "local function apply(fn) return fn(2) end\n"
+            .. "local function double(n) return n end\nlocal r = apply(double)\nreturn r\n"
+        local tys = infer(src)
+        T.eq(tys.r, "number", "the callback's arrow flows through the param cell")
+    end)
+end)
+
 T.describe("v9 lowering — totality roster", function()
     T.it("routes ALL 30 node kinds (checked / boundary / container)", function()
         local n = 0
@@ -204,9 +272,13 @@ T.describe("v9 lowering — totality roster", function()
         T.eq(n, 30, "all 30 kinds routed")
     end)
 
-    T.it("local function recursion + shallow calls check", function()
+    T.it("local function recursion terminates and infers honestly", function()
+        -- f never returns a value along any path that terminates: its result
+        -- is genuinely `never` (a bottom cycle), and the trailing-call spread
+        -- marks the arrow result-open. The fixpoint TERMINATES (clip bounds
+        -- the recursion-created value cycle).
         local tys = infer("local function f(n)\n  return f(n)\nend\nlocal r = f(1)\nreturn r\n")
-        T.eq(tys.f, "function", "local function binds itself")
-        T.eq(tys.r, "unknown", "v0 calls are shallow: result is unknown, to be narrowed")
+        T.eq(tys.f, "(?) -> (never, ...)", "local function binds itself; param inferred from the call sites")
+        T.eq(tys.r, "never", "a call that provably never returns has result never")
     end)
 end)

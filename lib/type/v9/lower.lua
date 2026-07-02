@@ -29,6 +29,23 @@
 -- header). Non-literal keys are the honest `unsupported:dynamic-index`
 -- boundary; the array part of constructors is `unsupported:table-array-part`.
 --
+-- FUNCTIONS ride the same shape (arrows are just more lattice values): a
+-- function definition mints one param cell per parameter (UNSEEDED — a
+-- cell-as-unknown that call sites flow argument types into) and one result
+-- cell per return position; ONE rebuild rule re-proposes the function value
+-- as its result cells climb. A call is ONE rule that flows argument values
+-- into the callee's param cells and each result position out (truncation /
+-- nil-extension per Lua call semantics; a call/vararg in last return
+-- position marks the function result-OPEN — positions beyond are unknown,
+-- not nil). Recursion works because the function's cell is bound BEFORE its
+-- body lowers; the recursion-created value cycles are kept finite by
+-- lattice.clip at the two cycle-closing proposal sites. `require(...)` is
+-- the honest `unsupported:cross-module` boundary — no module summaries yet.
+-- A parameter no in-file call reaches (and no annotation pins) stays at
+-- BOTTOM; post-solve that is reported ONCE per parameter as
+-- `unsupported:unconstrained-param` (the body was checked against no
+-- inputs) instead of a per-use unknown flood — same honesty, right shape.
+--
 -- Flow-sensitivity is SSA-style versioning: assignments rebind a variable's
 -- cell; `if` merges make phi cells that receive each branch version as a
 -- separate proposal — the engine's monotone join IS the union at the merge.
@@ -55,7 +72,7 @@ local frontend = require("lib.type.v9.frontend")
 
 --:: Ast = { tag: integer, line: integer, col: integer, ... }
 --:: Diag = { code: string, severity: string, message: string, line: integer, col: integer }
---:: Obligation = { kind: string, cell: string, allow: Val | nil, field: string | nil, base: string | nil, code: string, what: string, line: integer, col: integer }
+--:: Obligation = { kind: string, cell: string, allow: Val | nil, field: string | nil, base: string | nil, args: { [integer]: string } | nil, code: string, what: string, line: integer, col: integer }
 --:: LowerResult = { graph: Graph, obligations: { [integer]: Obligation }, diags: { [integer]: Diag }, vars: { [string]: string } }
 --:: Decl = { id: string, name: string, line: integer, col: integer, read: boolean, cell: string }
 --:: Scope = { map: { [string]: Decl }, order: { [integer]: Decl } }
@@ -76,6 +93,12 @@ local NUM = lattice.single("number")
 local NUMSTR = lattice.of({ "number", "string" })
 local LENABLE = lattice.of({ "string", "table" })
 local FUNC = lattice.single("function")
+local NIL_VAL = lattice.single("nil")
+local UNKNOWN_VAL = lattice.single("unknown")
+
+-- Depth bound for values proposed around recursion-created cycles (function
+-- rebuild + call-argument flow) — see lattice.clip.
+local CLIP_DEPTH = 5
 
 -- The binary-operator discipline as DATA: op -> (operand bound | nil,
 -- result atom | nil, derive | nil). `derive` marks the two operators whose
@@ -127,8 +150,12 @@ function M.lower(chunk)
     -- is the CURRENT cell of the variable; branches snapshot/restore it.
     local scopes = {} --: { [integer]: Scope }
     local depth = 0
-    -- Return-target cells, one per enclosing function (innermost = top).
-    local ret_cells = {} --: { [integer]: string }
+    -- Return frames, one per enclosing function (innermost = top): each
+    -- return statement records its per-position cells; the function wires
+    -- them into result-position cells once the max arity is known.
+    --:: Ret = { cells: { [integer]: string }, spread: boolean, line: integer, col: integer }
+    --:: Frame = { returns: { [integer]: Ret } }
+    local ret_frames = {} --: { [integer]: Frame }
     local ret_depth = 0
 
     --: (string) -> string
@@ -205,7 +232,7 @@ function M.lower(chunk)
     --: (cell: string, allow: Val, code: string, what: string, line: integer, col: integer) -> nil
     local function obligate(cell, allow, code, what, line, col)
         obligations[#obligations + 1] = {
-            kind = "bound", cell = cell, allow = allow, field = nil, base = nil,
+            kind = "bound", cell = cell, allow = allow, field = nil, base = nil, args = nil,
             code = code, what = what, line = line, col = col,
         }
         return nil
@@ -217,7 +244,7 @@ function M.lower(chunk)
     --: (cell: string, field: string, what: string, line: integer, col: integer) -> nil
     local function obligate_field_read(cell, field, what, line, col)
         obligations[#obligations + 1] = {
-            kind = "field-read", cell = cell, allow = nil, field = field, base = nil,
+            kind = "field-read", cell = cell, allow = nil, field = field, base = nil, args = nil,
             code = "missing-field", what = what, line = line, col = col,
         }
         return nil
@@ -230,8 +257,35 @@ function M.lower(chunk)
     --: (cell: string, base: string, field: string, line: integer, col: integer) -> nil
     local function obligate_field_write(cell, base, field, line, col)
         obligations[#obligations + 1] = {
-            kind = "field-write", cell = cell, allow = nil, field = field, base = base,
+            kind = "field-write", cell = cell, allow = nil, field = field, base = base, args = nil,
             code = "field-write-mismatch", what = "field '" .. field .. "'", line = line, col = col,
+        }
+        return nil
+    end
+
+    -- "`cell` (an unannotated parameter) should have received SOME evidence"
+    -- — post-solve, a still-bottom parameter means no in-file call reaches it
+    -- and no annotation pins it: the body was checked against no inputs.
+    -- Reported once per parameter (the honest boundary, not a per-use flood).
+    --: (cell: string, name: string, line: integer, col: integer) -> nil
+    local function obligate_param_witness(cell, name, line, col)
+        obligations[#obligations + 1] = {
+            kind = "param-witness", cell = cell, allow = nil, field = nil, base = nil, args = nil,
+            code = "unsupported:unconstrained-param", what = "parameter '" .. name .. "'",
+            line = line, col = col,
+        }
+        return nil
+    end
+
+    -- "each argument at this call site must satisfy the callee's param PINS"
+    -- — evaluated post-solve against the callee's function component; only
+    -- pinned (annotated) params are checked here, inferred params take their
+    -- evidence from the argument flow instead.
+    --: (cell: string, args: { [integer]: string }, what: string, line: integer, col: integer) -> nil
+    local function obligate_call(cell, args, what, line, col)
+        obligations[#obligations + 1] = {
+            kind = "call", cell = cell, allow = nil, field = nil, base = nil, args = args,
+            code = "call-mismatch", what = what, line = line, col = col,
         }
         return nil
     end
@@ -316,7 +370,7 @@ function M.lower(chunk)
     -- ── forward declarations (mutual recursion: exprs contain bodies).
     -- Unannotated on purpose: the checker types them at their assignment
     -- sites below (annotated there), same idiom as parse.lua.
-    local lower_expr, lower_stmts
+    local lower_expr, lower_stmts, lower_call
 
     -- ── havoc scan (soundness fence around unsupported subtrees) ──────────
     -- Marks identifier reads (no false "unused"), and havocs outer locals
@@ -387,48 +441,108 @@ function M.lower(chunk)
     -- ── shared construct pieces (each used by exactly the constructs whose
     --    semantics share them — not solver branches) ───────────────────────
 
-    -- A function body: fresh scope, params bound (unknown until annotations
-    -- land), returns flow into this function's ret cell. Value : function.
-    --: (Ast) -> string
-    local function lower_function(n)
+    -- A function body: fresh scope; one UNSEEDED cell per param (a
+    -- cell-as-unknown — call sites flow argument types in); one result cell
+    -- per return position, wired once the max return arity is known; ONE
+    -- rebuild rule proposing the function VALUE from its result cells
+    -- (params ride as constant cell ids — the lattice header explains the
+    -- polarity split). `recurse_decl`, when given, is bound to the function
+    -- cell BEFORE the body lowers, so `local function f` sees its own arrow.
+    --: (Ast, Decl | nil) -> string
+    local function lower_function(n, recurse_decl)
         push_scope()
         ret_depth = ret_depth + 1
-        ret_cells[ret_depth] = fresh("ret")
-        local params = n.params
-        if is_list(params) then
-            for i = 1, #params do
-                local nm = params[i].name
+        local frame = { returns = {} } --: Frame
+        ret_frames[ret_depth] = frame
+        local params = {} --: { [integer]: Param }
+        local nparams = n.params
+        if is_list(nparams) then
+            for i = 1, #nparams do
+                local nm = nparams[i].name
                 if type(nm) == "string" then
+                    local c = fresh("param-" .. nm)
                     -- params are exempt from unused-local (read = true):
                     -- callbacks legitimately ignore params.
-                    declare(nm, n.line, n.col, unknown_cell("param-" .. nm), true)
+                    declare(nm, n.line, n.col, c, true)
+                    params[#params + 1] = { cell = c, pin = nil }
+                    obligate_param_witness(c, nm, n.line, n.col)
                 end
             end
         end
+        local fcell = fresh("fn")
+        if recurse_decl ~= nil then recurse_decl.cell = fcell end
         local body = n.body
         if is_list(body) then lower_stmts(body) end
+
+        -- Wire returns into result-position cells. A return shorter than the
+        -- max arity pads with nil (Lua call semantics); a call/vararg spread
+        -- in last position contributes unknown AND marks the arrow OPEN.
+        local returns = frame.returns
+        local maxk = 0
+        local open = false
+        for i = 1, #returns do
+            local r = returns[i]
+            if #r.cells > maxk then maxk = #r.cells end
+            if r.spread then open = true end
+        end
+        local rcells = {} --: { [integer]: string }
+        for i = 1, maxk do rcells[i] = fresh("ret" .. i) end
+        for i = 1, #returns do
+            local r = returns[i]
+            for k = 1, maxk do
+                local c = r.cells[k]
+                if c ~= nil then
+                    flow(c, rcells[k])
+                elseif r.spread then
+                    seed(rcells[k], UNKNOWN_VAL)
+                else
+                    seed(rcells[k], NIL_VAL)
+                end
+            end
+        end
+        local vararg = n.vararg == true
+        rules[#rules + 1] = engine.rule(rcells, { fcell }, function(get)
+            local results = {} --: { [integer]: Val }
+            for i = 1, maxk do
+                local v = get(rcells[i])
+                if lattice.as_val(v) then
+                    results[i] = lattice.clip(v, CLIP_DEPTH)
+                else
+                    results[i] = NIL_VAL
+                end
+            end
+            return { [fcell] = lattice.fn_val(params, results, vararg, nil, open) }
+        end)
         ret_depth = ret_depth - 1
         pop_scope()
-        return atom_cell("function")
+        return fcell
     end
 
-    -- Lower an expression list into `want` source cells: extra targets take
-    -- `unknown` when the last expression can multi-return (call / method /
-    -- vararg), else `nil` (Lua pads with nil).
+    -- Lower an expression list into `want` source cells. A call/method in
+    -- LAST position spreads its per-position results into the remaining
+    -- targets (Lua multi-return); a trailing vararg fills with `unknown`
+    -- (the vararg boundary); anything else pads with `nil` (Lua semantics).
     --: ({ [integer]: Ast }, integer) -> { [integer]: string }
     local function lower_value_list(exprs, want)
         local cells = {} --: { [integer]: string }
         local nexpr = #exprs
-        for i = 1, nexpr do
+        for i = 1, nexpr - 1 do
             cells[i] = lower_expr(exprs[i])
         end
+        if nexpr == 0 then
+            for i = 1, want do cells[i] = atom_cell("nil") end
+            return cells
+        end
+        local last = exprs[nexpr]
+        local t = last.tag
+        if want > nexpr and (t == defs.NODE_CALL_EXPR or t == defs.NODE_METHOD_CALL) then
+            local rc = lower_call(last, want - nexpr + 1)
+            for j = 1, #rc do cells[nexpr + j - 1] = rc[j] end
+            return cells
+        end
+        cells[nexpr] = lower_expr(last)
         if want > nexpr then
-            local spread = false
-            if nexpr > 0 then
-                local t = exprs[nexpr].tag
-                spread = t == defs.NODE_CALL_EXPR or t == defs.NODE_METHOD_CALL
-                    or t == defs.NODE_VARARG_EXPR
-            end
+            local spread = t == defs.NODE_VARARG_EXPR
             for i = nexpr + 1, want do
                 if spread then
                     cells[i] = unknown_cell("spread")
@@ -452,18 +566,155 @@ function M.lower(chunk)
         return nil
     end
 
-    -- A field READ (`t.x` / `t["x"]` / the receiver half of `t:m()`): ONE
-    -- projection rule (the record analogue of the truthy/falsy filters) +
-    -- ONE field-read obligation. Returns the projected cell.
-    --: (target: Ast, key: string, what: string, line: integer, col: integer) -> string
-    local function lower_field_read(target, key, what, line, col)
-        local tc = lower_expr(target)
+    -- A field READ from an already-lowered target cell: ONE projection rule
+    -- (the record analogue of the truthy/falsy filters) + ONE field-read
+    -- obligation. Returns the projected cell.
+    --: (tc: string, key: string, what: string, line: integer, col: integer) -> string
+    local function field_read_from(tc, key, what, line, col)
         local rc = fresh("field-" .. key)
         rules[#rules + 1] = engine.rule({ tc }, { rc }, function(get)
             return { [rc] = lattice.project(get(tc), key) }
         end)
         obligate_field_read(tc, key, what, line, col)
         return rc
+    end
+
+    -- A field READ (`t.x` / `t["x"]` / the receiver half of `t:m()`).
+    --: (target: Ast, key: string, what: string, line: integer, col: integer) -> string
+    local function lower_field_read(target, key, what, line, col)
+        return field_read_from(lower_expr(target), key, what, line, col)
+    end
+
+    -- The shared call core: ONE rule that (a) flows argument values into the
+    -- callee's UNPINNED param cells (inference; pinned params are checked by
+    -- the call obligation instead, and an fn-typed pin seeds its own pins
+    -- into an fn-typed argument's param cells — the contravariant face), and
+    -- (b) flows each wanted result position out (per-position; truncation /
+    -- nil-extension per Lua call semantics; result-open arrows and the
+    -- `function` top yield unknown). Plus the callee-shape and per-argument
+    -- obligations. Returns the result-position cells.
+    --: (cc: string, argcells: { [integer]: string }, want: integer, what: string, line: integer, col: integer) -> { [integer]: string }
+    local function call_core(cc, argcells, want, what, line, col)
+        local rcells = {} --: { [integer]: string }
+        for i = 1, want do rcells[i] = fresh("call" .. i) end
+        local reads = { cc } --: { [integer]: string }
+        for i = 1, #argcells do reads[#reads + 1] = argcells[i] end
+        rules[#rules + 1] = engine.rule(reads, rcells, function(get)
+            local out = {} --: { [string]: unknown }
+            local v = get(cc)
+            if not lattice.as_val(v) then return out end
+            if lattice.is_bottom(v) then return out end
+            local fn = lattice.fn_of(v)
+            if fn ~= nil then
+                for i = 1, #fn.params do
+                    local p = fn.params[i]
+                    local pin = p.pin
+                    if pin == nil then
+                        -- inference: the argument (or Lua's nil pad) flows in.
+                        if i <= #argcells then
+                            local av = get(argcells[i])
+                            if lattice.as_val(av) then
+                                out[p.cell] = lattice.clip(av, CLIP_DEPTH)
+                            end
+                        else
+                            out[p.cell] = NIL_VAL
+                        end
+                    else
+                        -- pinned: checked by the call obligation. An
+                        -- fn-typed pin seeds its param pins into an
+                        -- fn-typed argument's UNPINNED param cells so the
+                        -- callback body is checked against what the callee
+                        -- may pass (contravariance, operationalized).
+                        local pfn = lattice.fn_of(pin)
+                        if pfn ~= nil and i <= #argcells then
+                            local av = get(argcells[i])
+                            if lattice.as_val(av) then
+                                local afn = lattice.fn_of(av)
+                                if afn ~= nil then
+                                    for j = 1, #afn.params do
+                                        local ap = afn.params[j]
+                                        if ap.pin == nil then
+                                            local pj = pfn.params[j]
+                                            if pj ~= nil and pj.pin ~= nil then
+                                                out[ap.cell] = pj.pin
+                                            end
+                                        end
+                                    end
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+            for i = 1, want do
+                local rv = UNKNOWN_VAL --: Val
+                if fn ~= nil then
+                    local r = fn.results[i]
+                    if r ~= nil then
+                        rv = r
+                    elseif not fn.open then
+                        rv = NIL_VAL
+                    end
+                end
+                out[rcells[i]] = rv
+            end
+            return out
+        end)
+        obligate(cc, FUNC, "call-non-function", what, line, col)
+        obligate_call(cc, argcells, what, line, col)
+        return rcells
+    end
+
+    -- A call expression (plain or method), lowered for `want` result
+    -- positions. `require(<literal>)` — Lua's module boundary — is the
+    -- honest `unsupported:cross-module` bucket: no module summaries in this
+    -- increment, the results are unknown.
+    --: (Ast, integer) -> { [integer]: string }
+    lower_call = function(n, want)
+        if n.tag == defs.NODE_CALL_EXPR then
+            local callee = n.callee
+            if not is_node(callee) then
+                internal(n, "call without callee")
+                local cells = {} --: { [integer]: string }
+                for i = 1, want do cells[i] = unknown_cell("badcall") end
+                return cells
+            end
+            local args = n.args
+            if callee.tag == defs.NODE_IDENTIFIER and callee.name == "require"
+                and resolve("require") == nil then
+                if is_list(args) then
+                    for i = 1, #args do lower_expr(args[i]) end
+                end
+                unsupported(n, "cross-module")
+                local cells = {} --: { [integer]: string }
+                for i = 1, want do cells[i] = unknown_cell("require") end
+                return cells
+            end
+            local cc = lower_expr(callee)
+            local acells = {} --: { [integer]: string }
+            if is_list(args) then
+                for i = 1, #args do acells[i] = lower_expr(args[i]) end
+            end
+            return call_core(cc, acells, want, "called value", n.line, n.col)
+        end
+        -- t:m(...) = a field read of `m` + a call with the receiver as the
+        -- implicit first argument (`function T:m` declared self the same way).
+        local recv = n.receiver
+        local method = n.method
+        if not is_node(recv) or type(method) ~= "string" then
+            internal(n, "malformed method call")
+            local cells = {} --: { [integer]: string }
+            for i = 1, want do cells[i] = unknown_cell("badmcall") end
+            return cells
+        end
+        local tc = lower_expr(recv)
+        local mc = field_read_from(tc, method, "method '" .. method .. "'", n.line, n.col)
+        local acells = { tc } --: { [integer]: string }
+        local args = n.args
+        if is_list(args) then
+            for i = 1, #args do acells[#acells + 1] = lower_expr(args[i]) end
+        end
+        return call_core(mc, acells, want, "method '" .. method .. "'", n.line, n.col)
     end
 
     -- A field WRITE (`t.x = v`, `t["x"] = v`, `function M.f()`). When the
@@ -619,40 +870,11 @@ function M.lower(chunk)
                 obligate(rc, bound, "op-mismatch", "right operand of '" .. op .. "'", rhs.line, rhs.col)
             end
             return atom_cell(result)
-        elseif tag == defs.NODE_CALL_EXPR then
-            -- shallow v0: callee must be a function; the result is unknown
-            -- (function TYPES — params/returns — are the next domain upgrade).
-            local callee = n.callee
-            local cc = "" --: string
-            if is_node(callee) then
-                cc = lower_expr(callee)
-            else
-                internal(n, "call without callee")
-                cc = unknown_cell("callee")
-            end
-            local args = n.args
-            if is_list(args) then
-                for i = 1, #args do lower_expr(args[i]) end
-            end
-            obligate(cc, FUNC, "call-non-function", "called value", n.line, n.col)
-            return unknown_cell("call")
-        elseif tag == defs.NODE_METHOD_CALL then
-            -- t:m(...) = a field read of `m` + a shallow call (result
-            -- unknown, as for CALL_EXPR — function types are the next
-            -- domain upgrade).
-            local recv = n.receiver
-            local method = n.method
-            if not is_node(recv) or type(method) ~= "string" then
-                internal(n, "malformed method call")
-                return unknown_cell("mcall")
-            end
-            local mc = lower_field_read(recv, method, "method '" .. method .. "'", n.line, n.col)
-            local args = n.args
-            if is_list(args) then
-                for i = 1, #args do lower_expr(args[i]) end
-            end
-            obligate(mc, FUNC, "call-non-function", "method '" .. method .. "'", n.line, n.col)
-            return unknown_cell("mcall")
+        elseif tag == defs.NODE_CALL_EXPR or tag == defs.NODE_METHOD_CALL then
+            -- expression position takes the FIRST result (Lua truncates);
+            -- lower_value_list asks lower_call for more when spreading.
+            local cells = lower_call(n, 1)
+            return cells[1]
         elseif tag == defs.NODE_FIELD_EXPR then
             local target = n.target
             local key = n.key
@@ -678,7 +900,7 @@ function M.lower(chunk)
             unsupported(n, "dynamic-index")
             return unknown_cell("index")
         elseif tag == defs.NODE_FUNC_EXPR then
-            return lower_function(n)
+            return lower_function(n, nil)
         elseif tag == defs.NODE_TABLE_EXPR then
             -- A constructor with named fields IS a record type: ONE rule
             -- proposing record_of over the field-value cells (duplicate keys:
@@ -894,12 +1116,29 @@ function M.lower(chunk)
             end
             return nil
         elseif tag == defs.NODE_RETURN_STMT then
+            -- record per-position cells on the enclosing frame; the function
+            -- wires them once the max return arity is known. A call in LAST
+            -- position forwards ALL its results in Lua — v0 carries its
+            -- first result and marks the arrow result-OPEN (positions beyond
+            -- are unknown); a trailing vararg likewise.
             local exprs = n.exprs
+            local rec = { cells = {}, spread = false, line = n.line, col = n.col } --: Ret
             if is_list(exprs) then
-                for i = 1, #exprs do
-                    local c = lower_expr(exprs[i])
-                    if ret_depth >= 1 then flow(c, ret_cells[ret_depth]) end
+                local ne = #exprs
+                for i = 1, ne do
+                    rec.cells[i] = lower_expr(exprs[i])
+                    if i == ne then
+                        local t = exprs[i].tag
+                        if t == defs.NODE_CALL_EXPR or t == defs.NODE_METHOD_CALL
+                            or t == defs.NODE_VARARG_EXPR then
+                            rec.spread = true
+                        end
+                    end
                 end
+            end
+            if ret_depth >= 1 then
+                local frame = ret_frames[ret_depth]
+                frame.returns[#frame.returns + 1] = rec
             end
             return nil
         elseif tag == defs.NODE_FUNC_DECL then
@@ -909,18 +1148,18 @@ function M.lower(chunk)
                 if type(nm) == "string" then
                     if n.is_local == true then
                         -- bind BEFORE the body: `local function f` sees
-                        -- itself (recursion).
+                        -- itself (recursion) — lower_function rebinds the
+                        -- decl to the function cell before the body lowers.
                         local d = declare(nm, n.line, n.col, atom_cell("function"), false)
-                        local c = lower_function(n)
-                        d.cell = c
+                        lower_function(n, d)
                     else
                         -- `function f() end`: assignment to f (a local if one
                         -- is visible, else an undeclared-global write).
-                        local c = lower_function(n)
                         local d = resolve(nm)
                         if d ~= nil then
-                            d.cell = c
+                            lower_function(n, d)
                         else
+                            lower_function(n, nil)
                             diag("global-write", n.line, n.col,
                                 "write to undeclared global '" .. nm .. "'")
                         end
@@ -932,14 +1171,14 @@ function M.lower(chunk)
             -- chain): the module idiom — a checked field write of the
             -- function value. (`:` already injected `self` as a param.)
             if is_node(name_node) and name_node.tag == defs.NODE_FIELD_EXPR then
-                local c = lower_function(n)
+                local c = lower_function(n, nil)
                 lower_field_write(name_node, c)
                 return nil
             end
             -- funcname is Name{.Name}[:Name] — anything else is a decoder
             -- drift bug, surfaced loudly.
             if is_node(name_node) then lower_expr(name_node) end
-            lower_function(n)
+            lower_function(n, nil)
             internal(n, "func-decl with an unexpected name shape")
             return nil
         elseif tag == defs.NODE_WHILE_STMT or tag == defs.NODE_REPEAT_STMT
@@ -981,7 +1220,9 @@ function M.lower(chunk)
     if chunk.tag == defs.NODE_CHUNK then
         push_scope()
         ret_depth = 1
-        ret_cells[1] = fresh("chunk-ret")
+        -- the chunk's returns are recorded but unconsumed: the module
+        -- summary (what `require` would see) is a later increment.
+        ret_frames[1] = { returns = {} }
         local body = chunk.body
         if is_list(body) then lower_stmts(body) end
         local top = scopes[1]

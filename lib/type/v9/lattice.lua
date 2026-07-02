@@ -113,8 +113,8 @@ local M = {}
 --:: Val = { atoms: { [string]: boolean }, rec: Rec | nil, fn: Fn | nil }
 --:: Rec = { fields: { [string]: Field } }
 --:: Field = { r: Val, w: Val }
---:: Fn = { params: { [integer]: Param }, results: { [integer]: Val }, vararg: boolean, rest: Val | nil, open: boolean }
 --:: Param = { cell: string, pin: Val | nil }
+--:: Fn = { params: { [integer]: Param }, results: { [integer]: Val }, vararg: boolean, rest: Val | nil, open: boolean }
 
 M.ATOMS = { "nil", "boolean", "number", "string", "table", "function", "unknown" }
 

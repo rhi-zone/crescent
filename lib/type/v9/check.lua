@@ -14,6 +14,17 @@
 --   field-write-mismatch error  a field write outside the field's invariant
 --                               write bound — the record mutation-soundness
 --                               rule (see lattice.lua's header)
+--   call-mismatch       error   an argument outside the callee's annotated
+--                               parameter pin (incl. a missing argument
+--                               whose nil pad the pin rejects)
+--   annotation-mismatch error   inference DISAGREES with an annotation —
+--                               either the code lies or the annotation does;
+--                               both are real findings
+--   cast-mismatch       error   a checked cast `--[[: T]]` whose expression
+--                               provably does not satisfy T
+--   force-cast          error   `--[[:! T]]` — per conventions force casts
+--                               are almost never correct; dial down only
+--                               with cause
 --   internal            error   a lowering invariant broke (checker bug)
 --   missing-field       warn    a field/method read the record provably
 --                               lacks (v0 record tracking is intraprocedural
@@ -53,7 +64,7 @@ local engine = require("lib.type.v9.engine.engine")
 local lattice = require("lib.type.v9.lattice")
 
 --:: Diag = { code: string, severity: string, message: string, line: integer, col: integer }
---:: Obligation = { kind: string, cell: string, allow: Val | nil, field: string | nil, base: string | nil, code: string, what: string, line: integer, col: integer }
+--:: Obligation = { kind: string, cell: string, allow: Val | nil, field: string | nil, base: string | nil, args: { [integer]: string } | nil, init: boolean | nil, code: string, what: string, line: integer, col: integer }
 --:: Policy = { [string]: string }
 --:: Caps = { read_file: (string) -> (string | nil, string | nil) }
 --:: CheckOpts = { policy: Policy | nil, mode: string | nil }
@@ -65,6 +76,8 @@ local function as_val(x) return type(x) == "table" end
 
 -- The atom bound a field-access TARGET must stay within (records are tables).
 local TABLE_ONLY = lattice.single("table")
+-- Lua's pad for a missing argument/result position.
+local NIL_ONLY = lattice.single("nil")
 
 -- The named rules and their default severities, as data. (Built with
 -- dynamic keys: the checker folds literal-key writes into the alias shape.)
@@ -72,7 +85,11 @@ local DEFAULT_RULES = {
     { "parse-error", "error" },
     { "op-mismatch", "error" },
     { "call-non-function", "error" },
+    { "call-mismatch", "error" },
     { "field-write-mismatch", "error" },
+    { "annotation-mismatch", "error" },
+    { "cast-mismatch", "error" },
+    { "force-cast", "error" },
     { "internal", "error" },
     { "missing-field", "warn" },
     { "use-before-narrow", "warn" },
@@ -185,7 +202,106 @@ end
 local function evaluate_obligation(diags, values, ob)
     local v = values[ob.cell]
     if not as_val(v) then return nil end
+
+    if ob.kind == "param-witness" then
+        -- the ONE obligation that asks for evidence of INHABITATION: a
+        -- still-bottom parameter means no in-file call reaches it and no
+        -- annotation pins it — the body was checked against no inputs.
+        if lattice.is_bottom(v) then
+            emit(diags, ob.code, ob.line, ob.col,
+                ob.what .. " is never constrained (no in-file call site, no annotation)"
+                    .. " — the body is unchecked against real inputs; annotate to check")
+        end
+        return nil
+    end
+
     if lattice.is_bottom(v) then return nil end
+
+    if ob.kind == "call" then
+        -- arguments against the callee's annotated parameter PINS (the
+        -- contravariant face of the arrow; unpinned params take the
+        -- argument FLOW instead and are checked by the body's own
+        -- obligations). A missing argument is Lua's nil pad.
+        local fn = v.fn
+        if fn == nil then return nil end
+        local args = ob.args
+        if args == nil then return nil end
+        local params = fn.params
+        for i = 1, #params do
+            local pin = params[i].pin
+            if pin ~= nil then
+                local av = nil --: unknown
+                if i <= #args then av = values[args[i]] end
+                local avv = NIL_ONLY --: Val
+                local missing = true
+                if av ~= nil and as_val(av) then
+                    avv = av
+                    missing = false
+                end
+                if not (not missing and lattice.is_bottom(avv)) then
+                    if lattice.is_unknown(avv) then
+                        emit(diags, "use-before-narrow", ob.line, ob.col,
+                            "argument #" .. tostring(i) .. " to " .. ob.what
+                                .. " has type `unknown` — the parameter expects `"
+                                .. lattice.show(pin) .. "`; narrow it first")
+                    elseif not lattice.leq(avv, pin) then
+                        local got = lattice.show(avv)
+                        if missing then got = got .. " (missing argument)" end
+                        emit(diags, ob.code, ob.line, ob.col,
+                            "argument #" .. tostring(i) .. " to " .. ob.what .. ": got `"
+                                .. got .. "`, the parameter expects `" .. lattice.show(pin) .. "`")
+                    end
+                end
+            end
+        end
+        local rest = fn.rest
+        if fn.vararg and rest ~= nil then
+            for i = #params + 1, #args do
+                local av = values[args[i]]
+                if av ~= nil and as_val(av) and not lattice.is_bottom(av) then
+                    if lattice.is_unknown(av) then
+                        emit(diags, "use-before-narrow", ob.line, ob.col,
+                            "argument #" .. tostring(i) .. " to " .. ob.what
+                                .. " has type `unknown` — the rest parameter expects `"
+                                .. lattice.show(rest) .. "`; narrow it first")
+                    elseif not lattice.leq(av, rest) then
+                        emit(diags, ob.code, ob.line, ob.col,
+                            "argument #" .. tostring(i) .. " to " .. ob.what .. ": got `"
+                                .. lattice.show(av) .. "`, the rest parameter expects `"
+                                .. lattice.show(rest) .. "`")
+                    end
+                end
+            end
+        end
+        return nil
+    end
+
+    if ob.kind == "ann" then
+        -- annotation/cast agreement: the value must satisfy the annotated
+        -- type (leq; leq_init for a directly-ascribed fresh constructor —
+        -- the ascription re-types the constructor's field refs). `unknown`
+        -- is the can't-verify class, not a disagreement.
+        local allow = ob.allow
+        if allow == nil then return nil end
+        if lattice.is_unknown(v) then
+            emit(diags, "use-before-narrow", ob.line, ob.col,
+                ob.what .. " has type `unknown` — `" .. lattice.show(allow)
+                    .. "` is asserted but cannot be verified; narrow the value first")
+            return nil
+        end
+        local ok = false
+        if ob.init == true then
+            ok = lattice.leq_init(v, allow)
+        else
+            ok = lattice.leq(v, allow)
+        end
+        if not ok then
+            emit(diags, ob.code, ob.line, ob.col,
+                ob.what .. ": got `" .. lattice.show(v) .. "`, the annotation says `"
+                    .. lattice.show(allow) .. "`")
+        end
+        return nil
+    end
 
     if ob.kind == "field-read" then
         local field = ob.field

@@ -201,6 +201,34 @@ T.describe("v9 check — structural records (obligations end to end)", function(
     end)
 end)
 
+T.describe("v9 check — function boundary honesty", function()
+    T.it("a parameter no call reaches is ONE honest diagnostic, not a per-use flood", function()
+        local diags = check.check_source(
+            "local function f(x)\n  local y = x.field\n  return y\nend\nreturn f\n", "t.lua", nil)
+        T.ok(diags ~= nil, "checked")
+        if diags ~= nil then
+            local d = find_diag(diags, "unsupported:unconstrained-param")
+            T.ok(d ~= nil, "the unchecked-body boundary is named")
+            if d ~= nil then
+                T.ok(d.message:find("'x'", 1, true) ~= nil, "names the parameter: " .. d.message)
+            end
+            T.eq(find_diag(diags, "use-before-narrow"), nil,
+                "no per-use unknown flood for a body checked against no inputs")
+        end
+    end)
+
+    T.it("a called function's params take evidence from the call, and the body is checked with it", function()
+        local diags = check.check_source(
+            "local function f(x) return x + 1 end\nlocal r = f('s')\nreturn r\n", "t.lua", nil)
+        T.ok(diags ~= nil, "checked")
+        if diags ~= nil then
+            local d = find_diag(diags, "op-mismatch")
+            T.ok(d ~= nil, "the string argument surfaces at the body's `+`")
+            T.eq(find_diag(diags, "unsupported:unconstrained-param"), nil, "param IS constrained")
+        end
+    end)
+end)
+
 T.describe("v9 check — caps-first file access", function()
     T.it("reads through injected caps only", function()
         local caps = {
@@ -235,10 +263,11 @@ local REAL_FILES = {
 local function known_code(code)
     if code:sub(1, 12) == "unsupported:" then return true end
     return code == "parse-error" or code == "op-mismatch" or code == "call-non-function"
-        or code == "use-before-narrow" or code == "undeclared-global"
+        or code == "call-mismatch" or code == "use-before-narrow" or code == "undeclared-global"
         or code == "global-write" or code == "unused-local" or code == "internal"
         or code == "missing-field" or code == "field-write-mismatch"
-        or code == "new-field-on-write"
+        or code == "new-field-on-write" or code == "annotation-mismatch"
+        or code == "cast-mismatch" or code == "force-cast"
 end
 
 --: (string) -> (string | nil, string | nil)
