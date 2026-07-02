@@ -122,6 +122,20 @@ T.describe("v9 annot — the supported v0 grammar", function()
         end
     end)
 
+    T.it("a trailing `...` in a result tuple marks the arrow result-open", function()
+        local at, buckets = parse("(f: function) -> (boolean, ...)")
+        T.eq(#buckets, 0, "in-grammar, not a bucket")
+        T.ok(is_at(at) and at.k == "fn", "fn")
+        if is_at(at) and at.k == "fn" then
+            T.eq(at.open, true, "result-open")
+            T.eq(count_of(at, "results"), 1, "one fixed result")
+        end
+        local bare = parse("() -> (...)")
+        T.ok(is_at(bare) and bare.k == "fn" and bare.open == true, "all-open results")
+        local closed = parse("() -> (string, integer)")
+        T.ok(is_at(closed) and closed.k == "fn" and closed.open ~= true, "no `...`, closed")
+    end)
+
     T.it("`x is T` predicates read as boolean results (narrowing later, stated)", function()
         local at, buckets = parse("(x: unknown) -> x is string")
         T.ok(is_at(at) and at.k == "fn", "fn")
@@ -240,10 +254,19 @@ T.describe("v9 annot — `--::` declaration classification", function()
         local kind, feat = annot.classify_decl("require \"lib.foo\"")
         T.eq(kind, "feature", "feature")
         T.eq(feat, "cross-module", "cross-module")
-        local _, f2 = annot.classify_decl("declare print = (string) -> nil")
-        T.eq(f2, "annotation-declare", "declare")
         local _, f3 = annot.classify_decl("augment string { upper: () -> string }")
         T.eq(f3, "annotation-augment", "augment")
+    end)
+
+    T.it("`declare name = T` is a global declaration (name + body split)", function()
+        local kind, name, body = annot.classify_decl("declare print = (string) -> nil")
+        T.eq(kind, "declare", "declare kind")
+        T.eq(name, "print", "name")
+        T.eq(body, "(string) -> nil", "body")
+        -- a malformed declare (no `= T` body) stays the named bucket.
+        local k2, f2 = annot.classify_decl("declare print")
+        T.eq(k2, "feature", "feature")
+        T.eq(f2, "annotation-declare", "annotation-declare")
     end)
 
     T.it("garbage classifies as garbage", function()

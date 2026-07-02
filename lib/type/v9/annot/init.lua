@@ -16,6 +16,9 @@
 --                  `x is T` predicates read as boolean results (the
 --                  narrowing power is a later increment, stated)
 --                  `-> ...(T)` result spread reads as a result-OPEN arrow
+--                  `-> (R1, R2, ...)` a trailing `...` in a result tuple
+--                  marks the arrow result-OPEN after its fixed positions
+--                  (positions beyond read as unknown, not nil)
 --   aliases        Name        resolved through the injected `resolve` cap.
 --                  RECURSIVE aliases unroll once and CUT to `unknown` at
 --                  the knot — the same bounded-depth upper approximation as
@@ -269,7 +272,7 @@ local function parse_results(p)
     local t = parse_type(p)
     if t.k == "tuple" then
         local parts = t.parts --: { [integer]: At }
-        return parts, false
+        return parts, t.open == true
     end
     return { t }, false
 end
@@ -326,9 +329,11 @@ local function parse_group(p)
     if #params == 1 and not vararg and not params[1].optional then
         return params[1].at
     end
+    -- a trailing `...` in a group read as a RESULT tuple marks the arrow
+    -- result-open (parse_results consumes `open`; other positions ignore it).
     local parts = {} --: { [integer]: At }
     for i = 1, #params do parts[i] = params[i].at end
-    return { k = "tuple", parts = parts }
+    return { k = "tuple", parts = parts, open = vararg }
 end
 
 -- ── primaries / terms / unions ──────────────────────────────────────────────
@@ -510,15 +515,25 @@ end
 
 -- Classify one `--::` declaration string. Returns one of:
 --   ("alias", name, body)      Name = <type grammar>
---   ("feature", feature, nil)  a named non-v0 form: declare / module /
---                              augment / newtype / template / unseal ->
+--   ("declare", name, body)    declare name = <type grammar> — a GLOBAL
+--                              declaration (the house no-ambient-globals
+--                              convention); the caller wires it into its
+--                              global environment
+--   ("feature", feature, nil)  a named non-v0 form: module / augment /
+--                              newtype / template / unseal ->
 --                              annotation-<kw>; require -> the cross-module
---                              boundary; generic aliases -> generic
+--                              boundary; generic aliases -> generic;
+--                              a malformed `declare` (no `= T` body) ->
+--                              annotation-declare
 --   ("garbage", errmsg, nil)   does not classify
 -- The generic-alias NAME is reported through the second return so callers
 -- can map references to the generic bucket.
 --: (content: string) -> (string, string, string | nil)
 function M.classify_decl(content)
+    local dname, dbody = content:match("^%s*declare%s+([%a_][%w_]*)%s*=%s*(.-)%s*$")
+    if dname ~= nil and dbody ~= nil and dbody ~= "" then
+        return "declare", dname, dbody
+    end
     local name, body = content:match("^%s*([%a_][%w_]*)%s*=%s*(.*)$")
     if name ~= nil and body ~= nil then
         return "alias", name, body
