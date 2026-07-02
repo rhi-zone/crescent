@@ -154,6 +154,96 @@ T.describe("v9 lattice — structural open records", function()
     end)
 end)
 
+T.describe("v9 lattice — function types (contravariant params, covariant results)", function()
+    local mkfn_seq = 0
+    --: (pins: { [integer]: unknown }, results: { [integer]: unknown }) -> unknown
+    local function mkfn(pins, results)
+        local params = {} --: { [integer]: { cell: string, pin: unknown } }
+        for i = 1, #pins do
+            mkfn_seq = mkfn_seq + 1
+            params[i] = { cell = "p#" .. tostring(mkfn_seq), pin = pins[i] }
+        end
+        return L.fn_val(params, results, false, nil, false)
+    end
+
+    T.it("renders and joins with itself", function()
+        local f = mkfn({ L.single("number") }, { L.single("string") })
+        T.eq(L.show(f), "(number) -> string", "arrow rendering")
+        T.ok(L.lattice.equal(L.lattice.join(f, f), f), "join idempotent on the same fn")
+    end)
+
+    T.it("join of the SAME function joins results pointwise (covariant)", function()
+        local params = { { cell = "p1", pin = nil } } --: { [integer]: { cell: string, pin: nil } }
+        local f1 = L.fn_val(params, { L.single("number") }, false, nil, false)
+        local f2 = L.fn_val(params, { L.single("string") }, false, nil, false)
+        local j = L.lattice.join(f1, f2)
+        T.eq(L.show(j), "(?) -> number | string", "results union up")
+    end)
+
+    T.it("join of DIFFERENT functions collapses to the function top", function()
+        local f = mkfn({ L.single("number") }, { L.single("string") })
+        local g = mkfn({ L.single("string") }, { L.single("string") })
+        local j = L.lattice.join(f, g)
+        T.eq(L.show(j), "function", "cond and f or g : some function, unchecked")
+        T.eq(L.leq(f, j), true, "each arrow ⊑ the function top")
+    end)
+
+    T.it("leq: results are COVARIANT", function()
+        local narrow = mkfn({}, { L.single("number") })
+        local wide = mkfn({}, { L.of({ "number", "string" }) })
+        T.eq(L.leq(narrow, wide), true, "() -> number ⊑ () -> number|string")
+        T.eq(L.leq(wide, narrow), false, "and NOT the reverse")
+    end)
+
+    T.it("leq: params are CONTRAVARIANT (the soundness direction)", function()
+        local takes_num = mkfn({ L.single("number") }, { L.single("nil") })
+        local takes_numstr = mkfn({ L.of({ "number", "string" }) }, { L.single("nil") })
+        T.eq(L.leq(takes_numstr, takes_num), true,
+            "(number|string) -> nil ⊑ (number) -> nil : accepts MORE, usable where less is passed")
+        T.eq(L.leq(takes_num, takes_numstr), false,
+            "(number) -> nil ⊄ (number|string) -> nil : would receive strings it cannot take")
+    end)
+
+    T.it("leq: arity extension per Lua call semantics", function()
+        local one_res = mkfn({}, { L.single("number") })
+        local two_res = mkfn({}, { L.single("number"), L.of({ "nil", "string" }) })
+        -- a function returning fewer results pads with nil at the caller.
+        T.eq(L.leq(one_res, two_res), true, "missing result position reads as nil ⊑ nil|string")
+        local two_strict = mkfn({}, { L.single("number"), L.single("string") })
+        T.eq(L.leq(one_res, two_strict), false, "nil pad ⊄ string")
+        -- a function with MORE pinned params than the expectation passes
+        -- receives nil at the extra position.
+        local needs_two = mkfn({ L.single("number"), L.of({ "number", "nil" }) }, {})
+        local wants_one = mkfn({ L.single("number") }, {})
+        T.eq(L.leq(needs_two, wants_one), true, "extra param admits nil -> ok")
+        local needs_two_strict = mkfn({ L.single("number"), L.single("number") }, {})
+        T.eq(L.leq(needs_two_strict, wants_one), false, "extra param demands number, gets nil")
+    end)
+
+    T.it("truthy keeps functions; falsy drops them", function()
+        local f = mkfn({}, {})
+        local opt = L.lattice.join(f, L.single("nil"))
+        T.eq(L.show(L.truthy(opt)), "() -> ()", "functions are truthy")
+        T.eq(L.show(L.falsy(opt)), "nil", "and never falsy")
+    end)
+
+    T.it("clip bounds depth with an UPPER approximation", function()
+        local inner = mkfn({}, { L.single("number") })
+        local outer = mkfn({}, { inner })
+        local clipped = L.clip(outer, 1)
+        T.eq(L.show(clipped), "() -> unknown", "structure below the cut becomes unknown")
+        T.eq(L.leq(outer, clipped), true, "clip(v) ⊒ v (monotone proposals survive)")
+        T.ok(L.lattice.equal(L.clip(L.single("number"), 0), L.single("number")),
+            "atoms are never clipped")
+    end)
+
+    T.it("excess flags an arrow outside a non-function bound", function()
+        local f = mkfn({}, {})
+        T.eq(L.excess(f, L.single("number")), "() -> ()", "arrow reported")
+        T.eq(L.excess(f, L.single("function")), nil, "admitted by the function atom")
+    end)
+end)
+
 T.describe("v9 lattice — obligation queries", function()
     T.it("excess reports atoms outside the allowed set", function()
         T.eq(L.excess(L.single("number"), L.single("number")), nil, "number ⊆ number")

@@ -1,11 +1,11 @@
 -- lib/type/v9/lattice.lua
 -- The v0 TYPE LATTICE for checking real Lua: atoms over the Lua base types
 -- (nil / boolean / number / string + the distinct table and function TOPS),
--- STRUCTURAL OPEN RECORDS, finite unions (a value carries an atom SET plus
--- at most one record component), and `unknown` as the absorbing top.
--- Deliberately BTy-lite: arrows / negation / literal types are later
--- DOMAIN-LOCAL upgrades behind this same interface — the engine never sees
--- any of this vocabulary.
+-- STRUCTURAL OPEN RECORDS, FUNCTION TYPES, finite unions (a value carries an
+-- atom SET plus at most one record component plus at most one function
+-- component), and `unknown` as the absorbing top. Deliberately BTy-lite:
+-- negation / literal types are later DOMAIN-LOCAL upgrades behind this same
+-- interface — the engine never sees any of this vocabulary.
 --
 -- ── Records (the v0 mutation-soundness choice, stated) ─────────────────────
 --
@@ -41,6 +41,48 @@
 -- different types can fool a reader. That residual hole is exactly what the
 -- policy rule names; dial it to "error" to forbid the idiom and close it.
 --
+-- ── Function types (the v0 arrow, engine-shaped) ───────────────────────────
+--
+-- A function component types `(params...) -> (results...)`:
+--
+--   Fn = { params, results, vararg, rest, open }
+--   params[i]  = { cell, pin }   cell : the param's ENGINE CELL id — call
+--                                sites propose argument values INTO it
+--                                (cells-as-unknowns: param inference);
+--                                pin  : the annotated param type, nil when
+--                                unannotated. Pins are the CONTRAVARIANT
+--                                face: a call site's argument is checked
+--                                `arg ⊑ pin`, and fn ⊑ fn demands
+--                                `pin_b ⊑ pin_a` (see fn_leq).
+--   results[i] = Val             COVARIANT: joins UP as return cells grow.
+--   vararg     = boolean         the function declares `...`.
+--   rest       = Val | nil       annotated `...T` bound for extra arguments.
+--   open       = boolean         some return ends in a call/vararg spread —
+--                                result positions beyond #results are
+--                                `unknown`, not `nil`.
+--
+-- WHY params are CELLS and results are VALUES: results are covariant, so a
+-- rebuild rule re-proposing them as return cells climb is monotone under the
+-- engine's join. Params are contravariant — successive proposals would have
+-- to MEET, and a meet against an early bottom sticks at bottom (the polarity
+-- trap). Cell ids sidestep it: the param list is a CONSTANT (identity), the
+-- flow into params happens through the engine's ordinary join on the param
+-- cells themselves, and the contravariant CHECK lives in pins + post-solve
+-- obligations. This is the arrow analogue of the record r/w split.
+--
+-- Join of two DIFFERENT functions (a phi like `cond and f or g`) collapses
+-- to the `function` atom top — calling it is unchecked (reported as the
+-- use-before-narrow class), which is sound and honest; keeping a precise
+-- union of arrows is a later domain-local upgrade. Join of the SAME function
+-- (same param cells) joins results pointwise.
+--
+-- TERMINATION: recursion can route a function's own value into its result
+-- cells (`local function f() return f end`) — each rebuild would nest one
+-- level deeper, an infinite ascent. `clip(v, depth)` cuts values at a fixed
+-- depth (replacing deeper structure with `unknown`, an upper approximation,
+-- so monotonicity survives); lowering applies it at exactly the two
+-- cycle-closing proposal sites (function rebuild, call-site argument flow).
+--
 -- ── Flow operations ─────────────────────────────────────────────────────────
 --
 -- Everything flow-sensitive derives from the same two lattice operations:
@@ -65,11 +107,14 @@
 
 local M = {}
 
--- A type value: a set of atom names + at most one open-record component.
--- {} atoms + nil rec = bottom (no info / never); { unknown = true } = top.
---:: Val = { atoms: { [string]: boolean }, rec: Rec | nil }
+-- A type value: a set of atom names + at most one open-record component +
+-- at most one function component. {} atoms + nil rec + nil fn = bottom (no
+-- info / never); { unknown = true } = top.
+--:: Val = { atoms: { [string]: boolean }, rec: Rec | nil, fn: Fn | nil }
 --:: Rec = { fields: { [string]: Field } }
 --:: Field = { r: Val, w: Val }
+--:: Fn = { params: { [integer]: Param }, results: { [integer]: Val }, vararg: boolean, rest: Val | nil, open: boolean }
+--:: Param = { cell: string, pin: Val | nil }
 
 M.ATOMS = { "nil", "boolean", "number", "string", "table", "function", "unknown" }
 
@@ -83,7 +128,7 @@ M.as_atoms = as_val
 local function single(atom)
     local a = {} --: { [string]: boolean }
     a[atom] = true
-    return { atoms = a, rec = nil }
+    return { atoms = a, rec = nil, fn = nil }
 end
 M.single = single
 
@@ -91,7 +136,7 @@ M.single = single
 function M.of(names)
     local a = {} --: { [string]: boolean }
     for i = 1, #names do a[names[i]] = true end
-    return { atoms = a, rec = nil }
+    return { atoms = a, rec = nil, fn = nil }
 end
 
 --: (Val) -> boolean
@@ -119,11 +164,55 @@ end
 --: () -> unknown
 local function bottom()
     local a = {} --: { [string]: boolean }
-    return { atoms = a, rec = nil }
+    return { atoms = a, rec = nil, fn = nil }
 end
 
 -- Forward declarations: join/meet/equal recurse through record fields.
 local join_val, meet_val, equal_val
+
+-- ── Function-component helpers ─────────────────────────────────────────────
+
+-- Same function IDENTITY: the param cell lists coincide. (A function's param
+-- cells are minted once at its definition, so cell-list equality identifies
+-- the definition; pins ride along and never differ for equal cell lists.)
+--: (Fn, Fn) -> boolean
+local function same_fn(a, b)
+    if a == b then return true end
+    if #a.params ~= #b.params then return false end
+    for i = 1, #a.params do
+        if a.params[i].cell ~= b.params[i].cell then return false end
+    end
+    return a.vararg == b.vararg
+end
+
+--: (Fn, Fn) -> boolean
+local function fn_equal(a, b)
+    if not same_fn(a, b) then return false end
+    if #a.results ~= #b.results then return false end
+    if a.open ~= b.open then return false end
+    for i = 1, #a.results do
+        if not equal_val(a.results[i], b.results[i]) then return false end
+    end
+    return true
+end
+
+-- Join of the SAME function: results join pointwise (covariant), positions
+-- one side lacks count as `nil` (Lua pads missing results with nil).
+--: (Fn, Fn) -> Fn
+local function fn_join(a, b)
+    local n = #a.results
+    if #b.results > n then n = #b.results end
+    local results = {} --: { [integer]: Val }
+    for i = 1, n do
+        local ra = a.results[i] or single("nil")
+        local rb = b.results[i] or single("nil")
+        results[i] = join_val(ra, rb)
+    end
+    return {
+        params = a.params, results = results, vararg = a.vararg,
+        rest = a.rest, open = a.open or b.open,
+    }
+end
 
 -- Pointwise join on COMMON fields (width: a merged view only guarantees the
 -- fields BOTH sides have). r joins UP (either branch may be read), w joins
@@ -174,9 +263,27 @@ join_val = function(a, b)
     elseif rb ~= nil then
         rec = rec_copy(rb)
     end
-    -- normalize: the `table` TOP subsumes any record component.
+    local fn = nil --: Fn | nil
+    local fa = a.fn
+    local fb = b.fn
+    if fa ~= nil and fb ~= nil then
+        if same_fn(fa, fb) then
+            fn = fn_join(fa, fb)
+        else
+            -- two DIFFERENT functions merge: collapse to the function TOP
+            -- (precise arrow unions are a later domain-local upgrade).
+            local k = "function" --: string
+            atoms[k] = true
+        end
+    elseif fa ~= nil then
+        fn = fa
+    elseif fb ~= nil then
+        fn = fb
+    end
+    -- normalize: the `table`/`function` TOPS subsume their components.
     if atoms["table"] then rec = nil end
-    return { atoms = atoms, rec = rec }
+    if atoms["function"] then fn = nil end
+    return { atoms = atoms, rec = rec, fn = fn }
 end
 
 -- Meet (greatest lower bound) — used ONLY for write bounds at record joins.
@@ -190,11 +297,11 @@ end
 meet_val = function(a, b)
     if has_unknown(a) then
         local rb0 = b.rec
-        return { atoms = copy_atoms(b.atoms), rec = rb0 ~= nil and rec_copy(rb0) or nil }
+        return { atoms = copy_atoms(b.atoms), rec = rb0 ~= nil and rec_copy(rb0) or nil, fn = b.fn }
     end
     if has_unknown(b) then
         local ra0 = a.rec
-        return { atoms = copy_atoms(a.atoms), rec = ra0 ~= nil and rec_copy(ra0) or nil }
+        return { atoms = copy_atoms(a.atoms), rec = ra0 ~= nil and rec_copy(ra0) or nil, fn = a.fn }
     end
     local atoms = {} --: { [string]: boolean }
     for k, present in pairs(a.atoms) do
@@ -210,8 +317,21 @@ meet_val = function(a, b)
     elseif rb ~= nil and a.atoms["table"] then
         rec = rec_copy(rb)
     end
+    -- Function components meet conservatively, mirroring records: kept when
+    -- structurally equal or when the other side admits any function.
+    local fn = nil --: Fn | nil
+    local fa = a.fn
+    local fb = b.fn
+    if fa ~= nil and fb ~= nil then
+        if fn_equal(fa, fb) then fn = fa end
+    elseif fa ~= nil and b.atoms["function"] then
+        fn = fa
+    elseif fb ~= nil and a.atoms["function"] then
+        fn = fb
+    end
     if atoms["table"] then rec = nil end
-    return { atoms = atoms, rec = rec }
+    if atoms["function"] then fn = nil end
+    return { atoms = atoms, rec = rec, fn = fn }
 end
 M.meet = meet_val
 
@@ -219,6 +339,13 @@ M.meet = meet_val
 equal_val = function(a, b)
     for k, present in pairs(a.atoms) do if present and not b.atoms[k] then return false end end
     for k, present in pairs(b.atoms) do if present and not a.atoms[k] then return false end end
+    local fa = a.fn
+    local fb = b.fn
+    if fa ~= nil and fb ~= nil then
+        if not fn_equal(fa, fb) then return false end
+    elseif fa ~= nil or fb ~= nil then
+        return false
+    end
     local ra = a.rec
     local rb = b.rec
     if ra == nil then return rb == nil end
@@ -251,8 +378,64 @@ function M.record_of(fieldvals)
         fields[name] = { r = v, w = v }
     end
     local a = {} --: { [string]: boolean }
-    return { atoms = a, rec = { fields = fields } }
+    return { atoms = a, rec = { fields = fields }, fn = nil }
 end
+
+-- A record from explicit r/w fields — the annotation constructor (readonly
+-- fields carry w = never; optional fields carry T | nil on both faces).
+--: ({ [string]: Field }) -> Val
+function M.record_rw(fields)
+    local copy = {} --: { [string]: Field }
+    for name, f in pairs(fields) do copy[name] = f end
+    local a = {} --: { [string]: boolean }
+    return { atoms = a, rec = { fields = copy }, fn = nil }
+end
+
+-- A function value. `params` is the definition's (or annotation's) param
+-- cell/pin list — treated as the function's IDENTITY (see header).
+--: (params: { [integer]: Param }, results: { [integer]: Val }, vararg: boolean, rest: Val | nil, open: boolean) -> Val
+function M.fn_val(params, results, vararg, rest, open)
+    local a = {} --: { [string]: boolean }
+    return {
+        atoms = a, rec = nil,
+        fn = { params = params, results = results, vararg = vararg, rest = rest, open = open },
+    }
+end
+
+-- Depth clip: replace structure deeper than `depth` with `unknown` (an UPPER
+-- approximation — clip(v) ⊒ v — so proposals through it stay monotone).
+-- Bottom stays bottom. Param pins are annotation-bounded and not clipped.
+-- Applied by lowering at the two cycle-closing proposal sites (function
+-- rebuild, call-argument flow) to bound recursion-created ascending chains.
+--: (Val, integer) -> Val
+local function clip(v, depth)
+    if has_unknown(v) then return single("unknown") end
+    local rec = v.rec
+    local fn = v.fn
+    if rec == nil and fn == nil then
+        return { atoms = copy_atoms(v.atoms), rec = nil, fn = nil }
+    end
+    if depth <= 0 then return single("unknown") end
+    local rec2 = nil --: Rec | nil
+    if rec ~= nil then
+        local fields = {} --: { [string]: Field }
+        for name, f in pairs(rec.fields) do
+            fields[name] = { r = clip(f.r, depth - 1), w = clip(f.w, depth - 1) }
+        end
+        rec2 = { fields = fields }
+    end
+    local fn2 = nil --: Fn | nil
+    if fn ~= nil then
+        local results = {} --: { [integer]: Val }
+        for i = 1, #fn.results do results[i] = clip(fn.results[i], depth - 1) end
+        fn2 = {
+            params = fn.params, results = results, vararg = fn.vararg,
+            rest = fn.rest, open = fn.open,
+        }
+    end
+    return { atoms = copy_atoms(v.atoms), rec = rec2, fn = fn2 }
+end
+M.clip = clip
 
 -- ── Ordering (obligation checking: is `a` allowed where `b` is required?) ──
 
@@ -260,9 +443,13 @@ end
 -- below `unknown`); a record component is admitted by `unknown`, by the
 -- `table` top, or by a WIDER record (every field b demands, a has, with
 -- r covariant and w contravariant — the r/w split is what makes mutable
--- fields sound, see the header).
+-- fields sound, see the header). A function component is admitted by
+-- `unknown`, by the `function` top, or by fn_leq (params contravariant,
+-- results covariant — the standard sound arrow rule).
+local leq, fn_leq
+
 --: (Val, Val) -> boolean
-local function leq(a, b)
+leq = function(a, b)
     if has_unknown(a) then return has_unknown(b) end
     if has_unknown(b) then return true end
     for k, present in pairs(a.atoms) do
@@ -279,9 +466,92 @@ local function leq(a, b)
             if not leq(fb.w, fa.w) then return false end
         end
     end
+    local fa = a.fn
+    if fa ~= nil and not b.atoms["function"] then
+        local fb = b.fn
+        if fb == nil then return false end
+        if not fn_leq(fa, fb) then return false end
+    end
     return true
 end
 M.leq = leq
+
+-- fa usable where fb is expected.
+--
+-- RESULTS (covariant): callers through fb read fb's result positions; fa
+-- must deliver a subtype at each — a position fa lacks delivers `nil`
+-- (unless fa is result-open, in which case it is unverifiable: reject).
+--
+-- PARAMS (contravariant): callers through fb pass values bounded by fb's
+-- pins; every requirement fa states (a pin) must ADMIT what fb lets
+-- through: `pin_b ⊑ pin_a`. A position fb never passes (beyond its arity,
+-- not vararg) reaches fa as `nil`. An fb position with NO pin makes no
+-- promise, so a pinned fa param there is unverifiable: reject. Unpinned fa
+-- params state no checkable requirement here; the call-site flow (arguments
+-- proposed into fa's param cells, checked by the body's own obligations)
+-- is what covers them — a v0 concession for fn-in-record-field comparisons,
+-- stated, not hidden.
+--: (Fn, Fn) -> boolean
+fn_leq = function(fa, fb)
+    for i = 1, #fb.results do
+        local ra = fa.results[i]
+        if ra == nil then
+            if fa.open then return false end
+            ra = single("nil")
+        end
+        if not leq(ra, fb.results[i]) then return false end
+    end
+    for i = 1, #fa.params do
+        local pa = fa.params[i].pin
+        if pa ~= nil then
+            local pb = nil --: Val | nil
+            local bp = fb.params[i]
+            if bp ~= nil then
+                pb = bp.pin
+            elseif fb.vararg then
+                pb = fb.rest
+            else
+                pb = single("nil")
+            end
+            if pb == nil then return false end
+            if not leq(pb, pa) then return false end
+        end
+    end
+    -- fa's rest bound must admit whatever fb's rest lets through.
+    local resta = fa.rest
+    local restb = fb.rest
+    if fa.vararg and resta ~= nil and fb.vararg then
+        if restb == nil then return false end
+        if not leq(restb, resta) then return false end
+    end
+    return true
+end
+
+-- Initialization ordering: like leq, but record FIELDS compare covariantly
+-- on the read face only. Sound ONLY for a syntactically FRESH constructor
+-- ascribed at its construction site — the constructor's field refs have no
+-- other alias yet, so the ascription re-types them (nested positions use
+-- full leq; only the top layer is initialization).
+--: (Val, Val) -> boolean
+local function leq_init(a, b)
+    if has_unknown(a) then return has_unknown(b) end
+    if has_unknown(b) then return true end
+    local ra = a.rec
+    local rb = b.rec
+    if ra ~= nil and rb ~= nil then
+        for name, fb in pairs(rb.fields) do
+            local fa = ra.fields[name]
+            if fa == nil then return false end
+            if not leq(fa.r, fb.r) then return false end
+        end
+        -- atoms + fn still compare as usual, minus the record component.
+        local a2 = { atoms = a.atoms, rec = nil, fn = a.fn } --: Val
+        local b2 = { atoms = b.atoms, rec = nil, fn = b.fn } --: Val
+        return leq(a2, b2)
+    end
+    return leq(a, b)
+end
+M.leq_init = leq_init
 
 -- ── The two flow operations (narrowing AND and/or derive from these) ───────
 
@@ -297,12 +567,13 @@ function M.truthy(v)
         if present and k ~= "nil" then r[k] = true end
     end
     local rec = v.rec
-    return { atoms = r, rec = rec ~= nil and rec_copy(rec) or nil }
+    return { atoms = r, rec = rec ~= nil and rec_copy(rec) or nil, fn = v.fn }
 end
 
 -- The part of `v` that survives a FALSY test: only `nil` and `boolean` atoms
 -- contain falsy values (numbers/strings/tables/functions are always truthy
--- in Lua — 0 and "" are truthy; every table is truthy, so records drop).
+-- in Lua — 0 and "" are truthy; every table is truthy, so records drop, and
+-- so does a function component).
 --: (unknown) -> unknown
 function M.falsy(v)
     if not as_val(v) then return bottom() end
@@ -311,7 +582,7 @@ function M.falsy(v)
     for k, present in pairs(v.atoms) do
         if present and (k == "nil" or k == "boolean") then r[k] = true end
     end
-    return { atoms = r, rec = nil }
+    return { atoms = r, rec = nil, fn = nil }
 end
 
 -- ── Record transfers (field read / field write) ────────────────────────────
@@ -354,13 +625,13 @@ function M.set_field(v, name, fv)
     if rec == nil then
         -- atoms-only target (number, table-top, …): the write cannot be
         -- tracked; the field-write obligation reports it.
-        return { atoms = copy_atoms(v.atoms), rec = nil }
+        return { atoms = copy_atoms(v.atoms), rec = nil, fn = v.fn }
     end
     local out = rec_copy(rec)
     if out.fields[name] == nil then
         out.fields[name] = { r = fv, w = fv }
     end
-    return { atoms = copy_atoms(v.atoms), rec = out }
+    return { atoms = copy_atoms(v.atoms), rec = out, fn = v.fn }
 end
 
 -- ── Queries (obligation checking reads these) ──────────────────────────────
@@ -371,11 +642,14 @@ function M.is_unknown(v) return has_unknown(v) end
 --: (Val) -> boolean
 function M.is_bottom(v)
     for _, present in pairs(v.atoms) do if present then return false end end
-    return v.rec == nil
+    return v.rec == nil and v.fn == nil
 end
 
 --: (Val) -> boolean
 function M.has_rec(v) return v.rec ~= nil end
+
+--: (Val) -> Fn | nil
+function M.fn_of(v) return v.fn end
 
 --: (Val) -> boolean
 function M.has_table_top(v) return v.atoms["table"] == true end
@@ -402,7 +676,7 @@ end
 -- record: reported as its own honest boundary bucket, never op-mismatch.
 --: (Val) -> boolean
 function M.is_string_only(v)
-    if v.rec ~= nil then return false end
+    if v.rec ~= nil or v.fn ~= nil then return false end
     local seen = false
     for k, present in pairs(v.atoms) do
         if present then
@@ -414,6 +688,33 @@ function M.is_string_only(v)
 end
 
 local show_val
+
+--: (Fn) -> string
+local function fn_show(fn)
+    local ps = {} --: { [integer]: string }
+    for i = 1, #fn.params do
+        local pin = fn.params[i].pin
+        if pin ~= nil then ps[#ps + 1] = show_val(pin) else ps[#ps + 1] = "?" end
+    end
+    if fn.vararg then
+        local rest = fn.rest
+        if rest ~= nil then
+            ps[#ps + 1] = "..." .. show_val(rest)
+        else
+            ps[#ps + 1] = "..."
+        end
+    end
+    local rs = {} --: { [integer]: string }
+    for i = 1, #fn.results do rs[#rs + 1] = show_val(fn.results[i]) end
+    if fn.open then rs[#rs + 1] = "..." end
+    local r = "()" --: string
+    if #rs == 1 then
+        r = rs[1]
+    elseif #rs > 1 then
+        r = "(" .. table.concat(rs, ", ") .. ")"
+    end
+    return "(" .. table.concat(ps, ", ") .. ") -> " .. r
+end
 
 --: (Rec) -> string
 local function rec_show(rec)
@@ -436,6 +737,8 @@ show_val = function(v)
     table.sort(atoms)
     local rec = v.rec
     if rec ~= nil then atoms[#atoms + 1] = rec_show(rec) end
+    local fn = v.fn
+    if fn ~= nil then atoms[#atoms + 1] = fn_show(fn) end
     if #atoms == 0 then return "never" end
     return table.concat(atoms, " | ")
 end
@@ -443,8 +746,9 @@ end
 -- Atoms/components of `v` NOT admitted by `allow` — nil when v ⊑ allow on
 -- the atom level, else a rendered list (stable order). A record component is
 -- admitted when `allow` has the `table` atom (records are tables) or its own
--- record component. `unknown` in `v` is the caller's use-before-narrow case
--- and is reported separately, never here.
+-- record component; a function component when `allow` has the `function`
+-- atom or its own function component. `unknown` in `v` is the caller's
+-- use-before-narrow case and is reported separately, never here.
 --: (v: Val, allow: Val) -> string | nil
 function M.excess(v, allow)
     local bad = {} --: { [integer]: string }
@@ -455,6 +759,10 @@ function M.excess(v, allow)
     local rec = v.rec
     if rec ~= nil and not allow.atoms["table"] and allow.rec == nil then
         bad[#bad + 1] = rec_show(rec)
+    end
+    local fn = v.fn
+    if fn ~= nil and not allow.atoms["function"] and allow.fn == nil then
+        bad[#bad + 1] = fn_show(fn)
     end
     if #bad == 0 then return nil end
     return table.concat(bad, " | ")
