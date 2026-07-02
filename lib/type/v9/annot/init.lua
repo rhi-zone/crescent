@@ -5,9 +5,11 @@
 -- vocabulary and names everything else honestly.
 --
 -- SUPPORTED in v0 (maps losslessly-enough onto the v9 lattice):
---   atoms          nil boolean number string table function  (integer -> the
---                  number atom; literal types -> their base atom — both are
---                  stated UP-approximations: sound as seeds, wider as bounds)
+--   atoms          nil true false boolean number string table function
+--                  (integer -> the number atom; string/number literal types
+--                  -> their base atom — stated UP-approximations: sound as
+--                  seeds, wider as bounds. true/false are EXACT: the lattice
+--                  carries boolean literal atoms; boolean = true | false)
 --   unknown, never
 --   unions         T | U | nil
 --   records        { x: T, y?: U, readonly z: V, ... }   (the `...` open
@@ -57,11 +59,12 @@ local M = {}
 local MAX_EXPANSIONS = 512
 
 -- Names that are types themselves, mapped to v9 atoms (integer is the
--- number atom in v0 — no literal/int split in the lattice).
+-- number atom in v0 — no int split in the lattice; true/false ARE the
+-- lattice's boolean literal atoms, and "boolean" is their union).
 local ATOM_NAMES = {
     ["nil"] = "nil", boolean = "boolean", number = "number", integer = "number",
     string = "string", table = "table", ["function"] = "function",
-    ["true"] = "boolean", ["false"] = "boolean",
+    ["true"] = "true", ["false"] = "false",
 } --: { [string]: string }
 
 -- ── tokenizer ───────────────────────────────────────────────────────────────

@@ -21,6 +21,9 @@
 --   if type(x) == "s" then   then-branch x : tag_keep(x, s), else-branch
 --                    x : tag_drop(x, s) — two more lattice flow ops of the
 --                    same shape (either operand order; ~= swaps branches)
+--   if x == nil then the SAME keep/drop filters at the nil tag (equality
+--                    with the nil literal IS the type()-tag test for nil;
+--                    ~= swaps branches, either operand order)
 --
 -- RECORDS ride the same shape: a table constructor with named fields is one
 -- rule proposing `lattice.record_of` over its field cells; a field READ
@@ -1258,12 +1261,29 @@ function M.lower(chunk)
         return nil
     end
 
+    -- The tested local of a plain-identifier expression, nil otherwise.
+    --: (unknown) -> Decl | nil
+    local function ident_target(e)
+        if not is_node(e) then return nil end
+        if e.tag ~= defs.NODE_IDENTIFIER then return nil end
+        local nm = e.name
+        if type(nm) ~= "string" then return nil end
+        return resolve(nm)
+    end
+
+    --: (unknown) -> boolean
+    local function is_nil_literal(e)
+        return is_node(e) and e.tag == defs.NODE_LITERAL and e.lit_kind == defs.LIT_NIL
+    end
+
     -- If `cond` is narrowable in v0, return the tested local's decl plus
     -- the then/else FILTER MODES (filter_flow vocabulary). Recognized:
-    -- a bare local (truthy/falsy), `not <local>` (swapped), and the tag
-    -- guards `type(x) == "…"` / `type(x) ~= "…"` in either operand order
-    -- (keep:<tag> / drop:<tag>). Richer guards (`x == nil`, and/or chains)
-    -- are later increments of the SAME mechanism.
+    -- a bare local (truthy/falsy), `not <local>` (swapped), the tag guards
+    -- `type(x) == "…"` / `type(x) ~= "…"` in either operand order
+    -- (keep:<tag> / drop:<tag>), and the nil-equality guards `x == nil` /
+    -- `x ~= nil` (the SAME keep/drop filters at the nil tag — equality with
+    -- the nil literal IS the type()-tag test for nil). Richer guards
+    -- (and/or chains) are later increments of the SAME mechanism.
     --: (Ast) -> (Decl | nil, string, string)
     local function cond_target(cond)
         if cond.tag == defs.NODE_IDENTIFIER then
@@ -1291,6 +1311,18 @@ function M.lower(chunk)
                     end
                     return d, "drop:" .. tag, "keep:" .. tag
                 end
+                local nd = ident_target(cond.lhs)
+                local lit = is_nil_literal(cond.rhs)
+                if nd == nil or not lit then
+                    nd = ident_target(cond.rhs)
+                    lit = is_nil_literal(cond.lhs)
+                end
+                if nd ~= nil and lit then
+                    if op == "==" then
+                        return nd, "keep:nil", "drop:nil"
+                    end
+                    return nd, "drop:nil", "keep:nil"
+                end
             end
         end
         return nil, "truthy", "falsy"
@@ -1305,7 +1337,13 @@ function M.lower(chunk)
             local k = n.lit_kind
             if type(k) == "number" then
                 if k == defs.LIT_NIL then return atom_cell("nil") end
-                if k == defs.LIT_BOOLEAN then return atom_cell("boolean") end
+                if k == defs.LIT_BOOLEAN then
+                    -- the literal atoms: `true`/`false` are distinct lattice
+                    -- values (boolean is their union) — what keeps
+                    -- `cond and a or b` from leaking a phantom boolean.
+                    if n.value == true then return atom_cell("true") end
+                    return atom_cell("false")
+                end
                 if k == defs.LIT_INTEGER or k == defs.LIT_NUMBER then return atom_cell("number") end
                 if k == defs.LIT_STRING then return atom_cell("string") end
             end

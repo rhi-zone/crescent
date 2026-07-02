@@ -1,11 +1,17 @@
 -- lib/type/v9/lattice.lua
 -- The v0 TYPE LATTICE for checking real Lua: atoms over the Lua base types
--- (nil / boolean / number / string + the distinct table and function TOPS),
--- STRUCTURAL OPEN RECORDS, FUNCTION TYPES, finite unions (a value carries an
--- atom SET plus at most one record component plus at most one function
--- component), and `unknown` as the absorbing top. Deliberately BTy-lite:
--- negation / literal types are later DOMAIN-LOCAL upgrades behind this same
--- interface — the engine never sees any of this vocabulary.
+-- (nil / true / false / number / string + the distinct table and function
+-- TOPS), STRUCTURAL OPEN RECORDS, FUNCTION TYPES, finite unions (a value
+-- carries an atom SET plus at most one record component plus at most one
+-- function component), and `unknown` as the absorbing top. Deliberately
+-- BTy-lite: negation / richer literal types are later DOMAIN-LOCAL upgrades
+-- behind this same interface — the engine never sees any of this vocabulary.
+--
+-- BOOLEAN IS SPLIT into the `true` and `false` literal atoms (boolean = their
+-- union; constructors normalize the spelling "boolean" into the pair, and
+-- show/excess collapse the pair back for display). The split is what makes
+-- the classic `cond and a or b` idiom precise: falsy(boolean) = false, and
+-- truthy(false | T) = T — the `or` arm never leaks a phantom `boolean`.
 --
 -- ── Records (the v0 mutation-soundness choice, stated) ─────────────────────
 --
@@ -87,8 +93,8 @@
 --
 -- Everything flow-sensitive derives from the same two lattice operations:
 --
---   truthy(T) = drop `nil` (records/tables are always truthy; they stay)
---   falsy(T)  = keep only `nil` and `boolean` (records are never falsy)
+--   truthy(T) = drop `nil` and `false` (records/tables are always truthy)
+--   falsy(T)  = keep only `nil` and `false` (records are never falsy)
 --
 -- `if`-narrowing uses them directly, and `and`/`or` are DERIVED, not
 -- hardcoded:  a and b : falsy(a) | type(b)     a or b : truthy(a) | type(b).
@@ -120,7 +126,7 @@ local M = {}
 --:: Param = { cell: string, pin: Val | nil }
 --:: Fn = { params: { [integer]: Param }, results: { [integer]: Val }, vararg: boolean, rest: Val | nil, open: boolean }
 
-M.ATOMS = { "nil", "boolean", "number", "string", "table", "function", "unknown" }
+M.ATOMS = { "nil", "true", "false", "number", "string", "table", "function", "unknown" }
 
 --: (x: unknown) -> x is Val
 local function as_val(x) return type(x) == "table" end
@@ -128,10 +134,27 @@ M.as_val = as_val
 -- Back-compat name used by callers narrowing engine cell values.
 M.as_atoms = as_val
 
+-- Constructors NORMALIZE the "boolean" spelling into the true/false literal
+-- pair — "boolean" is never an atom key, only a display collapse (show/excess).
+-- (Dynamic keys throughout: the legacy checker folds literal-key writes
+-- into the value's shape — same idiom as check.lua's DEFAULT_RULES.)
+--: ({ [string]: boolean }, string) -> nil
+local function add_atom(a, name)
+    if name == "boolean" then
+        local t = "true" --: string
+        local f = "false" --: string
+        a[t] = true
+        a[f] = true
+    else
+        a[name] = true
+    end
+    return nil
+end
+
 --: (string) -> Val
 local function single(atom)
     local a = {} --: { [string]: boolean }
-    a[atom] = true
+    add_atom(a, atom)
     return { atoms = a, rec = nil, fn = nil }
 end
 M.single = single
@@ -139,7 +162,7 @@ M.single = single
 --: ({ [integer]: string }) -> Val
 function M.of(names)
     local a = {} --: { [string]: boolean }
-    for i = 1, #names do a[names[i]] = true end
+    for i = 1, #names do add_atom(a, names[i]) end
     return { atoms = a, rec = nil, fn = nil }
 end
 
@@ -570,75 +593,86 @@ M.leq_init = leq_init
 
 -- ── The two flow operations (narrowing AND and/or derive from these) ───────
 
--- The part of `v` that survives a TRUTHY test: drop `nil`. `boolean` stays
--- (v0 cannot split true from false); records/tables are always truthy and
--- stay. `unknown` stays unknown (top is opaque).
+-- The part of `v` that survives a TRUTHY test: drop `nil` and the `false`
+-- literal (the boolean split makes this exact); records/tables are always
+-- truthy and stay. `unknown` stays unknown (top is opaque).
 --: (unknown) -> unknown
 function M.truthy(v)
     if not as_val(v) then return bottom() end
     if has_unknown(v) then return single("unknown") end
     local r = {} --: { [string]: boolean }
     for k, present in pairs(v.atoms) do
-        if present and k ~= "nil" then r[k] = true end
+        if present and k ~= "nil" and k ~= "false" then r[k] = true end
     end
     local rec = v.rec
     return { atoms = r, rec = rec ~= nil and rec_copy(rec) or nil, fn = v.fn }
 end
 
--- The part of `v` that survives a FALSY test: only `nil` and `boolean` atoms
--- contain falsy values (numbers/strings/tables/functions are always truthy
--- in Lua — 0 and "" are truthy; every table is truthy, so records drop, and
--- so does a function component).
+-- The part of `v` that survives a FALSY test: only `nil` and the `false`
+-- literal are falsy in Lua (numbers/strings/tables/functions — and `true` —
+-- are always truthy; 0 and "" are truthy; every table is truthy, so records
+-- drop, and so does a function component).
 --: (unknown) -> unknown
 function M.falsy(v)
     if not as_val(v) then return bottom() end
     if has_unknown(v) then return single("unknown") end
     local r = {} --: { [string]: boolean }
     for k, present in pairs(v.atoms) do
-        if present and (k == "nil" or k == "boolean") then r[k] = true end
+        if present and (k == "nil" or k == "false") then r[k] = true end
     end
     return { atoms = r, rec = nil, fn = nil }
 end
 
 -- ── type()-tag flow operations (the `type(x) == "…"` guard filters) ────────
 
--- Lua's type() tags mapped to v9 atoms. Tags with no v0 atom (userdata /
--- thread / cdata) are still VALID guards: their values only ever appear
--- inside `unknown` in v0, so keep-from-known is bottom (dead branch) and
--- drop-from-known is the identity — both sound.
-local TAG_ATOM = {
-    ["nil"] = "nil", boolean = "boolean", number = "number",
-    string = "string", table = "table", ["function"] = "function",
-} --: { [string]: string }
+-- Lua's type() tags mapped to v9 atom SETS (the boolean tag covers the
+-- true/false literal pair; every other tag covers one atom). Tags with no
+-- v0 atoms (userdata / thread / cdata) are still VALID guards: their values
+-- only ever appear inside `unknown` in v0, so keep-from-known is bottom
+-- (dead branch) and drop-from-known is the identity — both sound.
+local TAG_ATOMS = {
+    ["nil"] = { "nil" }, boolean = { "true", "false" }, number = { "number" },
+    string = { "string" }, table = { "table" }, ["function"] = { "function" },
+} --: { [string]: { [integer]: string } }
 
 --: (string) -> boolean
 function M.is_type_tag(name)
-    return TAG_ATOM[name] ~= nil or name == "userdata" or name == "thread"
+    return TAG_ATOMS[name] ~= nil or name == "userdata" or name == "thread"
         or name == "cdata"
 end
 
+--: ({ [integer]: string }) -> { [string]: boolean }
+local function atom_set(list)
+    local s = {} --: { [string]: boolean }
+    for i = 1, #list do s[list[i]] = true end
+    return s
+end
+
 -- The part of `v` whose type() IS `tag`. Monotone: as v climbs (atoms grow,
--- up to unknown) the kept part climbs (bounded by the tag's atom; from
--- `unknown` it is exactly that atom — the narrowing that makes the guard
+-- up to unknown) the kept part climbs (bounded by the tag's atoms; from
+-- `unknown` it is exactly those atoms — the narrowing that makes the guard
 -- useful — or unknown for atom-less tags).
 --: (unknown, string) -> unknown
 function M.tag_keep(v, tag)
     if not as_val(v) then return bottom() end
-    local atom = TAG_ATOM[tag] --: string | nil
+    local list = TAG_ATOMS[tag] --: { [integer]: string } | nil
     if has_unknown(v) then
-        if atom ~= nil then return single(atom) end
+        if list ~= nil then return M.of(list) end
         return single("unknown")
     end
-    if atom == nil then return bottom() end
+    if list == nil then return bottom() end
+    local keep = atom_set(list)
     local r = {} --: { [string]: boolean }
-    if v.atoms[atom] then r[atom] = true end
+    for k, present in pairs(v.atoms) do
+        if present and keep[k] then r[k] = true end
+    end
     local rec = nil --: Rec | nil
     local fn = nil --: Fn | nil
-    if atom == "table" then
+    if keep["table"] then
         local vr = v.rec
         if vr ~= nil then rec = rec_copy(vr) end
     end
-    if atom == "function" then fn = v.fn end
+    if keep["function"] then fn = v.fn end
     return { atoms = r, rec = rec, fn = fn }
 end
 
@@ -649,18 +683,20 @@ end
 function M.tag_drop(v, tag)
     if not as_val(v) then return bottom() end
     if has_unknown(v) then return single("unknown") end
-    local atom = TAG_ATOM[tag] --: string | nil
+    local list = TAG_ATOMS[tag] --: { [integer]: string } | nil
+    local drop = {} --: { [string]: boolean }
+    if list ~= nil then drop = atom_set(list) end
     local r = {} --: { [string]: boolean }
     for k, present in pairs(v.atoms) do
-        if present and k ~= atom then r[k] = true end
+        if present and not drop[k] then r[k] = true end
     end
     local rec = nil --: Rec | nil
-    if atom ~= "table" then
+    if not drop["table"] then
         local vr = v.rec
         if vr ~= nil then rec = rec_copy(vr) end
     end
     local fn = nil --: Fn | nil
-    if atom ~= "function" then fn = v.fn end
+    if not drop["function"] then fn = v.fn end
     return { atoms = r, rec = rec, fn = fn }
 end
 
@@ -809,10 +845,30 @@ local function rec_show(rec)
     return "{ " .. table.concat(parts, ", ") .. " }"
 end
 
+-- Display collapse: the true/false literal pair renders as "boolean".
+--: ({ [integer]: string }) -> { [integer]: string }
+local function collapse_boolean(names)
+    local has_t = false
+    local has_f = false
+    for i = 1, #names do
+        if names[i] == "true" then has_t = true end
+        if names[i] == "false" then has_f = true end
+    end
+    if not (has_t and has_f) then return names end
+    local out = {} --: { [integer]: string }
+    for i = 1, #names do
+        local n = names[i]
+        if n ~= "true" and n ~= "false" then out[#out + 1] = n end
+    end
+    out[#out + 1] = "boolean"
+    return out
+end
+
 --: (Val) -> string
 show_val = function(v)
     local atoms = {} --: { [integer]: string }
     for k, present in pairs(v.atoms) do if present then atoms[#atoms + 1] = k end end
+    atoms = collapse_boolean(atoms)
     table.sort(atoms)
     local rec = v.rec
     if rec ~= nil then atoms[#atoms + 1] = rec_show(rec) end
@@ -834,6 +890,7 @@ function M.excess(v, allow)
     for k, present in pairs(v.atoms) do
         if present and k ~= "unknown" and not allow.atoms[k] then bad[#bad + 1] = k end
     end
+    bad = collapse_boolean(bad)
     table.sort(bad)
     local rec = v.rec
     if rec ~= nil and not allow.atoms["table"] and allow.rec == nil then

@@ -32,7 +32,8 @@ T.describe("v9 check — supported-discipline diagnostics", function()
                 T.eq(d.severity, "error", "default policy: error")
                 T.eq(d.line, 1, "line")
                 T.eq(d.col, 15, "col of the boolean operand")
-                T.ok(d.message:find("boolean", 1, true) ~= nil, "names the offender: " .. d.message)
+                T.ok(d.message:find("`true`", 1, true) ~= nil,
+                    "names the offender at literal precision: " .. d.message)
             end
         end
     end)

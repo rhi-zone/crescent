@@ -58,6 +58,39 @@ T.describe("v9 lowering — and/or DERIVED from truthy/falsy (the historic bug s
         local tys = infer("local a = 1\nlocal x = a or 'd'\nreturn x\n")
         T.eq(tys.x, "number | string", "truthy(number) | string")
     end)
+
+    T.it("cond and a or b : type(a) | type(b) when a is never falsy (the classic idiom)", function()
+        -- pre-split this leaked `boolean | number` (falsy(boolean) was the
+        -- whole boolean atom); with literal atoms falsy(boolean) = false and
+        -- truthy(false | number) = number.
+        local tys = infer("local c = 1 == 2\nlocal x = c and 1 or 2\nreturn x\n")
+        T.eq(tys.x, "number", "no phantom boolean leaks out of the ternary idiom")
+    end)
+
+    T.it("boolean literals are the true/false literal atoms", function()
+        local tys = infer("local t = true\nlocal f = false\nlocal b = 1 == 1\nreturn t, f, b\n")
+        T.eq(tys.t, "true", "the literal atom, not the boolean top")
+        T.eq(tys.f, "false", "same for false")
+        T.eq(tys.b, "boolean", "a comparison is the full pair (renders collapsed)")
+    end)
+end)
+
+T.describe("v9 lowering — nil-equality guards (the == nil / ~= nil idiom)", function()
+    T.it("`if x ~= nil then` narrows x in the then-arm; `== nil` swaps", function()
+        local src = "local c = true\nlocal x = nil\nif c then x = 1 end\n"
+            .. "local y = 0\nif x ~= nil then y = x end\n"
+            .. "local z = nil\nif x == nil then z = x end\nreturn y, z\n"
+        local tys = infer(src)
+        T.eq(tys.y, "number", "x ~= nil drops nil in the then-arm")
+        T.eq(tys.z, "nil", "x == nil keeps only nil in the then-arm")
+    end)
+
+    T.it("either operand order works (nil == x)", function()
+        local src = "local c = true\nlocal x = nil\nif c then x = 's' end\n"
+            .. "local y = 0\nif nil ~= x then y = x end\nreturn y\n"
+        local tys = infer(src)
+        T.eq(tys.y, "number | string", "swapped operands narrow the same way")
+    end)
 end)
 
 T.describe("v9 lowering — truthiness narrowing + join at merge", function()
