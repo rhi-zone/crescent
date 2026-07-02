@@ -96,6 +96,36 @@ Op-sem parity must hold at every commit. After the handler deletion, the adversa
 
 - [ ] **Investigate `setmetatable(t, nil)` support** (v5 item 5 backlog). Medium prio. Sandboxing's strongest use case served by fresh-table pattern. v5.x decision may be "document fresh-table as canonical idiom; never support setmetatable(t, nil)." If supporting it: open question whether monotone substitution can be preserved.
 
+## v9 vertical slice — dynamism-boundary roadmap (2026-07-03)
+
+The v9 slice (frontend seam -> total lowering -> engine -> `lib/type/v9/check.lua`)
+checks real lib files end-to-end: 1,557 files, zero crashes, full solve ~6s
+(`bin/cr lib/type/v9/smoke.lua` prints the histogram). Boundary items to shrink,
+in histogram order, plus recorded debt:
+
+- [ ] **Record/table types in the v0 domain** — `unsupported:field-expr` (200k) +
+  `table-constructor` (44k) + `field-assign` (21k) + `index-expr` (16k) dominate the
+  histogram. Domain-local lattice upgrade (row-shaped values behind the same
+  `Lattice`/`Rule` interface); the fenced `type_rep`/`subtype` seams are the designated
+  substrate to grow into.
+- [ ] **Annotations + function types** — `use-before-narrow` (186k) is mostly
+  un-annotated params and shallow call results; wiring `--:`/`--::` (behind a NEW
+  annotation seam, not the legacy `ann.lua`) + arrow types in the domain turns them
+  into checked types. `unsupported:cast-annotation` (6.7k) folds into the same seam.
+- [ ] **Stdlib/global declarations** — `undeclared-global` (22k): the no-ambient-globals
+  stance needs the explicit declaration surface reflected into v9 (require + declares).
+- [ ] **Loops via loop-head phi** — `for-num`/`for-in`/`while`/`repeat` (~11k): back-edges
+  are native to the engine worklist; phi-at-loop-head is the same mechanism as the
+  if-merge. Currently havoc-fenced (sound).
+- [ ] **true/false literal atoms** — the `cond and a or b` idiom types `boolean | X`
+  and trips `op-mismatch` (most of the 139 across the tree). Literal split is a
+  domain-local lattice refinement.
+- [ ] **v9 unused-local is syntactic** (declared-never-read in the lowering walk),
+  not wired to the backward liveness domain; flow-precise liveness (e.g.
+  assigned-after-last-read) is a later wiring of the existing domain.
+- [ ] **Guard narrowing beyond bare `x` / `not x`** — `type(x) == "..."`, `==`-nil
+  comparisons, and/or in conditions; same `cond_target` seam in `lower.lua`.
+
 ## Typechecker soundness methodology — open fork
 
 > **RESOLVED (2026-06-20).** Decided via design-it-twice (4 decorrelated candidates, 3 adversarial judges): ground soundness in an executable formal Lua semantics validated against reality (validated-semantics-first), version-parametric and cross-language, with mechanized proof staged behind phase 1. Full design + staging (S1–S5) in `docs/typechecker-formal-semantics.md`. Implementation TODOs in the next subsection ("Formal-semantics substrate — implementation"). The historical fork below is retained for context.

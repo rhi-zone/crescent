@@ -213,6 +213,28 @@ independent `Lattice`/transfer instances over one engine, and a fourth (a
 different inference lattice, an interval analysis, a must-analysis) is a new
 module, not an engine edit.
 
+## The Lua vertical slice (v0): real files -> real diagnostics
+
+The engine + domain interface above is exercised by a REAL checker path
+(July 2026): parse an actual `lib/**/*.lua` file, lower it TOTALLY, solve on
+the engine, and emit line/col diagnostics.
+
+| Seam | File | Contract |
+|---|---|---|
+| **Frontend** | `frontend/init.lua` | source -> plain-table AST (line/col on every node), `(nil, errmsg)` on syntax errors. Wraps the proven legacy parser (`lib/type/static/{lex,parse}`) + the v4 arena decoder, required in place — swappable behind this seam. The s-expr `parser.lua` is fenced as proof-oracle-only. |
+| **v0 lattice** | `lattice.lua` | atoms (nil/boolean/number/string + table/function tops) + finite unions + absorbing `unknown`. `truthy`/`falsy` are the ONLY flow operations; `if`-narrowing and `and`/`or` both derive from them (`a and b : falsy(a) | type(b)`) — the historic hardcoded-`boolean|nil` bug is structurally impossible and pinned by tests. |
+| **Total lowering** | `lower.lua` | AST -> engine `Graph` + `Obligation`s + structural diags in ONE walk, ONE rule shape (seed / flow / filter + upper-bound obligation). ALL 30 node kinds routed: v0-checked, or `unsupported:<construct>` with line/col (`M.ROUTE` is the roster; tests assert totality). Unsupported subtrees are havoc-fenced (reads marked, assigned outer locals -> unknown) so the checked region stays sound at the boundary. |
+| **Runner** | `check.lua` | `check_source`/`check_file` (caps-first) -> policy-stamped, position-sorted diags. THE POWER DIAL: named policy rules (`op-mismatch=error`, `use-before-narrow=warn`, per-bucket `unsupported:*`) — strictness is owner-decidable data, in one place. |
+| **Smoke** | `smoke.lua` | tool entry: whole-`lib/` totality run + diagnostic histogram (the coverage roadmap). July 2026: 1,557 files, ZERO crashes, full solve ~6s. |
+
+The histogram is the prioritized roadmap (top buckets: field/index access →
+record types; use-before-narrow → annotations + function types in the
+domain; undeclared-global → stdlib declarations; table-constructor fields;
+method calls; loops). Known v0 imprecision: no true/false literal atoms, so
+the `cond and a or b` idiom types as `boolean | X` and can trip
+`op-mismatch` — sound, honest, and the literal-split is a domain-local
+lattice upgrade, not an engine change.
+
 ## Legacy type-checking seams (retained, repositioned)
 
 The previous skeleton's bidirectional checker — `ir.lua` (de-Bruijn `tm`-shaped
