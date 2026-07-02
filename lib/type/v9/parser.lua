@@ -2,6 +2,12 @@
 -- Parser -> IR seam. Source -> s-expression surface AST -> de-Bruijn IR.
 -- Proof oracle: the lowering TARGET is `tm` (typing.v) — a de-Bruijn core.
 --
+-- FENCE (proof-oracle only): this s-expr frontend exists solely for the
+-- proof-parity path (slice_test.lua / parity_test.lua against the Coq `tm`
+-- core). It is NOT the Lua-language frontend and must not grow toward Lua.
+-- Lua source is parsed by `lib/type/v9/frontend/` (the proven full-Lua parser
+-- behind the v9 seam); checking real files goes through lib/type/v9/check.lua.
+--
 -- Surface syntax (Lisp-style, deliberately tiny):
 --   42  "str"  true  false  nil        -- literals
 --   x                                   -- variable (resolved to de-Bruijn)
