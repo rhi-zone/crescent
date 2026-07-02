@@ -99,19 +99,37 @@ Op-sem parity must hold at every commit. After the handler deletion, the adversa
 ## v9 vertical slice — dynamism-boundary roadmap (2026-07-03)
 
 The v9 slice (frontend seam -> total lowering -> engine -> `lib/type/v9/check.lua`)
-checks real lib files end-to-end: 1,557 files, zero crashes, full solve ~6s
+checks real lib files end-to-end: 1,557 files, zero crashes, full solve ~7s
 (`bin/cr lib/type/v9/smoke.lua` prints the histogram). Boundary items to shrink,
 in histogram order, plus recorded debt:
 
-- [ ] **Record/table types in the v0 domain** — `unsupported:field-expr` (200k) +
-  `table-constructor` (44k) + `field-assign` (21k) + `index-expr` (16k) dominate the
-  histogram. Domain-local lattice upgrade (row-shaped values behind the same
-  `Lattice`/`Rule` interface); the fenced `type_rep`/`subtype` seams are the designated
-  substrate to grow into.
-- [ ] **Annotations + function types** — `use-before-narrow` (186k) is mostly
-  un-annotated params and shallow call results; wiring `--:`/`--::` (behind a NEW
-  annotation seam, not the legacy `ann.lua`) + arrow types in the domain turns them
-  into checked types. `unsupported:cast-annotation` (6.7k) folds into the same seam.
+- [x] **Record/table types in the v0 domain** — DONE 2026-07-03. Open structural
+  records with per-field read/write split (r joins up / w meets down — the
+  records-of-refs invariance, engine-lattice-encoded) as a domain-local lattice
+  upgrade; field read/write/constructor/method-call lowered in the same one rule
+  shape; engine untouched. The 314k-diag family (`field-expr` 200k +
+  `table-constructor` 44k + `method-call` 33k + `field-assign` 21k + `index-expr`
+  16k) is retired; residue is the honest boundary (`unsupported:dynamic-index` 22k,
+  `table-array-part` 12k, `string-method` 0.4k) + real findings (`missing-field`,
+  `field-write-mismatch`). Named concession: `new-field-on-write` (policy, default
+  off). Note: went straight into `lattice.lua` rather than growing into the fenced
+  `type_rep`/`subtype` seams — those stay fenced for the arrow/negation upgrade.
+- [ ] **Annotations + function types** — `use-before-narrow` (now 444k, THE dominant
+  bucket: field reads whose target crossed an untyped function boundary — `require`
+  results, params, call returns) is mostly un-annotated params and shallow call
+  results; wiring `--:`/`--::` (behind a NEW annotation seam, not the legacy
+  `ann.lua`) + arrow types in the domain turns them into checked types.
+  `unsupported:cast-annotation` (6.7k) folds into the same seam.
+- [ ] **Optional fields in records** — `{ x = cond and v or nil }`-shaped and
+  conditionally-assigned fields intersect away at phi joins; reads then report
+  missing-field (e.g. the `body.generationConfig = body.generationConfig or {}`
+  default idiom). An optional-field attribute (field: T | absent) keeps them; also
+  needed before `missing-field` can default to error.
+- [ ] **Record imprecision classes to burn down** (all domain-local): fields accreted
+  through one alias / inside a callee are invisible to other views (missing-field,
+  sound-imprecise); function bodies see upvalue record versions at DEFINITION order,
+  not call order (`lib/bigint/init.lua:40` `M._mt` is the canonical false positive);
+  `x == nil`-guard narrowing inside `or`-chains (aho_corasick:151).
 - [ ] **Stdlib/global declarations** — `undeclared-global` (22k): the no-ambient-globals
   stance needs the explicit declaration surface reflected into v9 (require + declares).
 - [ ] **Loops via loop-head phi** — `for-num`/`for-in`/`while`/`repeat` (~11k): back-edges

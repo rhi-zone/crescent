@@ -222,18 +222,27 @@ the engine, and emit line/col diagnostics.
 | Seam | File | Contract |
 |---|---|---|
 | **Frontend** | `frontend/init.lua` | source -> plain-table AST (line/col on every node), `(nil, errmsg)` on syntax errors. Wraps the proven legacy parser (`lib/type/static/{lex,parse}`) + the v4 arena decoder, required in place — swappable behind this seam. The s-expr `parser.lua` is fenced as proof-oracle-only. |
-| **v0 lattice** | `lattice.lua` | atoms (nil/boolean/number/string + table/function tops) + finite unions + absorbing `unknown`. `truthy`/`falsy` are the ONLY flow operations; `if`-narrowing and `and`/`or` both derive from them (`a and b : falsy(a) | type(b)`) — the historic hardcoded-`boolean|nil` bug is structurally impossible and pinned by tests. |
-| **Total lowering** | `lower.lua` | AST -> engine `Graph` + `Obligation`s + structural diags in ONE walk, ONE rule shape (seed / flow / filter + upper-bound obligation). ALL 30 node kinds routed: v0-checked, or `unsupported:<construct>` with line/col (`M.ROUTE` is the roster; tests assert totality). Unsupported subtrees are havoc-fenced (reads marked, assigned outer locals -> unknown) so the checked region stays sound at the boundary. |
-| **Runner** | `check.lua` | `check_source`/`check_file` (caps-first) -> policy-stamped, position-sorted diags. THE POWER DIAL: named policy rules (`op-mismatch=error`, `use-before-narrow=warn`, per-bucket `unsupported:*`) — strictness is owner-decidable data, in one place. |
-| **Smoke** | `smoke.lua` | tool entry: whole-`lib/` totality run + diagnostic histogram (the coverage roadmap). July 2026: 1,557 files, ZERO crashes, full solve ~6s. |
+| **v0 lattice** | `lattice.lua` | atoms (nil/boolean/number/string + table/function tops) + STRUCTURAL OPEN RECORDS (width-subtyped; per-field read/write split — r joins up, w meets down — the engine-lattice encoding of the proof-dev's records-of-refs, making mutation sound: see the file header) + finite unions + absorbing `unknown`. `truthy`/`falsy` are the flow operations; `if`-narrowing and `and`/`or` both derive from them (`a and b : falsy(a) | type(b)`) — the historic hardcoded-`boolean|nil` bug is structurally impossible and pinned by tests. Field access adds `project`/`set_field`, two more monotone transfers behind the same interface. |
+| **Total lowering** | `lower.lua` | AST -> engine `Graph` + `Obligation`s + structural diags in ONE walk, ONE rule shape (seed / flow / filter / project / set_field + obligations). ALL 30 node kinds routed: v0-checked, or `unsupported:<construct>` with line/col (`M.ROUTE` is the roster; tests assert totality). Field reads (`t.x`, `t["x"]`, `t:m()` receivers), field writes (incl. the `function M.f()` module idiom, SSA-rebinding the base), and named-field constructors are CHECKED; non-literal keys are `unsupported:dynamic-index`, constructor array parts `unsupported:table-array-part`. Unsupported subtrees are havoc-fenced (reads marked, assigned outer locals — including field-write BASES — -> unknown) so the checked region stays sound at the boundary. |
+| **Runner** | `check.lua` | `check_source`/`check_file` (caps-first) -> policy-stamped, position-sorted diags. THE POWER DIAL: named policy rules (`op-mismatch=error`, `field-write-mismatch=error`, `missing-field=warn`, `new-field-on-write=off` — the ONE named open-record concession, dialable to error to close the alias hole — per-bucket `unsupported:*`; "off" suppresses) — strictness is owner-decidable data, in one place. |
+| **Smoke** | `smoke.lua` | tool entry: whole-`lib/` totality run + diagnostic histogram (the coverage roadmap). July 2026, with records: 1,557 files, ZERO crashes, full solve ~7s. |
 
-The histogram is the prioritized roadmap (top buckets: field/index access →
-record types; use-before-narrow → annotations + function types in the
-domain; undeclared-global → stdlib declarations; table-constructor fields;
-method calls; loops). Known v0 imprecision: no true/false literal atoms, so
-the `cond and a or b` idiom types as `boolean | X` and can trip
-`op-mismatch` — sound, honest, and the literal-split is a domain-local
-lattice upgrade, not an engine change.
+The histogram is the prioritized roadmap. With records (July 2026) the
+field/table family — `unsupported:{field-expr 200k, table-constructor 44k,
+method-call 33k, field-assign 21k, index-expr 16k}` ≈ 314k diagnostics, 58%
+of the total — is retired; what remains of it is the honest dynamic-key
+boundary (`unsupported:dynamic-index` 22k, `table-array-part` 12k,
+`string-method` 0.4k) plus REAL findings (`missing-field` 0.5k,
+`field-write-mismatch`). The dominant bucket is now `use-before-narrow`
+(444k): field reads whose TARGET is untyped because it crossed a function
+boundary (`require` results, params, call returns) — i.e. the roadmap's next
+increments are function types + annotations + stdlib declarations, in that
+order. Known v0 imprecision: no true/false literal atoms (the `cond and a or
+b` idiom types as `boolean | X`); record tracking is intraprocedural
+(fields accreted through one alias or inside a callee are invisible through
+another — reads report missing-field, sound but imprecise); function bodies
+see upvalue record versions at DEFINITION order, not call order. All are
+domain-local lattice/lowering upgrades, not engine changes.
 
 ## Legacy type-checking seams (retained, repositioned)
 
