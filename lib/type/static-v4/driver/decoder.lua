@@ -263,6 +263,11 @@ local function decode_func_expr(ctx, n, out)
 end
 
 local function decode_func_decl(ctx, n, out)
+	-- `local function f` vs `function f` / `function M.f`: the parser sets
+	-- FLAG_LOCAL (2) on local function declarations. The walker ignores the
+	-- distinction (its env treats both as bindings), but scope-accurate
+	-- consumers (v9 lowering) need it, so decode it as an explicit field.
+	out.is_local = (n.flags % (defs.FLAG_LOCAL * 2)) >= defs.FLAG_LOCAL
 	return decode_func_like(ctx, n, out, true)
 end
 
