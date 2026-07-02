@@ -1328,6 +1328,41 @@ function M.lower(chunk)
         return nil, "truthy", "falsy"
     end
 
+    -- A call expression that provably NEVER RETURNS (a diverging call): the
+    -- callee is a plain identifier whose DECLARED type is a `-> never` arrow
+    -- — a local pinned by annotation, or a declared global (the stdlib's
+    -- `error`). Used by the reachability discipline: a statement list ending
+    -- in such a call cannot fall through, so it contributes nothing to the
+    -- enclosing merge. Syntactic + declaration-driven only (an INFERRED
+    -- never-result is not consulted — lowering runs before the solve).
+    --: (unknown) -> boolean
+    local function call_diverges(e)
+        if not is_node(e) then return false end
+        if e.tag ~= defs.NODE_CALL_EXPR then return false end
+        local callee = e.callee
+        if not is_node(callee) then return false end
+        if callee.tag ~= defs.NODE_IDENTIFIER then return false end
+        local nm = callee.name
+        if type(nm) ~= "string" then return false end
+        local d = resolve(nm)
+        if d ~= nil then
+            local pin = d.pin
+            if pin == nil then return false end
+            local fn = pin.fn
+            if fn == nil then return false end
+            return #fn.results == 1 and lattice.is_bottom(fn.results[1])
+        end
+        local at = file_globals[nm] --: unknown
+        if at == nil then at = globals.lookup(nm) end
+        if not is_at(at) then return false end
+        if at.k ~= "fn" then return false end
+        local rs = at.results --: unknown
+        if not is_list(rs) then return false end
+        if #rs ~= 1 then return false end
+        local r1 = rs[1] --: unknown
+        return is_tbl(r1) and r1.k == "never"
+    end
+
     -- ── expressions ────────────────────────────────────────────────────────
 
     --: (Ast) -> string
@@ -1576,13 +1611,21 @@ function M.lower(chunk)
     -- `if`/`elseif`/`else` with truthiness narrowing and join-at-merge.
     -- Clause i's else-path IS clauses i+1.. (+ else block) — one recursion,
     -- so elseif chains get the same narrowing/merge as plain if/else.
-    --: ({ [integer]: Ast }, integer, { [integer]: Ast } | nil) -> nil
+    --
+    -- REACHABILITY AT THE MERGE: a branch that cannot fall through (its
+    -- lowering ends in return / break / a declared-never call — a DIVERGING
+    -- branch) contributes NOTHING to the phi; the merge takes only the
+    -- reachable branches' versions. This is what makes the early-exit idiom
+    -- narrow: `if type(x) ~= "string" then return end` leaves x at the
+    -- ELSE-arm's keep:string version after the if. Returns whether the
+    -- whole if diverges (every path ends in a definite jump).
+    --: ({ [integer]: Ast }, integer, { [integer]: Ast } | nil) -> boolean
     local function lower_if_from(clauses, i, else_body)
         local clause = clauses[i]
         local cond = clause.cond
         if not is_node(cond) then
             internal(clause, "if-clause without condition")
-            return nil
+            return false
         end
         lower_expr(cond)
         local vis = visible()
@@ -1590,45 +1633,58 @@ function M.lower(chunk)
         local d, then_mode, else_mode = cond_target(cond)
 
         -- then-arm: the condition's filter (truthy for a bare guard;
-        -- keep/drop tag filters for `type(x) == "…"`).
+        -- keep/drop tag filters for `type(x) == "…"` and nil equality).
         if d ~= nil then
             local nc = fresh(d.name .. "-then")
             filter_flow(d.cell, nc, then_mode)
             d.cell = nc
         end
+        local then_div = false
         local body = clause.body
         if is_list(body) then
             push_scope()
-            lower_stmts(body)
+            then_div = lower_stmts(body)
             pop_scope()
         end
         local then_snap = snapshot(vis)
         restore(vis, pre)
 
         -- else-arm: the complementary filter, then the rest of the chain.
+        -- An ABSENT else still narrows: the fall-through path is the
+        -- else-arm (this is what the early-exit idiom merges with).
         if d ~= nil then
             local ec = fresh(d.name .. "-else")
             filter_flow(d.cell, ec, else_mode)
             d.cell = ec
         end
+        local else_div = false
         if i < #clauses then
-            lower_if_from(clauses, i + 1, else_body)
+            else_div = lower_if_from(clauses, i + 1, else_body)
         elseif else_body ~= nil then
             push_scope()
-            lower_stmts(else_body)
+            else_div = lower_stmts(else_body)
             pop_scope()
         end
         local else_snap = snapshot(vis)
         restore(vis, pre)
 
-        -- merge: differing branch versions meet at a phi cell; the engine's
-        -- join produces the union. Identical versions pass through.
+        -- merge: only REACHABLE branch versions meet at the phi; a diverging
+        -- branch's version is skipped (its narrowing never leaks). Both arms
+        -- diverging makes the merge point unreachable: fresh BOTTOM cells —
+        -- code below is checked against no values (obligations on bottom are
+        -- vacuous), which is exact for dead code.
         for k = 1, #vis do
             local dk = vis[k]
             local t = then_snap[dk.id]
             local e = else_snap[dk.id]
             if t ~= nil and e ~= nil then
-                if t == e then
+                if then_div and else_div then
+                    dk.cell = fresh(dk.name .. "-unreachable")
+                elseif then_div then
+                    dk.cell = e
+                elseif else_div then
+                    dk.cell = t
+                elseif t == e then
                     dk.cell = t
                 else
                     local phi = fresh(dk.name .. "-phi")
@@ -1638,10 +1694,13 @@ function M.lower(chunk)
                 end
             end
         end
-        return nil
+        return then_div and else_div
     end
 
-    --: (Ast) -> nil
+    -- Lower one statement. Returns true when the statement DIVERGES (cannot
+    -- fall through: return, break, a declared-never call, or an if whose
+    -- every path diverges) — the reachability bit the merges consume.
+    --: (Ast) -> boolean
     local function lower_stmt(n)
         local tag = n.tag
         if tag == defs.NODE_LOCAL_STMT then
@@ -1649,7 +1708,7 @@ function M.lower(chunk)
             local exprs = n.exprs
             if not is_list(names) then
                 internal(n, "local without names")
-                return nil
+                return false
             end
             -- the same-line `--: T` annotation (single-name locals; consumed
             -- BEFORE the value list so a constructor's fields on this line
@@ -1683,7 +1742,7 @@ function M.lower(chunk)
                     end
                     local d = declare(nm, n.line, n.col, pinned_cell(nm, pinval), false)
                     d.pin = pinval
-                    return nil
+                    return false
                 end
             end
             for i = 1, #names do
@@ -1694,13 +1753,13 @@ function M.lower(chunk)
                     declare(nm, n.line, n.col, c, false)
                 end
             end
-            return nil
+            return false
         elseif tag == defs.NODE_ASSIGN_STMT then
             local targets = n.targets
             local exprs = n.exprs
             if not is_list(targets) or not is_list(exprs) then
                 internal(n, "malformed assignment")
-                return nil
+                return false
             end
             -- the same-line `--: T` annotation (single-target; consumed
             -- before the value list, as for locals).
@@ -1773,32 +1832,37 @@ function M.lower(chunk)
                     internal(t, "unexpected assignment target")
                 end
             end
-            return nil
+            return false
         elseif tag == defs.NODE_EXPR_STMT then
+            -- a declared-never call (`error(...)`) diverges: the statement
+            -- still lowers normally (arguments checked), but nothing after
+            -- it in this block is reachable.
             local e = n.expr
-            if is_node(e) then lower_expr(e) end
-            return nil
+            if is_node(e) then
+                lower_expr(e)
+                return call_diverges(e)
+            end
+            return false
         elseif tag == defs.NODE_DO_STMT then
             local body = n.body
             if is_list(body) then
                 push_scope()
-                lower_stmts(body)
+                local div = lower_stmts(body)
                 pop_scope()
+                return div
             end
-            return nil
+            return false
         elseif tag == defs.NODE_IF_STMT then
             local clauses = n.clauses
             if is_list(clauses) and #clauses >= 1 then
                 local else_body = n.else_body
                 if is_list(else_body) then
-                    lower_if_from(clauses, 1, else_body)
-                else
-                    lower_if_from(clauses, 1, nil)
+                    return lower_if_from(clauses, 1, else_body)
                 end
-            else
-                internal(n, "if without clauses")
+                return lower_if_from(clauses, 1, nil)
             end
-            return nil
+            internal(n, "if without clauses")
+            return false
         elseif tag == defs.NODE_RETURN_STMT then
             local frame_pins = nil --: unknown
             if ret_depth >= 1 then frame_pins = ret_frames[ret_depth].pins end
@@ -1829,7 +1893,7 @@ function M.lower(chunk)
                             n.line, n.col)
                     end
                 end
-                return nil
+                return true
             end
             -- inferred function: record per-position cells on the enclosing
             -- frame; the function wires them once the max return arity is
@@ -1855,7 +1919,7 @@ function M.lower(chunk)
                 local frame = ret_frames[ret_depth]
                 frame.returns[#frame.returns + 1] = rec
             end
-            return nil
+            return true
         elseif tag == defs.NODE_FUNC_DECL then
             local name_node = n.name
             if is_node(name_node) and name_node.tag == defs.NODE_IDENTIFIER then
@@ -1879,7 +1943,7 @@ function M.lower(chunk)
                                 "write to global '" .. nm .. "' (crescent has no ambient mutable globals)")
                         end
                     end
-                    return nil
+                    return false
                 end
             end
             -- `function M.f()` / `function M:f()` (the name is a field
@@ -1888,44 +1952,48 @@ function M.lower(chunk)
             if is_node(name_node) and name_node.tag == defs.NODE_FIELD_EXPR then
                 local c = lower_function(n, nil)
                 lower_field_write(name_node, c)
-                return nil
+                return false
             end
             -- funcname is Name{.Name}[:Name] — anything else is a decoder
             -- drift bug, surfaced loudly.
             if is_node(name_node) then lower_expr(name_node) end
             lower_function(n, nil)
             internal(n, "func-decl with an unexpected name shape")
-            return nil
+            return false
         elseif tag == defs.NODE_WHILE_STMT or tag == defs.NODE_REPEAT_STMT
             or tag == defs.NODE_FOR_NUM or tag == defs.NODE_FOR_IN then
             unsupported(n, frontend.node_name(tag))
             havoc_scan(n)
-            return nil
+            return false
         elseif tag == defs.NODE_BREAK_STMT then
             unsupported(n, "break-stmt")
-            return nil
+            return false
         elseif tag == defs.NODE_GOTO_STMT then
             unsupported(n, "goto-stmt")
-            return nil
+            return false
         elseif tag == defs.NODE_LABEL_STMT then
             unsupported(n, "label-stmt")
-            return nil
+            return false
         elseif tag == defs.NODE_CHUNK or tag == defs.NODE_IF_CLAUSE or tag == defs.NODE_TABLE_FIELD then
             internal(n, "container node '" .. frontend.node_name(tag) .. "' in statement position")
-            return nil
+            return false
         end
         -- expression kind in statement position (parser never emits this) —
         -- routed defensively, still total.
         internal(n, "node kind '" .. frontend.node_name(tag) .. "' in statement position")
-        return nil
+        return false
     end
 
-    --: ({ [integer]: Ast }) -> nil
+    -- Lower a statement list; true when the list cannot fall through (some
+    -- statement diverges — in well-formed Lua that is the last one, since
+    -- return/break must close a block).
+    --: ({ [integer]: Ast }) -> boolean
     lower_stmts = function(list)
+        local div = false
         for i = 1, #list do
-            lower_stmt(list[i])
+            if lower_stmt(list[i]) then div = true end
         end
-        return nil
+        return div
     end
 
     -- ── entry: annotation pre-pass ─────────────────────────────────────────

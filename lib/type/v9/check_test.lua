@@ -230,6 +230,43 @@ T.describe("v9 check — function boundary honesty", function()
     end)
 end)
 
+T.describe("v9 check — control-flow precision (the recorded false-positive classes)", function()
+    T.it("the math/init.lua:11 idiom: `== nil` early exit narrows for the stdlib pin", function()
+        -- tonumber -> number|nil; the guard + diverging branch leave number.
+        local src = "local n = tonumber('42')\nif n == nil then return nil end\n"
+            .. "local i = math.floor(n)\nreturn i\n"
+        local diags = check.check_source(src, "t.lua", nil)
+        T.ok(diags ~= nil, "checked")
+        if diags ~= nil then
+            T.eq(find_diag(diags, "call-mismatch"), nil,
+                "math.floor(n) is clean after the nil guard")
+        end
+    end)
+
+    T.it("the pagination:384 idiom: `cond and 1 or math.ceil(...)` is a number", function()
+        local src = "local total = 0\nlocal per = 10\n"
+            .. "local tp = total == 0 and 1 or math.ceil(total / per)\n"
+            .. "local c = math.min(1, tp)\nreturn c\n"
+        local diags = check.check_source(src, "t.lua", nil)
+        T.ok(diags ~= nil, "checked")
+        if diags ~= nil then
+            T.eq(find_diag(diags, "call-mismatch"), nil,
+                "no phantom boolean reaches the stdlib pin")
+            T.eq(find_diag(diags, "op-mismatch"), nil, "no operand complaint either")
+        end
+    end)
+
+    T.it("the early-exit string guard checks the fall-through use", function()
+        local src = "local function f(x)\n  if type(x) ~= 'string' then return nil end\n"
+            .. "  return x .. '!'\nend\nlocal r = f('a')\nreturn r\n"
+        local diags = check.check_source(src, "t.lua", nil)
+        T.ok(diags ~= nil, "checked")
+        if diags ~= nil then
+            T.eq(#diags, 0, "the idiom is clean end to end")
+        end
+    end)
+end)
+
 T.describe("v9 check — caps-first file access", function()
     T.it("reads through injected caps only", function()
         local caps = {

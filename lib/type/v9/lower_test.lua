@@ -123,6 +123,43 @@ T.describe("v9 lowering — truthiness narrowing + join at merge", function()
     end)
 end)
 
+T.describe("v9 lowering — reachability at the merge (early-exit narrowing)", function()
+    T.it("`if type(x) ~= 'string' then return end` narrows x AFTER the if", function()
+        local src = "local x = whatever\nif type(x) ~= 'string' then return end\n"
+            .. "local y = x\nreturn y\n"
+        local tys = infer(src)
+        T.eq(tys.y, "string", "the diverging then-arm contributes nothing; the else filter survives")
+    end)
+
+    T.it("`if x == nil then return end` drops nil after the if (the (nil, errmsg) guard)", function()
+        local src = "local c = true\nlocal x = nil\nif c then x = 1 end\n"
+            .. "if x == nil then return end\nlocal y = x\nreturn y\n"
+        local tys = infer(src)
+        T.eq(tys.y, "number", "keep:nil diverges; drop:nil falls through")
+    end)
+
+    T.it("a declared-never call (`error`) is a diverging branch tail", function()
+        local src = "local x = whatever\nif type(x) ~= 'number' then error('bad') end\n"
+            .. "local y = x + 1\nreturn y\n"
+        local tys, diags = infer(src)
+        T.eq(tys.y, "number", "error() cannot fall through, so x is number after the guard")
+        T.eq(find_diag(diags, "op-mismatch"), nil, "x + 1 is clean")
+    end)
+
+    T.it("both arms diverging makes the merge unreachable (bottom, not a lie)", function()
+        local src = "local x = 1\nlocal c = true\n"
+            .. "if c then return 1 else return 2 end\nlocal y = x\nreturn y\n"
+        local tys = infer(src)
+        T.eq(tys.y, "never", "dead code is checked against no values")
+    end)
+
+    T.it("a non-diverging if still merges both arms (no false divergence)", function()
+        local src = "local x = 1\nlocal c = true\nif c then x = 's' end\nlocal y = x\nreturn y\n"
+        local tys = infer(src)
+        T.eq(tys.y, "number | string", "fall-through branches still phi")
+    end)
+end)
+
 T.describe("v9 lowering — the honest dynamism boundary", function()
     T.it("unsupported constructs produce structured diags with line/col", function()
         local _, diags = infer("local a = 1\nwhile a do\n  a = a\nend\n")
