@@ -4,19 +4,35 @@
 -- evaluation -> policy-stamped, position-sorted diagnostics.
 --
 -- THE POWER DIAL LIVES HERE and nowhere else: `Policy` maps NAMED rule codes
--- to severities ("error" | "warn" | "info"). Strictness is owner-decidable
--- data, never an implementation choice buried in the solver. v0 defaults:
+-- to severities ("error" | "warn" | "info" | "off"; "off" suppresses the
+-- diagnostic entirely). Strictness is owner-decidable data, never an
+-- implementation choice buried in the solver. v0 defaults:
 --
 --   parse-error         error   the file is not Lua
 --   op-mismatch         error   supported-discipline type error
 --   call-non-function   error   supported-discipline type error
+--   field-write-mismatch error  a field write outside the field's invariant
+--                               write bound — the record mutation-soundness
+--                               rule (see lattice.lua's header)
 --   internal            error   a lowering invariant broke (checker bug)
+--   missing-field       warn    a field/method read the record provably
+--                               lacks (v0 record tracking is intraprocedural
+--                               — aliases don't see later extensions — so
+--                               absence evidence is warn, not error; dial up
+--                               once annotations land)
 --   use-before-narrow   warn    unknown used dynamically — v0 cannot narrow
 --                               it yet (annotations/stdlib decls are the
 --                               roadmap); the dial makes the debt visible
 --   undeclared-global   warn    no ambient globals (stdlib decls pending)
 --   global-write        warn    write to an undeclared global
 --   unused-local        warn    declared, never read (syntactic in v0)
+--   new-field-on-write  off     a write CREATED a field on an open record —
+--                               the Lua module idiom, admitted by default.
+--                               THE one named soundness concession: a field
+--                               created through one alias is invisible (and
+--                               at a colliding type, unsound) through
+--                               another. Dial to error to forbid the idiom
+--                               and close the hole.
 --   unsupported         warn    the dynamism/coverage boundary, per bucket
 --                               (`unsupported:<construct>` may be dialed
 --                               individually; the bare prefix is the default)
@@ -29,6 +45,7 @@ if not package.path:find("?/init.lua", 1, true) then
 end
 
 --:: require "lib.type.v9.engine.defs"
+--:: require "lib.type.v9.lattice"
 
 local frontend = require("lib.type.v9.frontend")
 local lower = require("lib.type.v9.lower")
@@ -36,15 +53,18 @@ local engine = require("lib.type.v9.engine.engine")
 local lattice = require("lib.type.v9.lattice")
 
 --:: Diag = { code: string, severity: string, message: string, line: integer, col: integer }
---:: Obligation = { cell: string, allow: { [string]: boolean }, code: string, what: string, line: integer, col: integer }
+--:: Obligation = { kind: string, cell: string, allow: Val | nil, field: string | nil, base: string | nil, code: string, what: string, line: integer, col: integer }
 --:: Policy = { [string]: string }
 --:: Caps = { read_file: (string) -> (string | nil, string | nil) }
 --:: CheckOpts = { policy: Policy | nil, mode: string | nil }
 
 local M = {}
 
---: (x: unknown) -> x is { [string]: boolean }
-local function as_atoms(x) return type(x) == "table" end
+--: (x: unknown) -> x is Val
+local function as_val(x) return type(x) == "table" end
+
+-- The atom bound a field-access TARGET must stay within (records are tables).
+local TABLE_ONLY = lattice.single("table")
 
 -- The named rules and their default severities, as data. (Built with
 -- dynamic keys: the checker folds literal-key writes into the alias shape.)
@@ -52,11 +72,14 @@ local DEFAULT_RULES = {
     { "parse-error", "error" },
     { "op-mismatch", "error" },
     { "call-non-function", "error" },
+    { "field-write-mismatch", "error" },
     { "internal", "error" },
+    { "missing-field", "warn" },
     { "use-before-narrow", "warn" },
     { "undeclared-global", "warn" },
     { "global-write", "warn" },
     { "unused-local", "warn" },
+    { "new-field-on-write", "off" },
     { "unsupported", "warn" },
 } --: { [integer]: { [integer]: string } }
 
@@ -115,6 +138,116 @@ end
 --: (x: unknown) -> x is { graph: Graph, obligations: { [integer]: Obligation }, diags: { [integer]: Diag }, vars: { [string]: string } }
 local function is_lower_result(x) return type(x) == "table" end
 
+--: (diags: { [integer]: Diag }, code: string, line: integer, col: integer, message: string) -> nil
+local function emit(diags, code, line, col, message)
+    -- severity is stamped by the policy afterwards.
+    diags[#diags + 1] = { code = code, severity = "warn", line = line, col = col, message = message }
+    return nil
+end
+
+-- Shared triage of a field-access TARGET value. Emits the target-shaped
+-- diagnostics and reports whether field-level checking may proceed:
+--   unknown           -> use-before-narrow
+--   string only       -> unsupported:string-method (stdlib decls pending)
+--   non-table atoms   -> op-mismatch (naming the offending parts)
+--   bare `table` top  -> use-before-narrow (fields unknown; narrow it)
+-- A record component (with or without the field) returns true; the caller
+-- decides between ok / missing-field / new-field-on-write.
+--: (diags: { [integer]: Diag }, v: Val, what: string, line: integer, col: integer) -> boolean
+local function triage_field_target(diags, v, what, line, col)
+    if lattice.is_unknown(v) then
+        emit(diags, "use-before-narrow", line, col,
+            what .. " target has type `unknown` — narrow it before dynamic use")
+        return false
+    end
+    if lattice.is_string_only(v) then
+        emit(diags, "unsupported:string-method", line, col,
+            what .. " on `string` (the string metatable) needs stdlib declarations — outside v0")
+        return false
+    end
+    local bad = lattice.excess(v, TABLE_ONLY)
+    if bad ~= nil then
+        emit(diags, "op-mismatch", line, col,
+            what .. " target: got `" .. lattice.show(v) .. "`, expected a table")
+        return false
+    end
+    if not lattice.has_rec(v) then
+        -- only the `table` top remains: some table, fields unknown.
+        emit(diags, "use-before-narrow", line, col,
+            what .. " target has type `table` — fields unknown; construct with known fields or narrow")
+        return false
+    end
+    return true
+end
+
+-- Evaluate ONE post-solve obligation against the fixpoint values.
+--: (diags: { [integer]: Diag }, values: { [string]: unknown }, ob: Obligation) -> nil
+local function evaluate_obligation(diags, values, ob)
+    local v = values[ob.cell]
+    if not as_val(v) then return nil end
+    if lattice.is_bottom(v) then return nil end
+
+    if ob.kind == "field-read" then
+        local field = ob.field
+        if field == nil then return nil end
+        if triage_field_target(diags, v, ob.what, ob.line, ob.col) then
+            if not lattice.has_field(v, field) then
+                emit(diags, "missing-field", ob.line, ob.col,
+                    "no " .. ob.what .. " on `" .. lattice.show(v) .. "`")
+            end
+        end
+        return nil
+    end
+
+    if ob.kind == "field-write" then
+        -- ob.cell is the WRITTEN VALUE's cell; ob.base is the target's
+        -- pre-write version. The write must satisfy the field's invariant
+        -- `w` bound (mutation soundness — lattice.lua header).
+        local field = ob.field
+        local basecell = ob.base
+        if field == nil or basecell == nil then return nil end
+        local base = values[basecell]
+        if not as_val(base) then return nil end
+        if lattice.is_bottom(base) then return nil end
+        if not triage_field_target(diags, base, "write to " .. ob.what, ob.line, ob.col) then
+            return nil
+        end
+        local w = lattice.field_write_bound(base, field)
+        if w == nil then
+            emit(diags, "new-field-on-write", ob.line, ob.col,
+                ob.what .. " created by write on `" .. lattice.show(base)
+                    .. "` (invisible through aliases — the open-record concession)")
+            return nil
+        end
+        if lattice.is_unknown(v) then
+            emit(diags, "use-before-narrow", ob.line, ob.col,
+                "value written to " .. ob.what .. " has type `unknown` — narrow it before the write")
+            return nil
+        end
+        if not lattice.leq(v, w) then
+            emit(diags, ob.code, ob.line, ob.col,
+                "write to " .. ob.what .. ": got `" .. lattice.show(v)
+                    .. "`, the field's write bound is `" .. lattice.show(w) .. "`")
+        end
+        return nil
+    end
+
+    -- kind == "bound": the original upper-bound obligation.
+    local allow = ob.allow
+    if allow == nil then return nil end
+    if lattice.is_unknown(v) then
+        emit(diags, "use-before-narrow", ob.line, ob.col,
+            ob.what .. " has type `unknown` — narrow it before dynamic use")
+        return nil
+    end
+    local excess = lattice.excess(v, allow)
+    if excess ~= nil then
+        emit(diags, ob.code, ob.line, ob.col,
+            ob.what .. ": got `" .. lattice.show(v) .. "`, expected `" .. lattice.show(allow) .. "`")
+    end
+    return nil
+end
+
 -- Check a source string. Returns position-sorted, policy-stamped diags.
 -- `opts.mode = "lower"` skips the solve (parse + total lowering only — the
 -- totality smoke path); default is the full check.
@@ -152,37 +285,17 @@ function M.check_source(source, filename, opts)
         if sol == nil then return nil, filename .. ": " .. (serr or "solve failed") end
         local obligations = low.obligations
         for i = 1, #obligations do
-            local ob = obligations[i]
-            local v = sol.values[ob.cell]
-            if as_atoms(v) and not lattice.is_bottom(v) then
-                if lattice.is_unknown(v) then
-                    diags[#diags + 1] = {
-                        code = "use-before-narrow",
-                        severity = "warn",
-                        line = ob.line,
-                        col = ob.col,
-                        message = ob.what .. " has type `unknown` — narrow it before dynamic use",
-                    }
-                else
-                    local excess = lattice.excess(v, ob.allow)
-                    if excess ~= nil then
-                        diags[#diags + 1] = {
-                            code = ob.code,
-                            severity = "warn",
-                            line = ob.line,
-                            col = ob.col,
-                            message = ob.what .. ": got `" .. lattice.show(v)
-                                .. "`, expected `" .. lattice.show(ob.allow) .. "`",
-                        }
-                    end
-                end
-            end
+            evaluate_obligation(diags, sol.values, obligations[i])
         end
     end
 
     stamp(diags, policy)
-    sort_by_position(diags)
-    return diags, nil
+    local kept = {} --: { [integer]: Diag }
+    for i = 1, #diags do
+        if diags[i].severity ~= "off" then kept[#kept + 1] = diags[i] end
+    end
+    sort_by_position(kept)
+    return kept, nil
 end
 
 -- Check a file via injected caps (never reaches for io).

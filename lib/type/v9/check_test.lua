@@ -92,6 +92,115 @@ T.describe("v9 check — the power dial (named policy rules)", function()
     end)
 end)
 
+T.describe("v9 check — structural records (obligations end to end)", function()
+    T.it("width is free; a provably absent field is missing-field with line/col", function()
+        local ok_diags = check.check_source(
+            "local t = { x = 1, y = 2 }\nlocal a = t.x + t.y\nreturn a\n", "t.lua", nil)
+        T.ok(ok_diags ~= nil and #ok_diags == 0, "extra fields never hurt (open records)")
+        local diags = check.check_source(
+            "local t = { x = 1 }\nlocal y = t.z\nreturn y, t\n", "t.lua", nil)
+        T.ok(diags ~= nil, "checked")
+        if diags ~= nil then
+            local d = find_diag(diags, "missing-field")
+            T.ok(d ~= nil, "t.z flagged")
+            if d ~= nil then
+                T.eq(d.severity, "warn", "default policy: warn (v0 absence evidence)")
+                T.eq(d.line, 2, "line of the read")
+                T.eq(d.col, 12, "col of the read")
+                T.ok(d.message:find("'z'", 1, true) ~= nil, "names the field: " .. d.message)
+            end
+        end
+    end)
+
+    T.it("WRITE VARIANCE: a widened-alias write is rejected; the narrow alias stays sound", function()
+        -- The classic unsoundness under naive covariant writes: u aliases t,
+        -- writing "s" through u would make `t.x + 1` explode at runtime while
+        -- checking clean. The invariant write bound rejects the WRITE instead.
+        local src = "local t = { x = 1 }\nlocal u = t\nu.x = 's'\nlocal n = t.x + 1\nreturn n, u\n"
+        local diags = check.check_source(src, "t.lua", nil)
+        T.ok(diags ~= nil, "checked")
+        if diags ~= nil then
+            local d = find_diag(diags, "field-write-mismatch")
+            T.ok(d ~= nil, "the unsound write is rejected")
+            if d ~= nil then
+                T.eq(d.severity, "error", "mutation soundness is an error by default")
+                T.eq(d.line, 3, "line of the write")
+            end
+            T.eq(find_diag(diags, "op-mismatch"), nil,
+                "t.x + 1 stays clean: the field type was never relaxed by the write")
+        end
+    end)
+
+    T.it("writes through a phi'd view must be safe for EVERY branch (w = meet)", function()
+        local src = "local a = { x = 1 }\nlocal b = { x = 's' }\nlocal c = true\nlocal t = nil\n"
+            .. "if c then t = a else t = b end\nif t then t.x = 1 end\nreturn t, a, b\n"
+        local diags = check.check_source(src, "t.lua", nil)
+        T.ok(diags ~= nil, "checked")
+        if diags ~= nil then
+            local d = find_diag(diags, "field-write-mismatch")
+            T.ok(d ~= nil, "even a number write is rejected (b.x readers rely on string)")
+        end
+        local ok_src = "local t = { x = 1 }\nt.x = 2\nreturn t\n"
+        local ok_diags = check.check_source(ok_src, "t.lua", nil)
+        T.ok(ok_diags ~= nil and #ok_diags == 0, "in-bound writes are clean")
+    end)
+
+    T.it("new-field-on-write is the named concession: off by default, dialable", function()
+        local src = "local M = {}\nM.f = 1\nreturn M\n"
+        local diags = check.check_source(src, "t.lua", nil)
+        T.ok(diags ~= nil and #diags == 0, "the module idiom is admitted silently by default")
+        local strict = check.default_policy()
+        strict["new-field-on-write"] = "error"
+        local diags2 = check.check_source(src, "t.lua", { policy = strict, mode = nil })
+        T.ok(diags2 ~= nil, "checked")
+        if diags2 ~= nil then
+            local d = find_diag(diags2, "new-field-on-write")
+            T.ok(d ~= nil and d.severity == "error", "dialed up, the concession is refusable")
+        end
+    end)
+
+    T.it("method-call sugar: t:m() is a field read + a call", function()
+        local ok_diags = check.check_source(
+            "local M = {}\nfunction M:greet() return 1 end\nlocal r = M:greet()\nreturn r\n", "t.lua", nil)
+        T.ok(ok_diags ~= nil and #ok_diags == 0, "declared method calls clean")
+        local diags = check.check_source(
+            "local t = { m = 1 }\nlocal r = t:m()\nreturn r\n", "t.lua", nil)
+        T.ok(diags ~= nil, "checked")
+        if diags ~= nil then
+            local d = find_diag(diags, "call-non-function")
+            T.ok(d ~= nil, "calling a number field is call-non-function")
+        end
+        local diags2 = check.check_source(
+            "local t = { x = 1 }\nlocal r = t:nope()\nreturn r\n", "t.lua", nil)
+        if diags2 ~= nil then
+            local d2 = find_diag(diags2, "missing-field")
+            T.ok(d2 ~= nil and d2.message:find("'nope'", 1, true) ~= nil, "missing method named")
+        end
+    end)
+
+    T.it("string methods are their own honest boundary (stdlib decls pending)", function()
+        local diags = check.check_source("local s = 'a'\nlocal r = s:sub(1)\nreturn r\n", "t.lua", nil)
+        T.ok(diags ~= nil, "checked")
+        if diags ~= nil then
+            local d = find_diag(diags, "unsupported:string-method")
+            T.ok(d ~= nil, "s:sub is a named bucket, not an op-mismatch lie")
+            T.eq(find_diag(diags, "op-mismatch"), nil, "not misreported")
+        end
+    end)
+
+    T.it("field access on non-tables is op-mismatch at the use site", function()
+        local diags = check.check_source("local n = 1\nlocal v = n.x\nreturn v\n", "t.lua", nil)
+        T.ok(diags ~= nil, "checked")
+        if diags ~= nil then
+            local d = find_diag(diags, "op-mismatch")
+            T.ok(d ~= nil, "number.x flagged")
+            if d ~= nil then
+                T.ok(d.message:find("number", 1, true) ~= nil, "names the offender: " .. d.message)
+            end
+        end
+    end)
+end)
+
 T.describe("v9 check — caps-first file access", function()
     T.it("reads through injected caps only", function()
         local caps = {
@@ -128,6 +237,8 @@ local function known_code(code)
     return code == "parse-error" or code == "op-mismatch" or code == "call-non-function"
         or code == "use-before-narrow" or code == "undeclared-global"
         or code == "global-write" or code == "unused-local" or code == "internal"
+        or code == "missing-field" or code == "field-write-mismatch"
+        or code == "new-field-on-write"
 end
 
 --: (string) -> (string | nil, string | nil)

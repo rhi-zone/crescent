@@ -19,6 +19,16 @@
 --   a and b          : falsy(a) | type(b)   } derived from the SAME two ops,
 --   a or  b          : truthy(a) | type(b)  } never a hardcoded case
 --
+-- RECORDS ride the same shape: a table constructor with named fields is one
+-- rule proposing `lattice.record_of` over its field cells; a field READ
+-- (`t.x`, `t["x"]`, and the receiver half of `t:m(...)`) is one projection
+-- rule + a field-read obligation; a field WRITE (`t.x = v`, incl. the
+-- `function M.f()` module idiom) is one `set_field` rule that SSA-rebinds
+-- the base local + a field-write obligation (the write is checked against
+-- the field's invariant `w` bound post-solve — see lattice.lua's soundness
+-- header). Non-literal keys are the honest `unsupported:dynamic-index`
+-- boundary; the array part of constructors is `unsupported:table-array-part`.
+--
 -- Flow-sensitivity is SSA-style versioning: assignments rebind a variable's
 -- cell; `if` merges make phi cells that receive each branch version as a
 -- separate proposal — the engine's monotone join IS the union at the merge.
@@ -36,6 +46,7 @@ if not package.path:find("?/init.lua", 1, true) then
 end
 
 --:: require "lib.type.v9.engine.defs"
+--:: require "lib.type.v9.lattice"
 
 local defs = require("lib.type.static.defs")
 local engine = require("lib.type.v9.engine.engine")
@@ -44,7 +55,7 @@ local frontend = require("lib.type.v9.frontend")
 
 --:: Ast = { tag: integer, line: integer, col: integer, ... }
 --:: Diag = { code: string, severity: string, message: string, line: integer, col: integer }
---:: Obligation = { cell: string, allow: { [string]: boolean }, code: string, what: string, line: integer, col: integer }
+--:: Obligation = { kind: string, cell: string, allow: Val | nil, field: string | nil, base: string | nil, code: string, what: string, line: integer, col: integer }
 --:: LowerResult = { graph: Graph, obligations: { [integer]: Obligation }, diags: { [integer]: Diag }, vars: { [string]: string } }
 --:: Decl = { id: string, name: string, line: integer, col: integer, read: boolean, cell: string }
 --:: Scope = { map: { [string]: Decl }, order: { [integer]: Decl } }
@@ -70,7 +81,7 @@ local FUNC = lattice.single("function")
 -- result atom | nil, derive | nil). `derive` marks the two operators whose
 -- result is DERIVED from the lattice's truthy/falsy (and/or) instead of a
 -- fixed result atom. An unrecognized op returns (nil, nil, nil).
---: (string) -> ({ [string]: boolean } | nil, string | nil, string | nil)
+--: (string) -> (Val | nil, string | nil, string | nil)
 local function binop_rule(op)
     if op == "+" or op == "-" or op == "*" or op == "/" or op == "%" or op == "^" then
         return NUM, "number", nil
@@ -90,7 +101,7 @@ end
 
 -- The unary-operator discipline: op -> (operand bound | nil, result atom |
 -- nil). Unrecognized op returns (nil, nil).
---: (string) -> ({ [string]: boolean } | nil, string | nil)
+--: (string) -> (Val | nil, string | nil)
 local function unop_rule(op)
     if op == "-" then
         return NUM, "number"
@@ -126,7 +137,7 @@ function M.lower(chunk)
         return "c:" .. tag .. "#" .. counter
     end
 
-    --: (string, { [string]: boolean }) -> nil
+    --: (string, Val) -> nil
     local function seed(cell, atoms)
         rules[#rules + 1] = engine.rule({}, { cell }, function(get)
             return { [cell] = atoms }
@@ -191,10 +202,37 @@ function M.lower(chunk)
         return nil
     end
 
-    --: (cell: string, allow: { [string]: boolean }, code: string, what: string, line: integer, col: integer) -> nil
+    --: (cell: string, allow: Val, code: string, what: string, line: integer, col: integer) -> nil
     local function obligate(cell, allow, code, what, line, col)
-        obligations[#obligations + 1] =
-            { cell = cell, allow = allow, code = code, what = what, line = line, col = col }
+        obligations[#obligations + 1] = {
+            kind = "bound", cell = cell, allow = allow, field = nil, base = nil,
+            code = code, what = what, line = line, col = col,
+        }
+        return nil
+    end
+
+    -- "`cell` (a field-read target) must be a record with `field`" — checked
+    -- post-solve; violation codes are resolved there (missing-field /
+    -- op-mismatch / use-before-narrow / unsupported:string-method).
+    --: (cell: string, field: string, what: string, line: integer, col: integer) -> nil
+    local function obligate_field_read(cell, field, what, line, col)
+        obligations[#obligations + 1] = {
+            kind = "field-read", cell = cell, allow = nil, field = field, base = nil,
+            code = "missing-field", what = what, line = line, col = col,
+        }
+        return nil
+    end
+
+    -- "the value in `cell`, written to `base`.`field`, must satisfy the
+    -- field's invariant write bound" — the mutation-soundness check. A write
+    -- to a field `base` does not yet have is the named `new-field-on-write`
+    -- policy case (also resolved post-solve).
+    --: (cell: string, base: string, field: string, line: integer, col: integer) -> nil
+    local function obligate_field_write(cell, base, field, line, col)
+        obligations[#obligations + 1] = {
+            kind = "field-write", cell = cell, allow = nil, field = field, base = base,
+            code = "field-write-mismatch", what = "field '" .. field .. "'", line = line, col = col,
+        }
         return nil
     end
 
@@ -282,7 +320,34 @@ function M.lower(chunk)
 
     -- ── havoc scan (soundness fence around unsupported subtrees) ──────────
     -- Marks identifier reads (no false "unused"), and havocs outer locals
-    -- assigned inside the unchecked region to `unknown`.
+    -- assigned inside the unchecked region to `unknown`. A FIELD write
+    -- (`t.x = …`, `t[k] = …`, `function t.f()`) havocs the BASE variable:
+    -- a record type must not survive unchecked mutation of the table.
+
+    -- The root identifier of an assignment-target chain (`a.b[c].d` -> `a`);
+    -- nil when the root is not a plain identifier.
+    --: (unknown) -> string | nil
+    local function target_root_name(t)
+        local cur = t --: unknown
+        while is_tbl(cur) do
+            local tt = cur.tag
+            if type(tt) == "number" then
+                if tt == defs.NODE_IDENTIFIER then
+                    local nm = cur.name
+                    if type(nm) == "string" then return nm end
+                    return nil
+                elseif tt == defs.NODE_FIELD_EXPR or tt == defs.NODE_INDEX_EXPR then
+                    cur = cur.target
+                else
+                    return nil
+                end
+            else
+                return nil
+            end
+        end
+        return nil
+    end
+
     --: (unknown) -> nil
     local function havoc_scan(x)
         if not is_tbl(x) then return nil end
@@ -298,25 +363,18 @@ function M.lower(chunk)
                 local targets = x.targets
                 if is_tbl(targets) then
                     for _, t in pairs(targets) do
-                        if is_tbl(t) then
-                            local tt = t.tag
-                            local nm = t.name
-                            if type(tt) == "number" and tt == defs.NODE_IDENTIFIER and type(nm) == "string" then
-                                local d = resolve(nm)
-                                if d ~= nil then d.cell = unknown_cell("havoc-" .. nm) end
-                            end
+                        local nm = target_root_name(t)
+                        if nm ~= nil then
+                            local d = resolve(nm)
+                            if d ~= nil then d.cell = unknown_cell("havoc-" .. nm) end
                         end
                     end
                 end
             elseif tag == defs.NODE_FUNC_DECL then
-                local name_node = x.name
-                if is_tbl(name_node) then
-                    local tt = name_node.tag
-                    local nm = name_node.name
-                    if type(tt) == "number" and tt == defs.NODE_IDENTIFIER and type(nm) == "string" then
-                        local d = resolve(nm)
-                        if d ~= nil then d.cell = unknown_cell("havoc-" .. nm) end
-                    end
+                local nm = target_root_name(x.name)
+                if nm ~= nil then
+                    local d = resolve(nm)
+                    if d ~= nil then d.cell = unknown_cell("havoc-" .. nm) end
                 end
             end
         end
@@ -380,6 +438,85 @@ function M.lower(chunk)
             end
         end
         return cells
+    end
+
+    -- The literal-string key of an index expression (`t["x"]`), nil when the
+    -- key is any other expression — the `unsupported:dynamic-index` boundary.
+    --: (unknown) -> string | nil
+    local function literal_string_key(k)
+        if not is_node(k) then return nil end
+        if k.tag ~= defs.NODE_LITERAL then return nil end
+        local lk = k.lit_kind
+        local v = k.value
+        if type(lk) == "number" and lk == defs.LIT_STRING and type(v) == "string" then return v end
+        return nil
+    end
+
+    -- A field READ (`t.x` / `t["x"]` / the receiver half of `t:m()`): ONE
+    -- projection rule (the record analogue of the truthy/falsy filters) +
+    -- ONE field-read obligation. Returns the projected cell.
+    --: (target: Ast, key: string, what: string, line: integer, col: integer) -> string
+    local function lower_field_read(target, key, what, line, col)
+        local tc = lower_expr(target)
+        local rc = fresh("field-" .. key)
+        rules[#rules + 1] = engine.rule({ tc }, { rc }, function(get)
+            return { [rc] = lattice.project(get(tc), key) }
+        end)
+        obligate_field_read(tc, key, what, line, col)
+        return rc
+    end
+
+    -- A field WRITE (`t.x = v`, `t["x"] = v`, `function M.f()`). When the
+    -- base is a plain local, the write SSA-rebinds it through ONE set_field
+    -- rule (flow-sensitive extension: the module idiom `local M = {}` +
+    -- `function M.f() end` accretes fields on M's versions). Field types are
+    -- invariant refs, so writes to EXISTING fields never change the type —
+    -- for nested bases (`a.b.c = v`) no rebind is needed at all; the write
+    -- is checked in place against the field's `w` bound. Non-literal keys
+    -- are the `unsupported:dynamic-index` boundary.
+    --: (Ast, string) -> nil
+    local function lower_field_write(t, vcell)
+        local key = nil --: string | nil
+        if t.tag == defs.NODE_FIELD_EXPR then
+            local k = t.key
+            if type(k) == "string" then key = k end
+        else
+            key = literal_string_key(t.key)
+        end
+        local target = t.target
+        if not is_node(target) then
+            internal(t, "field write without a target")
+            return nil
+        end
+        if key == nil then
+            lower_expr(target)
+            local k = t.key
+            if is_node(k) then lower_expr(k) end
+            unsupported(t, "dynamic-index")
+            return nil
+        end
+        if target.tag == defs.NODE_IDENTIFIER then
+            local nm = target.name
+            if type(nm) == "string" then
+                local d = resolve(nm)
+                if d ~= nil then
+                    -- mutation counts as use: `local M = {}; M.f = …` is not
+                    -- an unused local even before anyone reads M.
+                    d.read = true
+                    local bc = d.cell
+                    local nc = fresh(nm .. "-set-" .. key)
+                    rules[#rules + 1] = engine.rule({ bc, vcell }, { nc }, function(get)
+                        return { [nc] = lattice.set_field(get(bc), key, get(vcell)) }
+                    end)
+                    d.cell = nc
+                    obligate_field_write(vcell, bc, key, t.line, t.col)
+                    return nil
+                end
+            end
+        end
+        local bc = lower_expr(target)
+        obligate_field_write(vcell, bc, key, t.line, t.col)
+        return nil
     end
 
     -- If `cond` is narrowable in v0 (a bare local, or `not <local>`), return
@@ -500,43 +637,94 @@ function M.lower(chunk)
             obligate(cc, FUNC, "call-non-function", "called value", n.line, n.col)
             return unknown_cell("call")
         elseif tag == defs.NODE_METHOD_CALL then
+            -- t:m(...) = a field read of `m` + a shallow call (result
+            -- unknown, as for CALL_EXPR — function types are the next
+            -- domain upgrade).
             local recv = n.receiver
-            if is_node(recv) then lower_expr(recv) end
+            local method = n.method
+            if not is_node(recv) or type(method) ~= "string" then
+                internal(n, "malformed method call")
+                return unknown_cell("mcall")
+            end
+            local mc = lower_field_read(recv, method, "method '" .. method .. "'", n.line, n.col)
             local args = n.args
             if is_list(args) then
                 for i = 1, #args do lower_expr(args[i]) end
             end
-            unsupported(n, "method-call")
+            obligate(mc, FUNC, "call-non-function", "method '" .. method .. "'", n.line, n.col)
             return unknown_cell("mcall")
         elseif tag == defs.NODE_FIELD_EXPR then
             local target = n.target
-            if is_node(target) then lower_expr(target) end
-            unsupported(n, "field-expr")
-            return unknown_cell("field")
+            local key = n.key
+            if not is_node(target) or type(key) ~= "string" then
+                internal(n, "malformed field expression")
+                return unknown_cell("field")
+            end
+            return lower_field_read(target, key, "field '" .. key .. "'", n.line, n.col)
         elseif tag == defs.NODE_INDEX_EXPR then
             local target = n.target
             local key = n.key
-            if is_node(target) then lower_expr(target) end
+            if not is_node(target) then
+                internal(n, "index without a target")
+                return unknown_cell("index")
+            end
+            local k = literal_string_key(key)
+            if k ~= nil then
+                -- t["x"] IS t.x — same projection, same obligation.
+                return lower_field_read(target, k, "field '" .. k .. "'", n.line, n.col)
+            end
+            lower_expr(target)
             if is_node(key) then lower_expr(key) end
-            unsupported(n, "index-expr")
+            unsupported(n, "dynamic-index")
             return unknown_cell("index")
         elseif tag == defs.NODE_FUNC_EXPR then
             return lower_function(n)
         elseif tag == defs.NODE_TABLE_EXPR then
-            -- the VALUE is soundly `table` (the table top); the FIELDS are
-            -- beyond v0 (no record types yet) — flagged, still traversed.
-            unsupported(n, "table-constructor")
+            -- A constructor with named fields IS a record type: ONE rule
+            -- proposing record_of over the field-value cells (duplicate keys:
+            -- last wins, as in Lua). The array part and computed keys are the
+            -- honest deferral buckets; their values are still lowered.
+            local entries = {} --: { [integer]: { name: string, cell: string } }
             local fields = n.fields
+            local array_flagged = false
             if is_list(fields) then
                 for i = 1, #fields do
                     local f = fields[i]
+                    local fk = f.field_kind
                     local v = f.value
-                    if is_node(v) then lower_expr(v) end
-                    local k = f.key
-                    if is_node(k) then lower_expr(k) end
+                    local vc = nil --: string | nil
+                    if is_node(v) then vc = lower_expr(v) end
+                    if fk == "named" then
+                        local k = f.key
+                        if type(k) == "string" then
+                            if type(vc) == "string" then
+                                entries[#entries + 1] = { name = k, cell = vc }
+                            end
+                        end
+                    elseif fk == "positional" then
+                        if not array_flagged then
+                            array_flagged = true
+                            unsupported(f, "table-array-part")
+                        end
+                    else
+                        local k = f.key
+                        if is_node(k) then lower_expr(k) end
+                        unsupported(f, "dynamic-index")
+                    end
                 end
             end
-            return atom_cell("table")
+            local tcell = fresh("table")
+            local reads = {} --: { [integer]: string }
+            for i = 1, #entries do reads[i] = entries[i].cell end
+            rules[#rules + 1] = engine.rule(reads, { tcell }, function(get)
+                local fieldvals = {} --: { [string]: Val }
+                for i = 1, #entries do
+                    local val = get(entries[i].cell)
+                    if lattice.as_val(val) then fieldvals[entries[i].name] = val end
+                end
+                return { [tcell] = lattice.record_of(fieldvals) }
+            end)
+            return tcell
         elseif tag == defs.NODE_VARARG_EXPR then
             unsupported(n, "vararg")
             return unknown_cell("vararg")
@@ -672,11 +860,9 @@ function M.lower(chunk)
                         end
                     end
                 elseif t.tag == defs.NODE_FIELD_EXPR or t.tag == defs.NODE_INDEX_EXPR then
-                    local target = t.target
-                    if is_node(target) then lower_expr(target) end
-                    local key = t.key
-                    if is_node(key) then lower_expr(key) end
-                    unsupported(t, "field-assign")
+                    local c = cells[i]
+                    if c == nil then c = atom_cell("nil") end
+                    lower_field_write(t, c)
                 else
                     internal(t, "unexpected assignment target")
                 end
@@ -742,11 +928,19 @@ function M.lower(chunk)
                     return nil
                 end
             end
-            -- `function M.f()` / `function M:f()`: the VALUE is still checked
-            -- (body lowered); the field-target write is beyond v0.
+            -- `function M.f()` / `function M:f()` (the name is a field
+            -- chain): the module idiom — a checked field write of the
+            -- function value. (`:` already injected `self` as a param.)
+            if is_node(name_node) and name_node.tag == defs.NODE_FIELD_EXPR then
+                local c = lower_function(n)
+                lower_field_write(name_node, c)
+                return nil
+            end
+            -- funcname is Name{.Name}[:Name] — anything else is a decoder
+            -- drift bug, surfaced loudly.
             if is_node(name_node) then lower_expr(name_node) end
             lower_function(n)
-            unsupported(n, "field-assign")
+            internal(n, "func-decl with an unexpected name shape")
             return nil
         elseif tag == defs.NODE_WHILE_STMT or tag == defs.NODE_REPEAT_STMT
             or tag == defs.NODE_FOR_NUM or tag == defs.NODE_FOR_IN then
@@ -818,12 +1012,16 @@ ROUTE[defs.NODE_LITERAL] = "checked"
 ROUTE[defs.NODE_IDENTIFIER] = "checked"
 ROUTE[defs.NODE_UNARY_EXPR] = "checked"
 ROUTE[defs.NODE_BINARY_EXPR] = "checked"
-ROUTE[defs.NODE_INDEX_EXPR] = "boundary"
-ROUTE[defs.NODE_FIELD_EXPR] = "boundary"
-ROUTE[defs.NODE_METHOD_CALL] = "boundary"
+-- INDEX_EXPR: literal-string keys are checked (= field access); every other
+-- key is the in-construct `unsupported:dynamic-index` boundary.
+ROUTE[defs.NODE_INDEX_EXPR] = "checked"
+ROUTE[defs.NODE_FIELD_EXPR] = "checked"
+ROUTE[defs.NODE_METHOD_CALL] = "checked"
 ROUTE[defs.NODE_CALL_EXPR] = "checked"
 ROUTE[defs.NODE_FUNC_EXPR] = "checked"
-ROUTE[defs.NODE_TABLE_EXPR] = "boundary"
+-- TABLE_EXPR: named fields are checked (record construction); the array
+-- part / computed keys are in-construct boundary buckets.
+ROUTE[defs.NODE_TABLE_EXPR] = "checked"
 ROUTE[defs.NODE_TABLE_FIELD] = "container"
 ROUTE[defs.NODE_VARARG_EXPR] = "boundary"
 ROUTE[defs.NODE_ASSIGN_STMT] = "checked"

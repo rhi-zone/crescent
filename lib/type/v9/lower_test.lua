@@ -128,6 +128,70 @@ T.describe("v9 lowering — the honest dynamism boundary", function()
     end)
 end)
 
+T.describe("v9 lowering — structural records", function()
+    T.it("constructor -> field read roundtrip", function()
+        local tys = infer("local t = { x = 1, s = 'a' }\nlocal y = t.x\nlocal z = t.s\nreturn y, z, t\n")
+        T.eq(tys.t, "{ s: string, x: number }", "the constructor IS a record type")
+        T.eq(tys.y, "number", "t.x projects the field type")
+        T.eq(tys.z, "string", "t.s projects the field type")
+    end)
+
+    T.it("the module idiom: `function M.f()` accretes fields flow-sensitively", function()
+        local tys, diags = infer("local M = {}\nfunction M.f() return 1 end\nM.g = 2\nlocal h = M.f\nreturn M, h\n")
+        T.eq(tys.M, "{ f: function, g: number }", "field writes extend the open record")
+        T.eq(tys.h, "function", "reading an accreted field")
+        T.eq(find_diag(diags, "unsupported:field-assign"), nil, "field-assign is no longer a boundary bucket")
+    end)
+
+    T.it("phi of two records joins pointwise on common fields", function()
+        local src = "local c = true\nlocal t = nil\n"
+            .. "if c then t = { a = 1, b = 2 } else t = { a = 's', b = 3 } end\nreturn t\n"
+        local tys = infer(src)
+        T.eq(tys.t, "{ a: number | string, b: number }", "pointwise join at the merge")
+    end)
+
+    T.it("records ride the existing truthiness narrowing (optional-table idiom)", function()
+        local src = "local c = true\nlocal t = nil\nif c then t = { x = 1 } end\n"
+            .. "local v = nil\nif t then v = t.x end\nreturn v, t\n"
+        local tys = infer(src)
+        T.eq(tys.t, "nil | { x: number }", "nil | record stays precise at the merge")
+        T.eq(tys.v, "nil | number", "truthy(t) is the record; t.x projects inside the guard")
+    end)
+
+    T.it("`local v = t.x; if v then` narrows the projected value", function()
+        local src = "local c = true\nlocal t = { x = 1 }\nif c then t = { x = nil } end\n"
+            .. "local v = t.x\nlocal y = nil\nif v then y = v end\nreturn y, t\n"
+        local tys = infer(src)
+        T.eq(tys.y, "nil | number", "the guard drops v's nil part (joined with y's initial nil)")
+    end)
+
+    T.it("field writes inside unchecked regions HAVOC the base (soundness fence)", function()
+        local tys = infer("local t = { x = 1 }\nlocal c = true\nwhile c do\n  t.x = 2\nend\nreturn t\n")
+        T.eq(tys.t, "unknown", "a record type must not survive unchecked mutation")
+    end)
+
+    T.it("dynamic keys are the honest `unsupported:dynamic-index` boundary", function()
+        local _, diags = infer("local t = { x = 1 }\nlocal k = 'x'\nlocal v = t[k]\nreturn v\n")
+        local d = find_diag(diags, "unsupported:dynamic-index")
+        T.ok(d ~= nil, "non-literal index is flagged, not guessed at")
+        if d ~= nil then
+            T.eq(d.line, 3, "line of the index")
+        end
+    end)
+
+    T.it("t[\"x\"] IS t.x (literal-string index = field)", function()
+        local tys, diags = infer("local t = { x = 1 }\nlocal v = t[\"x\"]\nreturn v\n")
+        T.eq(tys.v, "number", "literal-string keys project like dot access")
+        T.eq(find_diag(diags, "unsupported:dynamic-index"), nil, "no boundary diag")
+    end)
+
+    T.it("the array part is the honest `unsupported:table-array-part` boundary", function()
+        local tys, diags = infer("local t = { 1, 2, named = 's' }\nlocal v = t.named\nreturn v, t\n")
+        T.ok(find_diag(diags, "unsupported:table-array-part") ~= nil, "array part flagged")
+        T.eq(tys.v, "string", "named fields of a mixed constructor still check")
+    end)
+end)
+
 T.describe("v9 lowering — totality roster", function()
     T.it("routes ALL 30 node kinds (checked / boundary / container)", function()
         local n = 0
