@@ -184,6 +184,25 @@ in histogram order, plus recorded debt:
   built-then-returned map class (agent/set.lua-shaped straight-line builds)
   checks clean; annotation-mismatch 1,500 -> 1,475, field-write-mismatch
   215 -> 190 on the tree.
+- [x] **String metatable member access** — DONE 2026-07-03 (landed 29261ba8;
+  audited + refactored to declaration data same day). Member access on
+  string-typed values (`s:upper()`, `("x").len`) resolves through the
+  DECLARED `string` table — LuaJIT sets the string metatable's `__index` to
+  the string library. The LINKAGE is DATA at the declaration seam:
+  `globals.atom_index` (atom -> declared global table NAME), consumed
+  UNIFORMLY by lowering's projection joins (atom_index_libs) and check's
+  read-target triage (read_meta) — no atom-keyed branch in the member-access
+  path and no method list in the checker (the initial landing name-keyed
+  `string` in lower/check; the audit refactor collapsed it to the map — a
+  future metatabled atom, e.g. cdata, is one entry + its declaration).
+  Per-file `--:: declare string` re-wires member resolution (pinned by test:
+  a shadow makes `s:sub` missing-field and a novel method resolve). WRITE
+  targets stay table-only (no `__newindex` wiring; a string write target is
+  op-mismatch — a real runtime error). `unsupported:string-method` 4,697 ->
+  0, most sites checking clean; the replacement surface is real checking
+  (call-mismatch +302 on string-method arguments, missing-field +12,
+  use-before-narrow +483 where members return through unknown). Verified
+  post-increment histogram: 426,041 -> 422,506 at ~23s, zero crashes.
 - [ ] **Freshness at call arguments (`f(t)`)** — deliberately NOT consumed:
   a call pin resolves only post-solve, so there is no lowering-time
   ownership transfer, and re-typing without one leaves a stale precise view
@@ -3421,6 +3440,7 @@ See `docs/batteries.md` for the full ecosystem scope. Key entries below; batteri
 - [x] Arithmetic on integers returns integer, not number
 - [x] String method resolution (`s:gsub(...)` resolves via string metatable)
 - [ ] **`string <: { sub: _ }` fails in structural subtyping** — method dispatch (`s:sub()`) already resolves via the string prelude, so the checker knows `string` has those methods. But the subtyping relation doesn't use the same lookup: `string` as a primitive fails `<: { sub: _ }`. These are the same invariant — one code path (method dispatch) uses the prelude, the other (structural subtyping) doesn't. Fix: when checking `string <: { field: T }`, look up the field in the string prelude before failing. Causes ~59 pre-existing errors in `lib/parse/init.lua`.
+- [ ] **Mixed named/unnamed params in a `--:` annotation mis-infer DISTANT code** — writing `--: (Val, atom: string) -> boolean` on v9 lattice.lua's `has_atom` (commit ff25df8c, where it is spelled unnamed `(Val, string)`) makes the legacy checker report `cannot take length of type never` at the UNRELATED, much earlier `#fn.results` (lattice.lua:645, inside clip); the fully-unnamed spelling checks clean. Whole-file inference is annotation-shape sensitive at a distance — either reject the mixed spelling with a parse diag or fix the inference; silent far-away `never` is the worst failure shape.
 - [x] `number` assignable to `integer` parameter (safe widening direction)
 - [x] Union-typed operands (`x and "y" or "z"` produces union — concat/arithmetic now accept)
 - [x] Reassignment of literal-typed bindings (`ret = "()"` then `ret = "..."` — fixed by T.widen)
