@@ -227,7 +227,7 @@ the engine, and emit line/col diagnostics.
 | **Globals seam** | `globals/init.lua`, `globals/stdlib.lua` | `global name -> annotation tree`. Source (a): the STDLIB declarations — LuaJIT 5.1 globals as `--:: declare` DATA in v9's own grammar (mined from the legacy `lib/type/static/stdlib_types.lua`, translated to v0: generics/overloads widen to the widest concrete arrow, index signatures -> the `table` atom in PARAM positions — kept deliberately even with real index parts: an index-signature pin would reject every inferred plain record until constructor-freshness-through-locals lands — pcall/select/string.find as result-OPEN arrows, pairs/ipairs/next as iterator triples with $-INSTANTIATED element positions; `ffi` deliberately NOT declared — it is not a LuaJIT global, it rides `require`), parsed ONCE per process and shared (interning); a non-empty `problems` list is a checker bug, asserted empty by tests. Source (b): per-file `--:: declare name = T` lines (the house convention), wired in lower's pre-pass, shadowing stdlib. READS resolve typed (one lazily-minted pinned cell per referenced global per file; At->Val conversion is memoized on shared At nodes); WRITES stay the `global-write` policy diag; `undeclared-global` fires only for genuinely unknown names. |
 | **Total lowering** | `lower.lua` | AST -> engine `Graph` + `Obligation`s + structural diags in ONE walk, ONE rule shape (seed / flow / filter / project / set_field / call / fn-rebuild + obligations). ALL 30 node kinds routed: v0-checked, or `unsupported:<construct>` with line/col (`M.ROUTE` is the roster; tests assert totality). Records: field reads/writes (incl. the `function M.f()` module idiom) and named-field constructors CHECKED; DYNAMIC keys (`t[k]`, incl. literal numbers) are one project_index/set_index rule + one index-read/index-write obligation each (reads `T | nil`; nil writes are deletion; direct-constructor writes check under leq_init — the append idiom); constructor ARRAY parts build the `[number]` index part (join of elements + unknown when a trailing call/vararg spreads; no arity tracking — stated); keys outside string/number stay `unsupported:dynamic-index`. Functions: param cells seeded from call sites (cells-as-unknowns) AND/OR annotation pins; per-position multi-return with Lua truncation/nil-extension; recursion via bind-before-body + clip; a parameter with NO evidence (no call, no pin) is ONE `unsupported:unconstrained-param`, not a per-use flood. Annotations are PIN + CHECK (a pin is both a seed and an upper-bound obligation; inference must AGREE): locals/assignments/table-fields/field-writes pin cells; preceding-line arrow annotations pin params (checked per call site, incl. nil pads and contravariant callback seeding) and returns (per-position, at the return line); `--[[: T]]` checked casts narrow the flow, `--[[:! T]]` is the force-cast policy. A pin that DEGRADED to unknown through a bucket pins nothing (⊤ carries no checking value; explicit `unknown` stays a pin). CONTROL-FLOW PRECISION (July 2026): merges are reachability-aware — a branch ending in a definite jump (return / break / a declared-`never` call: the stdlib's `error`) contributes nothing to the phi, so `if type(x) ~= "string" then return end` narrows the fall-through; both arms diverging = bottom (dead code checked against no values). LOOPS are the same phi with a back edge: loop-head phi per rebindable decl (assigned-roots scan), CLIPPED back-edge proposals (the third cycle-closing site — loop-grown values terminate), condition narrowing into the body / complement onto the exit, reachable-exit merge (cond-false edge — absent for `while true` — plus break snapshots; break diverges and snapshots into its loop frame, reset across function boundaries). COMPOUND CONDITIONS (July 2026): `cond_narrows` composes branch action LISTS recursively over the same atomic filters — `and` narrows every conjunct on the then-path, `or` its sound falsy duals on the else-path only, `not` swaps the lists, same-decl actions chain — and the RHS of any expression-level and/or lowers UNDER the lhs guard (Lua's evaluation order; the `opts and opts.f` idiom). Field PLACES are deliberately not narrowed (unstable under mutation/aliasing without call/write invalidation — recorded). for-num: loop var seeded number, bounds obligated ⊑ number. for-in: the generic-for protocol as ONE ordinary call (vars = result positions, var 1 nil-dropped, control cycling through a phi as the nil-dropped result). repeat lowers `until` inside the body scope (the Lua quirk). The havoc fence is GONE — its last consumer was the loop boundary. |
 | **Runner** | `check.lua` | `check_source`/`check_file` (caps-first) -> policy-stamped, position-sorted diags. THE POWER DIAL: named policy rules (`op-mismatch` / `call-non-function` / `call-mismatch` / `field-write-mismatch` / `annotation-mismatch` / `cast-mismatch` / `force-cast` = error; `missing-field` / `use-before-narrow` = warn; `new-field-on-write` = off — the ONE named open-record concession; per-bucket `unsupported:*`; "off" suppresses) — strictness is owner-decidable data, in one place. |
-| **Smoke** | `smoke.lua` | tool entry: whole-`lib/` totality run + diagnostic histogram (the coverage roadmap). July 2026, with compound narrowing + index signatures: 1,563 files, ZERO crashes, full solve ~24.1s (was ~19.3s on the same machine — the dynamic-access rule volume: one key cell + one projection per `t[k]`). |
+| **Smoke** | `smoke.lua` | tool entry: whole-`lib/` totality run + diagnostic histogram (the coverage roadmap). July 2026, with constructor freshness + the string metatable: 1,563 files, ZERO crashes, full solve ~25s (~24.1s before this increment on the same machine — the string-library projection joins + per-file library conversion). |
 
 The histogram is the prioritized roadmap. With records (July 2026) the 314k
 field/table family is retired. With FUNCTION TYPES + ANNOTATIONS (July 2026)
@@ -303,6 +303,46 @@ has absorbed records, arrows, annotations, the global environment + tag
 guards, back-edge cycles + reachability, and now compound narrowing +
 index signatures + call-site instantiation with ZERO changes (sixth
 consecutive data point).
+
+With CONSTRUCTOR FRESHNESS THROUGH LOCALS + the STRING METATABLE (July
+2026) the totals moved 426,041 -> 422,434 at ~25s, zero crashes. STRING
+METATABLE: string-typed values resolve member access through the
+DECLARED `string` table (LuaJIT sets the string metatable's `__index` to
+the string library; per-file declares shadow stdlib — declaration-driven,
+no method list in the checker): `unsupported:string-method` 4,697 -> 0,
+most sites checking CLEAN; the replacement surface is real checking —
+call-mismatch 4,053 -> 4,355 (dominated by `nil | string`
+receivers/arguments — `lines[i]:match(...)`-shaped flows into the
+string pins: the same honest `t[i]` border class the index discipline
+already surfaced), missing-field +12 (undeclared members on strings),
+and string WRITE targets are op-mismatch (strings have no `__newindex`).
+FRESHNESS: a constructor bound to a local stays re-typeable under
+leq_init along a single LINEAR SSA chain — rebound only by its own
+field/index writes, read only at projection bases (field/index-read
+bases, `#`'s operand — the `t[#t+1]` append idiom stays fresh) — and is
+CONSUMED by the first ascription whose type is known AT LOWERING
+(annotated local/assignment/field write, checked cast, pinned return
+positions) with OWNERSHIP TRANSFER: the local rebinds to the pin, so no
+stale precise view survives (and named writes on index-bounded records
+now check against the `[string]` part's bound — what keeps the
+transferred map view checked). Any retaining read (alias, call argument,
+store), closure capture (PERMANENT — the closure aliases the binding),
+or PHI kills it: a merge drops one-sided field/part evidence, so
+leq_init's absent⇒nil claim would go wrong through the merged version —
+the `local m = {}; for … m[k] = v` loop idiom therefore stays REJECTED
+(sound), now with the actionable hint (annotate the DECLARATION; the pin
+carries the part through every merge and the annotated loop checks
+clean). The alternative — a `{}` born index-bounded at never — stays
+rejected as recorded (wrong `nil` claims through stale aliases). The
+built-then-returned map class checks clean: annotation-mismatch 1,500 ->
+1,475, field-write-mismatch 215 -> 190 (direct-constructor field writes
+now check under leq_init, as index writes already did). The `f(t)`
+call-argument case KILLS rather than consumes — a call pin resolves only
+post-solve, so no lowering-time ownership transfer exists; re-typing
+without it would leave a stale precise view (recorded in TODO, not
+papered over). Engine untouched (SEVENTH consecutive data point). Next
+top boundary: cross-module summaries (`unsupported:cross-module` 3.2k +
+`annotation-unknown-name` 3.4k).
 
 ## Legacy type-checking seams (retained, repositioned)
 

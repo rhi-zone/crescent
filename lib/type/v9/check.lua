@@ -231,6 +231,23 @@ local function triage_field_target(diags, v, what, line, col, strtab)
     return false
 end
 
+-- The loop/branch-merge hint: a PLAIN open record failing against an
+-- index-bounded type is very often a table BUILT ACROSS MERGES (`local m =
+-- {}` filled in a loop) — the join with the unbounded pre-loop `{}` drops
+-- the index part (sound: a plain record's unnamed keys are unbounded), and
+-- constructor freshness dies at the phi. The actionable fix is annotating
+-- the DECLARATION: the pin carries the part through every merge and the
+-- whole build is checked against it.
+--: (v: Val, allow: Val) -> string
+local function index_drop_hint(v, allow)
+    if lattice.has_index(allow) and lattice.has_rec(v) and not lattice.has_index(v) then
+        return " — a built table's index part survives neither loop/branch"
+            .. " merges nor aliasing; annotate the DECLARATION (`local t ="
+            .. " {} --: <this type>`) so the whole build is checked against it"
+    end
+    return ""
+end
+
 -- Evaluate ONE post-solve obligation against the fixpoint values. `strtab`
 -- is the declared string-library table (nil when `string` is undeclared):
 -- member reads on string-typed targets resolve through it.
@@ -294,7 +311,8 @@ local function evaluate_obligation(diags, values, ob, strtab)
                         if missing then got = got .. " (missing argument)" end
                         emit(diags, ob.code, ob.line, ob.col,
                             "argument #" .. tostring(i) .. " to " .. ob.what .. ": got `"
-                                .. got .. "`, the parameter expects `" .. lattice.show(pin) .. "`")
+                                .. got .. "`, the parameter expects `" .. lattice.show(pin) .. "`"
+                                .. index_drop_hint(avv, pin))
                     end
                 end
             end
@@ -351,7 +369,7 @@ local function evaluate_obligation(diags, values, ob, strtab)
         if not ok then
             emit(diags, ob.code, ob.line, ob.col,
                 ob.what .. ": got `" .. lattice.show(v) .. "`, the annotation says `"
-                    .. lattice.show(allow) .. "`")
+                    .. lattice.show(allow) .. "`" .. index_drop_hint(v, allow))
         end
         return nil
     end
@@ -427,6 +445,41 @@ local function evaluate_obligation(diags, values, ob, strtab)
         end
         local w = lattice.field_write_bound(base, field)
         if w == nil then
+            -- no named ref — but an index-bounded record's unnamed string
+            -- keys are governed by its str part: a NAMED write IS a
+            -- string-keyed write, checked against the part's bound (this
+            -- is also what keeps freshness ownership-transfer sound: every
+            -- write through a transferred map view stays checked). Writing
+            -- nil deletes (as for dynamic keys); a never part means "no
+            -- string keys yet" — growth, the named concession below.
+            if lattice.has_str_index(base) then
+                local pw = lattice.index_write_bound(base, "str")
+                if pw ~= nil then
+                    local vv = v --: Val
+                    local dropped = lattice.tag_drop(v, "nil")
+                    if as_val(dropped) then vv = dropped end
+                    if lattice.is_bottom(vv) then return nil end
+                    if lattice.is_unknown(vv) then
+                        emit(diags, "use-before-narrow", ob.line, ob.col,
+                            "value written to " .. ob.what
+                                .. " has type `unknown` — narrow it before the write")
+                        return nil
+                    end
+                    local ok = false
+                    if ob.init == true then
+                        ok = lattice.leq_init(vv, pw)
+                    else
+                        ok = lattice.leq(vv, pw)
+                    end
+                    if not ok then
+                        emit(diags, ob.code, ob.line, ob.col,
+                            "write to " .. ob.what .. ": got `" .. lattice.show(vv)
+                                .. "`, the record's `[string]` index part bounds writes at `"
+                                .. lattice.show(pw) .. "`")
+                    end
+                    return nil
+                end
+            end
             emit(diags, "new-field-on-write", ob.line, ob.col,
                 ob.what .. " created by write on `" .. lattice.show(base)
                     .. "` (invisible through aliases — the open-record concession)")
@@ -437,7 +490,16 @@ local function evaluate_obligation(diags, values, ob, strtab)
                 "value written to " .. ob.what .. " has type `unknown` — narrow it before the write")
             return nil
         end
-        if not lattice.leq(v, w) then
+        -- a direct-constructor written value is a fresh construction
+        -- ascribed by the ref's bound (initialization ordering — the same
+        -- rule dynamic-key writes already apply).
+        local wok = false
+        if ob.init == true then
+            wok = lattice.leq_init(v, w)
+        else
+            wok = lattice.leq(v, w)
+        end
+        if not wok then
             emit(diags, ob.code, ob.line, ob.col,
                 "write to " .. ob.what .. ": got `" .. lattice.show(v)
                     .. "`, the field's write bound is `" .. lattice.show(w) .. "`")

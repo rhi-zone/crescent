@@ -231,6 +231,117 @@ T.describe("v9 check — structural records (obligations end to end)", function(
     end)
 end)
 
+T.describe("v9 check — constructor freshness through locals", function()
+    T.it("a built-then-returned map checks under leq_init (the recorded amplifier)", function()
+        local src = "--: () -> { [string]: number }\nlocal function make()\n"
+            .. "    local t = {}\n    t.a = 1\n    t.b = 2\n    return t\nend\nreturn make\n"
+        local diags = check.check_source(src, "t.lua", nil)
+        T.ok(diags ~= nil and #diags == 0,
+            "fresh across statements: the return ascription re-types the refs")
+    end)
+
+    T.it("ascription CONSUMES freshness and transfers ownership", function()
+        -- after `local u = t --: map`, t's own view IS the ascription:
+        -- a later out-of-bound write through t is caught (no stale view).
+        local src = "local t = {}\nt.x = 1\nlocal u = t --: { [string]: number }\n"
+            .. "t.x = 'oops'\nreturn t, u\n"
+        local diags = check.check_source(src, "t.lua", nil)
+        T.ok(diags ~= nil, "checked")
+        if diags ~= nil then
+            T.eq(find_diag(diags, "annotation-mismatch"), nil, "the ascription itself passes")
+            local d = find_diag(diags, "field-write-mismatch")
+            T.ok(d ~= nil and d.line == 4,
+                "the post-transfer write checks against the map's [string] part")
+        end
+        local cast = check.check_source(
+            "local t = {}\nt.a = 1\nlocal u = t --[[: { [string]: number }]]\nreturn u, t\n",
+            "t.lua", nil)
+        T.ok(cast ~= nil and #cast == 0, "a checked cast consumes freshness the same way")
+    end)
+
+    T.it("an ALIAS read kills freshness — re-typing is REJECTED", function()
+        local src = "--: () -> { [string]: number }\nlocal function make()\n"
+            .. "    local t = {}\n    t.a = 1\n    local u = t\n    return t, u\nend\nreturn make\n"
+        local diags = check.check_source(src, "t.lua", nil)
+        T.ok(diags ~= nil, "checked")
+        if diags ~= nil then
+            local d = find_diag(diags, "annotation-mismatch")
+            T.ok(d ~= nil, "aliased: ordinary invariant discipline (leq), rejected")
+            if d ~= nil then
+                T.ok(d.message:find("annotate the DECLARATION", 1, true) ~= nil,
+                    "the message says what to actually do: " .. d.message)
+            end
+        end
+    end)
+
+    T.it("a CALL argument kills freshness — the callee may retain the value", function()
+        local src = "local function sink(x) return x end\n"
+            .. "--: () -> { [string]: number }\nlocal function make()\n"
+            .. "    local t = {}\n    t.a = 1\n    sink(t)\n    return t\nend\nreturn make, sink\n"
+        local diags = check.check_source(src, "t.lua", nil)
+        T.ok(diags ~= nil, "checked")
+        if diags ~= nil then
+            T.ok(find_diag(diags, "annotation-mismatch") ~= nil,
+                "escaped to a call: re-typing rejected")
+        end
+    end)
+
+    T.it("CLOSURE capture kills freshness permanently", function()
+        local src = "--: () -> { [string]: number }\nlocal function make()\n"
+            .. "    local t = {}\n    local g = function() return t end\n"
+            .. "    t.a = 1\n    g()\n    return t\nend\nreturn make\n"
+        local diags = check.check_source(src, "t.lua", nil)
+        T.ok(diags ~= nil, "checked")
+        if diags ~= nil then
+            T.ok(find_diag(diags, "annotation-mismatch") ~= nil,
+                "captured: the closure aliases the binding — rejected")
+        end
+    end)
+
+    T.it("projection bases do NOT kill: the `t[#t + 1]` append idiom stays fresh", function()
+        local src = "--: () -> { [number]: string }\nlocal function build()\n"
+            .. "    local t = {}\n    t[#t + 1] = 'a'\n    t[#t + 1] = 'b'\n"
+            .. "    return t\nend\nreturn build\n"
+        local diags = check.check_source(src, "t.lua", nil)
+        T.ok(diags ~= nil and #diags == 0, "#t and t[...] reads are non-retaining")
+    end)
+
+    T.it("a DIVERGING branch keeps the chain linear; a real phi kills", function()
+        local one = "--: (boolean) -> { [string]: number }\nlocal function make(c)\n"
+            .. "    local t = {}\n    if c then\n        return { fixed = 1 }\n    end\n"
+            .. "    t.a = 1\n    return t\nend\nreturn make\n"
+        local d1 = check.check_source(one, "t.lua", nil)
+        T.ok(d1 ~= nil and #d1 == 0, "early-return arm: single surviving version stays fresh")
+        local two = "--: (boolean) -> { [string]: number }\nlocal function make(c)\n"
+            .. "    local t = {}\n    if c then t.a = 1 else t.b = 2 end\n"
+            .. "    return t\nend\nreturn make\n"
+        local d2 = check.check_source(two, "t.lua", nil)
+        T.ok(d2 ~= nil and find_diag(d2, "annotation-mismatch") ~= nil,
+            "a real phi drops one-sided field evidence — soundly rejected")
+    end)
+
+    T.it("the loop-built map: annotate-hint diagnostic, and the annotated decl checks", function()
+        local bare = "--: () -> { [string]: number }\nlocal function collect()\n"
+            .. "    local m = {}\n    for i = 1, 3 do\n        m['k'] = i\n    end\n"
+            .. "    return m\nend\nreturn collect\n"
+        local d1 = check.check_source(bare, "t.lua", nil)
+        T.ok(d1 ~= nil, "checked")
+        if d1 ~= nil then
+            local d = find_diag(d1, "annotation-mismatch")
+            T.ok(d ~= nil, "the loop-head phi drops the index part — honestly rejected")
+            if d ~= nil then
+                T.ok(d.message:find("annotate the DECLARATION", 1, true) ~= nil,
+                    "with the actionable fix, not a bare mismatch: " .. d.message)
+            end
+        end
+        local annotated = "--: () -> { [string]: number }\nlocal function collect()\n"
+            .. "    local m = {} --: { [string]: number }\n    for i = 1, 3 do\n"
+            .. "        m['k'] = i\n    end\n    return m\nend\nreturn collect\n"
+        local d2 = check.check_source(annotated, "t.lua", nil)
+        T.ok(d2 ~= nil and #d2 == 0, "the hint's advice checks the whole loop cleanly")
+    end)
+end)
+
 T.describe("v9 check — function boundary honesty", function()
     T.it("a parameter no call reaches is ONE honest diagnostic, not a per-use flood", function()
         local diags = check.check_source(

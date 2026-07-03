@@ -108,6 +108,16 @@
 -- Merges are REACHABILITY-aware: a branch that cannot fall through (return /
 -- break / a declared-never call) contributes nothing to the phi.
 --
+-- CONSTRUCTOR FRESHNESS THROUGH LOCALS rides the same SSA discipline: a
+-- table constructor bound to a local stays re-typeable by an ascription
+-- (leq_init) along a single LINEAR version chain — rebound only by its own
+-- field/index writes, read only at projection bases (`t.x`, `t[k]`, `#t`) —
+-- and is CONSUMED by the first ascription whose type is known at lowering
+-- (annotated local/assignment/field write, checked cast, pinned return),
+-- which TRANSFERS OWNERSHIP: the local rebinds to the pin, so no stale
+-- precise view survives. Any retaining read, closure capture, or phi kills
+-- it. Full discipline + soundness argument at the freshness block below.
+--
 -- LOOPS are the same phi mechanism with a back edge: each decl the loop may
 -- rebind gets a LOOP-HEAD phi (pre-loop version + the back-edge version —
 -- the engine's fixpoint solves the cycle; back-edge flows are CLIPPED, see
@@ -145,7 +155,7 @@ local globals = require("lib.type.v9.globals")
 --:: Diag = { code: string, severity: string, message: string, line: integer, col: integer }
 --:: Obligation = { kind: string, cell: string, allow: Val | nil, field: string | nil, base: string | nil, key: string | nil, args: { [integer]: string } | nil, inits: { [integer]: boolean } | nil, init: boolean | nil, code: string, what: string, line: integer, col: integer }
 --:: LowerResult = { graph: Graph, obligations: { [integer]: Obligation }, diags: { [integer]: Diag }, vars: { [string]: string }, strlib: Val | nil }
---:: Decl = { id: string, name: string, line: integer, col: integer, read: boolean, cell: string, pin: Val | nil }
+--:: Decl = { id: string, name: string, line: integer, col: integer, read: boolean, cell: string, pin: Val | nil, fresh: boolean, captured: boolean, fdepth: integer }
 --:: Scope = { map: { [string]: Decl }, order: { [integer]: Decl } }
 --:: Ann = { kind: integer, content: string, col: integer, force_cast: boolean | nil, line: integer | nil, consumed: boolean | nil }
 
@@ -369,11 +379,15 @@ function M.lower(chunk)
     -- "the value in `cell`, written to `base`.`field`, must satisfy the
     -- field's invariant write bound" — the mutation-soundness check. A write
     -- to a field `base` does not yet have is the named `new-field-on-write`
-    -- policy case (also resolved post-solve).
-    --: (cell: string, base: string, field: string, line: integer, col: integer) -> nil
-    local function obligate_field_write(cell, base, field, line, col)
+    -- policy case (also resolved post-solve) — UNLESS the base is
+    -- index-bounded for string keys: a named write IS a string-keyed write,
+    -- checked against the str part's bound. `init` marks a
+    -- direct-constructor written value (initialization ordering, as for
+    -- dynamic-key writes).
+    --: (cell: string, base: string, field: string, init: boolean, line: integer, col: integer) -> nil
+    local function obligate_field_write(cell, base, field, init, line, col)
         obligations[#obligations + 1] = {
-            kind = "field-write", cell = cell, allow = nil, field = field, base = base, key = nil, args = nil, inits = nil, init = nil,
+            kind = "field-write", cell = cell, allow = nil, field = field, base = base, key = nil, args = nil, inits = nil, init = init,
             code = "field-write-mismatch", what = "field '" .. field .. "'", line = line, col = col,
         }
         return nil
@@ -806,10 +820,12 @@ function M.lower(chunk)
         return nil
     end
 
+    -- fresh/captured/fdepth: CONSTRUCTOR FRESHNESS (see the freshness block
+    -- below) — armed by a direct-constructor binding, killed by aliasing.
     --: (name: string, line: integer, col: integer, cell: string, read: boolean) -> Decl
     local function declare(name, line, col, cell, read)
         counter = counter + 1
-        local d = { id = name .. "#" .. counter, name = name, line = line, col = col, read = read, cell = cell, pin = nil } --: Decl
+        local d = { id = name .. "#" .. counter, name = name, line = line, col = col, read = read, cell = cell, pin = nil, fresh = false, captured = false, fdepth = ret_depth } --: Decl
         local s = scopes[depth]
         s.map[name] = d
         s.order[#s.order + 1] = d
@@ -820,7 +836,17 @@ function M.lower(chunk)
     local function resolve(name)
         for i = depth, 1, -1 do
             local d = scopes[i].map[name]
-            if d ~= nil then return d end
+            if d ~= nil then
+                if ret_depth ~= d.fdepth then
+                    -- touched from a NESTED function: the binding is
+                    -- captured (a closure holds an upvalue alias whose
+                    -- runtime order lowering cannot see) — permanently
+                    -- outside the freshness discipline.
+                    d.captured = true
+                    d.fresh = false
+                end
+                return d
+            end
         end
         return nil
     end
@@ -864,6 +890,79 @@ function M.lower(chunk)
     -- Unannotated on purpose: the checker types them at their assignment
     -- sites below (annotated there), same idiom as parse.lua.
     local lower_expr, lower_stmts, lower_call
+
+    -- ── constructor FRESHNESS through locals ───────────────────────────────
+    -- A table constructor bound to a local stays FRESH — re-typeable by an
+    -- ascription under leq_init — while it provably has exactly ONE typed
+    -- view: a single linear SSA chain in one function, i.e. since the
+    -- `local t = {...}` (or `t = {...}`) binding it has only been rebound by
+    -- its own field/index writes (`t.x = 1`, `t[k] = v` — the set_field/
+    -- set_index versions) and read in NON-RETAINING base positions (the base
+    -- of a field/index READ, the operand of `#` — a projection consumes the
+    -- reference without retaining it). Freshness is a property of the DECL
+    -- (a lowering-time SSA fact), never a per-construct case.
+    --
+    -- KILLED by (each creates — or may create — a second typed view, which
+    -- is exactly what makes leq_init's re-typing unsound):
+    --   * any ordinary identifier READ (aliasing `local u = t`, a call
+    --     argument `f(t)`, a value stored into another structure, a return
+    --     into an inferred arrow, an operand — retaining or not-provably-not);
+    --   * any touch from a NESTED function (capture): PERMANENT — the
+    --     closure aliases the BINDING, so even a later re-arming constructor
+    --     is aliased; runtime call order is invisible to lowering
+    --     (d.captured, marked in resolve);
+    --   * any PHI (if-merge, loop head/exit): a merge of versions loses
+    --     field/part evidence (rec_join keeps common fields; idx survives
+    --     only when both sides are bounded), so the version no longer
+    --     accounts for every write — leq_init's absent-field⇒nil claim
+    --     would go wrong. Conservative and uniform: multiple versions end
+    --     the linear chain.
+    --
+    -- CONSUMED (checked under leq_init, exactly like a direct-constructor
+    -- expression) only where the ascribed type is known AT LOWERING, so
+    -- ownership can TRANSFER — the decl rebinds to the pinned cell and no
+    -- stale precise view survives: annotated locals/assignments, annotated
+    -- field writes, checked casts, and pinned return positions (nothing of
+    -- this activation runs after a return). Uses whose bound resolves only
+    -- post-solve (call-argument pins, index-part write bounds) can NOT
+    -- transfer ownership at lowering and therefore KILL instead — recorded
+    -- as the remaining `f(t)` gap, never papered over with an unsound
+    -- re-typing.
+
+    -- Take the freshness of a plain-identifier expression: returns the decl
+    -- (freshness CONSUMED — a taken view transfers or dies; greedy, so
+    -- `return t, t` re-types only the first position) or nil. Call BEFORE
+    -- lowering the expression (the read there kills the flag anyway).
+    --: (unknown) -> Decl | nil
+    local function fresh_source(e)
+        if not is_node(e) then return nil end
+        if e.tag ~= defs.NODE_IDENTIFIER then return nil end
+        local nm = e.name
+        if type(nm) ~= "string" then return nil end
+        local d = resolve(nm)
+        if d == nil or not d.fresh then return nil end
+        d.fresh = false
+        return d
+    end
+
+    -- Lower a PROJECTION-BASE expression: the base of a field/index read or
+    -- the operand of `#` consumes the reference without retaining it, so a
+    -- plain-identifier base read does NOT kill freshness (the `t[#t + 1]`
+    -- append idiom stays fresh). Capture detection still applies (resolve).
+    --: (Ast) -> string
+    local function lower_base_expr(e)
+        if e.tag == defs.NODE_IDENTIFIER then
+            local nm = e.name
+            if type(nm) == "string" then
+                local d = resolve(nm)
+                if d ~= nil then
+                    d.read = true
+                    return d.cell
+                end
+            end
+        end
+        return lower_expr(e)
+    end
 
     -- ── assigned-roots scan (which decls can a subtree rebind?) ───────────
     -- A loop needs a head phi ONLY for decls its body may rebind: plain
@@ -1172,10 +1271,13 @@ function M.lower(chunk)
         return rc
     end
 
-    -- A field READ (`t.x` / `t["x"]` / the receiver half of `t:m()`).
+    -- A field READ (`t.x` / `t["x"]`). The base is a projection position
+    -- (non-retaining): a plain-identifier base keeps its freshness. The
+    -- receiver of `t:m()` does NOT ride this — lower_call retains it as
+    -- the call's first argument (an escaping use).
     --: (target: Ast, key: string, what: string, line: integer, col: integer) -> string
     local function lower_field_read(target, key, what, line, col)
-        return field_read_from(lower_expr(target), key, what, line, col)
+        return field_read_from(lower_base_expr(target), key, what, line, col)
     end
 
     -- A dynamic-key READ (`t[k]`, k not a literal string — literal numbers
@@ -1442,13 +1544,13 @@ function M.lower(chunk)
                         return { [nc] = lattice.set_field(get(bc), key, get(vcell)) }
                     end)
                     d.cell = nc
-                    obligate_field_write(vcell, bc, key, t.line, t.col)
+                    obligate_field_write(vcell, bc, key, init, t.line, t.col)
                     return nil
                 end
             end
         end
         local bc = lower_expr(target)
-        obligate_field_write(vcell, bc, key, t.line, t.col)
+        obligate_field_write(vcell, bc, key, init, t.line, t.col)
         return nil
     end
 
@@ -1722,6 +1824,12 @@ function M.lower(chunk)
             local d = resolve(nm)
             if d ~= nil then
                 d.read = true
+                -- an ordinary read RETAINS the value (aliasing, a call
+                -- argument, a store, an operand): constructor freshness
+                -- dies here — consuming sites take the flag BEFORE
+                -- lowering (fresh_source); projection bases go through
+                -- lower_base_expr and never reach this arm.
+                d.fresh = false
                 return d.cell
             end
             -- declared globals (per-file `--:: declare` / the stdlib
@@ -1737,7 +1845,13 @@ function M.lower(chunk)
             local op = n.op
             local oc = "" --: string
             if is_node(operand) then
-                oc = lower_expr(operand)
+                if op == "#" then
+                    -- `#t` is a projection position: the reference is not
+                    -- retained, so freshness survives (the append idiom).
+                    oc = lower_base_expr(operand)
+                else
+                    oc = lower_expr(operand)
+                end
             else
                 internal(n, "unary without operand")
                 oc = unknown_cell("unop")
@@ -1824,8 +1938,8 @@ function M.lower(chunk)
             end
             -- t[expr] — the dynamic-key read (literal numbers included:
             -- their key cell is just the number atom, consulting the num
-            -- part the same way).
-            local tc = lower_expr(target)
+            -- part the same way). The base is a projection position.
+            local tc = lower_base_expr(target)
             local kc = lower_expr(key)
             return index_read_from(tc, kc, "index read", n.line, n.col)
         elseif tag == defs.NODE_FUNC_EXPR then
@@ -1942,6 +2056,13 @@ function M.lower(chunk)
             local inner = n.expr
             local ic = "" --: string
             local has_inner = false
+            -- a CHECKED cast of a fresh local is an ascription: consume the
+            -- freshness (taken before the read kills it; the local's view
+            -- rebinds to the asserted type below — ownership transfer).
+            local fdecl = nil --: Decl | nil
+            if is_node(inner) and n.force ~= true then
+                fdecl = fresh_source(inner)
+            end
             if is_node(inner) then
                 ic = lower_expr(inner)
                 has_inner = true
@@ -1974,13 +2095,18 @@ function M.lower(chunk)
             if has_inner and n.force ~= true then
                 -- `--[[: T]]`: CHECKED — the expression must satisfy T
                 -- (an unknown source is the use-before-narrow class).
-                local init = is_node(inner) and inner.tag == defs.NODE_TABLE_EXPR
+                local init = (is_node(inner) and inner.tag == defs.NODE_TABLE_EXPR)
+                    or fdecl ~= nil
                 obligate_ann(ic, pinval, init, "cast-mismatch", "checked cast", n.line, n.col)
                 if pinval.fn ~= nil then ann_flow(ic, pinval) end
             end
             -- the flow continues at the asserted type (that is what a cast
             -- is FOR); the obligation above keeps it honest.
-            return pinned_cell("cast", pinval)
+            local pc = pinned_cell("cast", pinval)
+            -- ownership transfer for a consumed fresh local: its view is
+            -- the asserted type from here on (no stale precise view).
+            if fdecl ~= nil then fdecl.cell = pc end
+            return pc
         elseif tag == defs.NODE_MATCH_EXPR then
             -- walker-only synthetic; never parser-emitted. Routed anyway.
             unsupported(n, "match-expr")
@@ -2057,6 +2183,7 @@ function M.lower(chunk)
             if t ~= nil and e ~= nil then
                 if then_div and else_div then
                     dk.cell = fresh(dk.name .. "-unreachable")
+                    dk.fresh = false
                 elseif then_div then
                     dk.cell = e
                 elseif else_div then
@@ -2068,6 +2195,12 @@ function M.lower(chunk)
                     flow(t, phi)
                     flow(e, phi)
                     dk.cell = phi
+                    -- a real PHI ends the linear SSA chain: the join drops
+                    -- one-sided field/part evidence, so the merged version
+                    -- no longer accounts for every write — constructor
+                    -- freshness dies (a single surviving branch version,
+                    -- the arms above, keeps the chain linear).
+                    dk.fresh = false
                 end
             end
         end
@@ -2093,6 +2226,11 @@ function M.lower(chunk)
             local phi = fresh(d.name .. "-loophead")
             flow(d.cell, phi)
             d.cell = phi
+            -- the loop-head phi merges the pre-loop and back-edge versions:
+            -- the linear SSA chain ends here — freshness dies (the join
+            -- drops part/field evidence, e.g. `{}` ⊔ idx-parted drops the
+            -- part, so leq_init's absent⇒nil claim would go wrong).
+            d.fresh = false
             phis[d.id] = phi
         end
         return phis
@@ -2119,6 +2257,9 @@ function M.lower(chunk)
     local function loop_exit_merge(vis, exits)
         for i = 1, #vis do
             local d = vis[i]
+            -- vis decls' freshness already died at the loop head; exits
+            -- only ever merge loop-phi'd versions (kept dead).
+            d.fresh = false
             if #exits == 0 then
                 d.cell = fresh(d.name .. "-unreachable")
             else
@@ -2405,6 +2546,13 @@ function M.lower(chunk)
                 anns[n.line].consumed = true
                 unsupported(n, "annotation-multi-local")
             end
+            -- a FRESH-LOCAL initializer of an annotated local is consumed
+            -- by the ascription (leq_init) — taken BEFORE the value list
+            -- lowers (the read there kills the flag).
+            local fdecl = nil --: Decl | nil
+            if is_at(at) and is_list(exprs) and #exprs >= 1 then
+                fdecl = fresh_source(exprs[1])
+            end
             local cells = {} --: { [integer]: string }
             if is_list(exprs) then
                 cells = lower_value_list(exprs, #names)
@@ -2412,19 +2560,25 @@ function M.lower(chunk)
             if is_at(at) then
                 -- PIN + CHECK: the local's cell is the annotation (readers
                 -- see the interface); the initializer must agree (leq_init
-                -- for a directly-ascribed fresh constructor).
+                -- for a directly-ascribed fresh constructor, or a consumed
+                -- fresh local).
                 local nm = names[1].name
                 local pinval = at_val(at)
                 if type(nm) == "string" and usable_pin(at, pinval) then
+                    local pc = pinned_cell(nm, pinval)
                     if is_list(exprs) and #exprs >= 1 then
                         local e1 = exprs[1]
-                        local init = e1.tag == defs.NODE_TABLE_EXPR
+                        local init = e1.tag == defs.NODE_TABLE_EXPR or fdecl ~= nil
                         obligate_ann(cells[1], pinval, init, "annotation-mismatch",
                             "local '" .. nm .. "'", n.line, n.col)
                         if pinval.fn ~= nil then ann_flow(cells[1], pinval) end
                     end
-                    local d = declare(nm, n.line, n.col, pinned_cell(nm, pinval), false)
+                    local d = declare(nm, n.line, n.col, pc, false)
                     d.pin = pinval
+                    -- ownership TRANSFER: the consumed fresh local's view
+                    -- becomes the ascription too — no stale precise view
+                    -- survives the re-typing (the soundness condition).
+                    if fdecl ~= nil then fdecl.cell = pc end
                     return false
                 end
             end
@@ -2433,7 +2587,14 @@ function M.lower(chunk)
                 if type(nm) == "string" then
                     local c = cells[i]
                     if c == nil then c = atom_cell("nil") end
-                    declare(nm, n.line, n.col, c, false)
+                    local d = declare(nm, n.line, n.col, c, false)
+                    -- freshness ORIGIN: a direct-constructor binding.
+                    if is_list(exprs) then
+                        local e = exprs[i]
+                        if e ~= nil and e.tag == defs.NODE_TABLE_EXPR then
+                            d.fresh = true
+                        end
+                    end
                 end
             end
             return false
@@ -2454,10 +2615,33 @@ function M.lower(chunk)
                 anns[n.line].consumed = true
                 unsupported(n, "annotation-multi-target")
             end
+            -- fresh sources consumed by ASCRIBING targets (the pin is known
+            -- at lowering: an annotated target, or a pinned decl) — taken
+            -- before the value list lowers; every other target's read just
+            -- kills the flag (no ownership transfer possible).
+            local fsrc = {} --: { [integer]: Decl }
+            for i = 1, #targets do
+                local e = exprs[i]
+                local t = targets[i]
+                if is_node(e) and is_node(t) then
+                    local consuming = is_at(at)
+                    local tn = t.name
+                    if not consuming and t.tag == defs.NODE_IDENTIFIER
+                        and type(tn) == "string" then
+                        local td = resolve(tn)
+                        consuming = td ~= nil and td.pin ~= nil
+                    end
+                    if consuming then
+                        local fd = fresh_source(e)
+                        if fd ~= nil then fsrc[i] = fd end
+                    end
+                end
+            end
             local cells = lower_value_list(exprs, #targets)
             for i = 1, #targets do
                 local t = targets[i]
-                local init = exprs[i] ~= nil and exprs[i].tag == defs.NODE_TABLE_EXPR
+                local ctor = exprs[i] ~= nil and exprs[i].tag == defs.NODE_TABLE_EXPR
+                local init = ctor or fsrc[i] ~= nil
                 if t.tag == defs.NODE_IDENTIFIER then
                     local nm = t.name
                     if type(nm) == "string" then
@@ -2473,14 +2657,21 @@ function M.lower(chunk)
                                     if pinval.fn ~= nil then ann_flow(c, pinval) end
                                 end
                                 d.pin = pinval
-                                d.cell = pinned_cell(nm, pinval)
+                                local pc = pinned_cell(nm, pinval)
+                                d.cell = pc
+                                d.fresh = false
+                                -- ownership transfer for a consumed source.
+                                local fd = fsrc[i]
+                                if fd ~= nil then fd.cell = pc end
                             else
                                 local dp = d.pin
                                 if dp ~= nil then
                                     -- the variable's own annotation: the
                                     -- value must agree; the cell REBINDS to
                                     -- the value (assignment narrowing
-                                    -- survives the pin).
+                                    -- survives the pin). A consumed fresh
+                                    -- source needs no rebind: the target's
+                                    -- view IS the source's cell (one view).
                                     if c ~= nil then
                                         obligate_ann(c, dp, init, "annotation-mismatch",
                                             "assignment to '" .. nm .. "'", t.line, t.col)
@@ -2489,6 +2680,9 @@ function M.lower(chunk)
                                 elseif c ~= nil then
                                     d.cell = c
                                 end
+                                -- freshness ORIGIN: rebinding to a direct
+                                -- constructor re-arms (unless captured).
+                                d.fresh = ctor and c ~= nil and not d.captured
                             end
                         else
                             diag("global-write", t.line, t.col,
@@ -2508,6 +2702,9 @@ function M.lower(chunk)
                                 "annotated field write", t.line, t.col)
                             if pinval.fn ~= nil then ann_flow(c, pinval) end
                             c = pinned_cell("fieldw", pinval)
+                            -- ownership transfer for a consumed source.
+                            local fd = fsrc[i]
+                            if fd ~= nil then fd.cell = c end
                         end
                     end
                     lower_field_write(t, c, init)
@@ -2562,10 +2759,21 @@ function M.lower(chunk)
                 if is_list(exprs) then elist = exprs end
                 local want = #pins
                 if #elist > want then want = #elist end
+                -- fresh locals returned at PINNED positions are consumed by
+                -- the return ascription (nothing of this activation runs
+                -- after a return, so no stale view survives; greedy — a
+                -- repeated `return t, t` re-types only the first).
+                local finit = {} --: { [integer]: boolean }
+                for i = 1, #elist do
+                    if pins[i] ~= nil and fresh_source(elist[i]) ~= nil then
+                        finit[i] = true
+                    end
+                end
                 local cells = lower_value_list(elist, want)
                 for i = 1, #cells do
                     local pin = pins[i]
-                    local init = elist[i] ~= nil and elist[i].tag == defs.NODE_TABLE_EXPR
+                    local init = (elist[i] ~= nil and elist[i].tag == defs.NODE_TABLE_EXPR)
+                        or finit[i] == true
                     if pin ~= nil then
                         obligate_ann(cells[i], pin, init, "annotation-mismatch",
                             "return value #" .. tostring(i), n.line, n.col)

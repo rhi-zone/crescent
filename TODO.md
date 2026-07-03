@@ -153,27 +153,46 @@ in histogram order, plus recorded debt:
   dynamic-index boundary; reads on plain records without a signature are the
   `index-without-signature` diag (warn in v0 — dial up as annotations
   spread).
-- [ ] **Index-part growth through loop-head phis** — `local out = {}` then
-  `out[i] = v` in a loop: the loop phi joins the grown version with the
-  unbounded pre-loop `{}` and drops the part (sound — a plain open record
-  admits keys at any type), so the post-loop read is index-without-signature.
-  The actionable fix is the diag's own advice (annotate the decl:
-  `--: { [number]: T }` checks the whole loop cleanly). Closing it without
-  annotation needs constructor-freshness substrate (a fresh `{}` could be
-  born index-bounded with both parts never — but that widens the
-  new-field-on-write aliasing concession into wrong `nil` claims through
-  stale aliases; decide deliberately, not by default).
+- [x] **Index-part growth through loop-head phis** — DECIDED 2026-07-03 (with
+  the freshness increment): the phi kill is the sound call and stays. The
+  born-index-bounded-`{}` alternative was rejected deliberately — it turns
+  stale-alias reads into wrong `nil` claims (beyond the named concession,
+  which yields unknown/diags, never a wrong type); the join-as-identity
+  alternative breaks projection monotonicity. Constructor freshness dies at
+  every phi (the join drops one-sided field/part evidence, so leq_init's
+  absent⇒nil claim would go wrong through the merged version). The
+  annotation requirement is kept and the DIAGNOSTIC now says so: an
+  ann/call mismatch of a plain open record against an index-bounded type
+  carries the annotate-the-declaration hint (`local m = {} --: { [k]: T }`
+  checks the whole loop cleanly — pinned by tests).
 - [ ] **Cross-module summaries** — `unsupported:cross-module` (3.2k: `require`
   calls + `--:: require` type imports) + `unsupported:annotation-unknown-name`
   (3.2k: aliases imported from other modules). Module summary = the chunk's
   recorded returns (already collected per-frame in lower.lua) + exported alias
   env.
-- [ ] **Constructor freshness through locals** — `local t = {...}; f(t)` checks
-  under full leq (w-contravariance + absence-is-not-nil) even when t is
-  provably unaliased; direct-constructor arguments/initializers already use
-  leq_init. A local-freshness pass (no alias taken, no escape before use)
-  would extend initialization ascription and burn down a chunk of
-  call-mismatch/annotation-mismatch imprecision (bin_packing:698 class).
+- [x] **Constructor freshness through locals** — DONE 2026-07-03. Freshness is
+  a decl-level SSA property in lowering: a constructor bound to a local stays
+  re-typeable (leq_init) along a single LINEAR version chain — rebound only by
+  its own field/index writes, read only at projection bases (field/index-read
+  bases, `#`'s operand: the `t[#t+1]` append idiom stays fresh) — and is
+  CONSUMED by the first ascription whose type is known at lowering (annotated
+  local/assignment/field write, checked cast, pinned return) with OWNERSHIP
+  TRANSFER (the local rebinds to the pin; named writes on index-bounded
+  records now check against the `[string]` part bound, keeping the
+  transferred view checked). Kills: any retaining read, closure capture
+  (permanent — the closure aliases the binding), any phi. The
+  built-then-returned map class (agent/set.lua-shaped straight-line builds)
+  checks clean; annotation-mismatch 1,500 -> 1,475, field-write-mismatch
+  215 -> 190 on the tree.
+- [ ] **Freshness at call arguments (`f(t)`)** — deliberately NOT consumed:
+  a call pin resolves only post-solve, so there is no lowering-time
+  ownership transfer, and re-typing without one leaves a stale precise view
+  (unsound). The bin_packing:698-shaped `local t = {...}; f(t)` class
+  therefore still checks under full leq. Closing it needs either
+  lowering-time callee types (cross-module/known-local arrow resolution
+  before the solve) or a post-solve ownership discipline (e.g. consume only
+  when the argument is the decl's LAST use — requires a liveness pre-pass;
+  reads inside loops are never last).
 - [ ] **Optional fields in records** — `{ x = cond and v or nil }`-shaped and
   conditionally-assigned fields intersect away at phi joins; reads then report
   missing-field (e.g. the `body.generationConfig = body.generationConfig or {}`
