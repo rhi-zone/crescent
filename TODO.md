@@ -165,11 +165,69 @@ in histogram order, plus recorded debt:
   ann/call mismatch of a plain open record against an index-bounded type
   carries the annotate-the-declaration hint (`local m = {} --: { [k]: T }`
   checks the whole loop cleanly — pinned by tests).
-- [ ] **Cross-module summaries** — `unsupported:cross-module` (3.2k: `require`
-  calls + `--:: require` type imports) + `unsupported:annotation-unknown-name`
-  (3.2k: aliases imported from other modules). Module summary = the chunk's
-  recorded returns (already collected per-frame in lower.lua) + exported alias
-  env.
+- [x] **Cross-module summaries** — DONE 2026-07-03. Module summary = the
+  chunk's recorded returns (joined post-solve, exported as At DATA via
+  summary.lua's val_to_at — never live cells; the importer's at_val re-mints
+  param cells in its own graph, the globals-seam interning split) + the
+  exported alias env (own + imported, transitively closed). Resolution is a
+  caps-first seam (modules.lua: dot->slash, init.lua fallback, one injected
+  read_file cap — probing IS reading). Demand-driven session (check.session):
+  summaries cached by path, cycles cut by an in-progress set (the legacy
+  `_checking` pattern) into `unsupported:cross-module-cycle` — never a hang.
+  `require` wiring is DECLARATION-driven: stdlib declares
+  `require = (module: string) -> $Require<1>`; lowering resolves the inst
+  from the literal argument (no name-keying — pinned by a test that wires a
+  non-require name through the same declaration). `--:: require "mod"`
+  imports the dep's alias env (own aliases shadow).
+  `unannotated-module-boundary` is the policy dial over inferred summaries
+  (default off). Landing it surfaced a LATTICE-OP pathology: join/meet/equal
+  walk two distinct DAGs per PATH (exponential), and the imported DOM-shaped
+  `lib.js_types` environment made the whole-lib smoke hang (minutes,
+  gigabytes) on lib/web/html — fixed in the increment's own leq-memo pattern
+  (pairwise memos + EXACT absorption dedup so the engine's no-change firing
+  is identity + per-file reset; lattice.lua states why LuaJIT's
+  non-ephemeron weak tables cannot express the cache). Histogram + numbers
+  in ARCHITECTURE.md's slice section.
+- [ ] **`_types.lua` companion declaration files at the session** — the legacy
+  checker OVERRIDES a module's path with its `_types.lua` companion
+  (`lib/foo.lua` -> `lib/foo_types.lua`). NOT carried into v9's resolver: v9
+  summaries are inferred from the module's returns, and the two existing
+  companions (lib/http/format_types.lua, lib/imap/format_types.lua) are
+  alias-only files with no `return` — a path override would type the module's
+  value as `true` (wrong). The principled v9 shape is alias-env MERGING at
+  the session (summary(mod) also checks the companion and layers its aliases)
+  — small, but zero `--:: require` consumers target those pairs today, so
+  recorded instead of built.
+- [ ] **Cross-module summary invalidation / persistence** — the session cache
+  is per-process by design (this increment; the legacy sha256 disk cache is
+  deliberately out of scope). A future watch-mode/LSP needs invalidation
+  (content-hash keys + dep edges — the legacy dep_hashes pattern) before
+  summaries can persist.
+- [ ] **Legacy checker: forward-declared-local call sites contaminate
+  IMPORTERS' checks** — while landing v9 cross-module summaries: a
+  forward-declared local (`local equal_val ... join_val = function() ...
+  equal_val(r, a) ... end ... equal_val = function() ... end`) in
+  lib/type/v9/lattice.lua made `bin/cr check` (the LEGACY checker) report
+  a spurious error in lib/type/v9/lower.lua — a DIFFERENT file that
+  imports lattice — at an unrelated, previously-clean line
+  (`cannot take length of type integer` on `#names` after an
+  `x is { [integer]: string }` guard). Reordering lattice's definitions so
+  the local is assigned before the call sites cleared it. Minimal repro
+  not yet reduced; smells like module-summary inference degrading on the
+  unassigned-local call and poisoning the importer's env. v9 is the
+  replacement, but until cutover the legacy checker gates commits (the
+  pre-commit hook), so this class costs real debugging time.
+- [ ] **Cross-module solve cost on DOM-shaped imports requires Val
+  INTERNING (hash-consing)** — the whole-lib full smoke moved ~23s -> 95s
+  and peaks at ~19GB LuaJIT heap on the heaviest importers (the
+  `lib.js_types` environment: lib/web/html, the reactive_dom trees): each
+  importer re-mints the imported summary/alias DAG as fresh Vals + pinned
+  cells in its own graph, so equal structures are distinct objects and
+  every pairwise memo/dedup pays a full first-visit walk per file. The
+  substrate fix is interning Vals (equal structure = identical object,
+  the globals-seam sharing generalized), which collapses the pairwise
+  memos into identity checks and bounds the re-mint. Recorded as
+  substrate; not to be patched around per-name.
 - [x] **Constructor freshness through locals** — DONE 2026-07-03. Freshness is
   a decl-level SSA property in lowering: a constructor bound to a local stays
   re-typeable (leq_init) along a single LINEAR version chain — rebound only by
