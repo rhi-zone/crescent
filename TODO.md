@@ -195,13 +195,25 @@ in histogram order, plus recorded debt:
   fall-through; diverging branches — return/break/declared-`never` calls like
   `error` — contribute nothing to the merge) landed 2026-07; the
   lib/math/init.lua:11 false positive resolved. Remaining piece tracked below.
-- [ ] **Compound-condition narrowing (and/or chains)** — `if limit and #x > limit`
-  does not narrow `limit` in the then-arm, and `opts and opts.f` does not narrow
-  the RHS read of `opts` (same `cond_target`/filter seam in `lower.lua`, plus an
-  RHS-of-`and` narrowing in the expression rule). Now GATES real findings: most
-  of the new numeric-`for` `nil | number` bound errors (columnar:209,
-  inverted_index:242, qrencode:149, shamir:182) and the `opts and opts.f`
-  op-mismatch class (csv:140-143, base64:42-43) are this gap, not code bugs.
+- [x] **Compound-condition narrowing (and/or chains)** — DONE 2026-07-03.
+  `cond_narrows` in lower.lua composes branch action LISTS recursively over the
+  same atomic filters: `and` narrows EVERY conjunct on the then-path; `or`
+  narrows the sound duals on the else-path only (no invented positives);
+  `not` swaps the lists; actions on the same decl chain in order. The RHS of
+  any expression-level and/or also lowers UNDER the lhs guard (Lua's
+  evaluation order), which types `opts and opts.f` as `nil | typeof(f)`.
+  columnar:209, inverted_index:242, qrencode:145+149, csv:140-144/270-323,
+  base64:42-43/99 all resolve. shamir:182 was MISATTRIBUTED to this gap — it
+  is the zero-iteration-loop case (`len` is set inside a for-in; "k >= 2
+  implies the loop ran" is value-dependent reasoning): an honest dynamism
+  boundary, not a narrowing gap.
+- [ ] **Field-place narrowing (`if t.f then … t.f …`, `o._x and o._x.y`)** —
+  v0 narrows LOCAL bindings only (pinned decision, tested in lower_test:
+  "FIELD places are NOT narrowed"). A field read is not a stable place under
+  mutation/aliasing: sound field-place narrowing must invalidate on
+  intervening calls and writes (TS pays exactly this machinery). Remaining
+  real-file sites of the class: csv:394/410-411/457-458 (`ds._opts and
+  ds._opts.quote`). The supported idiom is `local o = t.f; if o then …`.
 
 ## Typechecker soundness methodology — open fork
 

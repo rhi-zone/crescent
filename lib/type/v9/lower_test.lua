@@ -105,6 +105,100 @@ T.describe("v9 lowering — nil-equality guards (the == nil / ~= nil idiom)", fu
     end)
 end)
 
+T.describe("v9 lowering — compound-condition narrowing (and/or chains)", function()
+    T.it("`if a and b then` narrows EVERY conjunct on the then-path", function()
+        local src = "local c = true\nlocal x = nil\nlocal y = nil\n"
+            .. "if c then x = 1 end\nif c then y = 's' end\n"
+            .. "local a = nil\nlocal b = nil\n"
+            .. "if x and y then a = x b = y end\nreturn a, b\n"
+        local tys = infer(src)
+        T.eq(tys.a, "nil | number", "first conjunct truthy-narrowed (joined with initial nil)")
+        T.eq(tys.b, "nil | string", "second conjunct truthy-narrowed too")
+    end)
+
+    T.it("the `if limit and #x > limit` repro: no op-mismatch, for-bound is number", function()
+        local src = "local c = true\nlocal limit = nil\nif c then limit = 2 end\n"
+            .. "local s = 'abc'\nlocal n = 0\n"
+            .. "if limit and #s > limit then\n  for i = 1, limit do n = i end\nend\nreturn n\n"
+        local diags = checked(src)
+        T.ok(find_diag(diags, "op-mismatch") == nil,
+            "the RHS comparison and the for-bound both see the truthy-narrowed limit")
+    end)
+
+    T.it("and-chain conjuncts compose on the SAME decl (~= nil, then a tag test)", function()
+        local src = "local c = true\nlocal x = nil\nif c then x = 1 end\nif c then x = 's' end\n"
+            .. "local y = nil\nif x ~= nil and type(x) == 'number' then y = x end\nreturn y\n"
+        local tys = infer(src)
+        T.eq(tys.y, "nil | number", "both filters chain: drop:nil then keep:number")
+    end)
+
+    T.it("`a and b` narrows NOTHING on the else-path (¬a ∨ ¬b refutes no conjunct)", function()
+        local src = "local c = true\nlocal x = nil\nif c then x = 1 end\n"
+            .. "local y = nil\nif x and c then else y = x end\nreturn y\n"
+        local tys = infer(src)
+        T.eq(tys.y, "nil | number", "else-arm keeps x's full type")
+    end)
+
+    T.it("`if a or b then` narrows BOTH duals on the else-path only", function()
+        local src = "local c = true\nlocal x = nil\nlocal y = nil\n"
+            .. "if c then x = 1 end\nif c then y = 's' end\n"
+            .. "local a = true\nlocal b = true\nlocal t = true\n"
+            .. "if x or y then t = x else a = x b = y end\nreturn a, b, t\n"
+        local tys = infer(src)
+        T.eq(tys.a, "nil | true", "else-arm: falsy(x) = nil")
+        T.eq(tys.b, "nil | true", "else-arm: falsy(y) = nil")
+        T.eq(tys.t, "nil | number | true", "then-arm does NOT invent a positive (x may be nil when y holds)")
+    end)
+
+    T.it("`not (a and b)` swaps the branch lists", function()
+        local src = "local c = true\nlocal x = nil\nlocal y = nil\n"
+            .. "if c then x = 1 end\nif c then y = 's' end\n"
+            .. "local a = nil\nlocal b = nil\n"
+            .. "if not (x and y) then else a = x b = y end\nreturn a, b\n"
+        local tys = infer(src)
+        T.eq(tys.a, "nil | number", "the else of `not (x and y)` is the then of `x and y`")
+        T.eq(tys.b, "nil | string", "both conjuncts narrowed there")
+    end)
+
+    T.it("the guarded-access idiom `opts and opts.f` types nil | field, no phantom op-mismatch", function()
+        local src = "local c = true\nlocal opts = nil\nif c then opts = { f = 1 } end\n"
+            .. "local f = opts and opts.f\nreturn f\n"
+        local tys = infer(src)
+        T.eq(tys.f, "nil | number", "falsy(opts) | typeof(opts.f) under the truthy guard")
+        local diags = checked(src)
+        T.ok(find_diag(diags, "op-mismatch") == nil,
+            "the RHS field read sees the truthy-narrowed opts (no nil-target op-mismatch)")
+    end)
+
+    T.it("the RHS of `or` lowers under the falsy guard (sound, and genuinely right)", function()
+        -- `x or #x` is a runtime error whenever the RHS runs (x is nil/false
+        -- there): the guard makes the checker SAY so instead of missing it.
+        local src = "local c = true\nlocal x = nil\nif c then x = 's' end\n"
+            .. "local n = x or #x\nreturn n\n"
+        local diags = checked(src)
+        local d = find_diag(diags, "op-mismatch")
+        T.ok(d ~= nil, "operand of unary # is falsy(x) = nil on the or-RHS path")
+    end)
+
+    T.it("FIELD places are NOT narrowed (pinned v0 decision: locals only)", function()
+        -- `if t.f then t.f end` — the second read is NOT filtered by the
+        -- guard: a field is not a stable place under mutation/aliasing.
+        -- Narrow through a local (`local f = t.f; if f then`).
+        local src = "local t = { f = nil } --: { f: number | nil }\n"
+            .. "local y = 0\nif t.f then y = t.f end\nreturn y\n"
+        local tys = infer(src)
+        T.eq(tys.y, "nil | number", "the guarded field read keeps its full declared type")
+    end)
+
+    T.it("a while-loop and-chain condition narrows into the body", function()
+        local src = "local c = true\nlocal limit = nil\nif c then limit = 3 end\n"
+            .. "local i = 1\nwhile limit and i < limit do i = i + 1 end\nreturn i\n"
+        local diags = checked(src)
+        T.ok(find_diag(diags, "op-mismatch") == nil,
+            "the comparison and the body see the truthy-narrowed limit")
+    end)
+end)
+
 T.describe("v9 lowering — truthiness narrowing + join at merge", function()
     T.it("branch versions join to a union at the if-merge", function()
         local tys = infer("local x = 1\nlocal c = true\nif c then\n  x = 's'\nelse\n  x = 2\nend\nreturn x\n")

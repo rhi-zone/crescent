@@ -24,6 +24,12 @@
 --   if x == nil then the SAME keep/drop filters at the nil tag (equality
 --                    with the nil literal IS the type()-tag test for nil;
 --                    ~= swaps branches, either operand order)
+--   if a and b then  COMPOUND conditions compose the same filters: every
+--                    conjunct narrows on the then-path (recursively);
+--                    `or` narrows its sound duals on the else-path only;
+--                    `not` swaps the branch lists. The RHS of any and/or
+--                    also LOWERS under the lhs guard (Lua only evaluates
+--                    it there) — the `opts and opts.f` idiom.
 --
 -- RECORDS ride the same shape: a table constructor with named fields is one
 -- rule proposing `lattice.record_of` over its field cells; a field READ
@@ -102,7 +108,7 @@
 -- the engine's fixpoint solves the cycle; back-edge flows are CLIPPED, see
 -- lattice.clip, because a loop can grow a record/union one level per
 -- iteration). while/repeat narrow their condition into the body / the exit
--- through the SAME cond_target filters as `if`; for-num seeds the loop var
+-- through the SAME cond_narrows filters as `if`; for-num seeds the loop var
 -- at number and obligates start/limit/step ⊑ number; for-in wires the
 -- generic-for iterator protocol through ONE ordinary call (iterator(state,
 -- control) — loop vars are the call's result positions, the first
@@ -1308,56 +1314,159 @@ function M.lower(chunk)
         return is_node(e) and e.tag == defs.NODE_LITERAL and e.lit_kind == defs.LIT_NIL
     end
 
-    -- If `cond` is narrowable in v0, return the tested local's decl plus
-    -- the then/else FILTER MODES (filter_flow vocabulary). Recognized:
-    -- a bare local (truthy/falsy), `not <local>` (swapped), the tag guards
-    -- `type(x) == "…"` / `type(x) ~= "…"` in either operand order
-    -- (keep:<tag> / drop:<tag>), and the nil-equality guards `x == nil` /
-    -- `x ~= nil` (the SAME keep/drop filters at the nil tag — equality with
-    -- the nil literal IS the type()-tag test for nil). Richer guards
-    -- (and/or chains) are later increments of the SAME mechanism.
-    --: (Ast) -> (Decl | nil, string, string)
-    local function cond_target(cond)
+    -- COMPOUND-CONDITION NARROWING: a condition yields a LIST of sound
+    -- narrowing ACTIONS per branch (filter_flow vocabulary), composed
+    -- recursively from the same atomic guards `if` always had — the and/or
+    -- chain arm of the ONE narrowing mechanism, never new solver logic:
+    --
+    --   x             then: truthy(x)             else: falsy(x)
+    --   not C         swaps C's branch lists (any C, not just identifiers)
+    --   A and B       then: then(A) ++ then(B)    else: NOTHING — ¬(A∧B) =
+    --                 ¬A ∨ ¬B refutes no single conjunct; inventing a
+    --                 positive would be unsound
+    --   A or B        then: NOTHING (the dual)    else: else(A) ++ else(B)
+    --   type(x)=="t"  then: keep:t                else: drop:t   (either
+    --                 operand order; ~= swaps branches)
+    --   x == nil      then: keep:nil              else: drop:nil (~= swaps)
+    --
+    -- Actions on the SAME decl compose by chaining filters in order
+    -- (`x ~= nil and type(x) == "table"` narrows x twice). FIELD places
+    -- (`t.f`) are NOT narrowed: a field read is not a stable place under
+    -- mutation/aliasing (an intervening call or write through another alias
+    -- invalidates it — TS pays call-invalidation for this); v0 narrows
+    -- LOCAL bindings only. `local f = t.f; if f then` is the supported
+    -- idiom; the gap is recorded in TODO.md.
+    --:: Narrow = { d: Decl, mode: string }
+
+    --: (Ast, { [integer]: Narrow }, { [integer]: Narrow }) -> nil
+    local function cond_narrows_into(cond, thens, elses)
         if cond.tag == defs.NODE_IDENTIFIER then
-            local nm = cond.name
-            if type(nm) == "string" then return resolve(nm), "truthy", "falsy" end
-        elseif cond.tag == defs.NODE_UNARY_EXPR then
-            local op = cond.op
-            local operand = cond.operand
-            if op == "not" and is_node(operand) and operand.tag == defs.NODE_IDENTIFIER then
-                local nm = operand.name
-                if type(nm) == "string" then return resolve(nm), "falsy", "truthy" end
+            local d = ident_target(cond)
+            if d ~= nil then
+                thens[#thens + 1] = { d = d, mode = "truthy" }
+                elses[#elses + 1] = { d = d, mode = "falsy" }
             end
+            return nil
+        elseif cond.tag == defs.NODE_UNARY_EXPR then
+            local operand = cond.operand
+            if cond.op == "not" and is_node(operand) then
+                -- `not C`: C's then-actions hold on OUR else-path and vice
+                -- versa — recurse with the accumulators swapped.
+                cond_narrows_into(operand, elses, thens)
+            end
+            return nil
         elseif cond.tag == defs.NODE_BINARY_EXPR then
             local op = cond.op
-            if op == "==" or op == "~=" then
-                local d = type_call_target(cond.lhs)
-                local tag = tag_literal(cond.rhs)
+            local lhs = cond.lhs
+            local rhs = cond.rhs
+            if not is_node(lhs) or not is_node(rhs) then return nil end
+            if op == "and" then
+                -- every conjunct holds on the then-path; the else-path
+                -- refutes only the disjunction of negations — narrow nothing.
+                local dead = {} --: { [integer]: Narrow }
+                cond_narrows_into(lhs, thens, dead)
+                cond_narrows_into(rhs, thens, dead)
+                return nil
+            elseif op == "or" then
+                local dead = {} --: { [integer]: Narrow }
+                cond_narrows_into(lhs, dead, elses)
+                cond_narrows_into(rhs, dead, elses)
+                return nil
+            elseif op == "==" or op == "~=" then
+                local d = type_call_target(lhs)
+                local tag = tag_literal(rhs)
                 if d == nil or tag == nil then
-                    d = type_call_target(cond.rhs)
-                    tag = tag_literal(cond.lhs)
+                    d = type_call_target(rhs)
+                    tag = tag_literal(lhs)
                 end
                 if d ~= nil and tag ~= nil then
+                    local keep = { d = d, mode = "keep:" .. tag } --: Narrow
+                    local drop = { d = d, mode = "drop:" .. tag } --: Narrow
                     if op == "==" then
-                        return d, "keep:" .. tag, "drop:" .. tag
+                        thens[#thens + 1] = keep
+                        elses[#elses + 1] = drop
+                    else
+                        thens[#thens + 1] = drop
+                        elses[#elses + 1] = keep
                     end
-                    return d, "drop:" .. tag, "keep:" .. tag
+                    return nil
                 end
-                local nd = ident_target(cond.lhs)
-                local lit = is_nil_literal(cond.rhs)
+                local nd = ident_target(lhs)
+                local lit = is_nil_literal(rhs)
                 if nd == nil or not lit then
-                    nd = ident_target(cond.rhs)
-                    lit = is_nil_literal(cond.lhs)
+                    nd = ident_target(rhs)
+                    lit = is_nil_literal(lhs)
                 end
                 if nd ~= nil and lit then
+                    local keep = { d = nd, mode = "keep:nil" } --: Narrow
+                    local drop = { d = nd, mode = "drop:nil" } --: Narrow
                     if op == "==" then
-                        return nd, "keep:nil", "drop:nil"
+                        thens[#thens + 1] = keep
+                        elses[#elses + 1] = drop
+                    else
+                        thens[#thens + 1] = drop
+                        elses[#elses + 1] = keep
                     end
-                    return nd, "drop:nil", "keep:nil"
+                    return nil
                 end
             end
         end
-        return nil, "truthy", "falsy"
+        return nil
+    end
+
+    --: (Ast) -> ({ [integer]: Narrow }, { [integer]: Narrow })
+    local function cond_narrows(cond)
+        local thens = {} --: { [integer]: Narrow }
+        local elses = {} --: { [integer]: Narrow }
+        cond_narrows_into(cond, thens, elses)
+        return thens, elses
+    end
+
+    -- Apply a branch's narrowing actions: each chains ONE filter_flow onto
+    -- the decl's current cell (actions on the same decl compose in order).
+    --: ({ [integer]: Narrow }, string) -> nil
+    local function apply_narrows(list, suffix)
+        for i = 1, #list do
+            local a = list[i]
+            local nc = fresh(a.d.name .. suffix)
+            filter_flow(a.d.cell, nc, a.mode)
+            a.d.cell = nc
+        end
+        return nil
+    end
+
+    -- Save the current cells of every decl a narrow list touches (dedup) —
+    -- the restore points for transient narrowing (expression-level and/or,
+    -- loop conditions on decls the loop never rebinds).
+    --:: NarrowSave = { d: Decl, cell: string }
+    --: ({ [integer]: Narrow }) -> { [integer]: NarrowSave }
+    local function save_narrows(list)
+        local seen = {} --: { [string]: boolean }
+        local out = {} --: { [integer]: NarrowSave }
+        for i = 1, #list do
+            local d = list[i].d
+            if not seen[d.id] then
+                seen[d.id] = true
+                out[#out + 1] = { d = d, cell = d.cell }
+            end
+        end
+        return out
+    end
+
+    --: ({ [integer]: NarrowSave }) -> nil
+    local function restore_narrows(saved)
+        for i = 1, #saved do saved[i].d.cell = saved[i].cell end
+        return nil
+    end
+
+    -- Both branch lists' saves in one pass (loop conditions restore the
+    -- union of touched decls).
+    --: ({ [integer]: Narrow }, { [integer]: Narrow }) -> { [integer]: NarrowSave }
+    local function save_narrows2(a, b)
+        local merged = {} --: { [integer]: Narrow }
+        for i = 1, #a do merged[#merged + 1] = a[i] end
+        for i = 1, #b do merged[#merged + 1] = b[i] end
+        return save_narrows(merged)
     end
 
     -- A call expression that provably NEVER RETURNS (a diverging call): the
@@ -1467,17 +1576,30 @@ function M.lower(chunk)
                 return unknown_cell("binop")
             end
             local lc = lower_expr(lhs)
-            local rc = lower_expr(rhs)
             local bound, result, derive = binop_rule(op)
             if derive ~= nil then
                 -- and/or: DERIVED from the lattice's falsy/truthy — the
                 -- result cell joins filter(lhs) with type(rhs). No special
-                -- case; the same transfer narrowing uses.
+                -- case; the same transfer narrowing uses. The RHS lowers
+                -- under the lhs GUARD (Lua evaluates `b` in `a and b` only
+                -- when a is truthy; in `a or b` only when a is falsy) —
+                -- the same branch actions an `if` would apply, restored
+                -- after (expressions cannot rebind locals, so save/restore
+                -- is exact). This is what types the guarded-access idiom
+                -- `opts and opts.f` without a phantom-nil op-mismatch.
+                local thens, elses = cond_narrows(lhs)
+                local guard = elses
+                if op == "and" then guard = thens end
+                local saved = save_narrows(guard)
+                apply_narrows(guard, "-" .. op)
+                local rc = lower_expr(rhs)
+                restore_narrows(saved)
                 local c = fresh(op)
                 filter_flow(lc, c, derive)
                 flow(rc, c)
                 return c
             end
+            local rc = lower_expr(rhs)
             if result == nil then
                 internal(n, "unknown binary op '" .. op .. "'")
                 return unknown_cell("binop")
@@ -1662,15 +1784,12 @@ function M.lower(chunk)
         lower_expr(cond)
         local vis = visible()
         local pre = snapshot(vis)
-        local d, then_mode, else_mode = cond_target(cond)
+        local thens, elses = cond_narrows(cond)
 
-        -- then-arm: the condition's filter (truthy for a bare guard;
-        -- keep/drop tag filters for `type(x) == "…"` and nil equality).
-        if d ~= nil then
-            local nc = fresh(d.name .. "-then")
-            filter_flow(d.cell, nc, then_mode)
-            d.cell = nc
-        end
+        -- then-arm: the condition's filters (truthy for a bare guard;
+        -- keep/drop tag filters for `type(x) == "…"` and nil equality;
+        -- every conjunct of an and-chain).
+        apply_narrows(thens, "-then")
         local then_div = false
         local body = clause.body
         if is_list(body) then
@@ -1681,14 +1800,10 @@ function M.lower(chunk)
         local then_snap = snapshot(vis)
         restore(vis, pre)
 
-        -- else-arm: the complementary filter, then the rest of the chain.
+        -- else-arm: the complementary filters, then the rest of the chain.
         -- An ABSENT else still narrows: the fall-through path is the
         -- else-arm (this is what the early-exit idiom merges with).
-        if d ~= nil then
-            local ec = fresh(d.name .. "-else")
-            filter_flow(d.cell, ec, else_mode)
-            d.cell = ec
-        end
+        apply_narrows(elses, "-else")
         local else_div = false
         if i < #clauses then
             else_div = lower_if_from(clauses, i + 1, else_body)
@@ -1798,7 +1913,7 @@ function M.lower(chunk)
     end
 
     -- `while cond do body end`: head phis -> cond (narrowed truthy into the
-    -- body, falsy onto the normal exit — the SAME cond_target filters as
+    -- body, falsy onto the normal exit — the SAME cond_narrows filters as
     -- `if`) -> body -> back edge. `while true` has NO normal exit (the
     -- reachability discipline): only breaks leave it, and an exitless loop
     -- diverges. Returns the statement's divergence bit.
@@ -1813,16 +1928,14 @@ function M.lower(chunk)
         local phis = loop_head(vis)
         local head = snapshot(vis)
         lower_expr(cond)
-        local d, then_mode, else_mode = cond_target(cond)
-        local d0 = nil --: string | nil
-        if d ~= nil then d0 = d.cell end
+        local thens, elses = cond_narrows(cond)
+        -- pre-condition versions of every narrowed decl: decls the loop
+        -- never rebinds are not in vis, so their transient body narrowing
+        -- is undone by hand from these saves.
+        local saved = save_narrows2(thens, elses)
         loop_depth = loop_depth + 1
         loop_frames[loop_depth] = { vis = vis, snaps = {} }
-        if d ~= nil and d0 ~= nil then
-            local nc = fresh(d.name .. "-loopthen")
-            filter_flow(d0, nc, then_mode)
-            d.cell = nc
-        end
+        apply_narrows(thens, "-loopthen")
         local div = false
         local body = n.body
         if is_list(body) then
@@ -1832,23 +1945,25 @@ function M.lower(chunk)
         end
         if not div then loop_back_edge(vis, phis) end
         restore(vis, head)
-        -- a cond decl the loop never rebinds is not in vis: undo the
+        -- cond decls the loop never rebinds are not in vis: undo the
         -- transient body narrowing by hand.
-        if d ~= nil and d0 ~= nil and phis[d.id] == nil then d.cell = d0 end
+        for i = 1, #saved do
+            local s = saved[i]
+            if phis[s.d.id] == nil then s.d.cell = s.cell end
+        end
         local frame = loop_frames[loop_depth]
         loop_depth = loop_depth - 1
         local exits = {} --: { [integer]: { [string]: string } }
         if not is_true_literal(cond) then
-            if d ~= nil then
-                local ec = fresh(d.name .. "-loopelse")
-                filter_flow(d.cell, ec, else_mode)
-                d.cell = ec
-            end
+            apply_narrows(elses, "-loopelse")
             exits[#exits + 1] = snapshot(vis)
-            -- the falsy narrowing persists for an un-rebound cond decl only
+            -- the falsy narrowing persists for un-rebound cond decls only
             -- when every exit passes the condition (no breaks bypass it).
-            if d ~= nil and d0 ~= nil and phis[d.id] == nil and #frame.snaps > 0 then
-                d.cell = d0
+            if #frame.snaps > 0 then
+                for i = 1, #saved do
+                    local s = saved[i]
+                    if phis[s.d.id] == nil then s.d.cell = s.cell end
+                end
             end
         end
         for i = 1, #frame.snaps do exits[#exits + 1] = frame.snaps[i] end
@@ -1874,35 +1989,30 @@ function M.lower(chunk)
         local cond = n.cond
         local exits = {} --: { [integer]: { [string]: string } }
         if not div then
-            local d = nil --: Decl | nil
-            local then_mode = "truthy"
-            local else_mode = "falsy"
+            local thens = {} --: { [integer]: Narrow }
+            local elses = {} --: { [integer]: Narrow }
             if is_node(cond) then
                 lower_expr(cond)
-                d, then_mode, else_mode = cond_target(cond)
+                thens, elses = cond_narrows(cond)
             else
                 internal(n, "repeat without a condition")
             end
-            local d0 = nil --: string | nil
-            if d ~= nil then d0 = d.cell end
+            local saved = save_narrows2(thens, elses)
             -- back edge: the loop repeats while the condition is FALSY.
-            if d ~= nil and d0 ~= nil then
-                local bc = fresh(d.name .. "-looprepeat")
-                filter_flow(d0, bc, else_mode)
-                d.cell = bc
-            end
+            apply_narrows(elses, "-looprepeat")
             loop_back_edge(vis, phis)
-            -- normal exit: the condition is TRUTHY.
-            if d ~= nil and d0 ~= nil then
-                local ec = fresh(d.name .. "-loopuntil")
-                filter_flow(d0, ec, then_mode)
-                d.cell = ec
-            end
+            -- normal exit: the condition is TRUTHY (filtered from the
+            -- POST-BODY state, not the falsy-filtered back-edge state).
+            restore_narrows(saved)
+            apply_narrows(thens, "-loopuntil")
             exits[#exits + 1] = snapshot(vis)
             -- the narrowing rides the exit snapshot for rebindable decls;
             -- for anything else (incl. a body-local dying with the scope)
             -- it is transient.
-            if d ~= nil and d0 ~= nil and phis[d.id] == nil then d.cell = d0 end
+            for i = 1, #saved do
+                local s = saved[i]
+                if phis[s.d.id] == nil then s.d.cell = s.cell end
+            end
         elseif is_node(cond) then
             -- the until is unreachable (the body cannot fall through) but
             -- still lowers for diagnostics.
