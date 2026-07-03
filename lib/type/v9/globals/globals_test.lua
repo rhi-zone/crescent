@@ -57,6 +57,23 @@ T.describe("v9 globals — the stdlib declaration source", function()
         T.ok(globals.stdlib() == env, "memoized: parsed once per process")
         T.ok(globals.lookup("string") == env.globals["string"], "lookup returns the shared At")
     end)
+
+    T.it("atom-metatable `__index` wiring is DATA and its tables are declared", function()
+        -- the atom_index map is the whole linkage: every wired atom names a
+        -- declared global table (the atom's metatable `__index`); consumers
+        -- iterate the map — no per-atom branch anywhere in lowering/check.
+        local n = 0
+        for atom, gname in pairs(globals.atom_index) do
+            T.ok(type(atom) == "string" and type(gname) == "string",
+                "atom -> global-name pairs")
+            T.ok(globals.lookup(gname) ~= nil,
+                "wired table `" .. gname .. "` (for atom `" .. atom .. "`) is declared")
+            n = n + 1
+        end
+        T.eq(globals.atom_index["string"], "string",
+            "LuaJIT boot wiring: string's `__index` is the string library")
+        T.eq(n, 1, "exactly the wirings LuaJIT establishes at boot (5.1: string)")
+    end)
 end)
 
 T.describe("v9 globals — stdlib access typed end to end", function()

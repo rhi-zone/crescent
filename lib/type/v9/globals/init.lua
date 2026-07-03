@@ -152,4 +152,16 @@ function M.lookup(name)
     return M.stdlib().globals[name]
 end
 
+-- ATOM-METATABLE `__index` wiring, as DATA: LuaJIT wires some PRIMITIVE
+-- atoms' metatables at boot so member access on a value of the atom
+-- resolves through a global library table (the metatable's `__index`).
+-- This map — atom name -> the global table's NAME — is that boot wiring.
+-- Lowering and obligation evaluation consume it UNIFORMLY (no per-atom
+-- branch anywhere); the member types come from the named table's
+-- declaration (stdlib above; per-file `--:: declare` shadows it, same
+-- resolution as global reads). Wiring a future metatabled atom (e.g.
+-- cdata) is one entry here plus the table's declaration — nothing else.
+--   string -> the string library (5.1/LuaJIT: getmetatable("").__index == string)
+M.atom_index = { string = "string" } --: { [string]: string }
+
 return M

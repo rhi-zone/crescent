@@ -95,13 +95,32 @@ local function as_val(x) return type(x) == "table" end
 
 -- The atom bound a field-access TARGET must stay within (records are tables).
 local TABLE_ONLY = lattice.single("table")
--- A field-READ target may also be a string: LuaJIT's string metatable sets
--- `__index` to the string library, so member access on strings resolves
--- through the DECLARED `string` table (write targets stay TABLE_ONLY —
--- strings have no `__newindex`; writing to one is a runtime error).
-local TABLE_OR_STRING = lattice.of({ "table", "string" })
 -- Lua's pad for a missing argument/result position.
 local NIL_ONLY = lattice.single("nil")
+
+--:: AtomLib = { atom: string, lib: Val }
+--:: ReadMeta = { libs: { [integer]: AtomLib }, allow: Val, expected: string }
+
+-- The READ-target meta view, built once per file from lowering's resolved
+-- atom-metatable `__index` tables (globals.atom_index — LuaJIT wires
+-- `string`'s metatable to the string library at boot): a field/index READ
+-- target may be a table OR any wired atom whose table is declared; members
+-- on a wired atom resolve through its declared table. UNIFORM over the
+-- data — no atom is special-cased here. WRITE targets never take this view
+-- (there is no `__newindex` wiring; writing e.g. a string is a runtime
+-- error, an op-mismatch).
+--: (atomlibs: { [integer]: AtomLib } | nil) -> ReadMeta | nil
+local function read_meta(atomlibs)
+    if atomlibs == nil then return nil end
+    if #atomlibs == 0 then return nil end
+    local names = { "table" } --: { [integer]: string }
+    local expected = "a table" --: string
+    for i = 1, #atomlibs do
+        names[#names + 1] = atomlibs[i].atom
+        expected = expected .. " or " .. atomlibs[i].atom
+    end
+    return { libs = atomlibs, allow = lattice.of(names), expected = expected }
+end
 
 -- The named rules and their default severities, as data. (Built with
 -- dynamic keys: the checker folds literal-key writes into the alias shape.)
@@ -179,7 +198,7 @@ local function error_position(errmsg)
     return 0, 0
 end
 
---: (x: unknown) -> x is { graph: Graph, obligations: { [integer]: Obligation }, diags: { [integer]: Diag }, vars: { [string]: string }, strlib: Val | nil }
+--: (x: unknown) -> x is { graph: Graph, obligations: { [integer]: Obligation }, diags: { [integer]: Diag }, vars: { [string]: string }, atomlibs: { [integer]: AtomLib } }
 local function is_lower_result(x) return type(x) == "table" end
 
 --: (diags: { [integer]: Diag }, code: string, line: integer, col: integer, message: string) -> nil
@@ -194,14 +213,15 @@ end
 --   unknown           -> use-before-narrow
 --   non-table atoms   -> op-mismatch (naming the offending parts)
 --   bare `table` top  -> use-before-narrow (fields unknown; narrow it)
--- `strtab` is the DECLARED string-library table (the string metatable's
--- `__index` — LuaJIT semantics): when given, string-typed READ targets are
--- admitted and resolve their members through it; write targets pass nil
--- (strings have no `__newindex`, so a string write target is op-mismatch).
--- A record component (with or without the field) — or an admitted string —
--- returns true; the caller decides ok / missing-field / new-field-on-write.
---: (diags: { [integer]: Diag }, v: Val, what: string, line: integer, col: integer, strtab: Val | nil) -> boolean
-local function triage_field_target(diags, v, what, line, col, strtab)
+-- `meta` is the READ-target meta view (read_meta — the atom-metatable
+-- `__index` wiring): when given, targets admitting a wired atom are
+-- admitted and resolve their members through the atom's declared table;
+-- write targets pass nil (there is no `__newindex` wiring, so e.g. a
+-- string write target is op-mismatch). A record component (with or
+-- without the field) — or an admitted wired atom — returns true; the
+-- caller decides ok / missing-field / new-field-on-write.
+--: (diags: { [integer]: Diag }, v: Val, what: string, line: integer, col: integer, meta: ReadMeta | nil) -> boolean
+local function triage_field_target(diags, v, what, line, col, meta)
     if lattice.is_unknown(v) then
         emit(diags, "use-before-narrow", line, col,
             what .. " target has type `unknown` — narrow it before dynamic use")
@@ -209,9 +229,9 @@ local function triage_field_target(diags, v, what, line, col, strtab)
     end
     local allow = TABLE_ONLY --: Val
     local expected = "a table" --: string
-    if strtab ~= nil then
-        allow = TABLE_OR_STRING
-        expected = "a table or string"
+    if meta ~= nil then
+        allow = meta.allow
+        expected = meta.expected
     end
     local bad = lattice.excess(v, allow)
     if bad ~= nil then
@@ -220,10 +240,13 @@ local function triage_field_target(diags, v, what, line, col, strtab)
         return false
     end
     if lattice.has_rec(v) then return true end
-    if strtab ~= nil and lattice.has_string(v) and not lattice.has_table_top(v) then
-        -- a string(-only) target: members resolve through the declared
-        -- string library — the caller consults strtab.
-        return true
+    if meta ~= nil and not lattice.has_table_top(v) then
+        -- a wired-atom(-only) target: members resolve through the atom's
+        -- declared table — the caller consults meta.libs.
+        local libs = meta.libs
+        for i = 1, #libs do
+            if lattice.has_atom(v, libs[i].atom) then return true end
+        end
     end
     -- only the `table` top remains: some table, fields unknown.
     emit(diags, "use-before-narrow", line, col,
@@ -248,11 +271,11 @@ local function index_drop_hint(v, allow)
     return ""
 end
 
--- Evaluate ONE post-solve obligation against the fixpoint values. `strtab`
--- is the declared string-library table (nil when `string` is undeclared):
--- member reads on string-typed targets resolve through it.
---: (diags: { [integer]: Diag }, values: { [string]: unknown }, ob: Obligation, strtab: Val | nil) -> nil
-local function evaluate_obligation(diags, values, ob, strtab)
+-- Evaluate ONE post-solve obligation against the fixpoint values. `meta`
+-- is the READ-target meta view (nil when no wired atom's table is
+-- declared): member reads on wired-atom targets resolve through it.
+--: (diags: { [integer]: Diag }, values: { [string]: unknown }, ob: Obligation, meta: ReadMeta | nil) -> nil
+local function evaluate_obligation(diags, values, ob, meta)
     local v = values[ob.cell]
     if not as_val(v) then return nil end
 
@@ -377,14 +400,22 @@ local function evaluate_obligation(diags, values, ob, strtab)
     if ob.kind == "field-read" then
         local field = ob.field
         if field == nil then return nil end
-        if triage_field_target(diags, v, ob.what, ob.line, ob.col, strtab) then
+        if triage_field_target(diags, v, ob.what, ob.line, ob.col, meta) then
             -- a string index part covers unnamed keys: the read is the
             -- (sound) `T | nil` index projection, not a missing field.
             local ok = lattice.has_field(v, field) or lattice.has_str_index(v)
-            if not ok and strtab ~= nil and lattice.has_string(v) then
-                -- a string-typed target resolves members through the
-                -- declared string library (the string metatable).
-                ok = lattice.has_field(strtab, field) or lattice.has_str_index(strtab)
+            if not ok and meta ~= nil then
+                -- a wired-atom target resolves members through the atom's
+                -- declared table (its metatable's `__index`).
+                local libs = meta.libs
+                for i = 1, #libs do
+                    local al = libs[i]
+                    if lattice.has_atom(v, al.atom)
+                        and (lattice.has_field(al.lib, field) or lattice.has_str_index(al.lib)) then
+                        ok = true
+                        break
+                    end
+                end
             end
             if not ok then
                 emit(diags, "missing-field", ob.line, ob.col,
@@ -402,7 +433,7 @@ local function evaluate_obligation(diags, values, ob, strtab)
         -- with NO index part is the named dynamism boundary. One diag per
         -- read; an index-bounded target with a str/num key is fully checked
         -- (the projection already typed it `T | nil`).
-        if not triage_field_target(diags, v, ob.what, ob.line, ob.col, strtab) then
+        if not triage_field_target(diags, v, ob.what, ob.line, ob.col, meta) then
             return nil
         end
         local keycell = ob.key
@@ -638,9 +669,9 @@ function M.check_source(source, filename, opts)
         local sol, serr = engine.solve(low.graph)
         if sol == nil then return nil, filename .. ": " .. (serr or "solve failed") end
         local obligations = low.obligations
-        local strtab = low.strlib
+        local meta = read_meta(low.atomlibs)
         for i = 1, #obligations do
-            evaluate_obligation(diags, sol.values, obligations[i], strtab)
+            evaluate_obligation(diags, sol.values, obligations[i], meta)
         end
     end
 

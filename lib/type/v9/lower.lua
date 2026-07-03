@@ -154,7 +154,8 @@ local globals = require("lib.type.v9.globals")
 --:: Ast = { tag: integer, line: integer, col: integer, ... }
 --:: Diag = { code: string, severity: string, message: string, line: integer, col: integer }
 --:: Obligation = { kind: string, cell: string, allow: Val | nil, field: string | nil, base: string | nil, key: string | nil, args: { [integer]: string } | nil, inits: { [integer]: boolean } | nil, init: boolean | nil, code: string, what: string, line: integer, col: integer }
---:: LowerResult = { graph: Graph, obligations: { [integer]: Obligation }, diags: { [integer]: Diag }, vars: { [string]: string }, strlib: Val | nil }
+--:: AtomLib = { atom: string, lib: Val }
+--:: LowerResult = { graph: Graph, obligations: { [integer]: Obligation }, diags: { [integer]: Diag }, vars: { [string]: string }, atomlibs: { [integer]: AtomLib } }
 --:: Decl = { id: string, name: string, line: integer, col: integer, read: boolean, cell: string, pin: Val | nil, fresh: boolean, captured: boolean, fdepth: integer }
 --:: Scope = { map: { [string]: Decl }, order: { [integer]: Decl } }
 --:: Ann = { kind: integer, content: string, col: integer, force_cast: boolean | nil, line: integer | nil, consumed: boolean | nil }
@@ -779,22 +780,34 @@ function M.lower(chunk)
         return cell
     end
 
-    -- The STRING-METATABLE table: LuaJIT sets the string metatable's
-    -- `__index` to the string library, so member access on string-typed
-    -- values (`s:upper()`, `("x").len`) resolves through the DECLARED
-    -- `string` table — per-file declares shadow the stdlib, same resolution
-    -- as global reads. Declaration-driven: no method list lives here; if
-    -- `string` is undeclared the wiring is off (nil). Memoized per file.
-    local strlib_memo = nil --: Val | nil
-    local strlib_done = false
-    --: () -> Val | nil
-    local function string_lib()
-        if strlib_done then return strlib_memo end
-        strlib_done = true
-        local at = file_globals["string"] --: unknown
-        if at == nil then at = globals.lookup("string") end
-        if at ~= nil then strlib_memo = at_val(at) end
-        return strlib_memo
+    -- ATOM-METATABLE `__index` tables: LuaJIT wires some primitive atoms'
+    -- metatables at boot (`string`'s `__index` is the string library), so
+    -- member access on such a value (`s:upper()`, `("x").len`) resolves
+    -- through the wired atom's DECLARED table — per-file declares shadow
+    -- the stdlib, same resolution as global reads. Declaration-driven
+    -- twice over: WHICH atoms wire to WHICH table is data
+    -- (globals.atom_index), and the member types come from the named
+    -- table's declaration — no per-atom branch and no method list live
+    -- here; an undeclared table just drops out of the list. Memoized per
+    -- file (resolved once, sorted for determinism).
+    local atomlibs_memo = nil --: { [integer]: AtomLib } | nil
+    --: () -> { [integer]: AtomLib }
+    local function atom_index_libs()
+        if atomlibs_memo ~= nil then return atomlibs_memo end
+        local atoms = {} --: { [integer]: string }
+        for atom in pairs(globals.atom_index) do atoms[#atoms + 1] = atom end
+        table.sort(atoms)
+        local libs = {} --: { [integer]: AtomLib }
+        for i = 1, #atoms do
+            local gname = globals.atom_index[atoms[i]]
+            local at = file_globals[gname] --: unknown
+            if at == nil then at = globals.lookup(gname) end
+            if at ~= nil then
+                libs[#libs + 1] = { atom = atoms[i], lib = at_val(at) }
+            end
+        end
+        atomlibs_memo = libs
+        return libs
     end
 
     -- ── scopes / versions ──────────────────────────────────────────────────
@@ -1250,20 +1263,26 @@ function M.lower(chunk)
 
     -- A field READ from an already-lowered target cell: ONE projection rule
     -- (the record analogue of the truthy/falsy filters) + ONE field-read
-    -- obligation. Returns the projected cell. A string-typed target ALSO
-    -- projects through the declared string library (the string metatable's
-    -- `__index` — see string_lib); the join is monotone: the string atom
-    -- only ever appears as the target cell climbs.
+    -- obligation. Returns the projected cell. A target admitting a wired
+    -- atom (globals.atom_index — e.g. `string`) ALSO projects through that
+    -- atom's declared table (its metatable's `__index` — see
+    -- atom_index_libs); the join is monotone: the atom only ever appears
+    -- as the target cell climbs.
     --: (tc: string, key: string, what: string, line: integer, col: integer) -> string
     local function field_read_from(tc, key, what, line, col)
         local rc = fresh("field-" .. key)
-        local slib = string_lib()
+        local libs = atom_index_libs()
         rules[#rules + 1] = engine.rule({ tc }, { rc }, function(get)
             local tv = get(tc)
             local out = lattice.project(tv, key) --: unknown
-            if slib ~= nil and lattice.as_val(tv) and lattice.has_string(tv) then
-                local j = lattice.lattice.join(out, lattice.project(slib, key))
-                if lattice.as_val(j) then out = j end
+            if lattice.as_val(tv) then
+                for i = 1, #libs do
+                    local al = libs[i]
+                    if lattice.has_atom(tv, al.atom) then
+                        local j = lattice.lattice.join(out, lattice.project(al.lib, key))
+                        if lattice.as_val(j) then out = j end
+                    end
+                end
             end
             return { [rc] = out }
         end)
@@ -1289,16 +1308,22 @@ function M.lower(chunk)
     --: (tc: string, kc: string, what: string, line: integer, col: integer) -> string
     local function index_read_from(tc, kc, what, line, col)
         local rc = fresh("index")
-        local slib = string_lib()
+        local libs = atom_index_libs()
         rules[#rules + 1] = engine.rule({ tc, kc }, { rc }, function(get)
             local tv = get(tc)
             local out = lattice.project_index(tv, get(kc)) --: unknown
-            if slib ~= nil and lattice.as_val(tv) and lattice.has_string(tv) then
-                -- string targets consult the string library too (dynamic
-                -- member names on strings — rare; the lib table has no
-                -- index signature, so this reads as the honest unknown).
-                local j = lattice.lattice.join(out, lattice.project_index(slib, get(kc)))
-                if lattice.as_val(j) then out = j end
+            if lattice.as_val(tv) then
+                for i = 1, #libs do
+                    local al = libs[i]
+                    if lattice.has_atom(tv, al.atom) then
+                        -- wired-atom targets consult their declared table
+                        -- too (dynamic member names — rare; a lib table
+                        -- has no index signature, so this reads as the
+                        -- honest unknown).
+                        local j = lattice.lattice.join(out, lattice.project_index(al.lib, get(kc)))
+                        if lattice.as_val(j) then out = j end
+                    end
+                end
             end
             return { [rc] = out }
         end)
@@ -2975,10 +3000,10 @@ function M.lower(chunk)
         obligations = obligations,
         diags = diags,
         vars = vars,
-        -- the declared string-library value (nil when `string` is
-        -- undeclared): obligation evaluation consults it for member
-        -- access on string-typed targets (check.lua).
-        strlib = string_lib(),
+        -- the resolved atom-metatable `__index` tables (globals.atom_index
+        -- entries whose table is declared): obligation evaluation consults
+        -- them for member access on wired-atom targets (check.lua).
+        atomlibs = atom_index_libs(),
     }
 end
 

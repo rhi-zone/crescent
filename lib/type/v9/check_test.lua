@@ -218,6 +218,30 @@ T.describe("v9 check — structural records (obligations end to end)", function(
         end
     end)
 
+    T.it("string member resolution is DECLARATION-driven: a file declare re-wires it", function()
+        -- the linkage is atom -> declared TABLE NAME (globals.atom_index);
+        -- the members come from whatever that name resolves to — a per-file
+        -- `--:: declare string` shadows the stdlib, so it drives member
+        -- access on string VALUES too. Proof there is no hardcoded method
+        -- list: the shadow makes a stdlib method vanish and a novel one
+        -- appear.
+        local src = "--:: declare string = { shout: (s: string) -> string }\n"
+            .. "local s = 'a'\nlocal a = s:shout()\nlocal b = s:sub(1)\nreturn a, b\n"
+        local diags = check.check_source(src, "t.lua", nil)
+        T.ok(diags ~= nil, "checked")
+        if diags ~= nil then
+            local nope = find_diag(diags, "missing-field")
+            T.ok(nope ~= nil and nope.message:find("'sub'", 1, true) ~= nil,
+                "the shadowed table has no `sub` — the stdlib list is NOT baked in")
+            for i = 1, #diags do
+                T.ok(diags[i].message:find("'shout'", 1, true) == nil,
+                    "the file-declared `shout` resolves cleanly: " .. diags[i].message)
+                T.ok(diags[i].line == 4,
+                    "every finding is the `sub` site (line 4): " .. diags[i].message)
+            end
+        end
+    end)
+
     T.it("field access on non-tables is op-mismatch at the use site", function()
         local diags = check.check_source("local n = 1\nlocal v = n.x\nreturn v\n", "t.lua", nil)
         T.ok(diags ~= nil, "checked")

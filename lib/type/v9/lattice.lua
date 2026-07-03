@@ -1221,30 +1221,15 @@ function M.field_write_bound(v, name)
     return f.w
 end
 
--- Does the value admit the `string` atom? String-typed values resolve
--- member access through the DECLARED `string` library table (LuaJIT sets
--- the string metatable's `__index` to the string library) — lowering joins
--- that projection in, and the field-read obligation consults the declared
--- table. Declaration-driven: the method types come from the `string`
--- declaration (globals seam / per-file `--:: declare`), never a hardcoded
--- list here.
---: (Val) -> boolean
-function M.has_string(v) return v.atoms["string"] == true end
-
--- True when `v`'s only content is the `string` atom — the pure
--- string-metatable receiver case (s:sub(...)).
---: (Val) -> boolean
-function M.is_string_only(v)
-    if v.rec ~= nil or v.fn ~= nil then return false end
-    local seen = false
-    for k, present in pairs(v.atoms) do
-        if present then
-            if k ~= "string" then return false end
-            seen = true
-        end
-    end
-    return seen
-end
+-- Does the value admit `atom`? Consulted by the UNIFORM atom-metatable
+-- `__index` mechanism (globals.atom_index — atom -> declared table NAME,
+-- e.g. `string` -> the string library): a target admitting a wired atom
+-- resolves member access through that atom's declared table — lowering
+-- joins the projection in, the field-read obligation consults the table.
+-- Declaration-driven: WHICH atoms wire, and their member types, are data;
+-- no atom is special-cased here.
+--: (Val, string) -> boolean
+function M.has_atom(v, atom) return v.atoms[atom] == true end
 
 local show_val
 
