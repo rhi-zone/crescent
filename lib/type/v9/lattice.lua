@@ -276,6 +276,7 @@ end
 
 -- Forward declarations: join/meet/equal recurse through record fields.
 local join_val, meet_val, equal_val
+local join_val_raw, meet_val_raw, equal_val_raw
 
 -- ── Function-component helpers ─────────────────────────────────────────────
 
@@ -408,7 +409,7 @@ local function rec_equal(a, b)
 end
 
 --: (Val, Val) -> Val
-join_val = function(a, b)
+join_val_raw = function(a, b)
     if has_unknown(a) or has_unknown(b) then return single("unknown") end
     local atoms = copy_atoms(a.atoms)
     for k, present in pairs(b.atoms) do if present then atoms[k] = true end end
@@ -453,7 +454,7 @@ end
 -- admits any table (the `table` atom); otherwise dropped (= no table values
 -- admitted through the record component — strict, sound).
 --: (Val, Val) -> Val
-meet_val = function(a, b)
+meet_val_raw = function(a, b)
     if has_unknown(a) then
         local rb0 = b.rec
         return { atoms = copy_atoms(b.atoms), rec = rb0 ~= nil and rec_copy(rb0) or nil, fn = b.fn }
@@ -492,10 +493,9 @@ meet_val = function(a, b)
     if atoms["function"] then fn = nil end
     return { atoms = atoms, rec = rec, fn = fn }
 end
-M.meet = meet_val
 
 --: (Val, Val) -> boolean
-equal_val = function(a, b)
+equal_val_raw = function(a, b)
     -- identity fast path: shared immutable structure (alias-DAG values,
     -- rec_copy-shared Fields) compares in O(1), not by deep walk.
     if a == b then return true end
@@ -514,6 +514,96 @@ equal_val = function(a, b)
     if rb == nil then return false end
     return rec_equal(ra, rb)
 end
+
+-- join/meet/equal are MEMOIZED pairwise (reset per checked file — see
+-- reset_memo below) — the same reason and the same pattern as leq: Vals
+-- are immutable finite trees, so each pairwise result is a constant, and
+-- an unmemoized walk over two DISTINCT large DAGs (cross-module alias
+-- imports: DOM-shaped declaration records referencing each other)
+-- re-visits shared substructure per PATH — exponential in practice. The
+-- engine's fixpoint calls join + equal per rule firing (`merged =
+-- join(old, val)`, `equal(old, merged)`), so without the memo the
+-- whole-lib smoke hung (minutes, gigabytes) on lib/web/html/init.lua
+-- against the imported lib.js_types environment. The pair cache makes
+-- each op linear in reachable pairs; the identity fast paths are EXACT
+-- (join/meet are idempotent — the raw walk on (v, v) rebuilds an equal
+-- structure, so returning the operand changes nothing but the allocation)
+-- and keep the common no-change firing cheap.
+--:: ValRow = { [unknown]: Val | nil }
+--:: BoolRow = { [unknown]: boolean | nil }
+local join_memo = {}
+local meet_memo = {}
+local equal_memo = {}
+
+--: (x: unknown) -> x is ValRow
+local function is_val_row(x) return type(x) == "table" end
+
+--: (x: unknown) -> x is BoolRow
+local function is_bool_row(x) return type(x) == "table" end
+
+--: (row: ValRow, key: unknown) -> Val | nil
+local function val_row_get(row, key) return row[key] end
+
+--: (row: BoolRow, key: unknown) -> boolean | nil
+local function bool_row_get(row, key) return row[key] end
+
+-- (equal's wrapper is defined FIRST: join/meet's absorption dedup calls
+-- it, and assigning it before them keeps the forward-declared local's
+-- reference backward — assigned before read, for the reader and the
+-- checker alike.)
+--: (Val, Val) -> boolean
+equal_val = function(a, b)
+    if a == b then return true end
+    local row = equal_memo[a] --: unknown
+    if not is_bool_row(row) then
+        row = {} --[[: BoolRow]]
+        equal_memo[a] = row
+    end
+    local hit = bool_row_get(row, b)
+    if hit ~= nil then return hit end
+    local r = equal_val_raw(a, b) == true
+    row[b] = r
+    return r
+end
+
+--: (Val, Val) -> Val
+join_val = function(a, b)
+    if a == b then return a end
+    local row = join_memo[a] --: unknown
+    if not is_val_row(row) then
+        row = {} --[[: ValRow]]
+        join_memo[a] = row
+    end
+    local hit = val_row_get(row, b)
+    if hit ~= nil then return hit end
+    local r = join_val_raw(a, b)
+    -- absorption dedup (EXACT — the result is equal, only the identity
+    -- changes): a fixpoint's dominant join is `join(old, proposal)` where
+    -- one side already absorbs the other. Returning the OPERAND keeps
+    -- object identity stable, so the engine's `equal(old, merged)` takes
+    -- the O(1) identity path and the ascending chain stops allocating
+    -- fresh copies of an unchanged DAG (which the memo would then retain).
+    if equal_val(r, a) then r = a elseif equal_val(r, b) then r = b end
+    row[b] = r
+    return r
+end
+
+--: (Val, Val) -> Val
+meet_val = function(a, b)
+    if a == b then return a end
+    local row = meet_memo[a] --: unknown
+    if not is_val_row(row) then
+        row = {} --[[: ValRow]]
+        meet_memo[a] = row
+    end
+    local hit = val_row_get(row, b)
+    if hit ~= nil then return hit end
+    local r = meet_val_raw(a, b)
+    if equal_val(r, a) then r = a elseif equal_val(r, b) then r = b end
+    row[b] = r
+    return r
+end
+M.meet = meet_val
 
 --: (unknown, unknown) -> unknown
 local function join(a, b)
@@ -661,13 +751,62 @@ M.clip = clip
 -- fields sound, see the header). A function component is admitted by
 -- `unknown`, by the `function` top, or by fn_leq (params contravariant,
 -- results covariant — the standard sound arrow rule).
-local leq, fn_leq
+local leq, fn_leq, leq_raw
+
+-- leq is MEMOIZED pairwise (reset per checked file — see reset_memo):
+-- Vals are immutable finite trees, so `a ⊑ b` is a constant — and without
+-- the memo a comparison of two DISTINCT large DAGs (cross-module alias
+-- imports: DOM-shaped declaration records referencing each other)
+-- re-compares shared substructure per PATH, exponential in practice (one
+-- obligation spun for minutes). The pair cache makes it linear in
+-- reachable pairs. The same identity-memo pattern as show/at_val
+-- conversion caches.
+local leq_memo = {}
+
+--:: LeqRow = { [unknown]: boolean | nil }
+
+--: (x: unknown) -> x is LeqRow
+local function is_leq_row(x) return type(x) == "table" end
+
+--: (row: LeqRow, key: unknown) -> boolean | nil
+local function row_get(row, key) return row[key] end
+
+-- Drop every pairwise memo (join/meet/equal above, leq here). The memos
+-- are pure caches — a reset costs only warmth — but their STRONG pairs
+-- retain every Val DAG ever compared or joined, which over a whole-lib
+-- session is gigabytes of dead per-file graphs (measured: ~20GB retained
+-- across a 1,566-file run). LuaJIT has no ephemerons, so weak tables
+-- cannot express this cache (the absorption-dedup values reference their
+-- own keys — a weak-key entry would never collect); the runner resets
+-- per checked file instead, keeping each memo bounded by one file's solve.
+--: () -> nil
+function M.reset_memo()
+    join_memo = {}
+    meet_memo = {}
+    equal_memo = {}
+    leq_memo = {}
+    return nil
+end
 
 --: (Val, Val) -> boolean
 leq = function(a, b)
     -- identity fast path (leq is reflexive); shared immutable structure —
     -- the alias-DAG case — stays O(shared nodes), not O(tree paths).
     if a == b then return true end
+    local row = leq_memo[a] --: unknown
+    if not is_leq_row(row) then
+        row = {} --[[: LeqRow]]
+        leq_memo[a] = row
+    end
+    local hit = row_get(row, b)
+    if hit ~= nil then return hit end
+    local r = leq_raw(a, b) == true
+    row[b] = r
+    return r
+end
+
+--: (Val, Val) -> boolean
+leq_raw = function(a, b)
     if has_unknown(a) then return has_unknown(b) end
     if has_unknown(b) then return true end
     for k, present in pairs(a.atoms) do
@@ -1231,25 +1370,39 @@ end
 --: (Val, string) -> boolean
 function M.has_atom(v, atom) return v.atoms[atom] == true end
 
+-- Rendering is BUDGETED: a diagnostic needs a readable sketch, never a
+-- faithful serialization. Vals are clip-bounded but can be huge shared
+-- DAGs (cross-module alias imports — a DOM-shaped declaration file exports
+-- hundreds-of-fields records referencing each other), and a tree-walk
+-- printer re-renders shared substructure PER REFERENCE — exponential in
+-- practice (the pre-bound printer allocated gigabytes on one obligation
+-- message). Two bounds, both visible in the output as `…`: a DEPTH cap per
+-- record/function nesting, and a total NODE budget per render (threaded as
+-- a mutable countdown).
+local SHOW_DEPTH = 6
+local SHOW_BUDGET = 120
+
+--:: ShowState = { left: integer }
+
 local show_val
 
---: (Fn) -> string
-local function fn_show(fn)
+--: (Fn, integer, ShowState) -> string
+local function fn_show(fn, depth, st)
     local ps = {} --: { [integer]: string }
     for i = 1, #fn.params do
         local pin = fn.params[i].pin
-        if pin ~= nil then ps[#ps + 1] = show_val(pin) else ps[#ps + 1] = "?" end
+        if pin ~= nil then ps[#ps + 1] = show_val(pin, depth, st) else ps[#ps + 1] = "?" end
     end
     if fn.vararg then
         local rest = fn.rest
         if rest ~= nil then
-            ps[#ps + 1] = "..." .. show_val(rest)
+            ps[#ps + 1] = "..." .. show_val(rest, depth, st)
         else
             ps[#ps + 1] = "..."
         end
     end
     local rs = {} --: { [integer]: string }
-    for i = 1, #fn.results do rs[#rs + 1] = show_val(fn.results[i]) end
+    for i = 1, #fn.results do rs[#rs + 1] = show_val(fn.results[i], depth, st) end
     if fn.open then rs[#rs + 1] = "..." end
     local r = "()" --: string
     if #rs == 1 then
@@ -1260,15 +1413,19 @@ local function fn_show(fn)
     return "(" .. table.concat(ps, ", ") .. ") -> " .. r
 end
 
---: (Rec) -> string
-local function rec_show(rec)
+--: (Rec, integer, ShowState) -> string
+local function rec_show(rec, depth, st)
     local names = {} --: { [integer]: string }
     for name in pairs(rec.fields) do names[#names + 1] = name end
     table.sort(names)
     local parts = {} --: { [integer]: string }
     for i = 1, #names do
+        if st.left <= 0 then
+            parts[#parts + 1] = "…"
+            break
+        end
         local f = rec.fields[names[i]]
-        parts[#parts + 1] = names[i] .. ": " .. show_val(f.r)
+        parts[#parts + 1] = names[i] .. ": " .. show_val(f.r, depth, st)
     end
     local idx = rec.idx
     if idx ~= nil then
@@ -1277,11 +1434,11 @@ local function rec_show(rec)
         -- an index-bounded empty record is distinguishable from {}.
         local shown = false
         if not field_is_never(idx.num) then
-            parts[#parts + 1] = "[number]: " .. show_val(idx.num.r)
+            parts[#parts + 1] = "[number]: " .. show_val(idx.num.r, depth, st)
             shown = true
         end
         if not field_is_never(idx.str) then
-            parts[#parts + 1] = "[string]: " .. show_val(idx.str.r)
+            parts[#parts + 1] = "[string]: " .. show_val(idx.str.r, depth, st)
             shown = true
         end
         if not shown then parts[#parts + 1] = "[]: never" end
@@ -1309,16 +1466,30 @@ local function collapse_boolean(names)
     return out
 end
 
---: (Val) -> string
-show_val = function(v)
+--: (Val, integer, ShowState) -> string
+show_val = function(v, depth, st)
+    st.left = st.left - 1
+    if st.left <= 0 then return "…" end
     local atoms = {} --: { [integer]: string }
     for k, present in pairs(v.atoms) do if present then atoms[#atoms + 1] = k end end
     atoms = collapse_boolean(atoms)
     table.sort(atoms)
     local rec = v.rec
-    if rec ~= nil then atoms[#atoms + 1] = rec_show(rec) end
+    if rec ~= nil then
+        if depth <= 0 then
+            atoms[#atoms + 1] = "{…}"
+        else
+            atoms[#atoms + 1] = rec_show(rec, depth - 1, st)
+        end
+    end
     local fn = v.fn
-    if fn ~= nil then atoms[#atoms + 1] = fn_show(fn) end
+    if fn ~= nil then
+        if depth <= 0 then
+            atoms[#atoms + 1] = "(…) -> …"
+        else
+            atoms[#atoms + 1] = fn_show(fn, depth - 1, st)
+        end
+    end
     if #atoms == 0 then return "never" end
     return table.concat(atoms, " | ")
 end
@@ -1331,6 +1502,7 @@ end
 -- use-before-narrow case and is reported separately, never here.
 --: (v: Val, allow: Val) -> string | nil
 function M.excess(v, allow)
+    local st = { left = SHOW_BUDGET } --: ShowState
     local bad = {} --: { [integer]: string }
     for k, present in pairs(v.atoms) do
         if present and k ~= "unknown" and not allow.atoms[k] then bad[#bad + 1] = k end
@@ -1339,22 +1511,23 @@ function M.excess(v, allow)
     table.sort(bad)
     local rec = v.rec
     if rec ~= nil and not allow.atoms["table"] and allow.rec == nil then
-        bad[#bad + 1] = rec_show(rec)
+        bad[#bad + 1] = rec_show(rec, SHOW_DEPTH - 1, st)
     end
     local fn = v.fn
     if fn ~= nil and not allow.atoms["function"] and allow.fn == nil then
-        bad[#bad + 1] = fn_show(fn)
+        bad[#bad + 1] = fn_show(fn, SHOW_DEPTH - 1, st)
     end
     if #bad == 0 then return nil end
     return table.concat(bad, " | ")
 end
 
 -- Render as a sorted union string, e.g. "nil | number" or
--- "nil | { x: number }"; bottom -> "never".
+-- "nil | { x: number }"; bottom -> "never". Budgeted (see SHOW_DEPTH /
+-- SHOW_BUDGET above): oversized structure truncates to `…`.
 --: (unknown) -> string
 function M.show(v)
     if not as_val(v) then return "never" end
-    return show_val(v)
+    return show_val(v, SHOW_DEPTH, { left = SHOW_BUDGET })
 end
 
 return M

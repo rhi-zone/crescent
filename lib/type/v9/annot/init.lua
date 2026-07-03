@@ -412,6 +412,15 @@ local function parse_prim(p)
         if name == "Values" then proj = "values" end
         if name == "Keys" then proj = "keys" end
         if name == "Arg" then proj = "arg" end
+        -- $Require<N>: the MODULE-SUMMARY instantiation — a declared result
+        -- position computed from argument N's LITERAL module name at
+        -- lowering (the one inst resolved from syntax, not the solved
+        -- value: the lattice up-approximates string literals to the string
+        -- atom, so the name exists only at the call site). The house
+        -- convention's `typeof require(T) decays to $Require<T>`, carried
+        -- into v9 as declaration data — `require` itself is NOT name-keyed
+        -- anywhere; the power lives in its stdlib declaration.
+        if name == "Require" then proj = "require" end
         if proj ~= nil and at(p, "<") then
             local numtok = peek_at(p, 1)
             local closer = peek_at(p, 2)
@@ -601,12 +610,18 @@ end
 --                              declaration (the house no-ambient-globals
 --                              convention); the caller wires it into its
 --                              global environment
+--   ("require", modname, nil)  `require "a.b.c"` — the TYPE-ONLY import
+--                              directive: the caller imports module a.b.c's
+--                              exported `--::` alias env (the cross-module
+--                              seam); a `require` line without a literal
+--                              module string stays the cross-module feature
+--                              bucket
 --   ("feature", feature, nil)  a named non-v0 form: module / augment /
 --                              newtype / template / unseal ->
---                              annotation-<kw>; require -> the cross-module
---                              boundary; generic aliases -> generic;
---                              a malformed `declare` (no `= T` body) ->
---                              annotation-declare
+--                              annotation-<kw>; malformed require -> the
+--                              cross-module boundary; generic aliases ->
+--                              generic; a malformed `declare` (no `= T`
+--                              body) -> annotation-declare
 --   ("garbage", errmsg, nil)   does not classify
 -- The generic-alias NAME is reported through the second return so callers
 -- can map references to the generic bucket.
@@ -626,6 +641,10 @@ function M.classify_decl(content)
     end
     local kw = content:match("^%s*(%a+)")
     if kw == "require" then
+        local mod = content:match("^%s*require%s*%(?%s*[\"']([^\"']+)[\"']")
+        if mod ~= nil then
+            return "require", mod, nil
+        end
         return "feature", "cross-module", nil
     end
     if kw == "declare" or kw == "module" or kw == "augment" or kw == "newtype"

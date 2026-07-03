@@ -96,6 +96,11 @@ local function build(src)
         elseif kind == "generic-alias" then
             aliases[a] = { content = nil, feature = "generic" }
             problems[#problems + 1] = "generic alias `" .. a .. "` in declaration source"
+        elseif kind == "require" then
+            -- declaration sources are self-contained data; a cross-module
+            -- import inside one is drift, surfaced as a problem.
+            problems[#problems + 1] = "cross-module import (`require \"" .. a
+                .. "\"`) in declaration source"
         else
             problems[#problems + 1] = "unclassifiable declaration unit: `"
                 .. units[i]:sub(1, 60) .. "`"

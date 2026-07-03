@@ -5,8 +5,14 @@
 --
 -- Two passes over every lib/**/*.lua file:
 --   lower — parse + total lowering only (the totality claim: zero crashes,
---           every construct routed);
---   full  — plus engine solve + obligation evaluation.
+--           every construct routed); deliberately DEP-LESS — totality needs
+--           no summaries, so require sites read as the honest boundary;
+--   full  — engine solve + obligation evaluation, through ONE SHARED
+--           cross-module SESSION (check.session): module summaries resolve
+--           on demand and each file is solved AT MOST ONCE per run (a file
+--           already solved as someone's dep is served from the session
+--           cache) — the sharing that keeps the whole-lib run near-linear
+--           now checking one file may pull its transitive deps.
 --
 -- The histogram (counts by diagnostic code) is the honest coverage state
 -- and the prioritized roadmap: which `unsupported:<construct>` buckets
@@ -19,7 +25,11 @@ if not package.path:find("?/init.lua", 1, true) then
     package.path = "./?/init.lua;" .. package.path
 end
 
+--:: require "lib.type.v9.check"
+
 local check = require("lib.type.v9.check")
+
+--:: CDiag = { code: string, severity: string, message: string, line: integer, col: integer }
 
 --: (string) -> (string | nil, string | nil)
 local function read_file(path)
@@ -46,13 +56,22 @@ end
 --: (mode: string, files: { [integer]: string }) -> nil
 local function run_mode(mode, files)
     local caps = { read_file = read_file }
+    -- ONE session for the whole full pass: summaries and solves are shared
+    -- across every file (per-file sessions would re-solve shared deps).
+    local session = nil --: Session | nil
+    if mode == "full" then session = check.session(caps, nil) end
     local t0 = os.clock()
     local crashes = 0
     local total = 0
     local hist = {} --: { [string]: integer }
+    --: (path: string) -> ({ [integer]: CDiag } | nil, string | nil, Summary | nil)
+    local function check_one(path)
+        if session ~= nil then return session.check_file(path) end
+        return check.check_file(caps, path, { mode = mode, policy = nil, deps = nil })
+    end
     for i = 1, #files do
         local path = files[i]
-        local diags, err = check.check_file(caps, path, { mode = mode, policy = nil })
+        local diags, err = check_one(path)
         if diags == nil then
             crashes = crashes + 1
             print(("CRASH %s: %s"):format(path, err or "?"))

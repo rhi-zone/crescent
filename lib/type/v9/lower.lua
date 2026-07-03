@@ -56,8 +56,13 @@
 -- position marks the function result-OPEN — positions beyond are unknown,
 -- not nil). Recursion works because the function's cell is bound BEFORE its
 -- body lowers; the recursion-created value cycles are kept finite by
--- lattice.clip at the two cycle-closing proposal sites. `require(...)` is
--- the honest `unsupported:cross-module` boundary — no module summaries yet.
+-- lattice.clip at the two cycle-closing proposal sites. `require(...)` —
+-- Lua's module boundary — rides the DECLARATION: its stdlib arrow marks its
+-- result `$Require<1>`, resolved at lowering from the literal module name
+-- through the injected deps seam (the module's SUMMARY — summary.lua);
+-- without a session/literal it stays the honest `unsupported:cross-module`
+-- boundary, and a require CYCLE is the `unsupported:cross-module-cycle`
+-- cut, never a hang.
 -- A parameter no in-file call reaches (and no annotation pins) stays at
 -- BOTTOM; post-solve that is reported ONCE per parameter as
 -- `unsupported:unconstrained-param` (the body was checked against no
@@ -95,9 +100,14 @@
 --                         globals as shared, interned declare-lines data);
 --                         only genuinely undeclared names diag. Global
 --                         WRITES stay the global-write policy diag either
---                         way. `require(...)` calls stay the honest
---                         `unsupported:cross-module` boundary even though
---                         `require` itself is declared.
+--                         way. `require(...)` calls resolve through the
+--                         declaration's `$Require<1>` result (see
+--                         lower_call) — declaration-driven, never
+--                         name-keyed here.
+--   --:: require "mod"    the TYPE-ONLY import: the dep module's exported
+--                         alias env merges under this file's own aliases
+--                         (own names shadow; resolved through the injected
+--                         deps seam, honest buckets when it cannot be).
 --
 -- Every annotation feature the v9 lattice cannot express routes to a named
 -- `unsupported:annotation-<feature>` bucket — honest, dialable, per bucket.
@@ -155,7 +165,9 @@ local globals = require("lib.type.v9.globals")
 --:: Diag = { code: string, severity: string, message: string, line: integer, col: integer }
 --:: Obligation = { kind: string, cell: string, allow: Val | nil, field: string | nil, base: string | nil, key: string | nil, args: { [integer]: string } | nil, inits: { [integer]: boolean } | nil, init: boolean | nil, code: string, what: string, line: integer, col: integer }
 --:: AtomLib = { atom: string, lib: Val }
---:: LowerResult = { graph: Graph, obligations: { [integer]: Obligation }, diags: { [integer]: Diag }, vars: { [string]: string }, atomlibs: { [integer]: AtomLib } }
+--:: Summary = { returns: { [integer]: unknown } | nil, annotated: boolean, aliases: { [string]: unknown }, cycle: boolean | nil }
+--:: Deps = { summary: (name: string) -> (Summary | nil, string | nil) }
+--:: LowerResult = { graph: Graph, obligations: { [integer]: Obligation }, diags: { [integer]: Diag }, vars: { [string]: string }, atomlibs: { [integer]: AtomLib }, chunk_returns: { [integer]: unknown }, aliases: { [string]: unknown } }
 --:: Decl = { id: string, name: string, line: integer, col: integer, read: boolean, cell: string, pin: Val | nil, fresh: boolean, captured: boolean, fdepth: integer }
 --:: Scope = { map: { [string]: Decl }, order: { [integer]: Decl } }
 --:: Ann = { kind: integer, content: string, col: integer, force_cast: boolean | nil, line: integer | nil, consumed: boolean | nil }
@@ -225,8 +237,16 @@ end
 -- Lower a decoded chunk. Returns the constraint graph (engine-solvable), the
 -- obligations to evaluate against the solution, and the structural
 -- diagnostics gathered during the walk. Never throws on any construct.
---: (Ast) -> LowerResult
-function M.lower(chunk)
+--
+-- `deps` is the INJECTED cross-module seam (nil = single-file check, the
+-- honest pre-summary behavior): `deps.summary(modname)` returns the dep
+-- module's SUMMARY (summary.lua — its return type as At data + its exported
+-- alias env) or `(nil, errmsg)`. Lowering consumes it at exactly two sites:
+-- the `$Require<N>`-declared call results (require) and `--:: require`
+-- type-only imports. Cycle participants arrive as the `cycle = true` marker
+-- — the honest `unsupported:cross-module-cycle` cut, never a hang.
+--: (Ast, Deps | nil) -> LowerResult
+function M.lower(chunk, deps)
     local rules = {} --: { [integer]: Rule }
     local obligations = {} --: { [integer]: Obligation }
     local diags = {} --: { [integer]: Diag }
@@ -239,7 +259,7 @@ function M.lower(chunk)
     -- Return frames, one per enclosing function (innermost = top): each
     -- return statement records its per-position cells; the function wires
     -- them into result-position cells once the max arity is known.
-    --:: Ret = { cells: { [integer]: string }, spread: boolean, line: integer, col: integer }
+    --:: Ret = { cells: { [integer]: string }, spread: boolean, pinned: boolean | nil, line: integer, col: integer }
     --:: Frame = { returns: { [integer]: Ret }, pins: { [integer]: Val } | nil }
     local ret_frames = {} --: { [integer]: Frame }
     local ret_depth = 0
@@ -1440,10 +1460,109 @@ function M.lower(chunk)
         return rcells
     end
 
+    -- The callee's STATIC arrow view, when lowering can know one: a local's
+    -- annotation pin, or a declared global's type (per-file `--:: declare`
+    -- shadows stdlib — the same resolution as global reads; at_val is
+    -- memoized on At identity, so this shares global_cell's conversion).
+    -- nil = no declared view (an inferred callee) — the $Require machinery
+    -- below simply does not engage.
+    --: (Ast) -> Val | nil
+    local function static_callee_val(callee)
+        if callee.tag ~= defs.NODE_IDENTIFIER then return nil end
+        local nm = callee.name
+        if type(nm) ~= "string" then return nil end
+        local d = resolve(nm)
+        if d ~= nil then return d.pin end
+        local at = file_globals[nm] --: unknown
+        if at == nil then at = globals.lookup(nm) end
+        if at == nil then return nil end
+        return at_val(at)
+    end
+
+    -- Resolve ONE `$Require<N>`-declared result position from argument N's
+    -- LITERAL module name: the module's summary return type, as a pinned
+    -- cell in THIS file's graph (at_val on the summary's At data mints
+    -- fresh param cells here — cells never cross graphs). Everything that
+    -- cannot resolve is a NAMED honest boundary, and the result falls back
+    -- to the declaration's static unknown:
+    --   non-literal name        unsupported:cross-module (dynamic require)
+    --   no deps injected        unsupported:cross-module (single-file check)
+    --   unresolvable module     unsupported:cross-module (not on the path —
+    --                           includes LuaJIT builtins like `ffi`)
+    --   require CYCLE           unsupported:cross-module-cycle (the
+    --                           in-progress participant reads as unknown;
+    --                           the cut is what terminates the cycle)
+    -- A summary that resolves from PURE INFERENCE (no annotation pins the
+    -- module's returned value) is the `unannotated-module-boundary` policy
+    -- dial (default off): inferred summaries ARE cross-file contextual
+    -- typing, and the owner decides whether that crosses silently.
+    --: (n: Ast, args: unknown, idx: integer) -> string | nil
+    local function require_result(n, args, idx)
+        local modname = nil --: string | nil
+        if is_list(args) then
+            local a = args[idx]
+            if a ~= nil and a.tag == defs.NODE_LITERAL then
+                local lk = a.lit_kind
+                local v = a.value
+                if type(lk) == "number" and lk == defs.LIT_STRING and type(v) == "string" then
+                    modname = v
+                end
+            end
+        end
+        if modname == nil then
+            diag("unsupported:cross-module", n.line, n.col,
+                "dynamic module name — a module summary needs a literal"
+                    .. " (honest boundary; the result reads as unknown)")
+            return nil
+        end
+        if deps == nil then
+            diag("unsupported:cross-module", n.line, n.col,
+                "module '" .. modname .. "' — no module session injected;"
+                    .. " the result reads as unknown")
+            return nil
+        end
+        local sum, serr = deps.summary(modname)
+        if sum == nil then
+            diag("unsupported:cross-module", n.line, n.col,
+                "module '" .. modname .. "' did not resolve: " .. (serr or "?")
+                    .. " (the result reads as unknown)")
+            return nil
+        end
+        if sum.cycle == true then
+            diag("unsupported:cross-module-cycle", n.line, n.col,
+                "module '" .. modname .. "' is in the current require cycle —"
+                    .. " its in-progress summary reads as unknown (honest cycle cut)")
+            return nil
+        end
+        local rats = sum.returns
+        if not is_tbl(rats) or rats[1] == nil then
+            diag("unsupported:cross-module", n.line, n.col,
+                "module '" .. modname .. "' has no computed return summary"
+                    .. " (the result reads as unknown)")
+            return nil
+        end
+        if sum.annotated ~= true then
+            diag("unannotated-module-boundary", n.line, n.col,
+                "module '" .. modname .. "' crosses the module boundary with an"
+                    .. " INFERRED return type (no annotation pins the module's"
+                    .. " returned value) — cross-file contextual typing; annotate"
+                    .. " the returned value to pin the interface")
+        end
+        return pinned_cell("require-" .. modname, at_val(rats[1]))
+    end
+
     -- A call expression (plain or method), lowered for `want` result
-    -- positions. `require(<literal>)` — Lua's module boundary — is the
-    -- honest `unsupported:cross-module` bucket: no module summaries in this
-    -- increment, the results are unknown.
+    -- positions. Lua's module boundary rides the DECLARATION: a callee
+    -- whose declared/pinned arrow marks a result position `$Require<N>`
+    -- (stdlib `require`; any re-declaration or other declared arrow gets
+    -- identical treatment — no name is keyed here) resolves that position
+    -- from argument N's literal module name via the injected deps seam
+    -- (require_result above). The $Elem/$Values precedent, one seam
+    -- earlier: THIS inst resolves from syntax at lowering because the
+    -- lattice up-approximates string literals to the string atom — the
+    -- module name only exists at the call site. The call itself stays the
+    -- ordinary machinery (arguments are checked against the declared pins:
+    -- `require(42)` is a call-mismatch).
     --: (Ast, integer) -> { [integer]: string }
     lower_call = function(n, want)
         if n.tag == defs.NODE_CALL_EXPR then
@@ -1455,16 +1574,6 @@ function M.lower(chunk)
                 return cells
             end
             local args = n.args
-            if callee.tag == defs.NODE_IDENTIFIER and callee.name == "require"
-                and resolve("require") == nil then
-                if is_list(args) then
-                    for i = 1, #args do lower_expr(args[i]) end
-                end
-                unsupported(n, "cross-module")
-                local cells = {} --: { [integer]: string }
-                for i = 1, want do cells[i] = unknown_cell("require") end
-                return cells
-            end
             local cc = lower_expr(callee)
             local acells = {} --: { [integer]: string }
             local inits = {} --: { [integer]: boolean }
@@ -1474,7 +1583,39 @@ function M.lower(chunk)
                     inits[i] = args[i].tag == defs.NODE_TABLE_EXPR
                 end
             end
-            return call_core(cc, acells, inits, want, "called value", n.line, n.col)
+            local rcells = call_core(cc, acells, inits, want, "called value", n.line, n.col)
+            local sv = static_callee_val(callee)
+            if sv ~= nil and sv.fn ~= nil then
+                local svfn = sv.fn
+                local svinsts = svfn.insts
+                if svinsts ~= nil then
+                    local out = nil --: { [integer]: string } | nil
+                    -- a positional walk over the DEMANDED result cells (the
+                    -- same idiom as call_core's inst loop): an inst position
+                    -- nobody demanded types nothing.
+                    for i = 1, #rcells do
+                        local inst = svinsts[i]
+                        if inst ~= nil and inst.proj == "require" then
+                            local rc = require_result(n, args, inst.idx)
+                            if rc ~= nil and rcells[i] ~= nil then
+                                -- substitute in a COPY: call_core's result
+                                -- rule closed over `rcells` and still
+                                -- proposes the declared static fallback
+                                -- (unknown) into whatever ids that table
+                                -- holds — mutating it would join unknown
+                                -- into the summary cell.
+                                if out == nil then
+                                    out = {} --: { [integer]: string }
+                                    for k = 1, #rcells do out[k] = rcells[k] end
+                                end
+                                out[i] = rc
+                            end
+                        end
+                    end
+                    if out ~= nil then return out end
+                end
+            end
+            return rcells
         end
         -- t:m(...) = a field read of `m` + a call with the receiver as the
         -- implicit first argument (`function T:m` declared self the same way).
@@ -2817,7 +2958,7 @@ function M.lower(chunk)
             -- Lua — v0 carries its first result and marks the arrow
             -- result-OPEN (positions beyond are unknown); vararg likewise.
             local exprs = n.exprs
-            local rec = { cells = {}, spread = false, line = n.line, col = n.col } --: Ret
+            local rec = { cells = {}, spread = false, pinned = false, line = n.line, col = n.col } --: Ret
             if is_list(exprs) then
                 local ne = #exprs
                 for i = 1, ne do
@@ -2828,6 +2969,22 @@ function M.lower(chunk)
                             or t == defs.NODE_VARARG_EXPR then
                             rec.spread = true
                         end
+                    end
+                end
+            end
+            if ret_depth == 1 and is_list(exprs) then
+                -- the module-boundary annotation evidence (the
+                -- `unannotated-module-boundary` dial, summary.lua): the
+                -- CHUNK's first return position is annotation-backed when
+                -- it returns an annotation-pinned local or a cast.
+                local e1 = exprs[1]
+                if is_node(e1) then
+                    local nm1 = e1.name
+                    if e1.tag == defs.NODE_CAST_EXPR then
+                        rec.pinned = true
+                    elseif e1.tag == defs.NODE_IDENTIFIER and type(nm1) == "string" then
+                        local d = resolve(nm1)
+                        if d ~= nil and d.pin ~= nil then rec.pinned = true end
                     end
                 end
             end
@@ -2924,13 +3081,17 @@ function M.lower(chunk)
 
     -- ── entry: annotation pre-pass ─────────────────────────────────────────
     -- `--::` declarations are position-independent: aliases go into the
-    -- resolve environment up front; `declare name = T` bodies parse AFTER
-    -- the alias sweep (a declare may reference an alias declared below it)
-    -- into the file's global environment; every other form is a named
-    -- bucket (`require` is the cross-module boundary). `--:<T>` call-site
-    -- type arguments are their own bucket.
+    -- resolve environment up front; `require "mod"` TYPE-ONLY imports merge
+    -- the dep's exported alias env NEXT (own aliases shadow imports; the
+    -- imports resolve through the injected deps seam); `declare name = T`
+    -- bodies parse LAST (a declare may reference an alias declared below it
+    -- — or an imported one) into the file's global environment; every other
+    -- form is a named bucket. `--:<T>` call-site type arguments are their
+    -- own bucket.
     --:: PendingDecl = { name: string, body: string, line: integer, col: integer }
     local pending_declares = {} --: { [integer]: PendingDecl }
+    --:: PendingRequire = { mod: string, line: integer, col: integer }
+    local pending_requires = {} --: { [integer]: PendingRequire }
     for key, ann in pairs(anns) do
         local line = 0
         if type(key) == "number" and key > 0 then line = math.floor(key) end
@@ -2941,6 +3102,9 @@ function M.lower(chunk)
             elseif kind == "declare" then
                 pending_declares[#pending_declares + 1] =
                     { name = a, body = b or "", line = line, col = ann.col }
+            elseif kind == "require" then
+                pending_requires[#pending_requires + 1] =
+                    { mod = a, line = line, col = ann.col }
             elseif kind == "generic-alias" then
                 aliases[a] = { content = nil, feature = "generic" }
                 diag("unsupported:annotation-generic", line, ann.col,
@@ -2958,6 +3122,52 @@ function M.lower(chunk)
             diag("unsupported:annotation-type-args", line, ann.col,
                 "call-site type arguments (`--:<T>`) are outside the v0 annotation subset")
             ann.consumed = true
+        end
+    end
+    -- `--:: require "mod"` type-only imports (the dominant cross-module
+    -- idiom): the dep's SUMMARY carries its exported alias env (own +
+    -- imported — transitively closed). Imported names fill only what this
+    -- file does not declare itself (own aliases shadow); across imports the
+    -- FIRST in line order wins a name (deterministic). Alias entries are
+    -- immutable and SHARED with the dep's cached summary — read, never
+    -- written (summary immutability is pinned by test). Unresolvable
+    -- imports are the named honest boundaries, exactly as at require calls.
+    -- line-order sort (insertion: a file has a handful of imports at most).
+    for si = 2, #pending_requires do
+        local moving = pending_requires[si]
+        local sj = si - 1
+        while sj >= 1 and pending_requires[sj].line > moving.line do
+            pending_requires[sj + 1] = pending_requires[sj]
+            sj = sj - 1
+        end
+        pending_requires[sj + 1] = moving
+    end
+    for oi = 1, #pending_requires do
+        local pr = pending_requires[oi]
+        if deps == nil then
+            diag("unsupported:cross-module", pr.line, pr.col,
+                "type import `require \"" .. pr.mod .. "\"` — no module session"
+                    .. " injected; its aliases stay unresolved")
+        else
+            local sum, serr = deps.summary(pr.mod)
+            if sum == nil then
+                diag("unsupported:cross-module", pr.line, pr.col,
+                    "type import: module '" .. pr.mod .. "' did not resolve: "
+                        .. (serr or "?"))
+            elseif sum.cycle == true then
+                diag("unsupported:cross-module-cycle", pr.line, pr.col,
+                    "type import: module '" .. pr.mod .. "' is in the current"
+                        .. " require cycle — its aliases are not yet available"
+                        .. " (honest cycle cut)")
+            else
+                --: (x: unknown) -> x is Alias
+                local function is_alias(x) return type(x) == "table" end
+                for name, al in pairs(sum.aliases) do
+                    if aliases[name] == nil and is_alias(al) then
+                        aliases[name] = al
+                    end
+                end
+            end
         end
     end
     for i = 1, #pending_declares do
@@ -2980,8 +3190,9 @@ function M.lower(chunk)
     if chunk.tag == defs.NODE_CHUNK then
         push_scope()
         ret_depth = 1
-        -- the chunk's returns are recorded but unconsumed: the module
-        -- summary (what `require` would see) is a later increment.
+        -- the chunk's returns are recorded and EXPORTED (chunk_returns in
+        -- the result): the runner joins their solved first positions into
+        -- the module summary — what `require` sees (summary.lua).
         ret_frames[1] = { returns = {}, pins = nil }
         local body = chunk.body
         if is_list(body) then lower_stmts(body) end
@@ -2993,6 +3204,7 @@ function M.lower(chunk)
         pop_scope()
     else
         internal(chunk, "root is not a chunk")
+        ret_frames[1] = { returns = {}, pins = nil }
     end
 
     return {
@@ -3004,6 +3216,11 @@ function M.lower(chunk)
         -- entries whose table is declared): obligation evaluation consults
         -- them for member access on wired-atom targets (check.lua).
         atomlibs = atom_index_libs(),
+        -- the chunk's return records + the file's final alias env — the raw
+        -- material of the MODULE SUMMARY (the runner joins the solved
+        -- returns and packages both; summary.lua states the form).
+        chunk_returns = ret_frames[1].returns,
+        aliases = aliases,
     }
 end
 

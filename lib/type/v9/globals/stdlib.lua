@@ -19,9 +19,13 @@
 --                          but a false-positive machine until constructor
 --                          freshness through locals lands); `package.loaded`
 --                          reads stay the table atom
---   $-intrinsics/match  -> coarse honest types ($Require -> unknown;
---                          $FindReturn/$PatternReturn -> result-open
---                          `(number|nil, number|nil, ...)` / `(string|nil, ...)`)
+--   $-intrinsics/match  -> coarse honest types ($FindReturn/$PatternReturn
+--                          -> result-open `(number|nil, number|nil, ...)` /
+--                          `(string|nil, ...)`); `require` carries
+--                          $Require<1> — the module-summary instantiation
+--                          (lowering resolves the LITERAL argument's module
+--                          summary; without a session/literal it reads as
+--                          unknown, the honest cross-module boundary)
 --   pairs/ipairs/next   -> iterator-triple arrows whose element types are
 --                          CALL-SITE INSTANTIATED ($Elem/$Values/$Keys/$Arg
 --                          — v9's instantiation intrinsics, annot seam):
@@ -56,7 +60,7 @@ return [==[
 --:: declare assert = (val: unknown, ...unknown) -> (unknown, ...)
 --:: declare pcall = (f: function, ...unknown) -> (boolean, ...)
 --:: declare xpcall = (f: function, handler: function, ...unknown) -> (boolean, ...)
---:: declare require = (module: string) -> unknown
+--:: declare require = (module: string) -> $Require<1>
 --:: declare select = (n: integer | string, ...unknown) -> (...)
 --:: declare rawget = (t: table, k: unknown) -> unknown
 --:: declare rawset = (t: table, k: unknown, v: unknown) -> table

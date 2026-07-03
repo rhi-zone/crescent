@@ -63,30 +63,56 @@
 --                               never-part) record — the `local t = {};
 --                               t[k] = v` build idiom. Same aliasing hole,
 --                               same dial.
+--   unannotated-module-boundary off  a `require` site imported a summary
+--                               whose return type is PURE INFERENCE (no
+--                               annotation pins the module's returned
+--                               value) — inferred summaries ARE cross-file
+--                               contextual typing, and this dial is the
+--                               owner's visibility into it (the "warn when
+--                               cross-file contextual typing narrows a
+--                               type" ask). Default off: inferred summaries
+--                               are trusted across the boundary; dial up to
+--                               see (warn) or forbid (error) them.
 --   unsupported         warn    the dynamism/coverage boundary, per bucket
 --                               (`unsupported:<construct>` may be dialed
---                               individually; the bare prefix is the default)
+--                               individually; the bare prefix is the
+--                               default — `unsupported:cross-module` /
+--                               `unsupported:cross-module-cycle` are the
+--                               module-boundary buckets)
 --
 -- Caps-first: file access is INJECTED (`Caps.read_file`); this module never
 -- reaches for io. Errors are data: `(nil, errmsg)`, never thrown.
+--
+-- CROSS-MODULE SUMMARIES ride a SESSION (M.session): checking a file that
+-- requires others computes each dep's summary ON DEMAND through the same
+-- runner — session-cached by path (the sha256 DISK cache of the legacy
+-- checker is deliberately out of scope: session-only, stated), cycle-cut by
+-- an in-progress set (the legacy `_checking` pattern — a participant's
+-- in-progress summary is the honest unknown, never a deadlock).
 
 if not package.path:find("?/init.lua", 1, true) then
     package.path = "./?/init.lua;" .. package.path
 end
 
 --:: require "lib.type.v9.engine.defs"
+--:: require "lib.type.v9.summary"
 --:: require "lib.type.v9.lattice"
 
 local frontend = require("lib.type.v9.frontend")
 local lower = require("lib.type.v9.lower")
 local engine = require("lib.type.v9.engine.engine")
 local lattice = require("lib.type.v9.lattice")
+local modules = require("lib.type.v9.modules")
+local summary_mod = require("lib.type.v9.summary")
 
 --:: Diag = { code: string, severity: string, message: string, line: integer, col: integer }
 --:: Obligation = { kind: string, cell: string, allow: Val | nil, field: string | nil, base: string | nil, key: string | nil, args: { [integer]: string } | nil, inits: { [integer]: boolean } | nil, init: boolean | nil, code: string, what: string, line: integer, col: integer }
 --:: Policy = { [string]: string }
 --:: Caps = { read_file: (string) -> (string | nil, string | nil) }
---:: CheckOpts = { policy: Policy | nil, mode: string | nil }
+--:: Summary = { returns: { [integer]: unknown } | nil, annotated: boolean, aliases: { [string]: unknown }, cycle: boolean | nil }
+--:: Deps = { summary: (name: string) -> (Summary | nil, string | nil) }
+--:: CheckOpts = { policy: Policy | nil, mode: string | nil, deps: Deps | nil }
+--:: Session = { summary: (name: string) -> (Summary | nil, string | nil), check_file: (path: string) -> ({ [integer]: Diag } | nil, string | nil, Summary | nil) }
 
 local M = {}
 
@@ -143,6 +169,7 @@ local DEFAULT_RULES = {
     { "unused-local", "warn" },
     { "new-field-on-write", "off" },
     { "new-index-on-write", "off" },
+    { "unannotated-module-boundary", "off" },
     { "unsupported", "warn" },
 } --: { [integer]: { [integer]: string } }
 
@@ -198,7 +225,7 @@ local function error_position(errmsg)
     return 0, 0
 end
 
---: (x: unknown) -> x is { graph: Graph, obligations: { [integer]: Obligation }, diags: { [integer]: Diag }, vars: { [string]: string }, atomlibs: { [integer]: AtomLib } }
+--: (x: unknown) -> x is { graph: Graph, obligations: { [integer]: Obligation }, diags: { [integer]: Diag }, vars: { [string]: string }, atomlibs: { [integer]: AtomLib }, chunk_returns: { [integer]: Ret }, aliases: { [string]: unknown } }
 local function is_lower_result(x) return type(x) == "table" end
 
 --: (diags: { [integer]: Diag }, code: string, line: integer, col: integer, message: string) -> nil
@@ -633,19 +660,34 @@ local function evaluate_obligation(diags, values, ob, meta)
     return nil
 end
 
--- Check a source string. Returns position-sorted, policy-stamped diags.
--- `opts.mode = "lower"` skips the solve (parse + total lowering only — the
--- totality smoke path); default is the full check.
---: (source: string, filename: string, opts: CheckOpts | nil) -> ({ [integer]: Diag } | nil, string | nil)
+-- Check a source string. Returns position-sorted, policy-stamped diags AND
+-- (third value) the file's MODULE SUMMARY — its solved return type as At
+-- data + its exported alias env (summary.lua states the form; returns is
+-- nil when no solve ran). `opts.mode = "lower"` skips the solve (parse +
+-- total lowering only — the totality smoke path); default is the full
+-- check. `opts.deps` is the injected cross-module seam (a session's
+-- `summary`); nil = single-file check, require sites stay the honest
+-- boundary.
+--: (source: string, filename: string, opts: CheckOpts | nil) -> ({ [integer]: Diag } | nil, string | nil, Summary | nil)
 function M.check_source(source, filename, opts)
     local policy = M.default_policy()
     local mode = "full"
+    local deps = nil --: Deps | nil
     if opts ~= nil then
         local op = opts.policy
         if op ~= nil then policy = op end
         local om = opts.mode
         if om ~= nil then mode = om end
+        local od = opts.deps
+        if od ~= nil then deps = od end
     end
+
+    -- The lattice's pairwise memos (leq/join/meet/equal) are pure caches;
+    -- reset per file so their strong pairs never accumulate dead per-file
+    -- graphs across a session (measured ~20GB retained over a whole-lib
+    -- run without the reset — lattice.reset_memo states why weak tables
+    -- cannot express this).
+    lattice.reset_memo()
 
     local ast, perr = frontend.parse(source, filename)
     if ast == nil then
@@ -654,26 +696,37 @@ function M.check_source(source, filename, opts)
         local diags = {} --: { [integer]: Diag }
         diags[1] = { code = "parse-error", severity = "warn", message = msg, line = line, col = col }
         stamp(diags, policy)
-        return diags, nil
+        return diags, nil, nil
     end
 
     -- Totality is the lowering's contract; a crash here is a checker bug,
     -- surfaced as data at this seam (and counted by the smoke run).
-    local ok, res = pcall(lower.lower, ast)
-    if not ok then return nil, filename .. ": lowering crashed: " .. tostring(res) end
+    local ok, res = pcall(lower.lower, ast, deps)
+    if not ok then return nil, filename .. ": lowering crashed: " .. tostring(res), nil end
     local low = res --: unknown
-    if not is_lower_result(low) then return nil, filename .. ": lowering returned a non-result" end
+    if not is_lower_result(low) then return nil, filename .. ": lowering returned a non-result", nil end
 
     local diags = low.diags
+    local returns_at = nil --: { [integer]: unknown } | nil
     if mode ~= "lower" then
         local sol, serr = engine.solve(low.graph)
-        if sol == nil then return nil, filename .. ": " .. (serr or "solve failed") end
+        if sol == nil then return nil, filename .. ": " .. (serr or "solve failed"), nil end
         local obligations = low.obligations
         local meta = read_meta(low.atomlibs)
         for i = 1, #obligations do
             evaluate_obligation(diags, sol.values, obligations[i], meta)
         end
+        -- the module summary's return type: the chunk's solved returns,
+        -- joined and exported as At DATA (never live cells — summary.lua).
+        local mv = summary_mod.module_value(low.chunk_returns, sol.values)
+        returns_at = { summary_mod.val_to_at(mv) }
     end
+    local summary = {
+        returns = returns_at,
+        annotated = summary_mod.all_pinned(low.chunk_returns),
+        aliases = low.aliases,
+        cycle = nil,
+    } --: Summary
 
     stamp(diags, policy)
     local kept = {} --: { [integer]: Diag }
@@ -681,15 +734,91 @@ function M.check_source(source, filename, opts)
         if diags[i].severity ~= "off" then kept[#kept + 1] = diags[i] end
     end
     sort_by_position(kept)
-    return kept, nil
+    return kept, nil, summary
 end
 
 -- Check a file via injected caps (never reaches for io).
---: (caps: Caps, path: string, opts: CheckOpts | nil) -> ({ [integer]: Diag } | nil, string | nil)
+--: (caps: Caps, path: string, opts: CheckOpts | nil) -> ({ [integer]: Diag } | nil, string | nil, Summary | nil)
 function M.check_file(caps, path, opts)
     local src, err = caps.read_file(path)
-    if src == nil then return nil, err or (path .. ": unreadable") end
+    if src == nil then return nil, err or (path .. ": unreadable"), nil end
     return M.check_source(src, path, opts)
+end
+
+-- A CROSS-MODULE SESSION: demand-driven module summaries over injected
+-- caps, cached by resolved path for the session's lifetime (the legacy
+-- sha256 DISK cache is deliberately out of scope — session-only, stated).
+--
+--   session.summary(modname)  the module's summary, computing it by
+--                              checking the module (full solve) on first
+--                              demand — the seam `require` sites and
+--                              `--:: require` imports consume via
+--                              opts.deps.
+--   session.check_file(path)  diags + summary for one file WITH
+--                              cross-module resolution, session-cached: a
+--                              file already solved as someone's dep is not
+--                              solved again (what keeps the whole-lib smoke
+--                              near-linear).
+--
+-- CYCLES (Lua allows them: B may require A mid-A-check): an in-progress
+-- set — the legacy `_checking` tainted-set pattern — cuts re-entry by
+-- handing the participant a shared `cycle = true` marker; the requiring
+-- site emits `unsupported:cross-module-cycle` and reads unknown. Never a
+-- deadlock, never unbounded recursion. A summary computed while one of its
+-- deps was cycle-cut is honestly WIDER (the cut edge read unknown); it is
+-- still cached for the session (stated, as legacy taints).
+--
+-- Summaries handed out are IMMUTABLE: importers read them, never write.
+-- `opts.policy` applies to the session's internal checks (diags a summary
+-- computation produced are cached and returned by check_file untouched).
+--: (caps: Caps, opts: CheckOpts | nil) -> Session
+function M.session(caps, opts)
+    local resolver = modules.resolver(caps)
+    --:: Entry = { summary: Summary | nil, diags: { [integer]: Diag } | nil, err: string | nil }
+    local cache = {} --: { [string]: Entry }
+    local in_progress = {} --: { [string]: boolean | nil }
+    -- the shared cycle marker every in-cycle requester sees (immutable).
+    local CYCLE = { returns = nil, annotated = false, aliases = {}, cycle = true } --: Summary
+
+    local S = {}
+
+    --: (path: string, src: string) -> Entry
+    local function compute(path, src)
+        in_progress[path] = true
+        local diags, err, sum = M.check_source(src, path, {
+            policy = opts ~= nil and opts.policy or nil,
+            mode = nil,
+            deps = S,
+        })
+        in_progress[path] = nil
+        local e = { summary = sum, diags = diags, err = err } --: Entry
+        cache[path] = e
+        return e
+    end
+
+    --: (name: string) -> (Summary | nil, string | nil)
+    function S.summary(name)
+        local r, rerr = resolver.resolve(name)
+        if r == nil then return nil, rerr end
+        if in_progress[r.path] then return CYCLE, nil end
+        local e = cache[r.path]
+        if e == nil then e = compute(r.path, r.src) end
+        if e.summary == nil then return nil, e.err or (r.path .. ": check failed") end
+        return e.summary, nil
+    end
+
+    --: (path: string) -> ({ [integer]: Diag } | nil, string | nil, Summary | nil)
+    function S.check_file(path)
+        local e = cache[path]
+        if e == nil then
+            local src, err = caps.read_file(path)
+            if src == nil then return nil, err or (path .. ": unreadable"), nil end
+            e = compute(path, src)
+        end
+        return e.diags, e.err, e.summary
+    end
+
+    return S
 end
 
 -- Diagnostic counts by code — the coverage histogram (the roadmap view:
