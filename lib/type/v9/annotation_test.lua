@@ -241,12 +241,23 @@ end)
 
 T.describe("v9 annotations — the honest annotation boundary", function()
     T.it("non-v0 features are per-feature named buckets", function()
-        local src = "local x = {} --: { [string]: number }\nlocal y = nil --: Arr<string>\nreturn x, y\n"
+        local src = "local x = {} --: { [boolean]: number }\nlocal y = nil --: Arr<string>\nreturn x, y\n"
         local diags = check.check_source(src, "t.lua", nil)
         T.ok(diags ~= nil, "checked")
         if diags ~= nil then
-            T.ok(find_diag(diags, "unsupported:annotation-index-signature") ~= nil, "index signature named")
+            T.ok(find_diag(diags, "unsupported:annotation-index-signature-key") ~= nil,
+                "a non-string/number index KEY is named (string/number signatures are real types now)")
             T.ok(find_diag(diags, "unsupported:annotation-generic") ~= nil, "generic named")
+        end
+    end)
+
+    T.it("index-signature annotations are REAL types (bucket retired)", function()
+        local src = "local x = {} --: { [string]: number }\nreturn x\n"
+        local diags = check.check_source(src, "t.lua", nil)
+        T.ok(diags ~= nil, "checked")
+        if diags ~= nil then
+            T.eq(find_diag(diags, "unsupported:annotation-index-signature"), nil, "no bucket")
+            T.eq(#diags, 0, "a fresh {} ascribed to a map type is clean: " .. render(diags))
         end
     end)
 

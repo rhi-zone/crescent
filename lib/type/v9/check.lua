@@ -26,11 +26,21 @@
 --                               are almost never correct; dial down only
 --                               with cause
 --   internal            error   a lowering invariant broke (checker bug)
+--   index-write-mismatch error  a dynamic-key write outside the index
+--                               part's invariant write bound — the same
+--                               mutation-soundness rule as field writes
 --   missing-field       warn    a field/method read the record provably
 --                               lacks (v0 record tracking is intraprocedural
 --                               — aliases don't see later extensions — so
 --                               absence evidence is warn, not error; dial up
 --                               once annotations land)
+--   index-without-signature warn  a dynamic-key read on a record with NO
+--                               index signature — the dynamism boundary for
+--                               dynamic keys unless declared. Warn (not
+--                               error) in v0: the tree is full of
+--                               dynamic-key idioms on inferred records that
+--                               annotations haven't reached yet; dial up as
+--                               index annotations spread
 --   use-before-narrow   warn    unknown used dynamically — v0 cannot narrow
 --                               it yet (cross-module summaries / index
 --                               signatures are the roadmap); the dial makes
@@ -48,6 +58,11 @@
 --                               at a colliding type, unsound) through
 --                               another. Dial to error to forbid the idiom
 --                               and close the hole.
+--   new-index-on-write  off     the SAME concession for dynamic keys: a
+--                               write GREW an index part on a part-less (or
+--                               never-part) record — the `local t = {};
+--                               t[k] = v` build idiom. Same aliasing hole,
+--                               same dial.
 --   unsupported         warn    the dynamism/coverage boundary, per bucket
 --                               (`unsupported:<construct>` may be dialed
 --                               individually; the bare prefix is the default)
@@ -68,7 +83,7 @@ local engine = require("lib.type.v9.engine.engine")
 local lattice = require("lib.type.v9.lattice")
 
 --:: Diag = { code: string, severity: string, message: string, line: integer, col: integer }
---:: Obligation = { kind: string, cell: string, allow: Val | nil, field: string | nil, base: string | nil, args: { [integer]: string } | nil, inits: { [integer]: boolean } | nil, init: boolean | nil, code: string, what: string, line: integer, col: integer }
+--:: Obligation = { kind: string, cell: string, allow: Val | nil, field: string | nil, base: string | nil, key: string | nil, args: { [integer]: string } | nil, inits: { [integer]: boolean } | nil, init: boolean | nil, code: string, what: string, line: integer, col: integer }
 --:: Policy = { [string]: string }
 --:: Caps = { read_file: (string) -> (string | nil, string | nil) }
 --:: CheckOpts = { policy: Policy | nil, mode: string | nil }
@@ -95,12 +110,15 @@ local DEFAULT_RULES = {
     { "cast-mismatch", "error" },
     { "force-cast", "error" },
     { "internal", "error" },
+    { "index-write-mismatch", "error" },
     { "missing-field", "warn" },
     { "use-before-narrow", "warn" },
+    { "index-without-signature", "warn" },
     { "undeclared-global", "warn" },
     { "global-write", "warn" },
     { "unused-local", "warn" },
     { "new-field-on-write", "off" },
+    { "new-index-on-write", "off" },
     { "unsupported", "warn" },
 } --: { [integer]: { [integer]: string } }
 
@@ -328,10 +346,48 @@ local function evaluate_obligation(diags, values, ob)
         local field = ob.field
         if field == nil then return nil end
         if triage_field_target(diags, v, ob.what, ob.line, ob.col) then
-            if not lattice.has_field(v, field) then
+            -- a string index part covers unnamed keys: the read is the
+            -- (sound) `T | nil` index projection, not a missing field.
+            if not lattice.has_field(v, field) and not lattice.has_str_index(v) then
                 emit(diags, "missing-field", ob.line, ob.col,
                     "no " .. ob.what .. " on `" .. lattice.show(v) .. "`")
             end
+        end
+        return nil
+    end
+
+    if ob.kind == "index-read" then
+        -- dynamic-key read discipline: target triage first (unknown /
+        -- string / non-table / table-top), then the KEY (unknown keys must
+        -- narrow; keys outside string/number are the dynamic-index
+        -- boundary), then the signature requirement — a read on a record
+        -- with NO index part is the named dynamism boundary. One diag per
+        -- read; an index-bounded target with a str/num key is fully checked
+        -- (the projection already typed it `T | nil`).
+        if not triage_field_target(diags, v, ob.what, ob.line, ob.col) then
+            return nil
+        end
+        local keycell = ob.key
+        if keycell == nil then return nil end
+        local kv = values[keycell]
+        if not as_val(kv) then return nil end
+        if lattice.is_bottom(kv) then return nil end
+        local kk = lattice.key_kinds(kv)
+        if kk.unknown then
+            emit(diags, "use-before-narrow", ob.line, ob.col,
+                ob.what .. " key has type `unknown` — narrow the key before dynamic use")
+            return nil
+        end
+        if kk.other then
+            emit(diags, "unsupported:dynamic-index", ob.line, ob.col,
+                ob.what .. " key `" .. lattice.show(kv)
+                    .. "` is outside the string/number index discipline (honest boundary; not checked)")
+            return nil
+        end
+        if not lattice.has_index(v) then
+            emit(diags, ob.code, ob.line, ob.col,
+                ob.what .. " on `" .. lattice.show(v)
+                    .. "` — no index signature declares its dynamic keys (annotate `{ [string]: T }` / `{ [number]: T }`)")
         end
         return nil
     end
@@ -365,6 +421,85 @@ local function evaluate_obligation(diags, values, ob)
             emit(diags, ob.code, ob.line, ob.col,
                 "write to " .. ob.what .. ": got `" .. lattice.show(v)
                     .. "`, the field's write bound is `" .. lattice.show(w) .. "`")
+        end
+        return nil
+    end
+
+    if ob.kind == "index-write" then
+        -- dynamic-key write discipline, mirroring field writes: the written
+        -- value must satisfy the touched index part's invariant `w` bound;
+        -- growing a part on a part-less/never record is the named
+        -- new-index-on-write concession. Key triage as for index reads.
+        -- Writing nil DELETES the key in Lua (always legal — reads carry
+        -- `| nil` for absence), so the nil part of the written value is
+        -- outside the check; a direct-constructor write is a fresh
+        -- construction ascribed by the bound (initialization ordering, as
+        -- for call arguments — the `t[#t + 1] = {...}` append idiom).
+        local basecell = ob.base
+        local keycell = ob.key
+        if basecell == nil or keycell == nil then return nil end
+        local base = values[basecell]
+        if not as_val(base) then return nil end
+        if lattice.is_bottom(base) then return nil end
+        if not triage_field_target(diags, base, "write at " .. ob.what, ob.line, ob.col) then
+            return nil
+        end
+        local kv = values[keycell]
+        if not as_val(kv) then return nil end
+        if lattice.is_bottom(kv) then return nil end
+        local kk = lattice.key_kinds(kv)
+        if kk.unknown then
+            emit(diags, "use-before-narrow", ob.line, ob.col,
+                ob.what .. " key has type `unknown` — narrow the key before dynamic use")
+            return nil
+        end
+        if kk.other then
+            emit(diags, "unsupported:dynamic-index", ob.line, ob.col,
+                ob.what .. " key `" .. lattice.show(kv)
+                    .. "` is outside the string/number index discipline (honest boundary; not checked)")
+            return nil
+        end
+        local vv = v --: Val
+        local dropped = lattice.tag_drop(v, "nil")
+        if as_val(dropped) then vv = dropped end
+        if lattice.is_bottom(vv) then return nil end
+        local kinds = {} --: { [integer]: string }
+        if kk.str then kinds[#kinds + 1] = "str" end
+        if kk.num then kinds[#kinds + 1] = "num" end
+        local grew = false
+        for i = 1, #kinds do
+            local w = lattice.index_write_bound(base, kinds[i])
+            if w == nil then
+                -- part-less record: the write GROWS the part.
+                grew = true
+            else
+                if lattice.is_bottom(w) then
+                    -- a never part ("no keys of this kind yet"): also growth.
+                    grew = true
+                elseif lattice.is_unknown(vv) then
+                    emit(diags, "use-before-narrow", ob.line, ob.col,
+                        "value written at " .. ob.what .. " has type `unknown` — narrow it before the write")
+                    return nil
+                else
+                    local ok = false
+                    if ob.init == true then
+                        ok = lattice.leq_init(vv, w)
+                    else
+                        ok = lattice.leq(vv, w)
+                    end
+                    if not ok then
+                        emit(diags, ob.code, ob.line, ob.col,
+                            ob.what .. ": got `" .. lattice.show(vv)
+                                .. "`, the index part's write bound is `" .. lattice.show(w) .. "`")
+                        return nil
+                    end
+                end
+            end
+        end
+        if grew then
+            emit(diags, "new-index-on-write", ob.line, ob.col,
+                ob.what .. " grew an index part on `" .. lattice.show(base)
+                    .. "` (invisible through aliases — the open-record concession)")
         end
         return nil
     end

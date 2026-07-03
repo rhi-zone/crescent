@@ -127,11 +127,42 @@ in histogram order, plus recorded debt:
   `unsupported:cast-annotation` (6.7k) retired into cast-mismatch/force-cast +
   annotation buckets. Remainder of use-before-narrow is dominated by stdlib
   globals (`string.*`, `math.*`, `package.*` reads) — the next item below.
-- [ ] **Index signatures in the lattice** — `{ [string]: T }` /`{ [integer]: T }`/
-  `T[]` annotations (9.3k bucket diags) approximate to the `table` atom; field
-  reads through them are use-before-narrow noise. An indexer component on Rec
-  is a domain-local upgrade (needed before the annotation seam can express
-  the house map/array idioms).
+- [x] **Index signatures in the lattice** — DONE 2026-07-03. Rec gained an
+  optional `idx = { str, num }` component (per-kind r/w Fields; a never part
+  claims that key kind absent — how `{ [string]: T }` says "no number keys"
+  and an array constructor says "no string keys"). Dynamic reads are
+  `T | nil` NON-NEGOTIABLY (absent keys are nil — the spot TS is unsound by
+  default and v9 is not); writes check against the part's invariant `w`
+  (index-write-mismatch, error); growing a part on a part-less/never record
+  is the `new-index-on-write` concession (off), the exact analogue of
+  new-field-on-write. Joins keep idx only when both sides bounded and FOLD
+  dropped named fields into the str part (sound widened reads, monotone
+  projections); leq does width-into-index for extra named fields and
+  REJECTS plain open records into index types (unbounded extras) — fresh
+  constructors pass via leq_init (now recursive through record positions).
+  Annotation grammar: `{ [string]: T }` / `{ [number]: T }` / `T[]` are real
+  types (`annotation-index-signature` + `annotation-array` buckets retired;
+  non-str/num key types are the small `annotation-index-signature-key`
+  bucket). Constructors' array parts build the num part (join of elements;
+  no arity/tuple tracking — stated; `#t` is number). ipairs/pairs/next
+  element types flow via the CALL-SITE INSTANTIATION intrinsics
+  ($Elem/$Values/$Keys/$Arg — declared result positions computed per call
+  from an argument; one generic arm in call_core, power lives in the
+  declarations): ipairs loop var is `T` not `T | nil` (ipairs stops at the
+  first nil — Lua semantics). Keys outside string/number stay the honest
+  dynamic-index boundary; reads on plain records without a signature are the
+  `index-without-signature` diag (warn in v0 — dial up as annotations
+  spread).
+- [ ] **Index-part growth through loop-head phis** — `local out = {}` then
+  `out[i] = v` in a loop: the loop phi joins the grown version with the
+  unbounded pre-loop `{}` and drops the part (sound — a plain open record
+  admits keys at any type), so the post-loop read is index-without-signature.
+  The actionable fix is the diag's own advice (annotate the decl:
+  `--: { [number]: T }` checks the whole loop cleanly). Closing it without
+  annotation needs constructor-freshness substrate (a fresh `{}` could be
+  born index-bounded with both parts never — but that widens the
+  new-field-on-write aliasing concession into wrong `nil` claims through
+  stale aliases; decide deliberately, not by default).
 - [ ] **Cross-module summaries** — `unsupported:cross-module` (3.2k: `require`
   calls + `--:: require` type imports) + `unsupported:annotation-unknown-name`
   (3.2k: aliases imported from other modules). Module summary = the chunk's

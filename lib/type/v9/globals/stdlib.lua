@@ -12,12 +12,22 @@
 --                          `setmetatable` lose their identity typing)
 --   overloads (A) & (B) -> the single widest arrow (`math.max`,
 --                          `string.byte`, `select`)
---   index signatures    -> the `table` atom (`package.loaded`)
+--   index signatures    -> the `table` atom in PARAM positions, KEPT
+--                          deliberately even now the lattice has real index
+--                          parts: an index-signature PIN rejects every
+--                          inferred plain record at every call site (sound
+--                          but a false-positive machine until constructor
+--                          freshness through locals lands); `package.loaded`
+--                          reads stay the table atom
 --   $-intrinsics/match  -> coarse honest types ($Require -> unknown;
 --                          $FindReturn/$PatternReturn -> result-open
 --                          `(number|nil, number|nil, ...)` / `(string|nil, ...)`)
---   pairs/ipairs        -> concrete iterator-triple arrows (v0-honest;
---                          for-in loops are still the loop boundary)
+--   pairs/ipairs/next   -> iterator-triple arrows whose element types are
+--                          CALL-SITE INSTANTIATED ($Elem/$Values/$Keys/$Arg
+--                          — v9's instantiation intrinsics, annot seam):
+--                          iterating an index-bounded table types the loop
+--                          vars ($Elem is nil-dropped — ipairs stops at the
+--                          first nil, Lua semantics)
 --   pcall/xpcall        -> `(f: function, ...unknown) -> (boolean, ...)` —
 --                          variadic forwarding as a result-OPEN arrow
 --                          (positions beyond the boolean read as unknown)
@@ -53,9 +63,9 @@ return [==[
 --:: declare rawequal = (a: unknown, b: unknown) -> boolean
 --:: declare rawlen = (v: string | table) -> integer
 --:: declare unpack = (t: table, i: integer | nil, j: integer | nil) -> (...)
---:: declare next = (t: table, k: unknown) -> (unknown, unknown)
---:: declare pairs = (t: table) -> ((table, unknown) -> (unknown, unknown), table, nil)
---:: declare ipairs = (t: table) -> ((table, integer) -> (integer | nil, unknown), table, integer)
+--:: declare next = (t: table, k: unknown) -> ($Keys<1>, $Values<1>)
+--:: declare pairs = (t: table) -> ((s: table, k: unknown) -> ($Keys<1>, $Values<1>), $Arg<1>, nil)
+--:: declare ipairs = (t: table) -> ((s: table, i: number) -> (number | nil, $Elem<1>), $Arg<1>, number)
 --:: declare setmetatable = (t: table, mt: table | nil) -> table
 --:: declare getmetatable = (v: unknown) -> table | nil
 --:: declare collectgarbage = (opt: string | nil, arg: number | nil) -> number | boolean

@@ -14,6 +14,15 @@
 --   unions         T | U | nil
 --   records        { x: T, y?: U, readonly z: V, ... }   (the `...` open
 --                  marker is a no-op: v9 records are always open)
+--   index sigs     { [string]: T } / { [number]: T } / both — the
+--                  index-bounded record (DISTINCT from the `...` marker);
+--                  `T[]` is sugar for { [number]: T }. Key types beyond
+--                  string/number are the `index-signature-key` bucket.
+--   instantiation  $Elem<N> / $Values<N> / $Keys<N> / $Arg<N> in a declared
+--                  fn's RESULT position: computed per call site from
+--                  argument N (iteration projections / identity) — what
+--                  lets pairs/ipairs declarations carry element types
+--                  without generics.
 --   functions      (T, U) -> R   (a: T) -> R   () -> (R1, R2)   ...T rest
 --                  `x is T` predicates read as boolean results (the
 --                  narrowing power is a later increment, stated)
@@ -29,11 +38,10 @@
 --
 -- EVERYTHING ELSE routes to a NAMED bucket (returned in `buckets`; the
 -- caller prefixes `unsupported:annotation-`): generic / intrinsic / typeof /
--- intersection / complement / index-signature / meta-slot / array / tuple /
+-- intersection / complement / index-signature-key / meta-slot / tuple /
 -- cdata / any / unknown-name / recursive-alias / alias-budget / parse. A
--- bucketed subtree
--- reads as `unknown` (or the `table` atom where table-ness is certain:
--- index signatures, arrays) — honest, dialable, never a silent guess.
+-- bucketed subtree reads as `unknown` (or the `table` atom where table-ness
+-- is certain) — honest, dialable, never a silent guess.
 --
 -- Errors are data at the public seam: `(nil, buckets, errmsg)`.
 
@@ -192,6 +200,8 @@ local function parse_record(p)
     expect(p, "{")
     local fields = {} --: { [integer]: RecField }
     local feature = nil --: string | nil
+    local istr = nil --: At | nil
+    local inum = nil --: At | nil
     while not at(p, "}") do
         if at(p, "...") then
             -- the open marker; v9 records are always open. `...[%K]: %V`
@@ -218,11 +228,27 @@ local function parse_record(p)
                 end
             end
         elseif at(p, "[") then
-            -- index signature: not expressible as a v9 open record.
-            feature = "index-signature"
-            skip_balanced(p)
+            -- index signature `[string]: T` / `[number]: T` — REAL v0 types
+            -- (an index-bounded record; `integer` reads as number). Key
+            -- types beyond string/number are the named
+            -- `index-signature-key` boundary.
+            advance(p)
+            local kat = parse_type(p)
+            expect(p, "]")
             expect(p, ":")
-            parse_type(p)
+            local vat = parse_type(p)
+            local kname = nil --: string | nil
+            if kat.k == "atom" then
+                local n = kat.name
+                if type(n) == "string" then kname = n end
+            end
+            if kname == "string" then
+                istr = vat
+            elseif kname == "number" then
+                inum = vat
+            else
+                feature = "index-signature-key"
+            end
         else
             local ro = false
             if at(p, "ident") then
@@ -256,7 +282,7 @@ local function parse_record(p)
         -- approximates to the `table` atom (stated, dialable).
         return bucket(p, feature, "table")
     end
-    return { k = "record", fields = fields }
+    return { k = "record", fields = fields, istr = istr, inum = inum }
 end
 
 -- ── function types / groups ─────────────────────────────────────────────────
@@ -370,7 +396,35 @@ local function parse_prim(p)
         return bucket(p, "generic", nil)
     elseif tok.t == "$" then
         advance(p)
-        if at(p, "ident") then advance(p) end
+        -- the CALL-SITE INSTANTIATION intrinsics `$Elem<N>` / `$Values<N>` /
+        -- `$Keys<N>` / `$Arg<N>`: a declared RESULT position computed per
+        -- call site from argument N's value (iteration projections /
+        -- identity — see lattice.lua's header). Name-agnostic machinery:
+        -- the power lives in the declaration, one generic arm in call_core.
+        local name = nil --: string | nil
+        if at(p, "ident") then
+            local tk = peek(p)
+            if tk ~= nil then name = tk.v end
+            advance(p)
+        end
+        local proj = nil --: string | nil
+        if name == "Elem" then proj = "elem" end
+        if name == "Values" then proj = "values" end
+        if name == "Keys" then proj = "keys" end
+        if name == "Arg" then proj = "arg" end
+        if proj ~= nil and at(p, "<") then
+            local numtok = peek_at(p, 1)
+            local closer = peek_at(p, 2)
+            if numtok ~= nil and numtok.t == "num" and closer ~= nil and closer.t == ">" then
+                local idx = tonumber(numtok.v)
+                if idx ~= nil then
+                    advance(p)
+                    advance(p)
+                    advance(p)
+                    return { k = "inst", proj = proj, idx = math.floor(idx) }
+                end
+            end
+        end
         if at(p, "<") then skip_balanced(p) end
         return bucket(p, "intrinsic", nil)
     elseif tok.t == "str" then
@@ -464,7 +518,8 @@ local function parse_prim(p)
     error("type expected, got `" .. tok.v .. "`", 0)
 end
 
--- postfix: `T[]` array sugar (an index signature — the table approximation).
+-- postfix: `T[]` array sugar = `{ [number]: T }` (a real index-bounded
+-- record, no bucket).
 --: (P) -> At
 parse_term = function(p)
     local t = parse_prim(p)
@@ -473,7 +528,8 @@ parse_term = function(p)
         if after ~= nil and after.t == "]" then
             advance(p)
             advance(p)
-            t = bucket(p, "array", "table")
+            local fields = {} --: { [integer]: RecField }
+            t = { k = "record", fields = fields, istr = nil, inum = t }
         else
             break
         end

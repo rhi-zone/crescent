@@ -157,6 +157,57 @@ T.describe("v9 annot — the supported v0 grammar", function()
         local at = parse("((string | nil))")
         T.ok(is_at(at) and at.k == "union", "parens are transparent")
     end)
+
+    T.it("index signatures parse as real index-bounded records", function()
+        local at, buckets = parse("{ [string]: number }")
+        T.eq(#buckets, 0, "in-grammar, not a bucket")
+        T.ok(is_at(at) and at.k == "record", "record node")
+        if is_at(at) and at.k == "record" then
+            local istr = at.istr
+            T.ok(is_at(istr) and istr.k == "atom" and istr.name == "number",
+                "the string part carries the value type")
+            T.eq(at.inum, nil, "no number part declared")
+        end
+        local both = parse("{ [string]: number, [number]: string, n: number }")
+        T.ok(is_at(both) and both.k == "record", "record with both parts + a named field")
+        if is_at(both) and both.k == "record" then
+            T.ok(is_at(both.istr), "string part")
+            T.ok(is_at(both.inum), "number part")
+            T.eq(count_of(both, "fields"), 1, "named field rides alongside")
+        end
+        local ints = parse("{ [integer]: string }")
+        T.ok(is_at(ints) and ints.k == "record" and is_at(ints.inum),
+            "[integer] reads as the number key kind")
+    end)
+
+    T.it("`T[]` is sugar for { [number]: T }", function()
+        local at, buckets = parse("string[]")
+        T.eq(#buckets, 0, "no array bucket anymore")
+        T.ok(is_at(at) and at.k == "record", "record node")
+        if is_at(at) and at.k == "record" then
+            local inum = at.inum
+            T.ok(is_at(inum) and inum.k == "atom" and inum.name == "string",
+                "number part = the element type")
+            T.eq(count_of(at, "fields"), 0, "no named fields")
+        end
+    end)
+
+    T.it("$Elem/$Values/$Keys/$Arg parse as instantiation nodes; other $ stay bucketed", function()
+        local cases = {
+            { "$Elem<1>", "elem" }, { "$Values<1>", "values" },
+            { "$Keys<2>", "keys" }, { "$Arg<1>", "arg" },
+        } --: { [integer]: { [integer]: string } }
+        for i = 1, #cases do
+            local at, buckets = parse(cases[i][1])
+            T.eq(#buckets, 0, cases[i][1] .. ": in-grammar")
+            T.ok(is_at(at) and at.k == "inst" and at.proj == cases[i][2],
+                cases[i][1] .. " -> inst " .. cases[i][2])
+        end
+        local _, buckets = parse("$Elem<T>")
+        T.ok(has_bucket(buckets, "intrinsic"), "$Elem needs a NUMERIC argument; others bucket")
+        local iter = parse("(t: table) -> ((s: table, i: number) -> (number | nil, $Elem<1>), $Arg<1>, number)")
+        T.ok(is_at(iter) and iter.k == "fn", "the ipairs declaration shape parses")
+    end)
 end)
 
 T.describe("v9 annot — named buckets (the honest boundary)", function()
@@ -165,8 +216,7 @@ T.describe("v9 annot — named buckets (the honest boundary)", function()
             { "<T>(T) -> T", "generic" },
             { "Arr<string>", "generic" },
             { "$Require<T>", "intrinsic" },
-            { "{ [string]: integer }", "index-signature" },
-            { "string[]", "array" },
+            { "{ [boolean]: integer }", "index-signature-key" },
             { "A & B", "intersection" },
             { "~string", "complement" },
             { "typeof foo", "typeof" },
@@ -186,8 +236,8 @@ T.describe("v9 annot — named buckets (the honest boundary)", function()
         end
     end)
 
-    T.it("index signatures / arrays keep table-ness in the approximation", function()
-        local at = parse("{ [integer]: string }")
+    T.it("unsupported index-signature KEY types keep table-ness in the approximation", function()
+        local at = parse("{ [table]: string }")
         T.ok(is_at(at) and at.k == "opaque" and at.approx == "table", "approximates to the table atom")
     end)
 

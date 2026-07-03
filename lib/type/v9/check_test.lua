@@ -306,6 +306,8 @@ local function known_code(code)
         or code == "missing-field" or code == "field-write-mismatch"
         or code == "new-field-on-write" or code == "annotation-mismatch"
         or code == "cast-mismatch" or code == "force-cast"
+        or code == "index-without-signature" or code == "index-write-mismatch"
+        or code == "new-index-on-write"
 end
 
 --: (string) -> (string | nil, string | nil)

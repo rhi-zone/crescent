@@ -38,8 +38,13 @@
 -- `function M.f()` module idiom) is one `set_field` rule that SSA-rebinds
 -- the base local + a field-write obligation (the write is checked against
 -- the field's invariant `w` bound post-solve — see lattice.lua's soundness
--- header). Non-literal keys are the honest `unsupported:dynamic-index`
--- boundary; the array part of constructors is `unsupported:table-array-part`.
+-- header). DYNAMIC keys (`t[k]` reads/writes, non-literal) ride the SAME
+-- shape through the lattice's index component: one project_index /
+-- set_index rule + one index-read / index-write obligation (reads are
+-- `T | nil`, non-negotiably — absent keys are nil); constructors' array
+-- parts build the `[number]` part (`{a, b, c}`), and index-signature
+-- annotations (`{ [string]: T }`, `T[]`) express the bounds. Keys outside
+-- string/number stay the honest `unsupported:dynamic-index` boundary.
 --
 -- FUNCTIONS ride the same shape (arrows are just more lattice values): a
 -- function definition mints one param cell per parameter (UNSEEDED — a
@@ -138,7 +143,7 @@ local globals = require("lib.type.v9.globals")
 
 --:: Ast = { tag: integer, line: integer, col: integer, ... }
 --:: Diag = { code: string, severity: string, message: string, line: integer, col: integer }
---:: Obligation = { kind: string, cell: string, allow: Val | nil, field: string | nil, base: string | nil, args: { [integer]: string } | nil, inits: { [integer]: boolean } | nil, init: boolean | nil, code: string, what: string, line: integer, col: integer }
+--:: Obligation = { kind: string, cell: string, allow: Val | nil, field: string | nil, base: string | nil, key: string | nil, args: { [integer]: string } | nil, inits: { [integer]: boolean } | nil, init: boolean | nil, code: string, what: string, line: integer, col: integer }
 --:: LowerResult = { graph: Graph, obligations: { [integer]: Obligation }, diags: { [integer]: Diag }, vars: { [string]: string } }
 --:: Decl = { id: string, name: string, line: integer, col: integer, read: boolean, cell: string, pin: Val | nil }
 --:: Scope = { map: { [string]: Decl }, order: { [integer]: Decl } }
@@ -342,7 +347,7 @@ function M.lower(chunk)
     --: (cell: string, allow: Val, code: string, what: string, line: integer, col: integer) -> nil
     local function obligate(cell, allow, code, what, line, col)
         obligations[#obligations + 1] = {
-            kind = "bound", cell = cell, allow = allow, field = nil, base = nil, args = nil, inits = nil, init = nil,
+            kind = "bound", cell = cell, allow = allow, field = nil, base = nil, key = nil, args = nil, inits = nil, init = nil,
             code = code, what = what, line = line, col = col,
         }
         return nil
@@ -354,7 +359,7 @@ function M.lower(chunk)
     --: (cell: string, field: string, what: string, line: integer, col: integer) -> nil
     local function obligate_field_read(cell, field, what, line, col)
         obligations[#obligations + 1] = {
-            kind = "field-read", cell = cell, allow = nil, field = field, base = nil, args = nil, inits = nil, init = nil,
+            kind = "field-read", cell = cell, allow = nil, field = field, base = nil, key = nil, args = nil, inits = nil, init = nil,
             code = "missing-field", what = what, line = line, col = col,
         }
         return nil
@@ -367,8 +372,38 @@ function M.lower(chunk)
     --: (cell: string, base: string, field: string, line: integer, col: integer) -> nil
     local function obligate_field_write(cell, base, field, line, col)
         obligations[#obligations + 1] = {
-            kind = "field-write", cell = cell, allow = nil, field = field, base = base, args = nil, inits = nil, init = nil,
+            kind = "field-write", cell = cell, allow = nil, field = field, base = base, key = nil, args = nil, inits = nil, init = nil,
             code = "field-write-mismatch", what = "field '" .. field .. "'", line = line, col = col,
+        }
+        return nil
+    end
+
+    -- "`cell` (a dynamic-key read target) must be index-bounded for keys of
+    -- `key`'s kinds" — resolved post-solve (index-without-signature /
+    -- unsupported:dynamic-index for non-str/num keys / use-before-narrow
+    -- for unknown keys; op-mismatch shapes via the shared triage).
+    --: (cell: string, key: string, what: string, line: integer, col: integer) -> nil
+    local function obligate_index_read(cell, key, what, line, col)
+        obligations[#obligations + 1] = {
+            kind = "index-read", cell = cell, allow = nil, field = nil, base = nil, key = key,
+            args = nil, inits = nil, init = nil,
+            code = "index-without-signature", what = what, line = line, col = col,
+        }
+        return nil
+    end
+
+    -- "the value in `cell`, written at `base`[`key`], must satisfy the
+    -- touched index part's invariant write bound" — the dynamic-key
+    -- mutation-soundness check; a part-less/never target is the named
+    -- `new-index-on-write` concession (the `local t = {}; t[k] = v` idiom).
+    -- `init` marks a direct-constructor value (initialization ordering, as
+    -- for call arguments — the `t[#t + 1] = {...}` append idiom).
+    --: (cell: string, base: string, key: string, init: boolean, line: integer, col: integer) -> nil
+    local function obligate_index_write(cell, base, key, init, line, col)
+        obligations[#obligations + 1] = {
+            kind = "index-write", cell = cell, allow = nil, field = nil, base = base, key = key,
+            args = nil, inits = nil, init = init,
+            code = "index-write-mismatch", what = "index write", line = line, col = col,
         }
         return nil
     end
@@ -380,7 +415,7 @@ function M.lower(chunk)
     --: (cell: string, name: string, line: integer, col: integer) -> nil
     local function obligate_param_witness(cell, name, line, col)
         obligations[#obligations + 1] = {
-            kind = "param-witness", cell = cell, allow = nil, field = nil, base = nil, args = nil, inits = nil, init = nil,
+            kind = "param-witness", cell = cell, allow = nil, field = nil, base = nil, key = nil, args = nil, inits = nil, init = nil,
             code = "unsupported:unconstrained-param", what = "parameter '" .. name .. "'",
             line = line, col = col,
         }
@@ -396,7 +431,7 @@ function M.lower(chunk)
     --: (cell: string, args: { [integer]: string }, inits: { [integer]: boolean }, what: string, line: integer, col: integer) -> nil
     local function obligate_call(cell, args, inits, what, line, col)
         obligations[#obligations + 1] = {
-            kind = "call", cell = cell, allow = nil, field = nil, base = nil, args = args,
+            kind = "call", cell = cell, allow = nil, field = nil, base = nil, key = nil, args = args,
             inits = inits, init = nil, code = "call-mismatch", what = what, line = line, col = col,
         }
         return nil
@@ -408,7 +443,7 @@ function M.lower(chunk)
     --: (cell: string, allow: Val, init: boolean, code: string, what: string, line: integer, col: integer) -> nil
     local function obligate_ann(cell, allow, init, code, what, line, col)
         obligations[#obligations + 1] = {
-            kind = "ann", cell = cell, allow = allow, field = nil, base = nil, args = nil, inits = nil,
+            kind = "ann", cell = cell, allow = allow, field = nil, base = nil, key = nil, args = nil, inits = nil,
             init = init, code = code, what = what, line = line, col = col,
         }
         return nil
@@ -573,7 +608,24 @@ function M.lower(chunk)
                     end
                 end
             end
-            return lattice.record_rw(fields)
+            -- index-signature parts: the annotated type IS the part's ref
+            -- type (r = w, exactly as written); declaring one kind claims
+            -- the other kind absent (idx_of fills the never part).
+            local istr = nil --: Field | nil
+            local inum = nil --: Field | nil
+            if at.istr ~= nil then
+                local v = at_val(at.istr)
+                istr = { r = v, w = v }
+            end
+            if at.inum ~= nil then
+                local v = at_val(at.inum)
+                inum = { r = v, w = v }
+            end
+            local idx = nil --: Idx | nil
+            if istr ~= nil or inum ~= nil then
+                idx = lattice.idx_of(istr, inum)
+            end
+            return lattice.record_rw(fields, idx)
         elseif k == "fn" then
             local params = {} --: { [integer]: Param }
             local ps = at.params
@@ -602,15 +654,41 @@ function M.lower(chunk)
                 end
             end
             local results = {} --: { [integer]: Val }
+            local insts = nil --: { [integer]: Inst } | nil
             local rs = at.results
             if is_tbl(rs) then
-                for i = 1, #rs do results[i] = at_val(rs[i]) end
+                for i = 1, #rs do
+                    local r = rs[i] --: unknown
+                    local marked = false
+                    if is_tbl(r) and r.k == "inst" then
+                        -- a call-site-instantiated result position
+                        -- ($Elem/$Values/$Keys/$Arg): the static Val is the
+                        -- honest top (the fallback); call_core computes the
+                        -- projection from the actual argument per call.
+                        local proj = r.proj
+                        local idx = r.idx
+                        if type(proj) == "string" and type(idx) == "number" then
+                            results[i] = UNKNOWN_VAL
+                            if insts == nil then
+                                insts = {} --: { [integer]: Inst }
+                            end
+                            insts[i] = { proj = proj, idx = math.floor(idx) }
+                            marked = true
+                        end
+                    end
+                    if not marked then results[i] = at_val(rs[i]) end
+                end
             end
             local rest = nil --: Val | nil
             if at.rest ~= nil then rest = at_val(at.rest) end
-            return lattice.fn_val(params, results, at.vararg == true, rest, at.open == true)
+            return lattice.fn_val(params, results, at.vararg == true, rest, at.open == true, insts)
         elseif k == "opaque" then
             if at.approx == "table" then return lattice.single("table") end
+            return UNKNOWN_VAL
+        elseif k == "inst" then
+            -- instantiation intrinsics are meaningful only in a declared
+            -- fn's result position (consumed above); anywhere else they
+            -- read as the honest top.
             return UNKNOWN_VAL
         end
         -- a tuple outside result position, or an unexpected node: honest top.
@@ -1071,6 +1149,22 @@ function M.lower(chunk)
         return field_read_from(lower_expr(target), key, what, line, col)
     end
 
+    -- A dynamic-key READ (`t[k]`, k not a literal string — literal numbers
+    -- ride this same path; their key cell is just the number atom): ONE
+    -- projection rule over (target, key) + ONE index-read obligation. The
+    -- projected value is `T | nil` when the target is index-bounded (an
+    -- absent key IS nil — non-negotiable), `unknown` at the boundary cases
+    -- the obligation names.
+    --: (tc: string, kc: string, what: string, line: integer, col: integer) -> string
+    local function index_read_from(tc, kc, what, line, col)
+        local rc = fresh("index")
+        rules[#rules + 1] = engine.rule({ tc, kc }, { rc }, function(get)
+            return { [rc] = lattice.project_index(get(tc), get(kc)) }
+        end)
+        obligate_index_read(tc, kc, what, line, col)
+        return rc
+    end
+
     -- The shared call core: ONE rule that (a) flows argument values into the
     -- callee's UNPINNED param cells (inference; pinned params are checked by
     -- the call obligation instead, and an fn-typed pin seeds its own pins
@@ -1140,6 +1234,35 @@ function M.lower(chunk)
                         rv = r
                     elseif not fn.open then
                         rv = NIL_VAL
+                    end
+                    -- call-site INSTANTIATION: a declared result position
+                    -- marked $Elem/$Values/$Keys/$Arg computes from the
+                    -- actual argument's value here — ONE generic arm; the
+                    -- specific power lives in the DECLARATION (this is how
+                    -- pairs/ipairs carry element types without generics).
+                    -- The identity projection clips (a cycle-closing flow,
+                    -- like call-argument seeding); the iteration
+                    -- projections read bounded sub-structure.
+                    local insts = fn.insts
+                    if insts ~= nil then
+                        local inst = insts[i]
+                        if inst ~= nil and inst.idx >= 1 and inst.idx <= #argcells then
+                            local av = get(argcells[inst.idx])
+                            if lattice.as_val(av) then
+                                if inst.proj == "elem" then
+                                    local pv = lattice.elem_iter(av)
+                                    if lattice.as_val(pv) then rv = pv end
+                                elseif inst.proj == "values" then
+                                    local pv = lattice.values_iter(av)
+                                    if lattice.as_val(pv) then rv = pv end
+                                elseif inst.proj == "keys" then
+                                    local pv = lattice.keys_iter(av)
+                                    if lattice.as_val(pv) then rv = pv end
+                                elseif inst.proj == "arg" then
+                                    rv = lattice.clip(av, CLIP_DEPTH)
+                                end
+                            end
+                        end
                     end
                 end
                 out[rcells[i]] = rv
@@ -1217,10 +1340,14 @@ function M.lower(chunk)
     -- `function M.f() end` accretes fields on M's versions). Field types are
     -- invariant refs, so writes to EXISTING fields never change the type —
     -- for nested bases (`a.b.c = v`) no rebind is needed at all; the write
-    -- is checked in place against the field's `w` bound. Non-literal keys
-    -- are the `unsupported:dynamic-index` boundary.
-    --: (Ast, string) -> nil
-    local function lower_field_write(t, vcell)
+    -- is checked in place against the field's `w` bound. A NON-literal key
+    -- is a dynamic-key write: the SAME shape through set_index + the
+    -- index-write obligation (part bounds are invariant refs too; growing a
+    -- part on a part-less record is the new-index-on-write concession).
+    -- `init` marks a direct-constructor written value (initialization
+    -- ordering for the dynamic-key check — the append idiom).
+    --: (t: Ast, vcell: string, init: boolean) -> nil
+    local function lower_field_write(t, vcell, init)
         local key = nil --: string | nil
         if t.tag == defs.NODE_FIELD_EXPR then
             local k = t.key
@@ -1234,10 +1361,32 @@ function M.lower(chunk)
             return nil
         end
         if key == nil then
-            lower_expr(target)
-            local k = t.key
-            if is_node(k) then lower_expr(k) end
-            unsupported(t, "dynamic-index")
+            local kn = t.key
+            if not is_node(kn) then
+                internal(t, "index write without a key")
+                return nil
+            end
+            if target.tag == defs.NODE_IDENTIFIER then
+                local nm = target.name
+                if type(nm) == "string" then
+                    local d = resolve(nm)
+                    if d ~= nil then
+                        d.read = true
+                        local kc = lower_expr(kn)
+                        local bc = d.cell
+                        local nc = fresh(nm .. "-setidx")
+                        rules[#rules + 1] = engine.rule({ bc, kc, vcell }, { nc }, function(get)
+                            return { [nc] = lattice.set_index(get(bc), get(kc), get(vcell)) }
+                        end)
+                        d.cell = nc
+                        obligate_index_write(vcell, bc, kc, init, t.line, t.col)
+                        return nil
+                    end
+                end
+            end
+            local bc = lower_expr(target)
+            local kc = lower_expr(kn)
+            obligate_index_write(vcell, bc, kc, init, t.line, t.col)
             return nil
         end
         if target.tag == defs.NODE_IDENTIFIER then
@@ -1634,20 +1783,30 @@ function M.lower(chunk)
                 -- t["x"] IS t.x — same projection, same obligation.
                 return lower_field_read(target, k, "field '" .. k .. "'", n.line, n.col)
             end
-            lower_expr(target)
-            if is_node(key) then lower_expr(key) end
-            unsupported(n, "dynamic-index")
-            return unknown_cell("index")
+            -- t[expr] — the dynamic-key read (literal numbers included:
+            -- their key cell is just the number atom, consulting the num
+            -- part the same way).
+            local tc = lower_expr(target)
+            local kc = lower_expr(key)
+            return index_read_from(tc, kc, "index read", n.line, n.col)
         elseif tag == defs.NODE_FUNC_EXPR then
             return lower_function(n, nil)
         elseif tag == defs.NODE_TABLE_EXPR then
             -- A constructor with named fields IS a record type: ONE rule
             -- proposing record_of over the field-value cells (duplicate keys:
-            -- last wins, as in Lua). The array part and computed keys are the
-            -- honest deferral buckets; their values are still lowered.
+            -- last wins, as in Lua). POSITIONAL entries are the ARRAY part:
+            -- the record is index-bounded with num = join(elements) (r = w:
+            -- one element ref; no per-position arity/tuple tracking — a
+            -- stated v0 choice, `#t` already types number) and str = never.
+            -- A trailing call/vararg spreads MULTIPLE values in Lua: its
+            -- later positions are untracked, so the element type joins
+            -- unknown (upper approximation, stated). Computed LITERAL keys
+            -- fold in (string -> named field, number -> array element);
+            -- other computed keys stay the honest dynamic-index bucket.
             local entries = {} --: { [integer]: { name: string, cell: string } }
+            local elems = {} --: { [integer]: string }
+            local elem_spread = false
             local fields = n.fields
-            local array_flagged = false
             if is_list(fields) then
                 for i = 1, #fields do
                     local f = fields[i]
@@ -1655,54 +1814,86 @@ function M.lower(chunk)
                     local v = f.value
                     local vc = nil --: string | nil
                     if is_node(v) then vc = lower_expr(v) end
+                    local named_key = nil --: string | nil
                     if fk == "named" then
                         local k = f.key
-                        if type(k) == "string" then
-                            -- a same-line `--: T` pins this field's ref type
-                            -- (`body = nil, --: string | nil`); it belongs
-                            -- to the LAST field starting on the line.
-                            local nxt = fields[i + 1]
-                            if nxt == nil or nxt.line ~= f.line then
-                                local at = read_ann(f.line)
-                                if is_at(at) then
-                                    local pinval = at_val(at)
-                                    if usable_pin(at, pinval) then
-                                        if type(vc) == "string" then
-                                            local init = is_node(v) and v.tag == defs.NODE_TABLE_EXPR
-                                            obligate_ann(vc, pinval, init, "annotation-mismatch",
-                                                "field '" .. k .. "'", f.line, f.col)
-                                            if pinval.fn ~= nil then ann_flow(vc, pinval) end
-                                        end
-                                        vc = pinned_cell("field-" .. k, pinval)
+                        if type(k) == "string" then named_key = k end
+                    elseif fk ~= "positional" then
+                        local k = f.key
+                        named_key = literal_string_key(k)
+                        if named_key == nil then
+                            local num = is_node(k) and k.tag == defs.NODE_LITERAL
+                                and (k.lit_kind == defs.LIT_INTEGER or k.lit_kind == defs.LIT_NUMBER)
+                            if num then
+                                -- {[3] = v}: a number-keyed entry = an
+                                -- array-part element (no arity tracking).
+                                if type(vc) == "string" then elems[#elems + 1] = vc end
+                                vc = nil
+                            else
+                                if is_node(k) then lower_expr(k) end
+                                unsupported(f, "dynamic-index")
+                                vc = nil
+                            end
+                        end
+                    end
+                    if fk == "positional" then
+                        if type(vc) == "string" then elems[#elems + 1] = vc end
+                        if i == #fields and is_node(v)
+                            and (v.tag == defs.NODE_CALL_EXPR or v.tag == defs.NODE_METHOD_CALL
+                                or v.tag == defs.NODE_VARARG_EXPR) then
+                            elem_spread = true
+                        end
+                    elseif named_key ~= nil then
+                        local k = named_key
+                        -- a same-line `--: T` pins this field's ref type
+                        -- (`body = nil, --: string | nil`); it belongs
+                        -- to the LAST field starting on the line.
+                        local nxt = fields[i + 1]
+                        if nxt == nil or nxt.line ~= f.line then
+                            local at = read_ann(f.line)
+                            if is_at(at) then
+                                local pinval = at_val(at)
+                                if usable_pin(at, pinval) then
+                                    if type(vc) == "string" then
+                                        local init = is_node(v) and v.tag == defs.NODE_TABLE_EXPR
+                                        obligate_ann(vc, pinval, init, "annotation-mismatch",
+                                            "field '" .. k .. "'", f.line, f.col)
+                                        if pinval.fn ~= nil then ann_flow(vc, pinval) end
                                     end
+                                    vc = pinned_cell("field-" .. k, pinval)
                                 end
                             end
-                            if type(vc) == "string" then
-                                entries[#entries + 1] = { name = k, cell = vc }
-                            end
                         end
-                    elseif fk == "positional" then
-                        if not array_flagged then
-                            array_flagged = true
-                            unsupported(f, "table-array-part")
+                        if type(vc) == "string" then
+                            entries[#entries + 1] = { name = k, cell = vc }
                         end
-                    else
-                        local k = f.key
-                        if is_node(k) then lower_expr(k) end
-                        unsupported(f, "dynamic-index")
                     end
                 end
             end
             local tcell = fresh("table")
             local reads = {} --: { [integer]: string }
-            for i = 1, #entries do reads[i] = entries[i].cell end
+            for i = 1, #entries do reads[#reads + 1] = entries[i].cell end
+            for i = 1, #elems do reads[#reads + 1] = elems[i] end
             rules[#rules + 1] = engine.rule(reads, { tcell }, function(get)
                 local fieldvals = {} --: { [string]: Val }
                 for i = 1, #entries do
                     local val = get(entries[i].cell)
                     if lattice.as_val(val) then fieldvals[entries[i].name] = val end
                 end
-                return { [tcell] = lattice.record_of(fieldvals) }
+                local elem = nil --: Val | nil
+                if #elems > 0 or elem_spread then
+                    local ev = lattice.of({}) --: Val
+                    for i = 1, #elems do
+                        local val = lattice.lattice.join(ev, get(elems[i]))
+                        if lattice.as_val(val) then ev = val end
+                    end
+                    if elem_spread then
+                        local val = lattice.lattice.join(ev, UNKNOWN_VAL)
+                        if lattice.as_val(val) then ev = val end
+                    end
+                    elem = ev
+                end
+                return { [tcell] = lattice.record_of(fieldvals, elem) }
             end)
             return tcell
         elseif tag == defs.NODE_VARARG_EXPR then
@@ -2280,7 +2471,7 @@ function M.lower(chunk)
                             c = pinned_cell("fieldw", pinval)
                         end
                     end
-                    lower_field_write(t, c)
+                    lower_field_write(t, c, init)
                 else
                     internal(t, "unexpected assignment target")
                 end
@@ -2404,7 +2595,7 @@ function M.lower(chunk)
             -- function value. (`:` already injected `self` as a param.)
             if is_node(name_node) and name_node.tag == defs.NODE_FIELD_EXPR then
                 local c = lower_function(n, nil)
-                lower_field_write(name_node, c)
+                lower_field_write(name_node, c, false)
                 return false
             end
             -- funcname is Name{.Name}[:Name] — anything else is a decoder
@@ -2550,15 +2741,17 @@ ROUTE[defs.NODE_LITERAL] = "checked"
 ROUTE[defs.NODE_IDENTIFIER] = "checked"
 ROUTE[defs.NODE_UNARY_EXPR] = "checked"
 ROUTE[defs.NODE_BINARY_EXPR] = "checked"
--- INDEX_EXPR: literal-string keys are checked (= field access); every other
--- key is the in-construct `unsupported:dynamic-index` boundary.
+-- INDEX_EXPR: literal-string keys are checked (= field access); other keys
+-- are the checked dynamic-key read (project_index + index-read obligation;
+-- non-string/number keys resolve to the dynamic-index boundary there).
 ROUTE[defs.NODE_INDEX_EXPR] = "checked"
 ROUTE[defs.NODE_FIELD_EXPR] = "checked"
 ROUTE[defs.NODE_METHOD_CALL] = "checked"
 ROUTE[defs.NODE_CALL_EXPR] = "checked"
 ROUTE[defs.NODE_FUNC_EXPR] = "checked"
--- TABLE_EXPR: named fields are checked (record construction); the array
--- part / computed keys are in-construct boundary buckets.
+-- TABLE_EXPR: named fields + the array part are checked (record
+-- construction with a `[number]` index part); non-literal computed keys
+-- are the in-construct dynamic-index bucket.
 ROUTE[defs.NODE_TABLE_EXPR] = "checked"
 ROUTE[defs.NODE_TABLE_FIELD] = "container"
 ROUTE[defs.NODE_VARARG_EXPR] = "boundary"

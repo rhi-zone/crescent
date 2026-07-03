@@ -288,3 +288,110 @@ T.describe("v9 lattice — obligation queries", function()
         T.eq(L.is_bottom(L.lattice.bottom()), true, "bottom detected")
     end)
 end)
+
+T.describe("v9 lattice — index signatures (the idx component)", function()
+    --: (Val) -> Field
+    local function ref(v) return { r = v, w = v } end
+
+    --: () -> Val
+    local function str_num_map()
+        return L.record_rw({}, L.idx_of(ref(L.single("number")), nil))
+    end
+
+    T.it("record_of with an element type is an index-bounded array", function()
+        local arr = L.record_of({}, L.single("string"))
+        T.eq(L.show(arr), "{ [number]: string }", "the array constructor's shape")
+        T.eq(L.has_index(arr), true, "index-bounded")
+        T.eq(L.has_str_index(arr), false, "string keys claimed absent (never part)")
+    end)
+
+    T.it("project_index is T | nil, joins named fields for string keys", function()
+        local m = L.record_rw({ n = ref(L.single("string")) },
+            L.idx_of(ref(L.single("number")), nil))
+        local v = L.project_index(m, L.single("string"))
+        T.eq(L.show(v), "nil | number | string", "part + named field + nil")
+        local u = L.project_index(m, L.single("unknown"))
+        T.eq(L.show(u), "unknown", "an unknown key projects the top (monotone)")
+        local plain = L.record_of({}, nil)
+        T.eq(L.show(L.project_index(plain, L.single("string"))), "unknown",
+            "a plain open record's dynamic keys are untracked")
+    end)
+
+    T.it("join keeps idx only when BOTH sides are bounded; dropped fields FOLD", function()
+        local a = L.record_rw({ x = ref(L.single("number")) },
+            L.idx_of(ref(L.single("number")), nil))
+        local b = str_num_map()
+        local j = L.lattice.join(a, b)
+        T.ok(L.as_val(j), "joined")
+        if L.as_val(j) then
+            T.eq(L.has_index(j), true, "both bounded -> still bounded")
+            local read = L.project_index(j, L.single("string"))
+            T.eq(L.show(read), "nil | number", "x's number FOLDED into the str part (sound reads)")
+        end
+        local plain = L.record_of({}, nil)
+        local j2 = L.lattice.join(a, plain)
+        T.ok(L.as_val(j2), "joined")
+        if L.as_val(j2) then
+            T.eq(L.has_index(j2), false, "an unbounded side unbounds the join")
+        end
+    end)
+
+    T.it("leq: a plain open record does NOT flow into an index-signature type", function()
+        local plain = L.record_of({ x = L.single("number") }, nil)
+        T.eq(L.leq(plain, str_num_map()), false,
+            "its unnamed keys are unbounded — the sound rejection")
+        T.eq(L.leq_init(plain, str_num_map()), true,
+            "a FRESH constructor does (init re-types; fields fit the part)")
+        local bad = L.record_of({ x = L.single("string") }, nil)
+        T.eq(L.leq_init(bad, str_num_map()), false,
+            "width-into-index still checks the fields against T")
+    end)
+
+    T.it("leq between bounded records: r covariant, w contravariant per part", function()
+        local narrow = str_num_map()
+        local wide = L.record_rw({}, L.idx_of(ref(L.of({ "number", "string" })), nil))
+        T.eq(L.leq(narrow, wide), false, "w-contravariance rejects (writes through wide)")
+        local ro_wide = L.record_rw({}, L.idx_of({ r = L.of({ "number", "string" }), w = L.of({}) }, nil))
+        T.eq(L.leq(narrow, ro_wide), true, "a read-only wide view admits the narrow map")
+    end)
+
+    T.it("iteration projections: elem nil-drops, values joins all, keys | nil", function()
+        local arr = L.record_rw({},
+            L.idx_of(nil, ref(L.of({ "number", "nil" }))))
+        T.eq(L.show(L.elem_iter(arr)), "number",
+            "$Elem drops nil — ipairs stops at the first nil (Lua semantics)")
+        local m = L.record_rw({ n = ref(L.single("string")) },
+            L.idx_of(ref(L.single("number")), ref(L.single("table"))))
+        T.eq(L.show(L.values_iter(m)), "number | string | table", "$Values joins fields + both parts")
+        T.eq(L.show(L.keys_iter(m)), "nil | number | string", "$Keys includes the end-marker nil")
+        T.eq(L.show(L.values_iter(L.record_of({}, nil))), "unknown",
+            "a plain open record's values are unbounded")
+    end)
+
+    T.it("set_index grows never/missing parts; existing parts are invariant refs", function()
+        local plain = L.record_of({}, nil)
+        local grown = L.set_index(plain, L.single("number"), L.single("string"))
+        T.ok(L.as_val(grown), "grew")
+        if L.as_val(grown) then
+            T.eq(L.show(grown), "{ [number]: string }", "the num part grew from the write")
+            local wb = L.index_write_bound(grown, "num")
+            T.ok(wb ~= nil and L.show(wb) == "string", "and its w bound is the written ref")
+        end
+        local m = str_num_map()
+        local after = L.set_index(m, L.single("string"), L.single("table"))
+        T.ok(L.as_val(after), "wrote")
+        if L.as_val(after) then
+            local wb = L.index_write_bound(after, "str")
+            T.ok(wb ~= nil and L.show(wb) == "number",
+                "an existing part never widens from a write (checked post-solve instead)")
+        end
+    end)
+
+    T.it("key_kinds classifies the discipline boundary", function()
+        local kk = L.key_kinds(L.of({ "string", "number" }))
+        T.eq(kk.str and kk.num, true, "both kinds")
+        T.eq(kk.other, false, "in-discipline")
+        T.eq(L.key_kinds(L.single("true")).other, true, "boolean keys are outside")
+        T.eq(L.key_kinds(L.single("unknown")).unknown, true, "unknown keys must narrow")
+    end)
+end)

@@ -459,12 +459,13 @@ T.describe("v9 lowering — structural records", function()
         if d ~= nil then T.eq(d.line, 4, "at the write's line") end
     end)
 
-    T.it("dynamic keys are the honest `unsupported:dynamic-index` boundary", function()
-        local _, diags = infer("local t = { x = 1 }\nlocal k = 'x'\nlocal v = t[k]\nreturn v\n")
-        local d = find_diag(diags, "unsupported:dynamic-index")
-        T.ok(d ~= nil, "non-literal index is flagged, not guessed at")
+    T.it("dynamic keys on a PLAIN record are the index-without-signature boundary", function()
+        local diags = checked("local t = { x = 1 }\nlocal k = 'x'\nlocal v = t[k]\nreturn v\n")
+        local d = find_diag(diags, "index-without-signature")
+        T.ok(d ~= nil, "non-literal index on an unbounded record is flagged, not guessed at")
         if d ~= nil then
             T.eq(d.line, 3, "line of the index")
+            T.eq(d.severity, "warn", "warn in v0 (dial up as index annotations spread)")
         end
     end)
 
@@ -474,10 +475,143 @@ T.describe("v9 lowering — structural records", function()
         T.eq(find_diag(diags, "unsupported:dynamic-index"), nil, "no boundary diag")
     end)
 
-    T.it("the array part is the honest `unsupported:table-array-part` boundary", function()
+    T.it("the array part IS a `[number]` index part (bucket retired)", function()
         local tys, diags = infer("local t = { 1, 2, named = 's' }\nlocal v = t.named\nreturn v, t\n")
-        T.ok(find_diag(diags, "unsupported:table-array-part") ~= nil, "array part flagged")
+        T.eq(find_diag(diags, "unsupported:table-array-part"), nil, "no boundary bucket")
         T.eq(tys.v, "string", "named fields of a mixed constructor still check")
+        T.eq(tys.t, "{ named: string, [number]: number }",
+            "positional values join into the number part; string keys beyond `named` are claimed absent")
+    end)
+end)
+
+T.describe("v9 lowering — index signatures (dynamic keys, arrays, iteration)", function()
+    T.it("an annotated map read is `T | nil` (non-negotiable) and narrows", function()
+        local src = "local m = {} --: { [string]: number }\nlocal k = 'a'\n"
+            .. "local v = m[k]\nlocal n = 0\nif v then n = v end\nreturn n, v\n"
+        local tys = infer(src)
+        T.eq(tys.v, "nil | number", "an absent key IS nil in Lua — the read carries it")
+        T.eq(tys.n, "number", "the truthy guard narrows the nil away")
+        T.eq(#checked(src), 0, "the declared read + narrowed use is clean")
+    end)
+
+    T.it("an out-of-bound index write is index-write-mismatch with line/col", function()
+        local diags = checked("local m = {} --: { [string]: number }\nlocal k = 'a'\nm[k] = 'oops'\nreturn m\n")
+        local d = find_diag(diags, "index-write-mismatch")
+        T.ok(d ~= nil, "the write is checked against the part's invariant w bound")
+        if d ~= nil then
+            T.eq(d.severity, "error", "mutation soundness is an error, like field writes")
+            T.eq(d.line, 3, "at the write's line")
+            T.eq(d.col, 2, "at the write's col")
+        end
+    end)
+
+    T.it("named fields take precedence AND join into dynamic reads (sound)", function()
+        local src = "local m = { n = 'label' } --: { n: string, [string]: number }\n"
+            .. "local k = 'a'\nlocal v = m[k]\nreturn v\n"
+        local tys = infer(src)
+        T.eq(tys.v, "nil | number | string",
+            "a dynamic key may hit the named field — its type joins in with the part + nil")
+    end)
+
+    T.it("array constructors build the `[number]` part; ipairs elems are `T`, not `T | nil`", function()
+        local src = "local a = { 1, 2, 3 }\nlocal s = 0\n"
+            .. "for i, v in ipairs(a) do s = s + v end\nreturn s, a\n"
+        local tys = infer(src)
+        T.eq(tys.a, "{ [number]: number }", "positional values join into the number part")
+        T.eq(tys.s, "number", "the loop var is number — ipairs stops at the first nil (Lua semantics)")
+        T.eq(#checked(src), 0, "the whole sum loop is clean — no phantom nil in `s + v`")
+    end)
+
+    T.it("pairs over a declared map types both loop vars via $Keys/$Values", function()
+        local src = "local m = {} --: { [string]: number }\nlocal ks = ''\nlocal sum = 0\n"
+            .. "for k, v in pairs(m) do ks = ks .. k sum = sum + v end\nreturn ks, sum\n"
+        T.eq(#checked(src), 0, "k concatenates (string), v adds (number) — both flow")
+    end)
+
+    T.it("`#` on an array-part record is number", function()
+        local src = "local a = { 1, 2 }\nlocal n = #a\nreturn n\n"
+        local tys = infer(src)
+        T.eq(tys.n, "number", "length of a table")
+        T.eq(#checked(src), 0, "no op-mismatch")
+    end)
+
+    T.it("heterogeneous array parts join elementwise", function()
+        local tys = infer("local a = { 1, 'two' }\nreturn a\n")
+        T.eq(tys.a, "{ [number]: number | string }", "join(elems), no arity/tuple tracking (stated)")
+    end)
+
+    T.it("the annotation `{ [string]: T }` roundtrips through show", function()
+        local tys = infer("local m = {} --: { [string]: number }\nreturn m\n")
+        T.eq(tys.m, "{ [string]: number }", "the declared index part renders back")
+        local arr = infer("local m = {} --: string[]\nlocal v = m[1]\nreturn v, m\n")
+        T.eq(arr.m, "{ [number]: string }", "T[] is sugar for { [number]: T }")
+        T.eq(arr.v, "nil | string", "and reads through it are T | nil")
+    end)
+
+    T.it("the build idiom grows an index part (the new-index-on-write concession)", function()
+        local src = "local t = {}\nlocal k = 1\nt[k] = 5\nlocal v = t[k]\nreturn v, t\n"
+        local tys = infer(src)
+        T.eq(tys.t, "{ [number]: number }", "the write grew the num part on the writer's version")
+        T.eq(tys.v, "nil | number", "the read-back is T | nil")
+        T.eq(#checked(src), 0, "silent by default (the concession dial is off)")
+        local strict = check.default_policy()
+        strict["new-index-on-write"] = "error"
+        local d2 = check.check_source(src, "t.lua", { policy = strict, mode = nil })
+        T.ok(d2 ~= nil and find_diag(d2, "new-index-on-write") ~= nil,
+            "dialed up, the concession is named at the write")
+    end)
+
+    T.it("PINNED boundary: growing through a LOOP-head phi loses the part (annotate instead)", function()
+        -- join(plain {}, grown) drops idx — a plain open record admits keys
+        -- at any type, so the joined view cannot claim boundedness (sound).
+        -- The actionable fix IS the diagnostic's advice: annotate the decl.
+        local src = "local out = {}\nfor i = 1, 3 do out[i] = i * 2 end\nlocal x = out[1]\nreturn x\n"
+        local d = find_diag(checked(src), "index-without-signature")
+        T.ok(d ~= nil, "the post-loop read reports the missing signature")
+        local ann = "local out = {} --: { [number]: number }\n"
+            .. "for i = 1, 3 do out[i] = i * 2 end\nlocal x = out[1]\nreturn x\n"
+        T.eq(#checked(ann), 0, "the annotated build loop is fully checked and clean")
+    end)
+
+    T.it("`t[k] = nil` is DELETION — always legal (reads already carry | nil)", function()
+        local src = "local m = {} --: { [string]: number }\nlocal k = 'a'\n"
+            .. "m[k] = 1\nm[k] = nil\nreturn m\n"
+        T.eq(find_diag(checked(src), "index-write-mismatch"), nil,
+            "writing nil removes the key; it never enters the part's ref")
+        local maybe = "local m = {} --: { [string]: number }\nlocal k = 'a'\n"
+            .. "local v = m[k]\nm[k] = v\nreturn m\n"
+        T.eq(find_diag(checked(maybe), "index-write-mismatch"), nil,
+            "a maybe-nil write is a conditional deletion — the non-nil part fits")
+    end)
+
+    T.it("append idiom: a fresh constructor write checks under initialization ordering", function()
+        local src = "local xs = {} --: { [number]: { id: number, tag: string | nil } }\n"
+            .. "xs[1] = { id = 1, tag = 's' }\nxs[2] = { id = 2 }\nreturn xs\n"
+        T.eq(find_diag(checked(src), "index-write-mismatch"), nil,
+            "leq_init: absence of the optional field is nil, refs re-typed by the bound")
+        local bad = "local xs = {} --: { [number]: { id: number } }\n"
+            .. "xs[1] = { id = 'nope' }\nreturn xs\n"
+        T.ok(find_diag(checked(bad), "index-write-mismatch") ~= nil,
+            "a genuinely wrong constructor still fails the bound")
+    end)
+
+    T.it("keys outside string/number stay the honest dynamic-index boundary", function()
+        local src = "local t = { 1 }\nlocal k = true\nlocal v = t[k]\nreturn v\n"
+        local d = find_diag(checked(src), "unsupported:dynamic-index")
+        T.ok(d ~= nil, "a boolean-typed key is outside the v0 index discipline")
+    end)
+
+    T.it("an unknown key must be narrowed first", function()
+        local src = "local t = { 1 }\nlocal k = whatever\nlocal v = t[k]\nreturn v\n"
+        local d = find_diag(checked(src), "use-before-narrow")
+        T.ok(d ~= nil, "the key, not the target, is the unnarrowed value here")
+    end)
+
+    T.it("a `{ [string]: T }` record suppresses missing-field on unnamed reads", function()
+        local src = "local m = {} --: { [string]: number }\nlocal v = m.anything\nreturn v\n"
+        local tys = infer(src)
+        T.eq(tys.v, "nil | number", "a named read through the part is the same T | nil projection")
+        T.eq(find_diag(checked(src), "missing-field"), nil, "not a missing field — the part covers it")
     end)
 end)
 
