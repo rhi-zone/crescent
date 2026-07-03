@@ -179,13 +179,42 @@ T.describe("v9 check — structural records (obligations end to end)", function(
         end
     end)
 
-    T.it("string methods are their own honest boundary (stdlib decls pending)", function()
+    T.it("string methods resolve through the DECLARED string table (the metatable)", function()
+        -- LuaJIT sets the string metatable's __index to the string library;
+        -- v9 wires string-typed member access to the DECLARED `string`
+        -- table — declaration-driven, never a hardcoded method list.
         local diags = check.check_source("local s = 'a'\nlocal r = s:sub(1)\nreturn r\n", "t.lua", nil)
-        T.ok(diags ~= nil, "checked")
-        if diags ~= nil then
-            local d = find_diag(diags, "unsupported:string-method")
-            T.ok(d ~= nil, "s:sub is a named bucket, not an op-mismatch lie")
-            T.eq(find_diag(diags, "op-mismatch"), nil, "not misreported")
+        T.ok(diags ~= nil and #diags == 0, "s:sub(1) checks clean (was the string-method bucket)")
+        local chain = check.check_source(
+            "local r = ('x'):upper():lower()\nlocal n = #r + r:len()\nreturn n\n", "t.lua", nil)
+        T.ok(chain ~= nil and #chain == 0, "upper():lower() roundtrips; #s and s:len() are numbers")
+        local multi = check.check_source(
+            "local s, n = ('ab'):gsub('a', 'b')\nlocal m = n + 1\nlocal t = s .. '!'\nreturn m, t\n",
+            "t.lua", nil)
+        T.ok(multi ~= nil and #multi == 0, "gsub's multi-return carries (string, integer)")
+    end)
+
+    T.it("string members are CHECKED, not just admitted", function()
+        local missing = check.check_source("local s = 'a'\nlocal r = s:nope()\nreturn r\n", "t.lua", nil)
+        T.ok(missing ~= nil, "checked")
+        if missing ~= nil then
+            local d = find_diag(missing, "missing-field")
+            T.ok(d ~= nil and d.message:find("'nope'", 1, true) ~= nil,
+                "an undeclared string method is missing-field, not silence")
+            T.eq(find_diag(missing, "unsupported:string-method"), nil, "the bucket is retired")
+        end
+        local badarg = check.check_source(
+            "local s = 'a'\nlocal r = s:rep({})\nreturn r\n", "t.lua", nil)
+        T.ok(badarg ~= nil, "checked")
+        if badarg ~= nil then
+            T.ok(find_diag(badarg, "call-mismatch") ~= nil,
+                "a bad argument to a string method is a real call-mismatch")
+        end
+        local write = check.check_source("local s = 'a'\ns.x = 1\nreturn s\n", "t.lua", nil)
+        T.ok(write ~= nil, "checked")
+        if write ~= nil then
+            T.ok(find_diag(write, "op-mismatch") ~= nil,
+                "writing a field on a string is op-mismatch (no __newindex)")
         end
     end)
 

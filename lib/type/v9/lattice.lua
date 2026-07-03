@@ -1221,9 +1221,18 @@ function M.field_write_bound(v, name)
     return f.w
 end
 
--- True when `v`'s only content is the `string` atom — the string-metatable
--- method/field case (s:sub(...)), which needs stdlib declarations, not a
--- record: reported as its own honest boundary bucket, never op-mismatch.
+-- Does the value admit the `string` atom? String-typed values resolve
+-- member access through the DECLARED `string` library table (LuaJIT sets
+-- the string metatable's `__index` to the string library) — lowering joins
+-- that projection in, and the field-read obligation consults the declared
+-- table. Declaration-driven: the method types come from the `string`
+-- declaration (globals seam / per-file `--:: declare`), never a hardcoded
+-- list here.
+--: (Val) -> boolean
+function M.has_string(v) return v.atoms["string"] == true end
+
+-- True when `v`'s only content is the `string` atom — the pure
+-- string-metatable receiver case (s:sub(...)).
 --: (Val) -> boolean
 function M.is_string_only(v)
     if v.rec ~= nil or v.fn ~= nil then return false end

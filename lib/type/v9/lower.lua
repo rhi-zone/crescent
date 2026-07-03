@@ -144,7 +144,7 @@ local globals = require("lib.type.v9.globals")
 --:: Ast = { tag: integer, line: integer, col: integer, ... }
 --:: Diag = { code: string, severity: string, message: string, line: integer, col: integer }
 --:: Obligation = { kind: string, cell: string, allow: Val | nil, field: string | nil, base: string | nil, key: string | nil, args: { [integer]: string } | nil, inits: { [integer]: boolean } | nil, init: boolean | nil, code: string, what: string, line: integer, col: integer }
---:: LowerResult = { graph: Graph, obligations: { [integer]: Obligation }, diags: { [integer]: Diag }, vars: { [string]: string } }
+--:: LowerResult = { graph: Graph, obligations: { [integer]: Obligation }, diags: { [integer]: Diag }, vars: { [string]: string }, strlib: Val | nil }
 --:: Decl = { id: string, name: string, line: integer, col: integer, read: boolean, cell: string, pin: Val | nil }
 --:: Scope = { map: { [string]: Decl }, order: { [integer]: Decl } }
 --:: Ann = { kind: integer, content: string, col: integer, force_cast: boolean | nil, line: integer | nil, consumed: boolean | nil }
@@ -355,7 +355,8 @@ function M.lower(chunk)
 
     -- "`cell` (a field-read target) must be a record with `field`" — checked
     -- post-solve; violation codes are resolved there (missing-field /
-    -- op-mismatch / use-before-narrow / unsupported:string-method).
+    -- op-mismatch / use-before-narrow; string-typed targets resolve through
+    -- the declared string library — the string metatable's `__index`).
     --: (cell: string, field: string, what: string, line: integer, col: integer) -> nil
     local function obligate_field_read(cell, field, what, line, col)
         obligations[#obligations + 1] = {
@@ -764,6 +765,24 @@ function M.lower(chunk)
         return cell
     end
 
+    -- The STRING-METATABLE table: LuaJIT sets the string metatable's
+    -- `__index` to the string library, so member access on string-typed
+    -- values (`s:upper()`, `("x").len`) resolves through the DECLARED
+    -- `string` table — per-file declares shadow the stdlib, same resolution
+    -- as global reads. Declaration-driven: no method list lives here; if
+    -- `string` is undeclared the wiring is off (nil). Memoized per file.
+    local strlib_memo = nil --: Val | nil
+    local strlib_done = false
+    --: () -> Val | nil
+    local function string_lib()
+        if strlib_done then return strlib_memo end
+        strlib_done = true
+        local at = file_globals["string"] --: unknown
+        if at == nil then at = globals.lookup("string") end
+        if at ~= nil then strlib_memo = at_val(at) end
+        return strlib_memo
+    end
+
     -- ── scopes / versions ──────────────────────────────────────────────────
 
     --: () -> nil
@@ -1132,12 +1151,22 @@ function M.lower(chunk)
 
     -- A field READ from an already-lowered target cell: ONE projection rule
     -- (the record analogue of the truthy/falsy filters) + ONE field-read
-    -- obligation. Returns the projected cell.
+    -- obligation. Returns the projected cell. A string-typed target ALSO
+    -- projects through the declared string library (the string metatable's
+    -- `__index` — see string_lib); the join is monotone: the string atom
+    -- only ever appears as the target cell climbs.
     --: (tc: string, key: string, what: string, line: integer, col: integer) -> string
     local function field_read_from(tc, key, what, line, col)
         local rc = fresh("field-" .. key)
+        local slib = string_lib()
         rules[#rules + 1] = engine.rule({ tc }, { rc }, function(get)
-            return { [rc] = lattice.project(get(tc), key) }
+            local tv = get(tc)
+            local out = lattice.project(tv, key) --: unknown
+            if slib ~= nil and lattice.as_val(tv) and lattice.has_string(tv) then
+                local j = lattice.lattice.join(out, lattice.project(slib, key))
+                if lattice.as_val(j) then out = j end
+            end
+            return { [rc] = out }
         end)
         obligate_field_read(tc, key, what, line, col)
         return rc
@@ -1158,8 +1187,18 @@ function M.lower(chunk)
     --: (tc: string, kc: string, what: string, line: integer, col: integer) -> string
     local function index_read_from(tc, kc, what, line, col)
         local rc = fresh("index")
+        local slib = string_lib()
         rules[#rules + 1] = engine.rule({ tc, kc }, { rc }, function(get)
-            return { [rc] = lattice.project_index(get(tc), get(kc)) }
+            local tv = get(tc)
+            local out = lattice.project_index(tv, get(kc)) --: unknown
+            if slib ~= nil and lattice.as_val(tv) and lattice.has_string(tv) then
+                -- string targets consult the string library too (dynamic
+                -- member names on strings — rare; the lib table has no
+                -- index signature, so this reads as the honest unknown).
+                local j = lattice.lattice.join(out, lattice.project_index(slib, get(kc)))
+                if lattice.as_val(j) then out = j end
+            end
+            return { [rc] = out }
         end)
         obligate_index_read(tc, kc, what, line, col)
         return rc
@@ -2728,6 +2767,10 @@ function M.lower(chunk)
         obligations = obligations,
         diags = diags,
         vars = vars,
+        -- the declared string-library value (nil when `string` is
+        -- undeclared): obligation evaluation consults it for member
+        -- access on string-typed targets (check.lua).
+        strlib = string_lib(),
     }
 end
 

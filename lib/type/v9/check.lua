@@ -95,6 +95,11 @@ local function as_val(x) return type(x) == "table" end
 
 -- The atom bound a field-access TARGET must stay within (records are tables).
 local TABLE_ONLY = lattice.single("table")
+-- A field-READ target may also be a string: LuaJIT's string metatable sets
+-- `__index` to the string library, so member access on strings resolves
+-- through the DECLARED `string` table (write targets stay TABLE_ONLY —
+-- strings have no `__newindex`; writing to one is a runtime error).
+local TABLE_OR_STRING = lattice.of({ "table", "string" })
 -- Lua's pad for a missing argument/result position.
 local NIL_ONLY = lattice.single("nil")
 
@@ -174,7 +179,7 @@ local function error_position(errmsg)
     return 0, 0
 end
 
---: (x: unknown) -> x is { graph: Graph, obligations: { [integer]: Obligation }, diags: { [integer]: Diag }, vars: { [string]: string } }
+--: (x: unknown) -> x is { graph: Graph, obligations: { [integer]: Obligation }, diags: { [integer]: Diag }, vars: { [string]: string }, strlib: Val | nil }
 local function is_lower_result(x) return type(x) == "table" end
 
 --: (diags: { [integer]: Diag }, code: string, line: integer, col: integer, message: string) -> nil
@@ -187,41 +192,50 @@ end
 -- Shared triage of a field-access TARGET value. Emits the target-shaped
 -- diagnostics and reports whether field-level checking may proceed:
 --   unknown           -> use-before-narrow
---   string only       -> unsupported:string-method (stdlib decls pending)
 --   non-table atoms   -> op-mismatch (naming the offending parts)
 --   bare `table` top  -> use-before-narrow (fields unknown; narrow it)
--- A record component (with or without the field) returns true; the caller
--- decides between ok / missing-field / new-field-on-write.
---: (diags: { [integer]: Diag }, v: Val, what: string, line: integer, col: integer) -> boolean
-local function triage_field_target(diags, v, what, line, col)
+-- `strtab` is the DECLARED string-library table (the string metatable's
+-- `__index` — LuaJIT semantics): when given, string-typed READ targets are
+-- admitted and resolve their members through it; write targets pass nil
+-- (strings have no `__newindex`, so a string write target is op-mismatch).
+-- A record component (with or without the field) — or an admitted string —
+-- returns true; the caller decides ok / missing-field / new-field-on-write.
+--: (diags: { [integer]: Diag }, v: Val, what: string, line: integer, col: integer, strtab: Val | nil) -> boolean
+local function triage_field_target(diags, v, what, line, col, strtab)
     if lattice.is_unknown(v) then
         emit(diags, "use-before-narrow", line, col,
             what .. " target has type `unknown` — narrow it before dynamic use")
         return false
     end
-    if lattice.is_string_only(v) then
-        emit(diags, "unsupported:string-method", line, col,
-            what .. " on `string` (the string metatable) needs stdlib declarations — outside v0")
-        return false
+    local allow = TABLE_ONLY --: Val
+    local expected = "a table" --: string
+    if strtab ~= nil then
+        allow = TABLE_OR_STRING
+        expected = "a table or string"
     end
-    local bad = lattice.excess(v, TABLE_ONLY)
+    local bad = lattice.excess(v, allow)
     if bad ~= nil then
         emit(diags, "op-mismatch", line, col,
-            what .. " target: got `" .. lattice.show(v) .. "`, expected a table")
+            what .. " target: got `" .. lattice.show(v) .. "`, expected " .. expected)
         return false
     end
-    if not lattice.has_rec(v) then
-        -- only the `table` top remains: some table, fields unknown.
-        emit(diags, "use-before-narrow", line, col,
-            what .. " target has type `table` — fields unknown; construct with known fields or narrow")
-        return false
+    if lattice.has_rec(v) then return true end
+    if strtab ~= nil and lattice.has_string(v) and not lattice.has_table_top(v) then
+        -- a string(-only) target: members resolve through the declared
+        -- string library — the caller consults strtab.
+        return true
     end
-    return true
+    -- only the `table` top remains: some table, fields unknown.
+    emit(diags, "use-before-narrow", line, col,
+        what .. " target has type `table` — fields unknown; construct with known fields or narrow")
+    return false
 end
 
--- Evaluate ONE post-solve obligation against the fixpoint values.
---: (diags: { [integer]: Diag }, values: { [string]: unknown }, ob: Obligation) -> nil
-local function evaluate_obligation(diags, values, ob)
+-- Evaluate ONE post-solve obligation against the fixpoint values. `strtab`
+-- is the declared string-library table (nil when `string` is undeclared):
+-- member reads on string-typed targets resolve through it.
+--: (diags: { [integer]: Diag }, values: { [string]: unknown }, ob: Obligation, strtab: Val | nil) -> nil
+local function evaluate_obligation(diags, values, ob, strtab)
     local v = values[ob.cell]
     if not as_val(v) then return nil end
 
@@ -345,10 +359,16 @@ local function evaluate_obligation(diags, values, ob)
     if ob.kind == "field-read" then
         local field = ob.field
         if field == nil then return nil end
-        if triage_field_target(diags, v, ob.what, ob.line, ob.col) then
+        if triage_field_target(diags, v, ob.what, ob.line, ob.col, strtab) then
             -- a string index part covers unnamed keys: the read is the
             -- (sound) `T | nil` index projection, not a missing field.
-            if not lattice.has_field(v, field) and not lattice.has_str_index(v) then
+            local ok = lattice.has_field(v, field) or lattice.has_str_index(v)
+            if not ok and strtab ~= nil and lattice.has_string(v) then
+                -- a string-typed target resolves members through the
+                -- declared string library (the string metatable).
+                ok = lattice.has_field(strtab, field) or lattice.has_str_index(strtab)
+            end
+            if not ok then
                 emit(diags, "missing-field", ob.line, ob.col,
                     "no " .. ob.what .. " on `" .. lattice.show(v) .. "`")
             end
@@ -364,7 +384,7 @@ local function evaluate_obligation(diags, values, ob)
         -- with NO index part is the named dynamism boundary. One diag per
         -- read; an index-bounded target with a str/num key is fully checked
         -- (the projection already typed it `T | nil`).
-        if not triage_field_target(diags, v, ob.what, ob.line, ob.col) then
+        if not triage_field_target(diags, v, ob.what, ob.line, ob.col, strtab) then
             return nil
         end
         local keycell = ob.key
@@ -402,7 +422,7 @@ local function evaluate_obligation(diags, values, ob)
         local base = values[basecell]
         if not as_val(base) then return nil end
         if lattice.is_bottom(base) then return nil end
-        if not triage_field_target(diags, base, "write to " .. ob.what, ob.line, ob.col) then
+        if not triage_field_target(diags, base, "write to " .. ob.what, ob.line, ob.col, nil) then
             return nil
         end
         local w = lattice.field_write_bound(base, field)
@@ -441,7 +461,7 @@ local function evaluate_obligation(diags, values, ob)
         local base = values[basecell]
         if not as_val(base) then return nil end
         if lattice.is_bottom(base) then return nil end
-        if not triage_field_target(diags, base, "write at " .. ob.what, ob.line, ob.col) then
+        if not triage_field_target(diags, base, "write at " .. ob.what, ob.line, ob.col, nil) then
             return nil
         end
         local kv = values[keycell]
@@ -556,8 +576,9 @@ function M.check_source(source, filename, opts)
         local sol, serr = engine.solve(low.graph)
         if sol == nil then return nil, filename .. ": " .. (serr or "solve failed") end
         local obligations = low.obligations
+        local strtab = low.strlib
         for i = 1, #obligations do
-            evaluate_obligation(diags, sol.values, obligations[i])
+            evaluate_obligation(diags, sol.values, obligations[i], strtab)
         end
     end
 
