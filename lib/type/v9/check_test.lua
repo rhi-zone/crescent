@@ -352,8 +352,8 @@ T.describe("v9 check — real lib files, end to end", function()
             local sum = 0
             for _, n in pairs(h) do sum = sum + n end
             T.eq(sum, #diags, "histogram is a partition of the diags")
-            local loops = h["unsupported:for-num"] or 0
-            T.ok(loops > 0, "base64 has numeric loops -> the boundary shows in the histogram")
+            T.eq(h["unsupported:for-num"], nil,
+                "base64's numeric loops are CHECKED now, not a boundary bucket")
         end
     end)
 

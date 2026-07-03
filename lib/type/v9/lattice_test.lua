@@ -148,6 +148,20 @@ T.describe("v9 lattice — structural open records", function()
         T.eq(L.show(L.project(j, "x")), "number | string", "reads stay covariant (union)")
     end)
 
+    T.it("boolean literals WIDEN at mutable-ref creation (the flag idiom)", function()
+        local r = L.record_of({ enabled = L.single("false") })
+        T.eq(L.show(r), "{ enabled: boolean }", "the ref holds the base pair, not the literal")
+        local w = L.field_write_bound(r, "enabled")
+        T.ok(w ~= nil and L.leq(L.single("true"), w) == true,
+            "t.enabled = true is admitted (no false-positive machine)")
+        local ext = L.set_field(L.record_of({}), "neon", L.single("true"))
+        local wb = L.field_write_bound(ext, "neon")
+        T.ok(wb ~= nil and L.leq(L.single("false"), wb) == true,
+            "a new field written `true` still accepts false later")
+        -- flow values keep literal precision; only fresh refs widen.
+        T.eq(L.show(L.single("false")), "false", "non-ref positions stay literal")
+    end)
+
     T.it("set_field: existing fields are invariant refs; new fields extend", function()
         local r = L.record_of({ x = L.single("number") })
         local after = L.set_field(r, "x", L.single("string"))

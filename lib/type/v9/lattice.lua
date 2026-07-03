@@ -108,10 +108,13 @@
 --
 -- Soundness: join is set union on atoms + pointwise-on-common-fields on
 -- records, with `unknown` absorbing (unknown is a real top, not `any`).
--- Termination: atom sets are finite; record depth is bounded by program
--- syntax (constructors nest syntactically; project/join never deepen a
--- value; v0's rule graphs are acyclic — loops are havoc-fenced). A future
--- loop-checked increment needs a depth widening HERE, not an engine change.
+-- Termination: atom sets are finite; record width is bounded by program
+-- syntax (field names are literals) and depth by `clip` at every
+-- cycle-closing proposal site — the two recursion sites (function rebuild,
+-- call-argument flow) AND loop back edges (a loop can grow a record/union
+-- one level per iteration; the clipped back edge is the depth widening
+-- that keeps the ascending chain finite — a lowering choice, not an
+-- engine change).
 
 --:: require "lib.type.v9.engine.defs"
 
@@ -399,13 +402,33 @@ M.lattice = { bottom = bottom, join = join, equal = equal } --: Lattice
 
 -- ── Constructors ───────────────────────────────────────────────────────────
 
+-- Mutable-ref literal WIDENING: a field ref created from a lone `true` /
+-- `false` literal holds the base boolean pair (r = w = boolean) — the
+-- TS-style widening at mutable positions. Without it the ubiquitous flag
+-- idiom ({ enabled = false } … t.enabled = true) is a false-positive
+-- machine: the ref's invariant bound would pin the literal. FLOW values
+-- (locals, results, narrowing) keep literal precision, and ANNOTATED refs
+-- keep exactly what the author wrote (record_rw is not widened).
+--: (Val) -> Val
+local function widen_ref(v)
+    local ht = v.atoms["true"] == true
+    local hf = v.atoms["false"] == true
+    if ht == hf then return v end
+    local a = copy_atoms(v.atoms)
+    add_atom(a, "boolean")
+    local rec = v.rec
+    return { atoms = a, rec = rec ~= nil and rec_copy(rec) or nil, fn = v.fn }
+end
+
 -- A fresh open record from field initializers: each field's read type AND
--- write bound start at its initializer's type (the ref's fixed content type).
+-- write bound start at its initializer's type (the ref's fixed content
+-- type; boolean literals widen — see widen_ref).
 --: ({ [string]: Val }) -> Val
 function M.record_of(fieldvals)
     local fields = {} --: { [string]: Field }
     for name, v in pairs(fieldvals) do
-        fields[name] = { r = v, w = v }
+        local w = widen_ref(v)
+        fields[name] = { r = w, w = w }
     end
     local a = {} --: { [string]: boolean }
     return { atoms = a, rec = { fields = fields }, fn = nil }
@@ -728,7 +751,8 @@ end
 -- INVARIANT refs: writing an EXISTING field never changes its type (the
 -- write itself is checked against the field's `w` bound by a post-solve
 -- obligation); writing a NEW field extends the open record with
--- r = w = fv (the named `new-field-on-write` concession — see header).
+-- r = w = fv (the named `new-field-on-write` concession — see header;
+-- boolean literals widen at the fresh ref, see widen_ref).
 -- Monotone: existing-field writes are the identity on the record; the new
 -- field's r grows with fv, and its w descends through the target cell's
 -- join (Field w-parts meet), which under-approximates soundly.
@@ -744,7 +768,8 @@ function M.set_field(v, name, fv)
     end
     local out = rec_copy(rec)
     if out.fields[name] == nil then
-        out.fields[name] = { r = fv, w = fv }
+        local w = widen_ref(fv)
+        out.fields[name] = { r = w, w = w }
     end
     return { atoms = copy_atoms(v.atoms), rec = out, fn = v.fn }
 end

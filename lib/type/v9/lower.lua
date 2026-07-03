@@ -90,18 +90,26 @@
 --
 -- Every annotation feature the v9 lattice cannot express routes to a named
 -- `unsupported:annotation-<feature>` bucket — honest, dialable, per bucket.
--- HAVOC of an annotated variable resets it to its PIN, not to unknown: the
--- annotation is the contract the unchecked region is trusted against
--- (stated; the write inside the region gets checked when loops land).
 --
 -- Flow-sensitivity is SSA-style versioning: assignments rebind a variable's
 -- cell; `if` merges make phi cells that receive each branch version as a
 -- separate proposal — the engine's monotone join IS the union at the merge.
+-- Merges are REACHABILITY-aware: a branch that cannot fall through (return /
+-- break / a declared-never call) contributes nothing to the phi.
 --
--- Unsupported statements with bodies (loops, in v0) are not silently
--- skipped: the subtree is scanned so (a) reads keep outer locals from false
--- "unused" reports and (b) assigned outer locals are HAVOCED to unknown —
--- the supported discipline stays sound around the boundary.
+-- LOOPS are the same phi mechanism with a back edge: each decl the loop may
+-- rebind gets a LOOP-HEAD phi (pre-loop version + the back-edge version —
+-- the engine's fixpoint solves the cycle; back-edge flows are CLIPPED, see
+-- lattice.clip, because a loop can grow a record/union one level per
+-- iteration). while/repeat narrow their condition into the body / the exit
+-- through the SAME cond_target filters as `if`; for-num seeds the loop var
+-- at number and obligates start/limit/step ⊑ number; for-in wires the
+-- generic-for iterator protocol through ONE ordinary call (iterator(state,
+-- control) — loop vars are the call's result positions, the first
+-- nil-dropped, control cycles through a phi). The loop EXIT merges the
+-- reachable exit paths only: the cond-false edge (absent for `while true`),
+-- each `break`'s snapshot; an exitless loop makes the code after it
+-- unreachable (bottom).
 --
 -- Diag severities are stamped by the POLICY in check.lua, not here — the
 -- power dial is the owner's, and it lives in one named place.
@@ -143,6 +151,9 @@ local function is_tbl(x) return type(x) == "table" end
 
 -- Operand upper bounds (shared AtomSet constants; never mutated).
 local NUM = lattice.single("number")
+-- The numeric-for discipline's bound (a separate constant: NUM rides the
+-- binop/unop rule tuples, whose `Val | nil` slots widen it for the checker).
+local FORNUM_NUM = lattice.single("number")
 local NUMSTR = lattice.of({ "number", "string" })
 local LENABLE = lattice.of({ "string", "table" })
 local FUNC = lattice.single("function")
@@ -210,6 +221,13 @@ function M.lower(chunk)
     --:: Frame = { returns: { [integer]: Ret }, pins: { [integer]: Val } | nil }
     local ret_frames = {} --: { [integer]: Frame }
     local ret_depth = 0
+    -- Loop frames, one per lexically-enclosing loop of the CURRENT function
+    -- (lower_function resets the depth — `break` cannot cross a function
+    -- boundary). Each `break` snapshots the loop's rebindable decls; the
+    -- loop's exit merge consumes the snapshots (reachability discipline).
+    --:: LoopFrame = { vis: { [integer]: Decl }, snaps: { [integer]: { [string]: string } } }
+    local loop_frames = {} --: { [integer]: LoopFrame }
+    local loop_depth = 0
 
     --: (string) -> string
     local function fresh(tag)
@@ -261,6 +279,23 @@ function M.lower(chunk)
                 end)
             end
         end
+        return nil
+    end
+
+    -- A flow that CLIPS: back edges close value cycles (a loop can grow a
+    -- record/union one level per iteration — `t = { next = t }`), so the
+    -- back-edge proposal is depth-bounded exactly like the two recursion
+    -- sites (function rebuild, call-argument flow) — see lattice.clip.
+    --: (string, string) -> nil
+    local function clip_flow(src, dst)
+        rules[#rules + 1] = engine.rule({ src }, { dst }, function(get)
+            local v = get(src)
+            local out = {} --: { [string]: unknown }
+            if lattice.as_val(v) then
+                out[dst] = lattice.clip(v, CLIP_DEPTH)
+            end
+            return out
+        end)
         return nil
     end
 
@@ -727,11 +762,11 @@ function M.lower(chunk)
     -- sites below (annotated there), same idiom as parse.lua.
     local lower_expr, lower_stmts, lower_call
 
-    -- ── havoc scan (soundness fence around unsupported subtrees) ──────────
-    -- Marks identifier reads (no false "unused"), and havocs outer locals
-    -- assigned inside the unchecked region to `unknown`. A FIELD write
-    -- (`t.x = …`, `t[k] = …`, `function t.f()`) havocs the BASE variable:
-    -- a record type must not survive unchecked mutation of the table.
+    -- ── assigned-roots scan (which decls can a subtree rebind?) ───────────
+    -- A loop needs a head phi ONLY for decls its body may rebind: plain
+    -- assignments and `function f()` declarations rebind a decl's cell, and
+    -- a FIELD write (`t.x = …`, `t[k] = …`, `function t.f()`) SSA-rebinds
+    -- the BASE variable. Everything else keeps its version through the loop.
 
     -- The root identifier of an assignment-target chain (`a.b[c].d` -> `a`);
     -- nil when the root is not a plain identifier.
@@ -757,56 +792,47 @@ function M.lower(chunk)
         return nil
     end
 
-    -- Havoc one variable: an ANNOTATED variable resets to its PIN (the
-    -- annotation is the contract the unchecked region is trusted against —
-    -- stated in the header); an unannotated one to unknown.
-    --: (Decl) -> nil
-    local function havoc_decl(d)
-        local pin = d.pin
-        if pin ~= nil then
-            local c = fresh("havoc-pin-" .. d.name)
-            seed(c, pin)
-            d.cell = c
-        else
-            d.cell = unknown_cell("havoc-" .. d.name)
-        end
-        return nil
-    end
-
-    --: (unknown) -> nil
-    local function havoc_scan(x)
+    --: (unknown, { [string]: boolean }) -> nil
+    local function assigned_roots(x, out)
         if not is_tbl(x) then return nil end
         local tag = x.tag
         if type(tag) == "number" then
-            if tag == defs.NODE_IDENTIFIER then
-                local nm = x.name
-                if type(nm) == "string" then
-                    local d = resolve(nm)
-                    if d ~= nil then d.read = true end
-                end
-            elseif tag == defs.NODE_ASSIGN_STMT then
+            if tag == defs.NODE_ASSIGN_STMT then
                 local targets = x.targets
                 if is_tbl(targets) then
                     for _, t in pairs(targets) do
                         local nm = target_root_name(t)
-                        if nm ~= nil then
-                            local d = resolve(nm)
-                            if d ~= nil then havoc_decl(d) end
-                        end
+                        if nm ~= nil then out[nm] = true end
                     end
                 end
             elseif tag == defs.NODE_FUNC_DECL then
                 local nm = target_root_name(x.name)
-                if nm ~= nil then
-                    local d = resolve(nm)
-                    if d ~= nil then havoc_decl(d) end
-                end
+                if nm ~= nil then out[nm] = true end
             end
         end
         for _, v in pairs(x) do
-            if is_tbl(v) then havoc_scan(v) end
+            if is_tbl(v) then assigned_roots(v, out) end
         end
         return nil
+    end
+
+    -- The visible decls a loop node may rebind (sorted for deterministic
+    -- cell naming). Shadowing inside the loop body can make this a superset
+    -- (a name declared locally then assigned resolves to the OUTER decl
+    -- here) — a harmless extra phi, never a missed one.
+    --: (Ast) -> { [integer]: Decl }
+    local function loop_vis(n)
+        local names = {} --: { [string]: boolean }
+        assigned_roots(n, names)
+        local sorted = {} --: { [integer]: string }
+        for nm in pairs(names) do sorted[#sorted + 1] = nm end
+        table.sort(sorted)
+        local out = {} --: { [integer]: Decl }
+        for i = 1, #sorted do
+            local d = resolve(sorted[i])
+            if d ~= nil then out[#out + 1] = d end
+        end
+        return out
     end
 
     -- ── shared construct pieces (each used by exactly the constructs whose
@@ -842,6 +868,10 @@ function M.lower(chunk)
         ret_depth = ret_depth + 1
         local frame = { returns = {}, pins = nil } --: Frame
         ret_frames[ret_depth] = frame
+        -- `break` cannot cross a function boundary (Lua rejects it, and a
+        -- break in a closure must never snapshot an OUTER loop's frame).
+        local saved_loop_depth = loop_depth
+        loop_depth = 0
         local params = {} --: { [integer]: Param }
         local nparams = n.params
         if is_list(nparams) then
@@ -917,6 +947,7 @@ function M.lower(chunk)
             rules[#rules + 1] = engine.rule({}, { fcell }, function(get)
                 return { [fcell] = fnv }
             end)
+            loop_depth = saved_loop_depth
             ret_depth = ret_depth - 1
             pop_scope()
             return fcell
@@ -961,6 +992,7 @@ function M.lower(chunk)
             end
             return { [fcell] = lattice.fn_val(params, results, vararg, rest, open) }
         end)
+        loop_depth = saved_loop_depth
         ret_depth = ret_depth - 1
         pop_scope()
         return fcell
@@ -1697,6 +1729,317 @@ function M.lower(chunk)
         return then_div and else_div
     end
 
+    -- ── loops (loop-head phi + back edge + reachable-exit merge) ──────────
+
+    --: (unknown) -> boolean
+    local function is_true_literal(e)
+        return is_node(e) and e.tag == defs.NODE_LITERAL
+            and e.lit_kind == defs.LIT_BOOLEAN and e.value == true
+    end
+
+    -- Mint the loop-head phis: each rebindable decl's pre-loop version flows
+    -- in; the back edge joins in later — the engine's monotone fixpoint
+    -- solves the cycle (the same worklist that solved recursive functions).
+    --: ({ [integer]: Decl }) -> { [string]: string }
+    local function loop_head(vis)
+        local phis = {} --: { [string]: string }
+        for i = 1, #vis do
+            local d = vis[i]
+            local phi = fresh(d.name .. "-loophead")
+            flow(d.cell, phi)
+            d.cell = phi
+            phis[d.id] = phi
+        end
+        return phis
+    end
+
+    -- The back edge: each rebindable decl's end-of-body version rejoins its
+    -- head phi (clipped — the cycle-closing proposal site). Skipped entirely
+    -- when the body cannot fall through to the loop head.
+    --: ({ [integer]: Decl }, { [string]: string }) -> nil
+    local function loop_back_edge(vis, phis)
+        for i = 1, #vis do
+            local d = vis[i]
+            local phi = phis[d.id]
+            if phi ~= nil and d.cell ~= phi then clip_flow(d.cell, phi) end
+        end
+        return nil
+    end
+
+    -- Merge the loop's REACHABLE exit versions (the cond-false edge when it
+    -- exists, plus each break's snapshot). No exits = the code after the
+    -- loop is unreachable: fresh BOTTOM cells, same as the both-arms-diverge
+    -- if-merge.
+    --: ({ [integer]: Decl }, { [integer]: { [string]: string } }) -> nil
+    local function loop_exit_merge(vis, exits)
+        for i = 1, #vis do
+            local d = vis[i]
+            if #exits == 0 then
+                d.cell = fresh(d.name .. "-unreachable")
+            else
+                local first = exits[1][d.id]
+                local same = first ~= nil
+                for k = 2, #exits do
+                    if exits[k][d.id] ~= first then same = false end
+                end
+                if same and first ~= nil then
+                    d.cell = first
+                else
+                    local phi = fresh(d.name .. "-loopexit")
+                    for k = 1, #exits do
+                        local c = exits[k][d.id]
+                        if c ~= nil then flow(c, phi) end
+                    end
+                    d.cell = phi
+                end
+            end
+        end
+        return nil
+    end
+
+    -- `while cond do body end`: head phis -> cond (narrowed truthy into the
+    -- body, falsy onto the normal exit — the SAME cond_target filters as
+    -- `if`) -> body -> back edge. `while true` has NO normal exit (the
+    -- reachability discipline): only breaks leave it, and an exitless loop
+    -- diverges. Returns the statement's divergence bit.
+    --: (Ast) -> boolean
+    local function lower_while(n)
+        local cond = n.cond
+        if not is_node(cond) then
+            internal(n, "while without a condition")
+            return false
+        end
+        local vis = loop_vis(n)
+        local phis = loop_head(vis)
+        local head = snapshot(vis)
+        lower_expr(cond)
+        local d, then_mode, else_mode = cond_target(cond)
+        local d0 = nil --: string | nil
+        if d ~= nil then d0 = d.cell end
+        loop_depth = loop_depth + 1
+        loop_frames[loop_depth] = { vis = vis, snaps = {} }
+        if d ~= nil and d0 ~= nil then
+            local nc = fresh(d.name .. "-loopthen")
+            filter_flow(d0, nc, then_mode)
+            d.cell = nc
+        end
+        local div = false
+        local body = n.body
+        if is_list(body) then
+            push_scope()
+            div = lower_stmts(body)
+            pop_scope()
+        end
+        if not div then loop_back_edge(vis, phis) end
+        restore(vis, head)
+        -- a cond decl the loop never rebinds is not in vis: undo the
+        -- transient body narrowing by hand.
+        if d ~= nil and d0 ~= nil and phis[d.id] == nil then d.cell = d0 end
+        local frame = loop_frames[loop_depth]
+        loop_depth = loop_depth - 1
+        local exits = {} --: { [integer]: { [string]: string } }
+        if not is_true_literal(cond) then
+            if d ~= nil then
+                local ec = fresh(d.name .. "-loopelse")
+                filter_flow(d.cell, ec, else_mode)
+                d.cell = ec
+            end
+            exits[#exits + 1] = snapshot(vis)
+            -- the falsy narrowing persists for an un-rebound cond decl only
+            -- when every exit passes the condition (no breaks bypass it).
+            if d ~= nil and d0 ~= nil and phis[d.id] == nil and #frame.snaps > 0 then
+                d.cell = d0
+            end
+        end
+        for i = 1, #frame.snaps do exits[#exits + 1] = frame.snaps[i] end
+        loop_exit_merge(vis, exits)
+        return #exits == 0
+    end
+
+    -- `repeat body until cond`: the body ALWAYS runs once, and — the Lua
+    -- scope quirk — `until` sees the body's locals, so the condition lowers
+    -- INSIDE the body scope. Back edge = cond falsy; normal exit = cond
+    -- truthy (post-body state, never the head: a repeat cannot exit before
+    -- one iteration).
+    --: (Ast) -> boolean
+    local function lower_repeat(n)
+        local vis = loop_vis(n)
+        local phis = loop_head(vis)
+        loop_depth = loop_depth + 1
+        loop_frames[loop_depth] = { vis = vis, snaps = {} }
+        push_scope()
+        local div = false
+        local body = n.body
+        if is_list(body) then div = lower_stmts(body) end
+        local cond = n.cond
+        local exits = {} --: { [integer]: { [string]: string } }
+        if not div then
+            local d = nil --: Decl | nil
+            local then_mode = "truthy"
+            local else_mode = "falsy"
+            if is_node(cond) then
+                lower_expr(cond)
+                d, then_mode, else_mode = cond_target(cond)
+            else
+                internal(n, "repeat without a condition")
+            end
+            local d0 = nil --: string | nil
+            if d ~= nil then d0 = d.cell end
+            -- back edge: the loop repeats while the condition is FALSY.
+            if d ~= nil and d0 ~= nil then
+                local bc = fresh(d.name .. "-looprepeat")
+                filter_flow(d0, bc, else_mode)
+                d.cell = bc
+            end
+            loop_back_edge(vis, phis)
+            -- normal exit: the condition is TRUTHY.
+            if d ~= nil and d0 ~= nil then
+                local ec = fresh(d.name .. "-loopuntil")
+                filter_flow(d0, ec, then_mode)
+                d.cell = ec
+            end
+            exits[#exits + 1] = snapshot(vis)
+            -- the narrowing rides the exit snapshot for rebindable decls;
+            -- for anything else (incl. a body-local dying with the scope)
+            -- it is transient.
+            if d ~= nil and d0 ~= nil and phis[d.id] == nil then d.cell = d0 end
+        elseif is_node(cond) then
+            -- the until is unreachable (the body cannot fall through) but
+            -- still lowers for diagnostics.
+            lower_expr(cond)
+        end
+        pop_scope()
+        local frame = loop_frames[loop_depth]
+        loop_depth = loop_depth - 1
+        for i = 1, #frame.snaps do exits[#exits + 1] = frame.snaps[i] end
+        loop_exit_merge(vis, exits)
+        return #exits == 0
+    end
+
+    -- `for v = start, limit [, step] do body end`: the loop var IS a number
+    -- (LuaJIT 5.1 numeric-for semantics — the proof-dev's treatment: var and
+    -- bounds are numbers), so the var's cell is SEEDED number and each bound
+    -- carries a ⊑ number obligation. The var is scoped to the body and
+    -- exempt from unused-local (like params: `for _ = 1, n` is pure
+    -- repetition and the syntax demands a name).
+    --: (Ast) -> boolean
+    local function lower_for_num(n)
+        local init = n.init
+        local stop = n.stop
+        local step = n.step
+        if is_node(init) then
+            obligate(lower_expr(init), FORNUM_NUM, "op-mismatch",
+                "numeric `for` start value", init.line, init.col)
+        else
+            internal(n, "for-num without a start expression")
+        end
+        if is_node(stop) then
+            obligate(lower_expr(stop), FORNUM_NUM, "op-mismatch",
+                "numeric `for` limit", stop.line, stop.col)
+        else
+            internal(n, "for-num without a limit expression")
+        end
+        if is_node(step) then
+            obligate(lower_expr(step), FORNUM_NUM, "op-mismatch",
+                "numeric `for` step", step.line, step.col)
+        end
+        local vis = loop_vis(n)
+        local phis = loop_head(vis)
+        local head = snapshot(vis)
+        loop_depth = loop_depth + 1
+        loop_frames[loop_depth] = { vis = vis, snaps = {} }
+        push_scope()
+        local nm = n.name
+        if type(nm) == "string" then
+            local vc = fresh("forvar-" .. nm)
+            seed(vc, FORNUM_NUM)
+            declare(nm, n.line, n.col, vc, true)
+        else
+            internal(n, "for-num without a variable name")
+        end
+        local div = false
+        local body = n.body
+        if is_list(body) then div = lower_stmts(body) end
+        pop_scope()
+        if not div then loop_back_edge(vis, phis) end
+        restore(vis, head)
+        local frame = loop_frames[loop_depth]
+        loop_depth = loop_depth - 1
+        -- the normal exit always exists (the range can be empty): head state.
+        local exits = { snapshot(vis) } --: { [integer]: { [string]: string } }
+        for i = 1, #frame.snaps do exits[#exits + 1] = frame.snaps[i] end
+        loop_exit_merge(vis, exits)
+        return false
+    end
+
+    -- `for v1, … in explist do body end`: the generic-for protocol. explist
+    -- is the iterator TRIPLE (iterator fn, state, initial control); each
+    -- iteration calls iterator(state, control) and the loop vars are the
+    -- call's result positions — wired through ONE ordinary call_core (the
+    -- callee-shape obligation makes `for x in t` a real call-non-function
+    -- finding; pairs/ipairs are declared iterator arrows in the stdlib).
+    -- The control value cycles: initial control joins the iterator's first
+    -- result in a phi. v1 is nil-DROPPED (the loop runs only while result 1
+    -- is not nil — false does NOT stop a generic for).
+    --: (Ast) -> boolean
+    local function lower_for_in(n)
+        local exprs = n.exprs
+        local cells = {} --: { [integer]: string }
+        if is_list(exprs) and #exprs >= 1 then
+            cells = lower_value_list(exprs, 3)
+        else
+            internal(n, "for-in without an expression list")
+            for i = 1, 3 do cells[i] = unknown_cell("forin") end
+        end
+        local names = n.names --: unknown
+        --: (x: unknown) -> x is { [integer]: string }
+        local function is_names(x) return type(x) == "table" end
+        local nvar = 0
+        if is_names(names) then nvar = #names end
+        local want = nvar
+        if want < 1 then want = 1 end
+        local vis = loop_vis(n)
+        local phis = loop_head(vis)
+        local head = snapshot(vis)
+        local ctl = fresh("forin-ctl")
+        flow(cells[3], ctl)
+        local rcells = call_core(cells[1], { cells[2], ctl }, { false, false },
+            want, "`for in` iterator", n.line, n.col)
+        -- the value that cycles back as control is the NIL-DROPPED first
+        -- result: the loop re-calls the iterator only while result 1 is not
+        -- nil, so the iterator's own `T | nil` never lands on its control
+        -- pin. The same cell IS loop var 1.
+        local r1 = fresh("forin-next")
+        filter_flow(rcells[1], r1, "drop:nil")
+        flow(r1, ctl)
+        loop_depth = loop_depth + 1
+        loop_frames[loop_depth] = { vis = vis, snaps = {} }
+        push_scope()
+        if is_names(names) then
+            for i = 1, nvar do
+                local nm = names[i]
+                if type(nm) == "string" then
+                    local vc = rcells[i]
+                    if i == 1 then vc = r1 end
+                    declare(nm, n.line, n.col, vc, true)
+                end
+            end
+        end
+        local div = false
+        local body = n.body
+        if is_list(body) then div = lower_stmts(body) end
+        pop_scope()
+        if not div then loop_back_edge(vis, phis) end
+        restore(vis, head)
+        local frame = loop_frames[loop_depth]
+        loop_depth = loop_depth - 1
+        -- the normal exit always exists (the iterator may yield nothing).
+        local exits = { snapshot(vis) } --: { [integer]: { [string]: string } }
+        for i = 1, #frame.snaps do exits[#exits + 1] = frame.snaps[i] end
+        loop_exit_merge(vis, exits)
+        return false
+    end
+
     -- Lower one statement. Returns true when the statement DIVERGES (cannot
     -- fall through: return, break, a declared-never call, or an if whose
     -- every path diverges) — the reachability bit the merges consume.
@@ -1960,13 +2303,23 @@ function M.lower(chunk)
             lower_function(n, nil)
             internal(n, "func-decl with an unexpected name shape")
             return false
-        elseif tag == defs.NODE_WHILE_STMT or tag == defs.NODE_REPEAT_STMT
-            or tag == defs.NODE_FOR_NUM or tag == defs.NODE_FOR_IN then
-            unsupported(n, frontend.node_name(tag))
-            havoc_scan(n)
-            return false
+        elseif tag == defs.NODE_WHILE_STMT then
+            return lower_while(n)
+        elseif tag == defs.NODE_REPEAT_STMT then
+            return lower_repeat(n)
+        elseif tag == defs.NODE_FOR_NUM then
+            return lower_for_num(n)
+        elseif tag == defs.NODE_FOR_IN then
+            return lower_for_in(n)
         elseif tag == defs.NODE_BREAK_STMT then
-            unsupported(n, "break-stmt")
+            -- break DIVERGES from its block (reachability) and contributes
+            -- its version snapshot to the enclosing loop's exit merge.
+            if loop_depth >= 1 then
+                local frame = loop_frames[loop_depth]
+                frame.snaps[#frame.snaps + 1] = snapshot(frame.vis)
+                return true
+            end
+            internal(n, "break outside a loop")
             return false
         elseif tag == defs.NODE_GOTO_STMT then
             unsupported(n, "goto-stmt")
@@ -2102,14 +2455,17 @@ ROUTE[defs.NODE_VARARG_EXPR] = "boundary"
 ROUTE[defs.NODE_ASSIGN_STMT] = "checked"
 ROUTE[defs.NODE_LOCAL_STMT] = "checked"
 ROUTE[defs.NODE_DO_STMT] = "checked"
-ROUTE[defs.NODE_WHILE_STMT] = "boundary"
-ROUTE[defs.NODE_REPEAT_STMT] = "boundary"
+-- loops: loop-head phi + clipped back edge + reachable-exit merge; for-num
+-- bounds obligated ⊑ number; for-in wired through the iterator protocol.
+ROUTE[defs.NODE_WHILE_STMT] = "checked"
+ROUTE[defs.NODE_REPEAT_STMT] = "checked"
 ROUTE[defs.NODE_IF_STMT] = "checked"
 ROUTE[defs.NODE_IF_CLAUSE] = "container"
-ROUTE[defs.NODE_FOR_NUM] = "boundary"
-ROUTE[defs.NODE_FOR_IN] = "boundary"
+ROUTE[defs.NODE_FOR_NUM] = "checked"
+ROUTE[defs.NODE_FOR_IN] = "checked"
 ROUTE[defs.NODE_RETURN_STMT] = "checked"
-ROUTE[defs.NODE_BREAK_STMT] = "boundary"
+-- break: a diverging jump contributing its snapshot to the loop-exit merge.
+ROUTE[defs.NODE_BREAK_STMT] = "checked"
 ROUTE[defs.NODE_GOTO_STMT] = "boundary"
 ROUTE[defs.NODE_LABEL_STMT] = "boundary"
 ROUTE[defs.NODE_EXPR_STMT] = "checked"

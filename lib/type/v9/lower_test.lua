@@ -13,6 +13,7 @@ local frontend = require("lib.type.v9.frontend")
 local lower = require("lib.type.v9.lower")
 local engine = require("lib.type.v9.engine.engine")
 local lattice = require("lib.type.v9.lattice")
+local check = require("lib.type.v9.check")
 
 -- Lower + solve a snippet; return rendered types of top-level locals plus
 -- the lowering diags. Fails the test on parse/solve errors.
@@ -36,6 +37,17 @@ local function find_diag(diags, code)
         if diags[i].code == code then return diags[i] end
     end
     return nil
+end
+
+-- Full check (lower + solve + OBLIGATION evaluation): infer()'s diags are
+-- the lowering's structural diags only — assertions about post-solve codes
+-- (op-mismatch on obligations, field-write-mismatch, call-non-function)
+-- need this path.
+--: (string) -> { [integer]: { code: string, severity: string, message: string, line: integer, col: integer } }
+local function checked(src)
+    local diags, err = check.check_source(src, "test.lua", nil)
+    if diags == nil then error("check failed: " .. (err or "?")) end
+    return diags
 end
 
 T.describe("v9 lowering — and/or DERIVED from truthy/falsy (the historic bug site)", function()
@@ -160,20 +172,127 @@ T.describe("v9 lowering — reachability at the merge (early-exit narrowing)", f
     end)
 end)
 
-T.describe("v9 lowering — the honest dynamism boundary", function()
-    T.it("unsupported constructs produce structured diags with line/col", function()
-        local _, diags = infer("local a = 1\nwhile a do\n  a = a\nend\n")
-        local d = find_diag(diags, "unsupported:while-stmt")
-        T.ok(d ~= nil, "while is flagged, not crashed on or silently passed")
+T.describe("v9 lowering — loops (head phi, back edge, reachable exits)", function()
+    T.it("a loop-body assignment joins at the head phi and the exit", function()
+        local tys = infer("local x = 1\nlocal c = true\nwhile c do\n  x = 's'\nend\nreturn x\n")
+        T.eq(tys.x, "number | string", "pre-loop and back-edge versions join")
+    end)
+
+    T.it("`while true do … break` exits ONLY through the break (reachability)", function()
+        local tys = infer("local x = 1\nwhile true do\n  x = 's'\n  break\nend\nlocal y = x\nreturn y\n")
+        T.eq(tys.y, "string", "the break snapshot IS the exit; no phantom cond-false edge")
+    end)
+
+    T.it("`while true` without a break diverges (code after is unreachable)", function()
+        local tys = infer("local x = 1\nwhile true do\n  x = x\nend\nlocal y = x\nreturn y\n")
+        T.eq(tys.y, "never", "an exitless loop cannot fall through")
+    end)
+
+    T.it("the condition narrows into the body; its complement narrows the exit", function()
+        local src = "local c = true\nlocal x = nil\nif c then x = 1 end\n"
+            .. "local y = 0\nwhile x do\n  y = x\n  x = nil\nend\nlocal z = x\nreturn y, z\n"
+        local tys = infer(src)
+        T.eq(tys.y, "number", "the body sees truthy(x)")
+        T.eq(tys.z, "nil", "the normal exit sees falsy(x)")
+    end)
+
+    T.it("a break inside a narrowed arm carries the narrowing to the exit (search idiom)", function()
+        local src = "local x = nil\nlocal c = true\nwhile true do\n"
+            .. "  if c then x = 1 end\n  if x then break end\nend\nlocal y = x\nreturn y\n"
+        local tys = infer(src)
+        T.eq(tys.y, "number", "the break snapshot captures the truthy-narrowed version")
+    end)
+
+    T.it("for-num: the loop var is a number; the body checks against it", function()
+        local tys, diags = infer("local s = 0\nfor i = 1, 10 do\n  s = s + i\nend\nreturn s\n")
+        T.eq(tys.s, "number", "number + number through the loop")
+        T.eq(find_diag(diags, "op-mismatch"), nil, "no operand complaints")
+    end)
+
+    T.it("for-num: a non-number bound is rejected with line/col", function()
+        local diags = checked("for i = 1, 'x' do\n  local _ = i\nend\nreturn 1\n")
+        local d = find_diag(diags, "op-mismatch")
+        T.ok(d ~= nil, "the string limit is rejected")
         if d ~= nil then
-            T.eq(d.line, 2, "line of the while")
-            T.eq(d.col, 1, "col of the while")
+            T.eq(d.line, 1, "line of the bound")
+            T.eq(d.col, 12, "col of the bound")
+            T.ok(d.message:find("limit", 1, true) ~= nil, "names the position: " .. d.message)
         end
     end)
 
-    T.it("locals assigned inside an unchecked region are HAVOCED to unknown", function()
-        local tys = infer("local x = 1\nlocal c = true\nwhile c do\n  x = 's'\nend\nreturn x\n")
-        T.eq(tys.x, "unknown", "the checked discipline stays sound around the boundary")
+    T.it("for-num: exit joins the zero-iteration path", function()
+        local tys = infer("local last = nil\nfor i = 1, 3 do\n  last = i\nend\nreturn last\n")
+        T.eq(tys.last, "nil | number", "the range can be empty; nil survives the exit")
+    end)
+
+    T.it("for-in over ipairs: the index var is a number (nil-dropped result 1)", function()
+        local src = "local t = { x = 1 }\nlocal i0 = nil\nlocal v0 = nil\n"
+            .. "for i, v in ipairs(t) do\n  i0 = i\n  v0 = v\nend\nreturn i0, v0\n"
+        local tys = infer(src)
+        T.eq(tys.i0, "nil | number", "ipairs' integer|nil first result, nil-dropped, joins i0's nil")
+        T.eq(tys.v0, "unknown", "the value position is the iterator's declared unknown (absorbs the nil init)")
+    end)
+
+    T.it("for-in over pairs: the key var rides the declared iterator arrow", function()
+        local src = "local t = { x = 1 }\nlocal n = 0\n"
+            .. "for k in pairs(t) do\n  n = n + 1\nend\nreturn n\n"
+        local tys, diags = infer(src)
+        T.eq(tys.n, "number", "the body checks; the loop protocol is wired")
+        T.eq(find_diag(diags, "call-non-function"), nil, "pairs(t) IS an iterator call")
+    end)
+
+    T.it("for-in over a non-function is a real call-non-function finding", function()
+        local diags = checked("local t = { x = 1 }\nfor k in t do\n  local _ = k\nend\nreturn 1\n")
+        local d = find_diag(diags, "call-non-function")
+        T.ok(d ~= nil, "`for k in t` calls t: flagged")
+    end)
+
+    T.it("repeat-until: the until sees body locals (the Lua scope quirk)", function()
+        local src = "local n = 0\nrepeat\n  local done = n > 3\n  n = n + 1\nuntil done\nreturn n\n"
+        local tys, diags = infer(src)
+        T.eq(tys.n, "number", "the counter stays a number through the back edge")
+        T.eq(find_diag(diags, "undeclared-global"), nil, "`done` resolves in the until")
+        T.eq(find_diag(diags, "unused-local"), nil, "`done` is read by the until")
+    end)
+
+    T.it("repeat-until: the exit sees the truthy condition; breaks still merge", function()
+        local src = "local c = true\nlocal x = nil\nif c then x = 1 end\n"
+            .. "repeat\n  x = nil\nuntil x == nil\nlocal y = x\nreturn y\n"
+        local tys = infer(src)
+        T.eq(tys.y, "nil", "until x == nil exits with keep:nil applied")
+    end)
+
+    T.it("loop-driven value growth TERMINATES via the clipped back edge", function()
+        -- t = { next = t } deepens one level per iteration; the clipped
+        -- back edge bounds the ascent. The head phi's width join of {} and
+        -- { next: … } is {} (common fields only) — the honest merge; the
+        -- assertion here is TERMINATION, not shape.
+        local src = "local t = {}\nlocal c = true\nwhile c do\n  t = { next = t }\nend\nreturn t\n"
+        local tys = infer(src)
+        T.eq(tys.t, "{}", "the fixpoint terminates; the exit is the width join")
+    end)
+
+    T.it("nested loops with breaks keep their frames separate", function()
+        -- every path to the outer break passes through the inner loop, whose
+        -- only exit sets x = 's' — the precise exit type IS string (the
+        -- inner break landed in the inner frame, the outer in the outer).
+        local src = "local x = 1\nlocal c = true\nwhile true do\n"
+            .. "  while true do\n    x = 's'\n    break\n  end\n"
+            .. "  if c then break end\nend\nlocal y = x\nreturn y\n"
+        local tys = infer(src)
+        T.eq(tys.y, "string", "the outer exit sees the inner loop's exit version")
+    end)
+end)
+
+T.describe("v9 lowering — the honest dynamism boundary", function()
+    T.it("unsupported constructs produce structured diags with line/col", function()
+        local _, diags = infer("local a = 1\n::top::\na = a + 1\ngoto top\n")
+        local d = find_diag(diags, "unsupported:goto-stmt")
+        T.ok(d ~= nil, "goto is flagged, not crashed on or silently passed")
+        if d ~= nil then
+            T.eq(d.line, 4, "line of the goto")
+            T.eq(d.col, 1, "col of the goto")
+        end
     end)
 
     T.it("undeclared globals are flagged at the use site", function()
@@ -235,9 +354,15 @@ T.describe("v9 lowering — structural records", function()
         T.eq(tys.y, "nil | number", "the guard drops v's nil part (joined with y's initial nil)")
     end)
 
-    T.it("field writes inside unchecked regions HAVOC the base (soundness fence)", function()
+    T.it("field writes inside a loop body are CHECKED (no havoc fence anymore)", function()
         local tys = infer("local t = { x = 1 }\nlocal c = true\nwhile c do\n  t.x = 2\nend\nreturn t\n")
-        T.eq(tys.t, "unknown", "a record type must not survive unchecked mutation")
+        T.eq(tys.t, "{ x: number }", "an in-bound write keeps the record precise through the loop")
+        local ok_diags = checked("local t = { x = 1 }\nlocal c = true\nwhile c do\n  t.x = 2\nend\nreturn t\n")
+        T.eq(find_diag(ok_diags, "field-write-mismatch"), nil, "the in-bound write is clean")
+        local bad = checked("local t = { x = 1 }\nlocal c = true\nwhile c do\n  t.x = 's'\nend\nreturn t\n")
+        local d = find_diag(bad, "field-write-mismatch")
+        T.ok(d ~= nil, "an out-of-bound write inside the loop is rejected")
+        if d ~= nil then T.eq(d.line, 4, "at the write's line") end
     end)
 
     T.it("dynamic keys are the honest `unsupported:dynamic-index` boundary", function()
