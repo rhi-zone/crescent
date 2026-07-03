@@ -166,21 +166,42 @@ in histogram order, plus recorded debt:
   lattice flow ops (tag_keep/tag_drop) behind the same cond_target/filter
   shape. undeclared-global 19.5k -> genuine names only; use-before-narrow drops
   with it (histogram in the ARCHITECTURE slice section).
-- [ ] **Loops via loop-head phi** — `for-num`/`for-in`/`while`/`repeat` (~11k): back-edges
-  are native to the engine worklist; phi-at-loop-head is the same mechanism as the
-  if-merge. Currently havoc-fenced (sound).
-- [ ] **true/false literal atoms** — the `cond and a or b` idiom types `boolean | X`
-  and trips `op-mismatch` (most of the 139 across the tree). Literal split is a
-  domain-local lattice refinement.
+- [x] **Loops via loop-head phi** — DONE 2026-07 (control-flow precision increment).
+  All four constructs checked: loop-head phi per rebindable decl (assigned-roots
+  scan), CLIPPED back edges (loop-grown values terminate), condition narrowing
+  into body/exit, reachable-exit merge (`while true` has no cond-false edge;
+  breaks snapshot into their loop frame), for-num var seeded number + bounds
+  obligated ⊑ number, for-in as the iterator-protocol call (control cycles as
+  the nil-dropped first result), repeat's `until` inside the body scope. The
+  havoc fence retired with its last consumer. ~11k loop-boundary diags retired;
+  histogram in the ARCHITECTURE slice section.
+- [x] **true/false literal atoms** — DONE 2026-07. boolean = true | false in the
+  lattice (constructors normalize, show/excess collapse); falsy/truthy exact, so
+  `cond and a or b` infers `type(a) | type(b)` — op-mismatch 4,073 -> 2,165 and
+  the pagination:384 stdlib-pin false positive resolved. Mutable-ref creation
+  WIDENS a lone literal to the pair (the `{ enabled = false }` flag idiom);
+  flow values and annotated refs keep literal precision.
 - [ ] **v9 unused-local is syntactic** (declared-never-read in the lowering walk),
   not wired to the backward liveness domain; flow-precise liveness (e.g.
   assigned-after-last-read) is a later wiring of the existing domain.
-- [ ] **Guard narrowing beyond bare `x` / `not x` / `type(x) == "..."`** — `==`-nil
-  comparisons and and/or chains in conditions (same `cond_target` seam in
-  `lower.lua`); and EARLY-EXIT termination: `if type(x) ~= "s" then return end`
-  does not narrow the fall-through (the if-merge joins a branch that never
-  falls through — needs reachability at the merge, the same mechanism loops
-  will need). The guard-with-else form narrows correctly today.
+- [ ] **v9 goto is unmodeled** (112 sites) — the `unsupported:goto-stmt` diag names
+  the boundary, but a BACKWARD goto's loop effects (assignments between label and
+  goto) are not fenced or phi'd; before the loops increment such gotos usually sat
+  inside a havoc-fenced loop body, now they don't. Either model label/goto as
+  merge points (same phi mechanism) or havoc-fence the label..goto span.
+- [x] **Guard narrowing beyond bare `x` / `not x` / `type(x) == "..."`** — the
+  `==`/`~=`-nil comparisons (the SAME keep/drop filters at the nil tag) and
+  EARLY-EXIT reachability (`if type(x) ~= "s" then return end` narrows the
+  fall-through; diverging branches — return/break/declared-`never` calls like
+  `error` — contribute nothing to the merge) landed 2026-07; the
+  lib/math/init.lua:11 false positive resolved. Remaining piece tracked below.
+- [ ] **Compound-condition narrowing (and/or chains)** — `if limit and #x > limit`
+  does not narrow `limit` in the then-arm, and `opts and opts.f` does not narrow
+  the RHS read of `opts` (same `cond_target`/filter seam in `lower.lua`, plus an
+  RHS-of-`and` narrowing in the expression rule). Now GATES real findings: most
+  of the new numeric-`for` `nil | number` bound errors (columnar:209,
+  inverted_index:242, qrencode:149, shamir:182) and the `opts and opts.f`
+  op-mismatch class (csv:140-143, base64:42-43) are this gap, not code bugs.
 
 ## Typechecker soundness methodology — open fork
 
