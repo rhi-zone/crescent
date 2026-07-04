@@ -290,7 +290,7 @@ function M.range(start, stop, step_days)
   end
 end
 
---:: Recur = { _start: unknown, _current: unknown, _freq: string, _interval: integer, _count: unknown, _until: unknown, _by_day: unknown, _by_month_day: unknown, _n: integer, ... }
+--:: Recur = { _start: unknown, _current: unknown, _freq: string, _interval: integer, _count: unknown, _until: Date | nil, _by_day: unknown, _by_month_day: unknown, _n: integer, ... }
 
 -- Recurrence
 local recur_mt = {}
@@ -353,6 +353,10 @@ function recur_mt:next()
 
     -- Check count limit
     if self._count and self._n >= (self._count --[[:! integer]]) then return nil end
+
+    -- Check until limit (inclusive)
+    local u = self._until
+    if u and to_ordinal(d.year, d.month, d.day) > to_ordinal(u.year, u.month, u.day) then return nil end
 
     -- Advance current for next call
     if freq == "daily" then
