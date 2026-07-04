@@ -166,7 +166,18 @@ Op-sem parity must hold at every commit. After the handler deletion, the adversa
   mis-infers unrelated distant code to `never`; and the
   forward-declared-local cross-file contamination (tracked in the v9 section
   below; repro not yet reduced).
-
+- [ ] **23 test files fail on master (pre-existing; CI red).** Discovered
+  2026-07-04 while verifying the banked fixes. Until then the full suite
+  never finished at all: calendar_test hung forever (recur `until` limit
+  never checked in next() — fixed, commit 0e4c52c3), so CI died at timeout
+  and the failures behind it went unseen. With the hang fixed the suite
+  completes: 614 pass / 23 FAIL, all 23 failing identically at HEAD before
+  this session's changes. Clusters: crypto (hash 24, sha1 30, hmac 12,
+  pbkdf2 8, totp 22 assertion failures — possibly one shared root cause),
+  deque (14), text_diff (10), glob (6), sat (6), sqlite (5), taskgraph (5),
+  chan (4), utf8 (4), plus singles/doubles (count_min, db, doc, event,
+  platform×4, type/static, static-v4 cli_compare). Full list in the session
+  log; rerun `bin/cr test` to reproduce. Untriaged — root causes unknown.
 ## v9 vertical slice — dynamism-boundary roadmap (2026-07-03)
 
 The v9 slice (frontend seam -> total lowering -> engine -> `lib/type/v9/check.lua`)
