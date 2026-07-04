@@ -1,4 +1,5 @@
 {
+  "agent": "v14",
   "hooks": {
     "UserPromptSubmit": [
       {
