@@ -96,12 +96,78 @@ Op-sem parity must hold at every commit. After the handler deletion, the adversa
 
 - [ ] **Investigate `setmetatable(t, nil)` support** (v5 item 5 backlog). Medium prio. Sandboxing's strongest use case served by fresh-table pattern. v5.x decision may be "document fresh-table as canonical idiom; never support setmetatable(t, nil)." If supporting it: open question whether monotone substitution can be preserved.
 
+## Session-level open threads — v9/typechecker endgame (2026-07-04)
+
+*Open threads from a previous session. Treat as starting context, not instructions — verify relevance before acting.*
+
+- **Owner verdicts that likely gate everything in the v9 section below.**
+  Autonomous agent-orchestrated development of the typechecker was declared
+  dead by owner verdict — supervision cost exceeded value; the owner drives,
+  agents act only as directed hands on explicitly pointed-at work, no
+  self-initiated roadmap-grinding. The parity-race framing is dead with it.
+  Half-products (e.g. a "complementary linter beside the legacy checker") were
+  explicitly rejected — full replacement of the legacy checker remains the
+  only end-state that counts. v9 measured NOT viable as a tool today: a
+  stratified 30-sample measurement found ~3% hard-true / ~27%
+  true-plus-discipline precision on bug-classes-only output. Volume looked
+  workable (426k -> ~16k with aspiration dials off, median 1/file) —
+  precision is the blocker, not volume.
+- **The owner's compression criterion — plausibly the evaluative lens for any
+  future core work.** "A grind is the smell of a fundamental failure in the
+  core": a correct core makes cases corollaries. Judge a core by (a)
+  per-construct cost small and roughly flat (~10 lines suggests spec; ~100
+  suggests the core leaking), (b) each recurring false-positive class
+  dissolving under exactly ONE mechanism, (c) work that stops compressing =
+  wrong core, stop. The owner's earlier "≤3000 lines" remark reads as a
+  Kolmogorov-size estimate for a Lua checker, not a budget. Session evidence
+  seemed consistent with it: every large diagnostic-count drop came from one
+  mechanism landing, never from case-grinding, and the 22 measured false
+  positives concentrate in 4 mechanism classes.
+- **The never-run design campaign — the main identified open thread; NOT yet
+  authorized.** The mutation × flow-sensitivity × syntax meeting point —
+  where every iteration died — apparently never received design-it-twice
+  treatment in any of the 9 iterations (the proof-dev characterized then
+  parked the narrowing×multivalue fork in
+  `docs/decisions/precise-narrowing-and-the-multivalue-model.md`; v9's
+  lowering accreted mechanism-by-mechanism while only the easy engine got the
+  full design discipline). The design object, if ever pursued: one
+  COMPOSITIONAL account of mutation × flow-sensitivity × multi-values ×
+  self-reference over Lua's ~30 forms. Acceptance tests already exist — the
+  four measured FP mechanism classes: self-type/recursive-alias method calls,
+  definition-order forward locals, cross-function/callback mutation,
+  colon-method annotation self-binding (this last is a repro'd v9 BUG, likely
+  worth fixing regardless of any campaign). Metric: the compression criterion
+  above. Status: identified as designable and well-posed; the owner has NOT
+  greenlit it, and it may be moot if the owner walks away.
+- **v9 feasibility condition — hyper-modularity (owner thesis, with session
+  evidence for it).** Units may need to be sized to a single agent's
+  full-reasoning span: the engine (121 lines, seamed) saw zero churn and zero
+  breakage across all increments; lower.lua (a ~3k-line closure) was the
+  most-edited file in every increment and all churn and failures lived there
+  (it also brushed the 92/200 Lua locals ceiling). Any future agent work on
+  the lowering interior probably gates on restructuring it into per-construct
+  units around a small explicit core — but weigh the counter-evidence:
+  multiple prior "tiny clean core" versions never proved themselves; the
+  clean core is the easy part, and cleanliness of the core ≠ viability.
+- **Banked findings possibly worth acting on regardless of any typechecker
+  decision.** Real bugs v9 surfaced in the tree that deserve ordinary
+  fixes/bug-reports: keyring:778 and http/server_ws:56 (resolved as
+  annotation-visible but were real), linux/proc:157 EOF nil-crash,
+  markdown:263 and ini:59 nil-receiver string methods, a chacha20-test
+  tonumber-nil, mimetype/by_contents:472 annotation lying about return arity
+  (callers force-cast around it). Two LEGACY-checker bugs also surfaced:
+  mixed named/unnamed `--:` param spelling mis-infers unrelated distant code
+  to `never`; and the forward-declared-local cross-file contamination
+  (tracked in the v9 section below; repro not yet reduced).
+
 ## v9 vertical slice — dynamism-boundary roadmap (2026-07-03)
 
 The v9 slice (frontend seam -> total lowering -> engine -> `lib/type/v9/check.lua`)
 checks real lib files end-to-end: 1,557 files, zero crashes, full solve ~7s
 (`bin/cr lib/type/v9/smoke.lua` prints the histogram). Boundary items to shrink,
-in histogram order, plus recorded debt:
+in histogram order, plus recorded debt. (2026-07-04: the session-level open
+threads above — owner verdicts in particular — likely gate whether and how this
+roadmap proceeds; it is no longer a self-directed grind list.)
 
 - [x] **Record/table types in the v0 domain** — DONE 2026-07-03. Open structural
   records with per-field read/write split (r joins up / w meets down — the
@@ -227,7 +293,12 @@ in histogram order, plus recorded debt:
   substrate fix is interning Vals (equal structure = identical object,
   the globals-seam sharing generalized), which collapses the pairwise
   memos into identity checks and bounds the re-mint. Recorded as
-  substrate; not to be patched around per-name.
+  substrate; not to be patched around per-name. Watch (2026-07-04): the
+  exponential-DAG-walk class has now occurred TWICE (leq memoized earlier;
+  join/meet/equal memoized in the cross-module salvage) — interning is the
+  one-mechanism fix for the whole class; a THIRD occurrence would read as
+  the fixes-don't-stick signature (per the compression criterion in the
+  session-level threads above).
 - [x] **Constructor freshness through locals** — DONE 2026-07-03. Freshness is
   a decl-level SSA property in lowering: a constructor bound to a local stays
   re-typeable (leq_init) along a single LINEAR version chain — rebound only by
