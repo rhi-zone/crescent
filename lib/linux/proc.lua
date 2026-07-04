@@ -16,7 +16,7 @@ end
 mod.uptime = function ()
 	local f = io.open("/proc/uptime")
 	if not f then return nil, "could not open " .. "/proc/uptime" end
-	local line = f:read("*line")
+	local line = f:read("*line") or ""
 	local uptime, idle = match(line, "(%d+%.%d+) (%d+%.%d+)")
 	local ret = { uptime = tonumber(uptime), idle = tonumber(idle) }
 	f:close()
@@ -57,7 +57,7 @@ end
 mod.loadavg = function ()
 	local f = io.open("/proc/loadavg")
 	if not f then return nil, "could not open " .. "/proc/loadavg" end
-	local line = f:read("*line")
+	local line = f:read("*line") or ""
 	local loadavg_1min, loadavg_5min, loadavg_10min, running_procs, total_procs, last_pid = match(line, "(%d+%.%d+) (%d+%.%d+) (%d+%.%d+) (%d+)/(%d+) (%d+)")
 	local ret = {
 		loadavg_1min = tonumber(loadavg_1min), loadavg_5min = tonumber(loadavg_5min), loadavg_10min = tonumber(loadavg_10min),
@@ -116,7 +116,7 @@ mod.mounts = function ()
 		if not line then break end
 		local device, path, filesystem, options_raw, should_backup, fsck_order = match(line, "(.-) (.-) (.-) (.-) (%d+) (%d+)")
 		local options = {}
-		for option in options_raw:gmatch("[^,]+") do
+		for option in gmatch(options_raw or "", "[^,]+") do
 			local name, value = option:match("(.-)=(.+)")
 			if name then options[name] = tonumber(value) or value
 			else options[option] = true end
@@ -133,7 +133,7 @@ mod.stat = function ()
 	local f = io.open("/proc/stat")
 	if not f then return nil, "could not open " .. "/proc/stat" end
 	local ret = {}
-	local line = f:read("*line")
+	local line = f:read("*line") or ""
 	local user, nice, system, idle, iowait, irq, softirq, steal, guest, guest_nice = match(line, "cpu +(%d+) (%d+) (%d+) (%d+) (%d+) (%d+) (%d+) (%d+) (%d+) (%d+)")
 	ret.cpu = {
 		user = tonumber(user), nice = tonumber(nice), system = tonumber(system), idle = tonumber(idle), iowait = tonumber(iowait),
@@ -141,7 +141,7 @@ mod.stat = function ()
 	}
 	ret.cpus = {}
 	while true do
-		line = f:read("*line")
+		line = f:read("*line") or ""
 		user, nice, system, idle, iowait, irq, softirq, steal, guest, guest_nice = match(line, "cpu%d+ (%d+) (%d+) (%d+) (%d+) (%d+) (%d+) (%d+) (%d+) (%d+) (%d+)")
 		if not user then break end
 		ret.cpus[#ret.cpus+1] = {
@@ -154,12 +154,12 @@ mod.stat = function ()
 	for n in gmatch(line, "%d+") do
 		intr[#intr+1] = tonumber(n)
 	end
-	ret.ctxt = tonumber(match(f:read("*line"), "%d+"))
-	ret.btime = tonumber(match(f:read("*line"), "%d+"))
-	ret.processes = tonumber(match(f:read("*line"), "%d+"))
-	ret.procs_running = tonumber(match(f:read("*line"), "%d+"))
-	ret.procs_blocked = tonumber(match(f:read("*line"), "%d+"))
-	line = f:read("*line")
+	ret.ctxt = tonumber(match(f:read("*line") or "", "%d+"))
+	ret.btime = tonumber(match(f:read("*line") or "", "%d+"))
+	ret.processes = tonumber(match(f:read("*line") or "", "%d+"))
+	ret.procs_running = tonumber(match(f:read("*line") or "", "%d+"))
+	ret.procs_blocked = tonumber(match(f:read("*line") or "", "%d+"))
+	line = f:read("*line") or ""
 	ret.softirq = {}
 	local softirqs = ret.softirq
 	for n in gmatch(line, "%d+") do
@@ -247,7 +247,8 @@ mod.meminfo = function ()
 		local line = f:read("*line")
 		if not line then break end
 		local name, n_str = match(line, "(.-): +(%d+)")
-		ret[name_to_key[name]] = tonumber(n_str)
+		local key = name_to_key[name]
+		if key then ret[key] = tonumber(n_str) end
 	end
 	f:close()
 	return ret
@@ -262,7 +263,7 @@ mod.vmstat = function ()
 		local line = f:read("*line")
 		if not line then break end
 		local name, n_str = match(line, "(%S+) (%d+)")
-		ret[name] = tonumber(n_str)
+		if name then ret[name] = tonumber(n_str) end
 	end
 	f:close()
 	return ret
@@ -282,7 +283,7 @@ mod.net.dev = function ()
 		local name, r_bytes, r_packets, r_errs, r_drop, r_fifo, r_frame, r_compressed, r_multicast,
 			t_bytes, t_packets, t_errs, t_drop, t_fifo, t_colls, t_carrier, t_compressed =
 			match(line, "(%S+): +(%d+) +(%d+) +(%d+) +(%d+) +(%d+) +(%d+) +(%d+) +(%d+) +(%d+) +(%d+) +(%d+) +(%d+) +(%d+) +(%d+) +(%d+) +(%d+)")
-		ret[name] = {
+		if name then ret[name] = {
 			receive = {
 				bytes = tonumber(r_bytes), packets = tonumber(r_packets), errs = tonumber(r_errs), drop = tonumber(r_drop), fifo = tonumber(r_fifo),
 				frame = tonumber(r_frame), compressed = tonumber(r_compressed), multicast = tonumber(r_multicast),
@@ -291,7 +292,7 @@ mod.net.dev = function ()
 				bytes = tonumber(t_bytes), packets = tonumber(t_packets), errs = tonumber(t_errs), drop = tonumber(t_drop), fifo = tonumber(t_fifo),
 				colls = tonumber(t_colls), carrier = tonumber(t_carrier), compressed = tonumber(t_compressed),
 			},
-		}
+		} end
 	end
 	f:close()
 	return ret

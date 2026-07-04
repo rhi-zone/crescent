@@ -14,8 +14,7 @@ end
 
 --: (string, integer | nil) -> (string | nil, string | nil)
 M.by_contents = function(buffer, pos)
-	local ext, mt = (by_contents.mimetype)(buffer, pos)
-	return ext --[[:! string | nil]], mt --[[:! string | nil]]
+	return (by_contents.mimetype)(buffer, pos)
 end
 
 --: (string, string) -> string | nil
@@ -23,7 +22,7 @@ M.detect = function(filename, buffer)
 	local mt = (by_name.mimetype)(filename)
 	if mt then return mt end
 	local _, mt2 = (by_contents.mimetype)(buffer)
-	return mt2 --[[:! string | nil]]
+	return mt2
 end
 
 return M

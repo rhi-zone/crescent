@@ -12,7 +12,7 @@ local chacha  = require("lib.chacha20")
 -- Helper: hex string -> binary string
 -- ---------------------------------------------------------------------------
 local function from_hex(h)
-  return (h:gsub("%x%x", function(c) return string.char(tonumber(c, 16)) end))
+  return (h:gsub("%x%x", function(c) return string.char(tonumber(c, 16) or 0) end))
 end
 
 -- Helper: binary string -> hex string

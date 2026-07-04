@@ -25,7 +25,7 @@ local mod = {}
 
 local json_parse
 
---: (string, integer | nil) -> unknown
+--: (string, integer | nil) -> (string | nil, string | nil)
 mod.mimetype = function (buffer, pos)
 	if #buffer == 0 then return end
 	pos = pos or 1
@@ -61,6 +61,7 @@ mod.mimetype = function (buffer, pos)
 	local get_u64_le = function (pos_)
 		return bit.bor(get_u32_le(pos_), bit.lshift(0ULL + get_u32_le(pos_ + 4), 32))
 	end
+	--: (string) -> string
 	local trim = function (s) return s:match("%S.*%S") or s:match("%S") or "" end
 	--: (string, string, integer | nil) -> boolean
 	local _check = function (buffer_, header, offset)
@@ -195,6 +196,7 @@ mod.mimetype = function (buffer, pos)
 	if check("ftyp", 4) and bit.band(buffer:byte(pos + 7) or 0, 0x60) ~= 0x00 then
 		local brand_raw = (buffer:sub(pos + 8, pos + 11):gsub("%z+", ""))
 		local brand_major = trim(brand_raw)
+		--: { [string]: { [integer]: string } }
 		local lookup = {
 			avif = { "avif", "image/avif" },
 			avis = { "avif", "image/avif" },
@@ -472,6 +474,7 @@ mod.mimetype = function (buffer, pos)
 	if check_mask("\x7e\x10\x04\x000MIE", 0, "\xff\xf7\xff\0\xff\xff\xff\xff") then return "mie", "application/x-mie" end
 	if check("\x27\x0a\0\0\0\0\0\0\0\0\0\0", 2) then return "shp", "application/x-esri-shape" end
 	if check("\0\0\0\x0c\x6a\x50\x20\x20\x0d\x0a\x87\x0a") then
+		--: { [string]: { [integer]: string } }
 		local lookup = {
 			jp2 = { "jp2", "image/jp2" }, jpx = { "jpx", "image/jpx" }, jpm = { "jpm", "image/jpm" }, mjp2 = { "mj2", "image/mj2" },
 		}

@@ -253,7 +253,7 @@ local function parse_blocks(lines)
   local n = #lines
 
   while i <= n do
-    local line = lines[i]
+    local line = lines[i] or ""
 
     -- Blank line
     if is_blank(line) then

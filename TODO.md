@@ -150,15 +150,22 @@ Op-sem parity must hold at every commit. After the handler deletion, the adversa
   multiple prior "tiny clean core" versions never proved themselves; the
   clean core is the easy part, and cleanliness of the core ≠ viability.
 - **Banked findings possibly worth acting on regardless of any typechecker
-  decision.** Real bugs v9 surfaced in the tree that deserve ordinary
-  fixes/bug-reports: keyring:778 and http/server_ws:56 (resolved as
-  annotation-visible but were real), linux/proc:157 EOF nil-crash,
-  markdown:263 and ini:59 nil-receiver string methods, a chacha20-test
-  tonumber-nil, mimetype/by_contents:472 annotation lying about return arity
-  (callers force-cast around it). Two LEGACY-checker bugs also surfaced:
-  mixed named/unnamed `--:` param spelling mis-infers unrelated distant code
-  to `never`; and the forward-declared-local cross-file contamination
-  (tracked in the v9 section below; repro not yet reduced).
+  decision.** FIXED 2026-07-04 (all lib-code items): linux/proc EOF/malformed
+  nil-crash class (unguarded `f:read` into `match`/`gmatch`, plus nil-key
+  writes in meminfo/vmstat/net.dev — meminfo crashed on any /proc/meminfo
+  field missing from `name_to_key`); markdown:263 and ini:59 nil-receiver
+  string methods; chacha20-test tonumber-nil; mimetype/by_contents annotation
+  now tells the truth (`-> (string | nil, string | nil)`), force-casts in
+  mimetype/init.lua dropped, and fixing it exposed a REAL behavior bug: both
+  http/router/static.lua and static_full.lua served the first return (the
+  extension, e.g. "png") as Content-Type instead of the mime string — fixed
+  and verified end-to-end. keyring:778 / server_ws:56 needed no code change
+  (v9 diagnostics that resolved once `T | nil` annotations were read; the
+  code was correct). Still open — two LEGACY-checker bugs (typechecker work,
+  gated by owner direction): mixed named/unnamed `--:` param spelling
+  mis-infers unrelated distant code to `never`; and the
+  forward-declared-local cross-file contamination (tracked in the v9 section
+  below; repro not yet reduced).
 
 ## v9 vertical slice — dynamism-boundary roadmap (2026-07-03)
 

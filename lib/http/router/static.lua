@@ -28,7 +28,8 @@ mod.router = function (base, opts)
 		local ct = mimetype_by_name(req.path)
 		if not ct then
 			mimetype_by_contents = mimetype_by_contents or require("lib.mimetype.by_contents").mimetype
-			ct = mimetype_by_contents(res.body)
+			local _, contents_ct = mimetype_by_contents(res.body)
+			ct = contents_ct
 		end
 		if ct then res.headers["Content-Type"] = { ct } end
 		return true

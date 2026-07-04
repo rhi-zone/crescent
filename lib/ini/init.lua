@@ -23,7 +23,7 @@ end
 
 -- Trim leading and trailing whitespace
 local function trim(s)
-  return s:match("^%s*(.-)%s*$")
+  return s:match("^%s*(.-)%s*$") or ""
 end
 
 -- Coerce a string value to boolean or number if possible
