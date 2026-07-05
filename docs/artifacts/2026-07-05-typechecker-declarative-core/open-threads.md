@@ -48,3 +48,22 @@ certified; the certified formulation is in `declarative-design.md`.
   implementation. What that minimal implementation is remains open (the
   falsifiability audit proposed a lib/json screen prototype growing a
   minimal chase over 5 real bugs + 5 legacy false positives).
+
+## Post-ceiling-survey state (2026-07-05, session end)
+
+- [AUDIT-FINDING, cold judge over 5 anonymous entrants incl. ours]: ours
+  ranked 5/5 against the owner's ceiling mandate ("unlimited short of
+  uncomputable — how to achieve it") — "non-compliant with the mandate"
+  (no completeness story, missing derivation layer) but NOT dominated:
+  sole owner of the claim-provenance layer (mined beliefs, credence
+  grades, fallible annotations, hypothesis/obligation law). Judge's
+  composite spine adopts it as the claim-population component inside a
+  kernel-certified anytime-enumerator architecture (see
+  `research/ceiling-survey/judgment.md`).
+- [OPEN, owner decision]: whether the composite spine becomes the design
+  direction (demoting the pool design from spine to layer), and whether
+  the ceiling mandate is the binding ambition. Neither decided this
+  session.
+- [OPEN, all five entrants]: semantics-reality gap, heap/aliasing,
+  budget-vs-limit gap, certificate extraction cost, surrender-flood
+  economics — unsolved everywhere.

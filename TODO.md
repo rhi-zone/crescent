@@ -4155,3 +4155,5 @@ Open threads from the declarative-core session; details in
 - [ ] The process-killer gap: terminal states / increments / banking absent from all design material — untouched by the session.
 - [ ] Bar negotiability: owner has not ruled on the Dialyzer point (consistency-only keeps lie-findings/behavior-output/never-reject; gives up proven-fine + dominance-over-tsc-truths).
 - [ ] Convergence evidence: LLM-solver-simulation ruled inadmissible (owner-certified); requires human hand-run or a minimal real implementation (proposed: lib/json screen prototype + minimal chase over 10 labeled cases).
+- [ ] Owner decision: does the ceiling-survey composite spine become the design direction (demoting the pool design from spine to layer)? See `docs/artifacts/2026-07-05-typechecker-declarative-core/research/ceiling-survey/judgment.md`.
+- [ ] Owner decision: is the ceiling mandate ("unlimited short of uncomputable") the binding ambition? See `docs/artifacts/2026-07-05-typechecker-declarative-core/research/ceiling-survey/judgment.md`.
