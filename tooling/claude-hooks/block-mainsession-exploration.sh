@@ -135,7 +135,7 @@ fi
 # ── cost-tier enforcement: Agent / Workflow ──────────────────────────────────
 # Cheapest-adequate-model discipline: no silent default to a frontier tier.
 # COST_MSG text matches the marker checked for below ([frontier-approved]).
-COST_MSG="Name the tier: cheapest adequate model (haiku for mechanical/extraction, sonnet for scripted implementation). Opus needs an attestation tag; fable needs user-approved cost ([frontier-approved])."
+COST_MSG="Name the tier: cheapest adequate model (haiku for mechanical/extraction, sonnet for scripted implementation). Opus requires the literal tag [i swear this needs opus reasoning] in the prompt; fable requires user-approved cost plus [frontier-approved]."
 
 if [[ "$tool_name" == "Agent" ]]; then
     model_val=$(printf '%s' "$rest" | awk -v field="model" -f "$dir/lib/extract-field.awk")
