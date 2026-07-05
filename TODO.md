@@ -4143,3 +4143,15 @@ Backlog from the foundations session captured in `docs/foundations/pedagogy-and-
 - [ ] Build checker #2: pick the next property-question (candidates: table shapes, integer/float) and write its standalone checker.
 - [ ] Land the deferred sub-checkers from checker #1: integer/float distinction, table shapes, literal refinement, generics, intersections, match types, multi-return.
 - [ ] Finish flattening `lib/check_kind` — the refactor into per-node-kind handler functions over an explicit `ctx` is mid-done but `ctx` has no explicit type annotation, so the checker can't unify its shape across handler call sites and emits ~26 typecheck errors; add an explicit `ctx` type, re-verify tests + typecheck, then integrate.
+
+## typechecker declarative core (2026-07-05)
+
+Open threads from the declarative-core session; details in
+`docs/artifacts/2026-07-05-typechecker-declarative-core/open-threads.md`.
+
+- [ ] H1: define the middle derivation layer (undecided undefinable without it; ◇-refutation witness object undefined) — shelf: Cousot calculational AI, 3-valued/abstract model checking, O'Hearn incorrectness logic.
+- [ ] Uniformity class: re-derive whether the 2-safety framing is correct (owner's standing "seems wrong" objection); single-trace claim grammar cannot express it (H4).
+- [ ] Write the mined-beliefs presupposition catalog ("form F presupposes φ") — H5; only two examples exist.
+- [ ] The process-killer gap: terminal states / increments / banking absent from all design material — untouched by the session.
+- [ ] Bar negotiability: owner has not ruled on the Dialyzer point (consistency-only keeps lie-findings/behavior-output/never-reject; gives up proven-fine + dominance-over-tsc-truths).
+- [ ] Convergence evidence: LLM-solver-simulation ruled inadmissible (owner-certified); requires human hand-run or a minimal real implementation (proposed: lib/json screen prototype + minimal chase over 10 labeled cases).
