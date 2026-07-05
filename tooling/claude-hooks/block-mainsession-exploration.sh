@@ -139,6 +139,13 @@ COST_MSG="Name the tier: cheapest adequate model (haiku for mechanical/extractio
 
 if [[ "$tool_name" == "Agent" ]]; then
     model_val=$(printf '%s' "$rest" | awk -v field="model" -f "$dir/lib/extract-field.awk")
+    type_val=$(printf '%s' "$rest" | awk -v field="subagent_type" -f "$dir/lib/extract-field.awk")
+
+    # no anonymous Agent() spawns: name the agent type explicitly so the
+    # intended custom definition (e.g. general-purpose) governs the subagent.
+    if [[ -z "$type_val" ]]; then
+        deny "$tool_name" "Name the agent type: pass subagent_type explicitly (e.g. general-purpose) — anonymous Agent() spawns fall through to the default definition."
+    fi
 
     if [[ -z "$model_val" ]]; then
         deny "$tool_name" "$COST_MSG"
