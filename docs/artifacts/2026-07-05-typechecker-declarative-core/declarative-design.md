@@ -76,3 +76,23 @@ credence scale with no source special-cased. The draft retains value for its
 J1–J5 judgment-form skeleton (execution, trace satisfaction, modal
 satisfaction, provenance/generation, finding validity) and its five holes
 H1–H5, all of which remain open (see `open-threads.md`).
+
+## Grade axis: operationally inert (2026-07-05, post-checkpoint-1)
+
+[OWNER-STATED, verbatim]: the grade axis is "also meaningless for the
+implementation imo"; grades are credence, not importance — annotations
+"aren't 'less important' just 'less blessed as 100% true'" and must not be
+special-cased.
+
+[ORCHESTRATOR-DERIVATION, uncertified]: checking machinery never branches on
+grade; grade appears only in (1) finding strength (sort key on output — a
+reporting-layer concern) and (2) Γ/hypothesis-admission policy, where the
+hypothesis-survives-as-obligation law already guarantees soundness
+grade-independently. Hence: core semantics = claims + consistency + role law
++ verdict semantics; grade lives entirely in the reporting layer.
+Consequence: the "no literature precedent for graded constraints" concern
+(research/ notes) is defused if grades are metadata, not machinery — but note
+the typestate sweep found Kremenek et al. OSDI 2006 (factor graph fusing
+graded evidence, annotations as high-weight nodes) and the Datalog sweep
+found Flix lattice-valued facts as a shipping mechanism, so precedent exists
+either way.
