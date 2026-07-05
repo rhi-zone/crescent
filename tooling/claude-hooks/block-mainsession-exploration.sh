@@ -135,7 +135,7 @@ fi
 # ── cost-tier enforcement: Agent / Workflow ──────────────────────────────────
 # Cheapest-adequate-model discipline: no silent default to a frontier tier.
 # COST_MSG text matches the marker checked for below ([frontier-approved]).
-COST_MSG="Name the tier: cheapest adequate model (haiku for mechanical/extraction, sonnet for scripted implementation). Frontier tiers require user-approved cost: add model plus [frontier-approved] in the prompt after the user approves a cost estimate."
+COST_MSG="Name the tier: cheapest adequate model (haiku for mechanical/extraction, sonnet for scripted implementation). Opus needs an attestation tag; fable needs user-approved cost ([frontier-approved])."
 
 if [[ "$tool_name" == "Agent" ]]; then
     model_val=$(printf '%s' "$rest" | awk -v field="model" -f "$dir/lib/extract-field.awk")
@@ -151,9 +151,15 @@ if [[ "$tool_name" == "Agent" ]]; then
         deny "$tool_name" "$COST_MSG"
     fi
 
-    if [[ "$model_val" == "fable" || "$model_val" == "opus" ]]; then
+    # substring match: full ids (claude-opus-4-8) count as their tier too.
+    if [[ "$model_val" == *fable* ]]; then
         if ! printf '%s' "$rest" | grep -qF '[frontier-approved]'; then
-            deny "$tool_name" "$COST_MSG"
+            deny "$tool_name" "Fable requires user-approved cost: add [frontier-approved] to the prompt after the user approves a cost estimate."
+        fi
+    elif [[ "$model_val" == *opus* ]]; then
+        # opus is self-serviceable but masked: attest, don't default.
+        if ! printf '%s' "$rest" | grep -qF '[i swear this needs opus reasoning]'; then
+            deny "$tool_name" "Opus does not require user approval, but it must be attested: add [i swear this needs opus reasoning] to the prompt if it genuinely does."
         fi
     fi
 fi
