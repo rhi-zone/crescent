@@ -4161,6 +4161,7 @@ Open threads from the declarative-core session; details in
 - [ ] Owner decision: is the ceiling mandate ("unlimited short of uncomputable") the binding ambition? See `docs/artifacts/2026-07-05-typechecker-declarative-core/research/ceiling-survey/judgment.md`.
   2026-07-06 owner call: provisionally executing the entire composite (FP spine + all layers, pool demoted to claim-harvester) 'in some order or another'. Both items stay open — the wall execution hits is the evidence that closes them. No permanent spine/ceiling commitment made.
 - [ ] Session-process context recorded nowhere durable except here: the previous session's owner stated preferences for frequent owner checkpoints with a bias toward stopping; that research must be problem-anchored, not incumbent-design-anchored (that session was corrected twice on this); that LLM hand-simulation of unimplemented machinery is not admissible evidence (also in open-threads.md); and that design work is currently quarantined from the bars ("bars irrelevant FOR NOW" — owner's words).
+- [ ] owner: certify/reject abstract-kernel synthesis deltas (docs/artifacts/2026-07-05-typechecker-declarative-core/design-pass-abstract-kernel/synthesis.md)
 
 ## persona-prompt iteration (2026-07-05)
 
