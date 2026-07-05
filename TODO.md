@@ -166,6 +166,14 @@ Op-sem parity must hold at every commit. After the handler deletion, the adversa
   mis-infers unrelated distant code to `never`; and the
   forward-declared-local cross-file contamination (tracked in the v9 section
   below; repro not yet reduced).
+- **Semantics-linter thread (2026-07-05, owner-driven).** Definition + architecture
+  conversation state in `docs/semantics-linter-working-notes.md` (NOTHING greenlit;
+  one OPEN owner objection — "seems wrong" on the hyperproperty framing — must be
+  re-derived before anything is built on it). Session postmortem (why sessions run
+  long; how ad-hocness enters — at contact) in
+  `docs/postmortem-agentic-sessions-2026-07.md`, primary-source line refs included.
+  Identified-not-started: tier-1 structural uniformity rule + tier-2 renaming
+  property tests as standalone pre-commit antibodies predating the linter.
 - [ ] **23 test files fail on master (pre-existing; CI red).** Discovered
   2026-07-04 while verifying the banked fixes. Until then the full suite
   never finished at all: calendar_test hung forever (recur `until` limit
