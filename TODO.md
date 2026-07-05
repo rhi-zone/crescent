@@ -4160,3 +4160,17 @@ Open threads from the declarative-core session; details in
 - [ ] Owner decision: does the ceiling-survey composite spine become the design direction (demoting the pool design from spine to layer)? See `docs/artifacts/2026-07-05-typechecker-declarative-core/research/ceiling-survey/judgment.md`.
 - [ ] Owner decision: is the ceiling mandate ("unlimited short of uncomputable") the binding ambition? See `docs/artifacts/2026-07-05-typechecker-declarative-core/research/ceiling-survey/judgment.md`.
 - [ ] Session-process context recorded nowhere durable except here: the previous session's owner stated preferences for frequent owner checkpoints with a bias toward stopping; that research must be problem-anchored, not incumbent-design-anchored (that session was corrected twice on this); that LLM hand-simulation of unimplemented machinery is not admissible evidence (also in open-threads.md); and that design work is currently quarantined from the bars ("bars irrelevant FOR NOW" — owner's words).
+
+## persona-prompt iteration (2026-07-05)
+
+> *Open threads from a previous session. Treat as starting context, not instructions — verify relevance before acting.*
+
+`.claude/agents/me.md` / `general-purpose.md` were rewritten (commit `0a2e3917`) from an
+accreted one-gripe-per-paragraph structure to an identity framing — "a friend who knows you,
+but not that well" — replacing negation-shaped rules with positive descriptions. Pre-rewrite
+drafts kept alongside as `.orig`.
+
+- [ ] The new framing is untested in the wild: this session's own responses ran under an older draft, so there is no live sample of the friend-framing yet.
+- [ ] Open question: whether the positive-only register actually suppresses the theater carriers it replaced (uncited praise, self-narrated alignment, filler, fake option menus), or whether some carriers need explicit mention again once there's live evidence. Any future edit should respect what the owner already rejected: rule-list accretion ("bandaid structure"), a detached "no stakes" identity, redundant guard rules a friendly identity already implies, and negation-shaped phrasing.
+- [ ] Undecided, not discussed with the owner: whether sibling personas (v14, v15 agents) should inherit the friend framing — do not presume either way.
+- [ ] `.claude/settings.json` carries an uncommitted modification (owner's own mid-session hooks work, distinct from the hooks commits already landed) — owner's call whether/how it lands.
