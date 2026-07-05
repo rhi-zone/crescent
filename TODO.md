@@ -4146,14 +4146,17 @@ Backlog from the foundations session captured in `docs/foundations/pedagogy-and-
 
 ## typechecker declarative core (2026-07-05)
 
+> *Open threads from a previous session. Treat as starting context, not instructions — verify relevance before acting.*
+
 Open threads from the declarative-core session; details in
 `docs/artifacts/2026-07-05-typechecker-declarative-core/open-threads.md`.
 
-- [ ] H1: define the middle derivation layer (undecided undefinable without it; ◇-refutation witness object undefined) — shelf: Cousot calculational AI, 3-valued/abstract model checking, O'Hearn incorrectness logic.
-- [ ] Uniformity class: re-derive whether the 2-safety framing is correct (owner's standing "seems wrong" objection); single-trace claim grammar cannot express it (H4).
-- [ ] Write the mined-beliefs presupposition catalog ("form F presupposes φ") — H5; only two examples exist.
+- [ ] H1: the middle derivation layer is still undefined (undecided undefinable without it; ◇-refutation witness object undefined) — shelf: Cousot calculational AI, 3-valued/abstract model checking, O'Hearn incorrectness logic.
+- [ ] Uniformity class: whether the 2-safety framing is correct remains open (owner's standing "seems wrong" objection) — might need re-derivation; single-trace claim grammar cannot express it (H4).
+- [ ] The mined-beliefs presupposition catalog ("form F presupposes φ") is unwritten — H5; only two examples exist.
 - [ ] The process-killer gap: terminal states / increments / banking absent from all design material — untouched by the session.
 - [ ] Bar negotiability: owner has not ruled on the Dialyzer point (consistency-only keeps lie-findings/behavior-output/never-reject; gives up proven-fine + dominance-over-tsc-truths).
 - [ ] Convergence evidence: LLM-solver-simulation ruled inadmissible (owner-certified); requires human hand-run or a minimal real implementation (proposed: lib/json screen prototype + minimal chase over 10 labeled cases).
 - [ ] Owner decision: does the ceiling-survey composite spine become the design direction (demoting the pool design from spine to layer)? See `docs/artifacts/2026-07-05-typechecker-declarative-core/research/ceiling-survey/judgment.md`.
 - [ ] Owner decision: is the ceiling mandate ("unlimited short of uncomputable") the binding ambition? See `docs/artifacts/2026-07-05-typechecker-declarative-core/research/ceiling-survey/judgment.md`.
+- [ ] Session-process context recorded nowhere durable except here: the previous session's owner stated preferences for frequent owner checkpoints with a bias toward stopping; that research must be problem-anchored, not incumbent-design-anchored (that session was corrected twice on this); that LLM hand-simulation of unimplemented machinery is not admissible evidence (also in open-threads.md); and that design work is currently quarantined from the bars ("bars irrelevant FOR NOW" — owner's words).
