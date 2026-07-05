@@ -69,6 +69,7 @@ local M = {}
 --::   key: string,
 --::   claims: ClaimList,
 --::   verdict: unknown,
+--::   reason: string,
 --:: }
 
 --:: CheckResult = { [string]: CheckEntry, ... }
@@ -140,25 +141,20 @@ function M.check(claims)
 		local n_provenances = count_keys(provenances)
 
 		local verdict
+		local reason = "" --: string
 		if n_schemas > 1 then
 			-- Two-or-more independent sources assert INCOMPATIBLE
 			-- propositions for the same site/slot/stratum/modal. Real
 			-- finding or harvester bug -- the trace names both so a human
 			-- can tell which.
-			verdict = kernel.refuted({
-				reason = "conflicting schema_key across independent claim sources for the same topic (site+slot+stratum+modal)",
-				key = key,
-				claims = g,
-			})
+			reason = "conflicting schema_key across independent claim sources for the same topic (site+slot+stratum+modal)"
+			verdict = kernel.refuted({ reason = reason, key = key, claims = g })
 		elseif n_provenances >= 2 then
 			-- The hypothesis was independently re-derived by a second
 			-- source and it agrees: the obligation-side check the law
 			-- requires has been performed and it survived.
-			verdict = kernel.proved({
-				reason = "claim topic independently re-derived by >=2 distinct provenances with agreeing schema_key",
-				key = key,
-				claims = g,
-			})
+			reason = "claim topic independently re-derived by >=2 distinct provenances with agreeing schema_key"
+			verdict = kernel.proved({ reason = reason, key = key, claims = g })
 		else
 			-- Exactly one provenance produced this claim.key: there is no
 			-- second, independent obligation-side derivation to check the
@@ -167,17 +163,20 @@ function M.check(claims)
 			-- solver machinery. Do NOT hardcode a decision here to reduce
 			-- this count -- an Open flood at this substrate layer is
 			-- data, not failure.
-			verdict = kernel.open({
-				reason = "no independent obligation-side re-derivation available for this claim "
-					.. "(exactly one generation source produced it); this is Hole H1 -- "
-					.. "the missing middle derivation layer between the semantics and solver "
-					.. "machinery, open-threads.md -- not a decision this check law can make",
-				key = key,
-				claims = g,
-			})
+			reason = "no independent obligation-side re-derivation available for this claim "
+				.. "(exactly one generation source produced it); this is Hole H1 -- "
+				.. "the missing middle derivation layer between the semantics and solver "
+				.. "machinery, open-threads.md -- not a decision this check law can make"
+			verdict = kernel.open({ reason = reason, key = key, claims = g })
 		end
 
-		result[key] = { key = key, claims = g, verdict = verdict }
+		-- `reason` is also exposed as a plain string field on CheckEntry
+		-- (not just buried inside the kernel verdict's opaque payload) so
+		-- callers can read WHY without narrowing `unknown` -- kernel.lua's
+		-- cert/trace/receipt accessors remain the only way to get the full
+		-- payload back out of a Verdict, per the kernel's trust boundary;
+		-- this is a convenience duplicate of one field, not a bypass of it.
+		result[key] = { key = key, claims = g, verdict = verdict, reason = reason }
 	end
 
 	return result
