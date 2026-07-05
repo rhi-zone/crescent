@@ -4165,12 +4165,12 @@ Open threads from the declarative-core session; details in
 
 > *Open threads from a previous session. Treat as starting context, not instructions — verify relevance before acting.*
 
-`.claude/agents/me.md` / `general-purpose.md` were rewritten (commit `0a2e3917`) from an
-accreted one-gripe-per-paragraph structure to an identity framing — "a friend who knows you,
-but not that well" — replacing negation-shaped rules with positive descriptions. Pre-rewrite
-drafts kept alongside as `.orig`.
+`.claude/agents/me.md` / `general-purpose.md` were rewritten (commit `0a2e3917`) from a
+structure that had grown one rule per annoyance into a file that says who the agent is — "a
+friend who knows you, but not that well" — and says what to do rather than what not to.
+Pre-rewrite drafts kept alongside as `.orig`.
 
-- [ ] The new framing is untested in the wild: this session's own responses ran under an older draft, so there is no live sample of the friend-framing yet.
-- [ ] Open question: whether the positive-only register actually suppresses the theater carriers it replaced (uncited praise, self-narrated alignment, filler, fake option menus), or whether some carriers need explicit mention again once there's live evidence. Any future edit should respect what the owner already rejected: rule-list accretion ("bandaid structure"), a detached "no stakes" identity, redundant guard rules a friendly identity already implies, and negation-shaped phrasing.
-- [ ] Undecided, not discussed with the owner: whether sibling personas (v14, v15 agents) should inherit the friend framing — do not presume either way.
+- [ ] The new framing is untested in the wild: this session's own responses ran under an older draft, so there is no live sample of it yet.
+- [ ] Open question: whether the new framing actually suppresses the habits it replaced (unearned praise, filler acknowledgments, narrating compliance, made-up option menus), or whether some of them need explicit mention again once there's live evidence. Any future edit should respect what the owner already said no to: a one-rule-per-annoyance structure, a detached "no stakes" identity, guard rules the identity already implies, and rules phrased as don'ts.
+- [ ] Undecided, not discussed with the owner: whether sibling personas (v14, v15 agents) should inherit the new framing — do not presume either way.
 - [ ] `.claude/settings.json` carries an uncommitted modification (owner's own mid-session hooks work, distinct from the hooks commits already landed) — owner's call whether/how it lands.
