@@ -4159,6 +4159,7 @@ Open threads from the declarative-core session; details in
 - [ ] Convergence evidence: LLM-solver-simulation ruled inadmissible (owner-certified); requires human hand-run or a minimal real implementation (proposed: lib/json screen prototype + minimal chase over 10 labeled cases).
 - [ ] Owner decision: does the ceiling-survey composite spine become the design direction (demoting the pool design from spine to layer)? See `docs/artifacts/2026-07-05-typechecker-declarative-core/research/ceiling-survey/judgment.md`.
 - [ ] Owner decision: is the ceiling mandate ("unlimited short of uncomputable") the binding ambition? See `docs/artifacts/2026-07-05-typechecker-declarative-core/research/ceiling-survey/judgment.md`.
+  2026-07-06 owner call: provisionally executing the entire composite (FP spine + all layers, pool demoted to claim-harvester) 'in some order or another'. Both items stay open — the wall execution hits is the evidence that closes them. No permanent spine/ceiling commitment made.
 - [ ] Session-process context recorded nowhere durable except here: the previous session's owner stated preferences for frequent owner checkpoints with a bias toward stopping; that research must be problem-anchored, not incumbent-design-anchored (that session was corrected twice on this); that LLM hand-simulation of unimplemented machinery is not admissible evidence (also in open-threads.md); and that design work is currently quarantined from the bars ("bars irrelevant FOR NOW" — owner's words).
 
 ## persona-prompt iteration (2026-07-05)
