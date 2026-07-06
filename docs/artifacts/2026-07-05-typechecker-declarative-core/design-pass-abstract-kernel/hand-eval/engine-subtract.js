@@ -27,6 +27,16 @@ window.runSubtractEngine = function (scenario) {
   let stepNo = 0;
   function snap(description, state, verdict, spans) {
     stepNo += 1;
+    // Strip any top-level key on `state` whose value is JS `undefined`
+    // (e.g. a conditional `note` that resolved to no note) -- an explicit
+    // undefined value is the same disease as a missing `id` field: it
+    // surfaces as the literal string "undefined" wherever a generic
+    // renderer reads it. Source-level fix, not a display-time fallback.
+    if (state && typeof state === "object") {
+      for (const k in state) {
+        if (Object.prototype.hasOwnProperty.call(state, k) && state[k] === undefined) delete state[k];
+      }
+    }
     const s = { step: stepNo, description: description, state: state };
     if (verdict) s.verdict = verdict;
     if (spans) s.spans = spans;
@@ -107,17 +117,21 @@ window.runSubtractEngine = function (scenario) {
     return st;
   }
 
-  // --- the "colon-self-nonnil-v1" rule, verbatim in spirit --------------
-  // subtract.md §2.2: `check = function(premises, target) return
-  // def.form == "colon" and def.receiver_param == target.expr and
-  // target.claim == "non-nil" end`. It never reads anything about call
-  // sites -- that IS the bug this rule reproduces.
+  // --- the "colon-self-nonnil-v1" rule -----------------------------------
+  // PLACEMENT (see scenarios.js header): the rule's actual entailment
+  // logic is PRODUCER content, defined once in producers.js and re-fired
+  // here exactly like every other producer rule this kernel re-executes.
+  // subtract.md §2.2's own bug (definition-site-only, never inspects call
+  // sites) lives in producers.js's colon-self-nonnil-v1.entails, not here.
+  function findProducerRule(id) {
+    return (window.PRODUCER_RULES || []).filter((r) => r.id === id)[0];
+  }
   function colonSelfNonnilV1Check(premises, target) {
-    const def = premises[0];
-    return def.form === "colon" && def.receiver_param === target.expr && target.claim === "non-nil";
+    const rule = findProducerRule("colon-self-nonnil-v1");
+    return rule ? rule.entails(premises[0], target) === "supports" : false;
   }
 
-  function runColonSelfShape(fileName, derefName, funcName, defForm, defLine, useLine, receiverParam, schema, hasCounterexample, defSpan, useSpan) {
+  function runColonSelfShape(fileName, derefName, funcName, defForm, defLine, useLine, receiverParam, claim, hasCounterexample, defSpan, useSpan) {
     const defId = admit(
       { form: defForm, def_line: defLine, receiver_param: receiverParam, kind: "def-form", file: fileName },
       "mined"
@@ -129,7 +143,7 @@ window.runSubtractEngine = function (scenario) {
       defSpan ? [spanOf(fileName, defSpan)] : undefined
     );
     const derefId = admit(
-      { expr: derefName, claim: schema, kind: "presupposition", file: fileName, line: useLine },
+      { expr: derefName, subject: claim.subject, unionArms: claim.unionArms, claimedArms: claim.claimedArms, kind: "presupposition", file: fileName, line: useLine },
       "mined"
     );
     snap(
@@ -177,7 +191,7 @@ window.runSubtractEngine = function (scenario) {
 
   if (f.shape === "colon_self_nonnil") {
     runColonSelfShape(
-      f.file, f.derefName, f.funcName, f.defForm, f.defLine, f.useLine, f.receiverParam, f.schema,
+      f.file, f.derefName, f.funcName, f.defForm, f.defLine, f.useLine, f.receiverParam, f.claim,
       f.calledOnlyViaColon === false, f.defSpan, f.useSpan
     );
   } else if (f.shape === "colon_self_nonnil_multi") {
@@ -204,7 +218,7 @@ window.runSubtractEngine = function (scenario) {
     let lastVerdict = "Open";
     f.useLines.forEach((useLine, idx) => {
       const derefId = admit(
-        { expr: f.derefName, claim: f.schema, kind: "presupposition", file: f.file, line: useLine },
+        { expr: f.derefName, subject: f.claim.subject, unionArms: f.claim.unionArms, claimedArms: f.claim.claimedArms, kind: "presupposition", file: f.file, line: useLine },
         "mined"
       );
       submit("colon-self-nonnil-v1", colonSelfNonnilV1Check, [defId], derefId, "supports");
@@ -237,7 +251,7 @@ window.runSubtractEngine = function (scenario) {
       f.assignSpan ? [spanOf(f.file, f.assignSpan)] : undefined
     );
     const derefId = admit(
-      { expr: f.name, claim: f.schema, kind: "presupposition", file: f.file, line: f.useLine },
+      { expr: f.name, subject: f.claim.subject, unionArms: f.claim.unionArms, claimedArms: f.claim.claimedArms, kind: "presupposition", file: f.file, line: f.useLine },
       "mined"
     );
     snap(
@@ -250,9 +264,11 @@ window.runSubtractEngine = function (scenario) {
     submit("assign-fact-read-from-parse-v1", () => true, [], assignId, "supports");
     snap("submit axiom edge for the assignment fact (zero premises)", graphState());
 
+    // PLACEMENT: never-reassigned-nonnil's entailment logic is producer
+    // content (producers.js), re-fired here like colon-self-nonnil-v1 above.
     function neverReassignedNonnilCheck(premises, target) {
-      const def = premises[0];
-      return def.assignment_count === 1 && def.initial_value_kind === "table" && def.name === target.expr;
+      const rule = findProducerRule("never-reassigned-nonnil");
+      return rule ? rule.entails(premises[0], target) === "supports" : false;
     }
     submit("never-reassigned-nonnil", neverReassignedNonnilCheck, [assignId], derefId, "supports");
     const gapNote = note("gap");
@@ -266,7 +282,7 @@ window.runSubtractEngine = function (scenario) {
     const finalVerdict = verdicts[derefId] === "proved" ? "Proved" : "Open";
     snap("close(pool) — verdict = " + finalVerdict, graphState(), finalVerdict, f.useSpan ? [spanOf(f.file, f.useSpan)] : undefined);
   } else if (f.shape === "branch_reachable") {
-    admit({ kind: "presupposition", claim: f.schema, file: f.file, line: f.line, branch: f.branch }, "mined");
+    admit({ kind: "presupposition", subject: f.claim.subject, file: f.file, line: f.line, branch: f.branch }, "mined");
     snap(
       "admit(pool, branch reachability presupposition) — no producer registered a rule for it",
       graphState(),
@@ -286,9 +302,14 @@ window.runSubtractEngine = function (scenario) {
     // another's, because there is no shared "canonical representative" two
     // distinct ids could ever be folded into.
     const a = f.factA, b = f.factB;
-    const rA = runColonSelfShape(a.file, "self", a.funcName, a.defForm, a.defLine, a.useLine, "self", "non-nil",
+    // factA/factB don't carry their own claim object (see scenarios.js) --
+    // same arm-set shape as corpus-1 (Cache receiver) and corpus-4 (Deque
+    // receiver) respectively, since these are the same two real call sites.
+    const claimA = { subject: "self", unionArms: ["Cache", "nil"], claimedArms: ["Cache"] };
+    const claimB = { subject: "self", unionArms: ["Deque", "nil"], claimedArms: ["Deque"] };
+    const rA = runColonSelfShape(a.file, "self", a.funcName, a.defForm, a.defLine, a.useLine, "self", claimA,
       a.calledOnlyViaColon === false, a.defSpan, a.useSpan);
-    const rB = runColonSelfShape(b.file, "self", b.funcName, b.defForm, b.defLine, (b.useLines && b.useLines[0]), "self", "non-nil",
+    const rB = runColonSelfShape(b.file, "self", b.funcName, b.defForm, b.defLine, (b.useLines && b.useLines[0]), "self", claimB,
       b.calledOnlyViaColon === false, b.defSpan, b.useSpans && b.useSpans[0]);
     const contrastNote = note("contrast");
     snap(
@@ -296,6 +317,64 @@ window.runSubtractEngine = function (scenario) {
       graphState(contrastNote ? contrastNote.text + " [" + contrastNote.citesFinding + "]" : undefined),
       "A=" + rA.finalVerdict + ", B=" + rB.finalVerdict + " (no amplification)"
     );
+  } else if (f.shape === "hand_claims") {
+    // Generic claim-kind shape (see scenarios.js header): a claim asserts
+    // subject ∈ claimedArms; evidence.establishesArms is the arm subset the
+    // evidence structurally establishes (null = establishes nothing usable).
+    // PLACEMENT: the arm-subset entailment rule itself is PRODUCER content
+    // (producers.js), not kernel content -- this engine's kernel loop
+    // (admit/submit/close) re-executes whatever producers.js's rule.entails
+    // returns, exactly like it re-executes colonSelfNonnilV1Check above.
+    const armsRule = (window.PRODUCER_RULES || []).filter((r) => r.id === "arm-subset-entailment-v1")[0];
+    function armsCoverCheck(premises, target) {
+      return armsRule ? armsRule.entails(premises[0], target) === "supports" : false;
+    }
+    const results = [];
+    f.claims.forEach((claim) => {
+      const evId = admit(
+        { kind: "evidence", evidence_kind: claim.evidence.kind, establishesArms: claim.evidence.establishesArms, subject: claim.subject },
+        "hand"
+      );
+      snap(
+        "admit(pool, evidence payload, kind=" + claim.evidence.kind + ") for " + claim.subject,
+        graphState(),
+        undefined,
+        claim.evidence.span ? [spanOf(f.file, claim.evidence.span)] : undefined
+      );
+      const claimId = admit(
+        { kind: "claim", subject: claim.subject, unionArms: claim.unionArms, claimedArms: claim.claimedArms },
+        "hand"
+      );
+      snap(
+        "admit(pool, claim payload) for " + claim.subject + " -- claims arms=" + JSON.stringify(claim.claimedArms) + " ⊆ union=" + JSON.stringify(claim.unionArms),
+        graphState(),
+        undefined,
+        claim.site ? [spanOf(f.file, claim.site)] : undefined
+      );
+      // Zero-premise axiom edge for the evidence fact itself (same
+      // convention as runColonSelfShape's def-form-read-from-parse-v1):
+      // close()'s fixpoint only promotes a target once every premise id is
+      // itself "proved", so the evidence pool entry needs its own
+      // zero-premise edge before arms-cover-v1 can ever fire.
+      submit("evidence-read-from-parse-v1", () => true, [], evId, "supports");
+      submit("arms-cover-v1", armsCoverCheck, [evId], claimId, "supports");
+      snap(
+        "submit(pool, arms-cover-v1, premises={" + evId + "}, target=" + claimId + ", supports) — producers.js's arm-subset-entailment-v1.entails(evidence, claim)",
+        graphState(),
+        undefined,
+        claim.site ? [spanOf(f.file, claim.site)] : undefined
+      );
+      const verdicts = close();
+      const v = verdicts[claimId] === "proved" ? "Proved" : "Open";
+      results.push(claim.id + "=" + v);
+      snap(
+        "close(pool) — verdict for " + claim.subject + " = " + v,
+        graphState(),
+        v,
+        claim.site ? [spanOf(f.file, claim.site)] : undefined
+      );
+    });
+    snap("All claims evaluated: " + results.join(", "), {}, results.join(", "));
   }
 
   return snaps;

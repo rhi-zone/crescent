@@ -25,6 +25,16 @@ window.runInvertEngine = function (scenario) {
   let stepNo = 0;
   function snap(description, state, verdict, spans) {
     stepNo += 1;
+    // Strip any top-level key on `state` whose value is JS `undefined`
+    // (e.g. a conditional `note` that resolved to no note) -- an explicit
+    // undefined value is the same disease as a missing `id` field: it
+    // surfaces as the literal string "undefined" wherever a generic
+    // renderer reads it. Source-level fix, not a display-time fallback.
+    if (state && typeof state === "object") {
+      for (const k in state) {
+        if (Object.prototype.hasOwnProperty.call(state, k) && state[k] === undefined) delete state[k];
+      }
+    }
     const s = { step: stepNo, description: description, state: state };
     if (verdict) s.verdict = verdict;
     if (spans) s.spans = spans;
@@ -85,13 +95,13 @@ window.runInvertEngine = function (scenario) {
   let result;
   if (f.shape === "colon_self_nonnil") {
     result = runSelfShape(f.funcName, f.file, f.defSpan, f.useSpan);
-    snaps.push({ step: ++stepNo, description: result.description, state: result.state, verdict: result.verdict, spans: f.useSpan ? [spanOf(f.file, f.useSpan)] : undefined });
+    snap(result.description, result.state, result.verdict, f.useSpan ? [spanOf(f.file, f.useSpan)] : undefined);
   } else if (f.shape === "colon_self_nonnil_multi") {
     result = runSelfShape(f.funcName + " (amortized: one universal certificate, 4 site-specific projections)", f.file, f.defSpan, f.useSpans && f.useSpans[0]);
-    snaps.push({ step: ++stepNo, description: result.description, state: result.state, verdict: result.verdict, spans: f.useSpans ? f.useSpans.map((s) => spanOf(f.file, s)) : undefined });
+    snap(result.description, result.state, result.verdict, f.useSpans ? f.useSpans.map((s) => spanOf(f.file, s)) : undefined);
   } else if (f.shape === "single_assign_nonnil") {
     result = runSingleAssignShape(f.name, f.useLine, f.assignSpan, f.useSpan, f.file);
-    snaps.push({ step: ++stepNo, description: result.description, state: result.state, verdict: result.verdict, spans: f.useSpan ? [spanOf(f.file, f.useSpan)] : undefined });
+    snap(result.description, result.state, result.verdict, f.useSpan ? [spanOf(f.file, f.useSpan)] : undefined);
   } else if (f.shape === "branch_reachable") {
     snap(
       "Cheapest move: look for a Witness certificate (a concrete input reaching the site) or its dual (a full unreachability proof). Neither is available in this scenario.",
@@ -104,12 +114,49 @@ window.runInvertEngine = function (scenario) {
     const rA = runSelfShape(a.funcName, a.file, a.defSpan, a.useSpan);
     const rB = runSelfShape(b.funcName, b.file, b.defSpan, b.useSpans && b.useSpans[0]);
     const independentNote = note("independent-underspec");
+    const independentState = {};
+    if (independentNote) independentState.note = independentNote.text + " [" + independentNote.citesFinding + "]";
     snap(
       "invert's pool is a dependency graph over certificate ids, never a rewrite/merge system — no equivalence classes exist to collapse. " +
         a.funcName + " and " + b.funcName + " independently hit the same unconstructible-certificate problem.",
-      { note: independentNote ? independentNote.text + " [" + independentNote.citesFinding + "]" : undefined },
+      independentState,
       "A=Underspecified-stopped, B=Underspecified-stopped (no amplification possible)"
     );
+  } else if (f.shape === "hand_claims") {
+    // Generic claim-kind shape: a Proof certificate is constructible via
+    // const_fold (the claimed arms are read directly off evidence's own
+    // establishesArms set, no induction over traces needed) iff
+    // establishesArms is non-null and covers claimedArms; otherwise no
+    // certificate shape in this design carries "evidence establishes
+    // nothing usable" -- honestly Underspecified, same spirit as the
+    // colon-self shape's own gap. The arm-subset entailment itself is
+    // producers.js content (PLACEMENT, see scenarios.js header) -- this
+    // engine only decides which certificate SHAPE (Proof vs Underspecified)
+    // the entailment result can be carried in.
+    const armsRule = (window.PRODUCER_RULES || []).filter((r) => r.id === "arm-subset-entailment-v1")[0];
+    const results = [];
+    f.claims.forEach((claim) => {
+      const useSpan = claim.site ? spanOf(f.file, claim.site) : undefined;
+      snap(
+        "Claim.holds closure built: function(tr) return arm_of(tr, \"" + claim.subject + "\") in " + JSON.stringify(claim.claimedArms) + " end",
+        { pool: [{ id: "claim:" + claim.id }] },
+        undefined,
+        useSpan ? [useSpan] : undefined
+      );
+      const arms = claim.evidence.establishesArms;
+      const covered = armsRule && armsRule.entails({ establishesArms: arms, subject: claim.subject }, { claimedArms: claim.claimedArms, unionArms: claim.unionArms, subject: claim.subject }) === "supports";
+      let v, desc;
+      if (covered) {
+        desc = "const_fold certificate: evidence.establishesArms=" + JSON.stringify(arms) + " covers claimedArms=" + JSON.stringify(claim.claimedArms) + " directly -- Proof accepted.";
+        v = "Proved";
+      } else {
+        desc = "UNDERSPECIFIED: evidence establishes nothing usable for this claim (establishesArms=" + JSON.stringify(arms) + ") -- no certificate shape carries a bare non-coverage fact.";
+        v = "Underspecified-stopped";
+      }
+      snap(desc, { pool: [{ id: "claim:" + claim.id }], attemptedCertificate: { rule: "const_fold", premises: ["evidence.establishesArms"] } }, v, useSpan ? [useSpan] : undefined);
+      results.push(claim.id + "=" + v);
+    });
+    snap("All claims evaluated: " + results.join(", "), {}, results.join(", "));
   }
 
   return snaps;

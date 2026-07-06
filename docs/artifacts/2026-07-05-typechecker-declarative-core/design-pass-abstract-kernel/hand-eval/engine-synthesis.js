@@ -25,6 +25,16 @@ window.runSynthesisEngine = function (scenario) {
   let stepNo = 0;
   function snap(description, state, verdict, spans) {
     stepNo += 1;
+    // Strip any top-level key on `state` whose value is JS `undefined`
+    // (e.g. a conditional `note` that resolved to no note) -- an explicit
+    // undefined value is the same disease as a missing `id` field: it
+    // surfaces as the literal string "undefined" wherever a generic
+    // renderer reads it. Source-level fix, not a display-time fallback.
+    if (state && typeof state === "object") {
+      for (const k in state) {
+        if (Object.prototype.hasOwnProperty.call(state, k) && state[k] === undefined) delete state[k];
+      }
+    }
     const s = { step: stepNo, description: description, state: state };
     if (verdict) s.verdict = verdict;
     if (spans) s.spans = spans;
@@ -59,7 +69,7 @@ window.runSynthesisEngine = function (scenario) {
     const receiptText = receiptNote
       ? receiptNote.text + " [" + receiptNote.citesFinding + "]" +
         (hasCounterexample ? (" A real counterexample exists here: " + counterexampleCall + ".") : "")
-      : "";
+      : "receipt for " + funcName + ": universal claim, evidence cited = definition-site fact only.";
     return { hasCounterexample: hasCounterexample, receiptNote: receiptText };
   }
 
@@ -72,7 +82,7 @@ window.runSynthesisEngine = function (scenario) {
   } else if (f.shape === "single_assign_nonnil") {
     const pool = [
       { id: "assign", payload: { assignment_count: f.assignmentCount, initial_value_kind: f.assignKind }, provenance: "mined" },
-      { id: "deref", payload: { expr: f.name, claim: f.schema }, provenance: "mined" },
+      { id: "deref", payload: { expr: f.name, subject: f.claim.subject, unionArms: f.claim.unionArms, claimedArms: f.claim.claimedArms }, provenance: "mined" },
     ];
     const narrowingNote = note("narrowing-contingency");
     snap(
@@ -107,6 +117,44 @@ window.runSynthesisEngine = function (scenario) {
       { note: noMergeNote ? noMergeNote.text + " [" + noMergeNote.citesFinding + "]" : undefined },
       "A=False-Proved-flagged (rule-honesty gap, same as always), B=Proved (genuine) — no amplification"
     );
+  } else if (f.shape === "hand_claims") {
+    // Generic claim-kind shape: same Pool/Edge skeleton as subtract's base,
+    // plus synthesis's strength field -- these claims are direct, locally-
+    // grounded evidence (not the universal/existential distinction graft 2
+    // targets), so strength is recorded honestly as "direct-evidence"
+    // rather than forced into "universal". Pure set-inclusion check,
+    // generic over every claim kind.
+    // PLACEMENT: arm-subset entailment is producers.js content, re-executed
+    // by this kernel like any other rule.check.
+    const armsRule = (window.PRODUCER_RULES || []).filter((r) => r.id === "arm-subset-entailment-v1")[0];
+    function armsCoverCheck(ev, target) {
+      return armsRule ? armsRule.entails(ev, target) === "supports" : false;
+    }
+    const results = [];
+    f.claims.forEach((claim) => {
+      const pool = [
+        { id: "ev:" + claim.id, payload: { evidence_kind: claim.evidence.kind, establishesArms: claim.evidence.establishesArms, subject: claim.subject }, provenance: "hand" },
+        { id: "claim:" + claim.id, payload: { subject: claim.subject, unionArms: claim.unionArms, claimedArms: claim.claimedArms }, provenance: "hand" },
+      ];
+      snap(
+        "admit_mined(pool, evidence payload, provenance=hand) and admit_mined(pool, claim payload, provenance=hand) for " + claim.subject,
+        { pool: pool.slice() },
+        undefined,
+        claim.evidence.span ? [spanOf(f.file, claim.evidence.span)] : undefined
+      );
+      const holds = armsCoverCheck(pool[0].payload, pool[1].payload);
+      snap(
+        "submit(pool, arms-cover-v1, premises={ev:" + claim.id + "}, target=claim:" + claim.id + ", strength=\"direct-evidence\") — check() returns " +
+          (holds ? "\"supports\"" : "false") + " (generic set-inclusion: claimedArms ⊆ evidence.establishesArms).",
+        { pool: pool.slice(), edges: holds ? [{ rule: "arms-cover-v1", premises: ["ev:" + claim.id], target: "claim:" + claim.id, polarity: "supports", strength: "direct-evidence" }] : [] },
+        undefined,
+        claim.site ? [spanOf(f.file, claim.site)] : undefined
+      );
+      const v = holds ? "Proved" : "Open";
+      snap("close(pool): claim:" + claim.id + " -> " + (holds ? "proved_claim" : "stays open (no edge admitted)"), { pool: pool.slice() }, v, claim.site ? [spanOf(f.file, claim.site)] : undefined);
+      results.push(claim.id + "=" + v);
+    });
+    snap("All claims evaluated: " + results.join(", "), {}, results.join(", "));
   }
 
   return snaps;

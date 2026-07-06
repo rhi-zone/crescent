@@ -152,14 +152,27 @@
     margin-left: 0.6rem;
     flex: none;
   }
+
+  .prov-badge {
+    display: inline-block;
+    padding: 0.1rem 0.5rem;
+    border-radius: 999px;
+    font-size: 0.72rem;
+    font-weight: 600;
+    border: 1px solid var(--muted);
+    color: var(--muted);
+    margin-left: 0.5rem;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+  }
+  .citation-token {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.78rem;
+    color: var(--accent);
+  }
 </style>
 
 <h1>Kernel candidates — hand-eval stepper</h1>
-<div class="subtitle">
-  Pure replayer over per-engine snapshot arrays. No engine logic lives in this file — each
-  <code>engine-*.js</code> implements its own candidate design's kernel loop, faithfully,
-  flaws included, and returns <code>{ step, description, state, verdict? }</code> snapshots.
-</div>
 
 <div class="controls">
   <div class="control">
@@ -180,7 +193,7 @@
 </div>
 
 <div class="panel">
-  <div class="citation" id="scenario-citation"></div>
+  <span class="citation" id="scenario-citation"></span><span id="scenario-provenance"></span>
 </div>
 
 <div class="split">
@@ -196,21 +209,16 @@
 </div>
 
 <div class="panel">
-  <h2>Final verdict summary — all 7 engines, this scenario</h2>
+  <h2>Verdict summary</h2>
   <div id="summary"></div>
 </div>
-
-<footer>
-  Sources: design-pass-abstract-kernel/candidates/*.md, judgments/*-attack.md,
-  synthesis.md, execution/first-slice-run.md. Built as a docs artifact — plain
-  classic scripts, no framework, no build step, no external resources.
-</footer>
 
 <!-- Classic (non-module) scripts on purpose: `type="module"` can fail under
      file:// CORS restrictions in some browsers. Load order matters: scenarios
      first, then each engine (each attaches one function to `window`), then
      the app logic that ties them together. -->
 <script src="scenarios.js"></script>
+<script src="producers.js"></script>
 <script src="engine-subtract.js"></script>
 <script src="engine-primitive.js"></script>
 <script src="engine-invert.js"></script>
@@ -302,7 +310,7 @@
     if (Array.isArray(state.pool) && state.pool.length) {
       var title = document.createElement("div");
       title.className = "section-title";
-      title.textContent = "Pool / store";
+      title.textContent = "Pool";
       out.appendChild(title);
       var table = document.createElement("table");
       var thead = document.createElement("tr");
@@ -323,7 +331,7 @@
     if (Array.isArray(state.edges) && state.edges.length) {
       var title2 = document.createElement("div");
       title2.className = "section-title";
-      title2.textContent = "Edges / derivations (DAG)";
+      title2.textContent = "Edges";
       out.appendChild(title2);
       out.appendChild(renderDag(state.pool || [], state.edges));
 
@@ -369,11 +377,54 @@
     if (state.note) {
       var noteBox = document.createElement("div");
       noteBox.className = "note-box";
-      noteBox.textContent = state.note;
+      noteBox.appendChild(renderCitedText(state.note));
       out.appendChild(noteBox);
     }
 
     return out;
+  }
+
+  // Every engine's note/description text ends citation-bearing segments in
+  // "... [file.md#anchor--long-slug]". Render those bracket groups as a
+  // short link-style token (file.md#anchor, full anchor kept as a title
+  // tooltip) instead of the long slug reading as a prose sentence. A
+  // bracket group with no ".md" in it (e.g. JSON array text like
+  // ["self","Cache:peek"]) is left untouched -- this only ever recognizes
+  // doc citations, never scenario-keyed.
+  function shortCite(cite) {
+    var hashIdx = cite.indexOf("#");
+    if (hashIdx === -1) return cite; // already short, e.g. "candidates/synthesis.md §1"
+    var file = cite.slice(0, hashIdx);
+    var anchor = cite.slice(hashIdx + 1);
+    var ddIdx = anchor.indexOf("--");
+    var shortAnchor = ddIdx !== -1 ? anchor.slice(0, ddIdx) : anchor.split("-").slice(0, 2).join("-");
+    return file + "#" + shortAnchor;
+  }
+  function renderCitedText(str) {
+    var frag = document.createDocumentFragment();
+    if (typeof str !== "string" || !str) {
+      frag.appendChild(document.createTextNode(str == null ? "" : String(str)));
+      return frag;
+    }
+    var re = /([^\[\]]*)\[([^\]]+)\]/g;
+    var m, lastEnd = 0, any = false;
+    while ((m = re.exec(str))) {
+      any = true;
+      if (m[1]) frag.appendChild(document.createTextNode(m[1]));
+      var cite = m[2];
+      if (cite.indexOf(".md") !== -1) {
+        var tok = document.createElement("span");
+        tok.className = "citation-token";
+        tok.textContent = shortCite(cite);
+        tok.title = cite;
+        frag.appendChild(tok);
+      } else {
+        frag.appendChild(document.createTextNode("[" + cite + "]"));
+      }
+      lastEnd = re.lastIndex;
+    }
+    frag.appendChild(document.createTextNode(str.slice(lastEnd)));
+    return frag;
   }
 
   function escapeHtml(s) {
@@ -667,7 +718,8 @@
     } else {
       currentVerdictEl.innerHTML = "";
     }
-    currentDescriptionEl.textContent = snap.description;
+    currentDescriptionEl.innerHTML = "";
+    currentDescriptionEl.appendChild(renderCitedText(snap.description));
     currentStateEl.innerHTML = "";
     currentStateEl.appendChild(renderState(snap.state));
 
@@ -680,10 +732,30 @@
     highlightSpans(snap.spans, "hl-step");
   }
 
+  var provenanceEl = document.getElementById("scenario-provenance");
+
+  // Bare link-style token for the scenario-level citation: source doc only
+  // (up to the first comma), full string kept as a title tooltip. Not a
+  // per-step judgment citation (see renderCitedText for those) -- this is
+  // the scenario's own top-of-panel source locator.
+  function shortScenarioCitation(cite) {
+    var idx = cite.indexOf(",");
+    return idx === -1 ? cite : cite.slice(0, idx);
+  }
+
   function loadCurrent() {
     var engine = findEngine(engineSelect.value);
     var scenario = findScenario(scenarioSelect.value);
-    scenarioCitationEl.textContent = scenario.citation;
+    scenarioCitationEl.textContent = shortScenarioCitation(scenario.citation);
+    scenarioCitationEl.title = scenario.citation;
+    provenanceEl.innerHTML = "";
+    if (scenario.provenance) {
+      var pb = document.createElement("span");
+      pb.className = "prov-badge";
+      pb.textContent = scenario.provenance;
+      pb.title = "provenance: " + scenario.provenance;
+      provenanceEl.appendChild(pb);
+    }
     try {
       currentSnapshots = engine.run(scenario) || [];
     } catch (err) {

@@ -26,6 +26,16 @@ window.runPrimitiveEngine = function (scenario) {
   let stepNo = 0;
   function snap(description, state, verdict, spans) {
     stepNo += 1;
+    // Strip any top-level key on `state` whose value is JS `undefined`
+    // (e.g. a conditional `note` that resolved to no note) -- an explicit
+    // undefined value is the same disease as a missing `id` field: it
+    // surfaces as the literal string "undefined" wherever a generic
+    // renderer reads it. Source-level fix, not a display-time fallback.
+    if (state && typeof state === "object") {
+      for (const k in state) {
+        if (Object.prototype.hasOwnProperty.call(state, k) && state[k] === undefined) delete state[k];
+      }
+    }
     const s = { step: stepNo, description: description, state: state };
     if (verdict) s.verdict = verdict;
     if (spans) s.spans = spans;
@@ -160,6 +170,42 @@ window.runPrimitiveEngine = function (scenario) {
       { note: independentNote ? independentNote.text + " [" + independentNote.citesFinding + "]" : undefined },
       "A=" + rA + ", B=" + rB + " (no amplification, but same bug fires independently)"
     );
+  } else if (f.shape === "hand_claims") {
+    // Generic claim-kind shape: a witness per claim carries whatever arms
+    // the evidence structurally establishes. The arm-subset entailment
+    // itself is producers.js content (PLACEMENT, see scenarios.js header);
+    // this checker just maps producers.js's two-valued
+    // "supports"/"no-match" onto primitive's own three-valued
+    // "accept"/"reject"/"unknown" protocol -- "reject" is never reached by
+    // this generic shape, since establishesArms is always a subset of
+    // unionArms here, not a positive contradiction.
+    const armsRule = (window.PRODUCER_RULES || []).filter((r) => r.id === "arm-subset-entailment-v1")[0];
+    function armsCoverCheck(witness) {
+      if (typeof witness !== "object" || witness === null || witness.kind !== "arms_witness") return "unknown";
+      if (!armsRule) return "unknown";
+      return armsRule.entails({ establishesArms: witness.establishesArms }, { claimedArms: witness.claimedArms }) === "supports" ? "accept" : "unknown";
+    }
+    const results = [];
+    f.claims.forEach((claim) => {
+      const witness = { kind: "arms_witness", claimedArms: claim.claimedArms, establishesArms: claim.evidence.establishesArms };
+      const useSpan = claim.site ? Object.assign({ file: f.file }, claim.site) : undefined;
+      snap(
+        "witness_source(" + claim.subject + ") emits ONE witness: " + JSON.stringify(witness),
+        { witnesses: [witness] },
+        undefined,
+        useSpan ? [useSpan] : undefined
+      );
+      const r = armsCoverCheck(witness);
+      const v = r === "accept" ? "Proved" : r === "reject" ? "Disproved" : "Open";
+      snap(
+        "arms_cover_check(w) = \"" + r + "\" for " + claim.subject,
+        { witnesses: [witness], calls: { arms_cover: r } },
+        v,
+        useSpan ? [useSpan] : undefined
+      );
+      results.push(claim.id + "=" + v);
+    });
+    snap("All claims evaluated: " + results.join(", "), {}, results.join(", "));
   }
 
   return snaps;

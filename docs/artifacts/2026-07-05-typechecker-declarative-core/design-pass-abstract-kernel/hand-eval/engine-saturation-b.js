@@ -30,6 +30,16 @@ window.runSaturationBEngine = function (scenario) {
   let stepNo = 0;
   function snap(description, state, verdict, spans) {
     stepNo += 1;
+    // Strip any top-level key on `state` whose value is JS `undefined`
+    // (e.g. a conditional `note` that resolved to no note) -- an explicit
+    // undefined value is the same disease as a missing `id` field: it
+    // surfaces as the literal string "undefined" wherever a generic
+    // renderer reads it. Source-level fix, not a display-time fallback.
+    if (state && typeof state === "object") {
+      for (const k in state) {
+        if (Object.prototype.hasOwnProperty.call(state, k) && state[k] === undefined) delete state[k];
+      }
+    }
     const s = { step: stepNo, description: description, state: state };
     if (verdict) s.verdict = verdict;
     if (spans) s.spans = spans;
@@ -121,6 +131,39 @@ window.runSaturationBEngine = function (scenario) {
       "False-Proved-flagged (A amplified via B's merged identity)",
       [spanOf(a.file, a.useSpan), spanOf(b.file, b.useSpans && b.useSpans[0])].filter(Boolean)
     );
+  } else if (f.shape === "hand_claims") {
+    // Generic claim-kind shape: canonicalize each claim to a term
+    // claim_holds(ClaimId) iff the rewrite's own set-inclusion side
+    // condition (claimedArms ⊆ evidence.establishesArms) holds -- pure set
+    // inclusion, generic over every claim kind, never keyed on claim.id.
+    // PLACEMENT: the rewrite's side condition is producers.js's
+    // arm-subset-entailment-v1 rule, not kernel content -- re-executed
+    // exactly as this engine re-fires the colon-self rewrite rule above.
+    const armsRule = (window.PRODUCER_RULES || []).filter((r) => r.id === "arm-subset-entailment-v1")[0];
+    const results = [];
+    f.claims.forEach((claim) => {
+      const term = { functor: "claim_term", args: [claim.id, claim.subject] };
+      snap(
+        "Ground term admitted: " + JSON.stringify(term) + " (unionArms=" + JSON.stringify(claim.unionArms) + ")",
+        { pool: [{ id: claim.id, term: term }] },
+        undefined,
+        claim.evidence.span ? [spanOf(f.file, claim.evidence.span)] : undefined
+      );
+      const entailed = armsRule ? armsRule.entails({ establishesArms: claim.evidence.establishesArms, subject: claim.subject }, { claimedArms: claim.claimedArms, unionArms: claim.unionArms, subject: claim.subject }) : "no-match";
+      const covered = entailed === "supports";
+      const v = covered ? "Proved" : "Open";
+      const rewriteDesc = covered
+        ? "Rewrite rule fires: claim_term(...) -> covered(" + claim.id + ", arms=" + JSON.stringify(claim.claimedArms) + ") -- side condition claimedArms ⊆ establishesArms holds."
+        : "No rewrite rule's side condition is satisfied (evidence establishes nothing usable, or a claimed arm is uncovered) -- stays Open.";
+      snap(
+        rewriteDesc,
+        { pool: [{ id: claim.id, term: covered ? { functor: "covered", args: [claim.id] } : term }] },
+        v,
+        claim.site ? [spanOf(f.file, claim.site)] : undefined
+      );
+      results.push(claim.id + "=" + v);
+    });
+    snap("normalize(store, rules) reaches a fixpoint over all claims: " + results.join(", "), {}, results.join(", "));
   }
 
   return snaps;

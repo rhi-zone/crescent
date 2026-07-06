@@ -13,14 +13,23 @@
 //     false Proved -- rewriting is MORE dangerous than checking, under
 //     Reading B specifically" (identity-merge amplification)
 //
-// window.SCENARIOS is an array of { id, label, citation, facts, source, notes }.
+// window.SCENARIOS is an array of { id, label, provenance, citation, facts,
+// source, notes }.
+//
+// provenance (one word, rendered as a badge):
+//   "mined"       -- machine-harvested via lib/declc/harvest.lua
+//   "constructed" -- built from a judgments/candidates finding
+//   "hand"        -- hand-derived claims over real code (this audit);
+//                    admissibility waived by owner, claims need not be
+//                    derivable by any real typechecker
 //
 // -----------------------------------------------------------------------
-// Why this corpus is all non-nil / reachability claims (VERIFIED, not a
-// sampling artifact of this hand-eval):
+// Why the MINED corpus is all non-nil / reachability claims (VERIFIED, not
+// a sampling artifact of this hand-eval):
 //
-// Every scenario's `facts.schema` is either "non-nil" (a dereference
-// presupposition) or "reachable" (a branch presupposition). That is not
+// Every mined scenario's claim is either "non-nil" (a dereference
+// presupposition; encoded below as claimedArms = unionArms minus the nil
+// arm) or "reachable" (a branch presupposition). That is not
 // this hand-eval picking a convenient subset -- it is a direct, confirmed
 // consequence of upstream harvester scope. lib/declc/harvest.lua:21-26
 // states, verbatim, that `harvest_mined` implements "EXACTLY the two
@@ -33,13 +42,37 @@
 // no third mined-claim shape exists anywhere in that walk. So this
 // corpus's 2-schema claim mix is a byproduct of harvest_mined's current
 // scope, not a representative sample of every claim shape a real program
-// might need a kernel to decide.
+// might need a kernel to decide. The "hand" scenarios below exist to
+// counter exactly that bias with other claim kinds over real code.
+//
+// hand_claims fact shape (generic; engines must not branch on scenario
+// identity, only on this structure):
+//   claims: [{ id, subject, unionArms, claimedArms, site, evidence:
+//     { kind, establishesArms|null, span, ...kind-specific detail },
+//     groundTruth }]
+// A claim asserts subject ∈ claimedArms (a subset of unionArms). nil,
+// where present, is an ORDINARY arm of unionArms -- there is no non-nil
+// primitive anywhere in this encoding. evidence.establishesArms is the
+// arm subset the evidence structurally establishes (null = establishes
+// nothing usable).
+//
+// PLACEMENT: arm-set entailment (subset logic) is PRODUCER content, not
+// kernel content. It lives in producers.js as rule definitions whose
+// check/entails every engine re-executes opaquely through its generic
+// rule mechanism -- no engine kernel loop inspects arms. The corpus
+// scenarios' claims (below) use the same claim shape: { subject,
+// unionArms, claimedArms }, with claimedArms = unionArms minus the nil
+// arm expressing what "schema=non-nil" used to say opaquely. Entailment
+// between claims ("x ∈ {string}" entails "x ∈ {string, number}") is now
+// derivable by producer rules; the opaque-string encoding could never
+// corroborate across claims.
 // -----------------------------------------------------------------------
 
 window.SCENARIOS = [
   {
     id: "corpus-1-lru-self",
     label: "Corpus #1: lru self non-nil",
+    provenance: "mined",
     citation:
       "first-slice-run.md, 5 concrete “obviously decidable” Open " +
       "instances, item 1: “lib/lru/init.lua:155 | deref:self | schema=non-nil”",
@@ -52,7 +85,10 @@ window.SCENARIOS = [
       defForm: "colon",
       receiverParam: "self",
       derefName: "self",
-      schema: "non-nil",
+      // "non-nil" re-encoded as ordinary arm-set membership. Union derived
+      // from the --: annotation at lib/lru/init.lua:153 (receiver Cache)
+      // plus the dot-call possibility that motivates the presupposition.
+      claim: { subject: "self", unionArms: ["Cache", "nil"], claimedArms: ["Cache"] },
       // Ground truth for this scenario: no counterexample call exists in
       // the corpus -- Cache:peek is only ever invoked via `:` syntax.
       calledOnlyViaColon: true,
@@ -157,6 +193,7 @@ window.SCENARIOS = [
   {
     id: "corpus-2-json-hex",
     label: "Corpus #2: json HEX non-nil",
+    provenance: "mined",
     citation:
       "first-slice-run.md, instance 2: “lib/json/init.lua:125 | " +
       "deref:HEX | schema=non-nil”",
@@ -169,7 +206,9 @@ window.SCENARIOS = [
       useLine: 125,
       assignmentCount: 1,
       derefName: "HEX",
-      schema: "non-nil",
+      // Union derived from the code at lib/json/init.lua:28: a local is
+      // nil until assigned; the single assignment is a table literal.
+      claim: { subject: "HEX", unionArms: ["table", "nil"], claimedArms: ["table"] },
       useIsAfterAssign: true,
       assignSpan: { lineStart: 28, lineEnd: 28 },
       useSpan: { lineStart: 125, lineEnd: 125, colStart: 16, colEnd: 19 },
@@ -284,6 +323,7 @@ window.SCENARIOS = [
   {
     id: "corpus-3-queue-fifo",
     label: "Corpus #3: queue FIFO non-nil",
+    provenance: "mined",
     citation:
       "first-slice-run.md, instance 3: “lib/queue/init.lua:157 | " +
       "deref:FIFO | schema=non-nil”",
@@ -296,7 +336,9 @@ window.SCENARIOS = [
       useLine: 157,
       assignmentCount: 1,
       derefName: "FIFO",
-      schema: "non-nil",
+      // Union derived from the code at lib/queue/init.lua:156: a local is
+      // nil until assigned; the single assignment is a table literal.
+      claim: { subject: "FIFO", unionArms: ["table", "nil"], claimedArms: ["table"] },
       useIsAfterAssign: true,
       assignSpan: { lineStart: 156, lineEnd: 156 },
       useSpan: { lineStart: 157, lineEnd: 157, colStart: 1, colEnd: 5 },
@@ -366,6 +408,7 @@ window.SCENARIOS = [
   {
     id: "corpus-4-deque-self-x4",
     label: "Corpus #4: deque self non-nil (x4 sites)",
+    provenance: "mined",
     citation:
       "first-slice-run.md, instance 4: “lib/deque/init.lua:62-65 | " +
       "deref:self” (four separate Open entries)",
@@ -380,7 +423,9 @@ window.SCENARIOS = [
       receiverParam: "self",
       derefName: "self",
       useLines: [62, 63, 64, 65],
-      schema: "non-nil",
+      // Union derived from the --: annotation at lib/deque/init.lua:57
+      // (receiver Deque) plus the dot-call possibility.
+      claim: { subject: "self", unionArms: ["Deque", "nil"], claimedArms: ["Deque"] },
       calledOnlyViaColon: true,
       defSpan: { lineStart: 58, lineEnd: 58 },
       useSpans: [
@@ -482,6 +527,7 @@ window.SCENARIOS = [
   {
     id: "corpus-5-bigint-reachable",
     label: "Corpus #5: bigint branch reachability",
+    provenance: "mined",
     citation:
       "first-slice-run.md, instance 5: “lib/bigint/init.lua:115 | " +
       "branch:then | schema=reachable”",
@@ -490,7 +536,11 @@ window.SCENARIOS = [
       file: "lib/bigint/init.lua",
       line: 115,
       branch: "then",
-      schema: "reachable",
+      // Not a value-arm claim: reachability has no variable whose union
+      // could be recovered from code or annotation. Explicit unknown-union
+      // marker rather than invented arms -- the H1 middle-layer gap
+      // surfacing in the encoding itself.
+      claim: { subject: "branch:then@115", kind: "branch_reachable", unionArms: null, claimedArms: null },
       noRuleAvailable: true,
       lineSpan: { lineStart: 115, lineEnd: 117 },
     },
@@ -544,6 +594,7 @@ window.SCENARIOS = [
   {
     id: "adversarial-subtract-false-proved",
     label: "Adversarial (a): plausible-but-wrong colon-self rule",
+    provenance: "constructed",
     citation:
       "judgments/subtract-attack.md, “Attack 1 — the flagship worked " +
       "example is itself an unsound rule (FATAL)”",
@@ -556,7 +607,8 @@ window.SCENARIOS = [
       defForm: "colon",
       receiverParam: "self",
       derefName: "self",
-      schema: "non-nil",
+      // Same arm-set re-encoding as corpus-1 (same code, same annotation).
+      claim: { subject: "self", unionArms: ["Cache", "nil"], claimedArms: ["Cache"] },
       // Ground truth for THIS scenario, unlike corpus-1: a real counterexample
       // call exists. Colon *definition* syntax places no obligation on
       // *callers* -- per the attack: "Nothing stops `Cache.peek(nil, key)`".
@@ -684,6 +736,7 @@ window.SCENARIOS = [
   {
     id: "adversarial-saturation-b-identity-merge",
     label: "Adversarial (b): saturation-B identity-merge amplification",
+    provenance: "constructed",
     citation:
       "candidates/saturation.md §4, “Plausible-but-wrong rule earning " +
       "false Proved — rewriting is MORE dangerous than checking, under " +
@@ -859,6 +912,374 @@ window.SCENARIOS = [
             "synthesis) directly discuss.",
         },
       ],
+    },
+  },
+
+  // -----------------------------------------------------------------------
+  // Hand-derived scenarios (provenance "hand"). Real code, real line
+  // numbers; claims hand-derived by reading the code. Generic union-arm
+  // membership encoding throughout -- nil is an ordinary arm.
+  // -----------------------------------------------------------------------
+  {
+    id: "hand-json-type-guard",
+    label: "Hand #1: json type() guard — number arm (nil not the interesting arm)",
+    provenance: "hand",
+    citation: "hand-derived; code: lib/json/init.lua:407-428",
+    facts: {
+      shape: "hand_claims",
+      file: "lib/json/init.lua",
+      claims: [
+        {
+          id: "val-number-arm",
+          subject: "val",
+          unionArms: ["nil", "boolean", "number", "string", "table", "function", "userdata", "thread"],
+          claimedArms: ["number"],
+          site: { lineStart: 416, lineEnd: 416, colStart: 16, colEnd: 18 },
+          evidence: {
+            kind: "type_guard",
+            guardVar: "t",
+            boundFrom: "type(val)",
+            guardLine: 415,
+            establishesArms: ["number"],
+            span: { lineStart: 408, lineEnd: 415 },
+          },
+          groundTruth: true,
+        },
+      ],
+    },
+    source: {
+      file: "lib/json/init.lua",
+      excerpts: [
+        {
+          key: "encode_value",
+          lineStart: 406,
+          lineEnd: 428,
+          lines: [
+            "--: (unknown, { indent: number | nil, sort_keys: boolean | nil } | nil, integer) -> (string | nil, string | nil)",
+            "encode_value = function(val, opts, depth)",
+            "\tlocal t = type(val)",
+            "\tif val == M.null then",
+            "\t\treturn \"null\", nil",
+            "\telseif t == \"nil\" then",
+            "\t\treturn \"null\", nil",
+            "\telseif t == \"boolean\" then",
+            "\t\treturn val and \"true\" or \"false\", nil",
+            "\telseif t == \"number\" then",
+            "\t\tlocal nval = val --[[:! number]]",
+            "\t\tif nval ~= nval then return nil, \"json.encode: NaN is not allowed\" end",
+            "\t\tif nval == huge or nval == -huge then return nil, \"json.encode: Infinity is not allowed\" end",
+            "\t\t-- Represent integers without decimal point; handle negative zero as 0",
+            "\t\tif nval == floor(nval) and nval >= -1e15 and nval <= 1e15 then",
+            "\t\t\tif nval == 0 then return \"0\", nil end",
+            "\t\t\treturn format(\"%.0f\", nval), nil",
+            "\t\tend",
+            "\t\t-- Use shortest representation",
+            "\t\tlocal s = format(\"%.17g\", nval)",
+            "\t\treturn s, nil",
+            "\telseif t == \"string\" then",
+            "\t\treturn encode_string(val --[[:! string]]), nil",
+          ],
+        },
+      ],
+    },
+    notes: {
+      subtract: [], primitive: [], invert: [], evidence: [],
+      "saturation-a": [], "saturation-b": [], synthesis: [],
+    },
+  },
+  {
+    id: "hand-bigint-err-arm",
+    label: "Hand #2: bigint (nil, errmsg) error-path arms",
+    provenance: "hand",
+    citation: "hand-derived; code: lib/bigint/init.lua:291-308",
+    facts: {
+      shape: "hand_claims",
+      file: "lib/bigint/init.lua",
+      claims: [
+        {
+          id: "ret1-nil-arm",
+          subject: "M.new return#1 (type-error path)",
+          unionArms: ["BigInt", "nil"],
+          claimedArms: ["nil"],
+          site: { lineStart: 305, lineEnd: 305, colStart: 12, colEnd: 14 },
+          evidence: {
+            kind: "guard_return",
+            guardLine: 304,
+            returnedForm: "nil_literal",
+            establishesArms: ["nil"],
+            span: { lineStart: 304, lineEnd: 306 },
+          },
+          groundTruth: true,
+        },
+        {
+          id: "ret2-string-arm",
+          subject: "M.new return#2 (type-error path)",
+          unionArms: ["string", "nil"],
+          claimedArms: ["string"],
+          site: { lineStart: 305, lineEnd: 305, colStart: 17, colEnd: 66 },
+          evidence: {
+            kind: "guard_return",
+            guardLine: 304,
+            returnedForm: "string_concat_literal",
+            establishesArms: ["string"],
+            span: { lineStart: 304, lineEnd: 306 },
+          },
+          groundTruth: true,
+        },
+      ],
+    },
+    source: {
+      file: "lib/bigint/init.lua",
+      excerpts: [
+        {
+          key: "new",
+          lineStart: 291,
+          lineEnd: 308,
+          lines: [
+            "-- Create a bigint from a string or number.",
+            "--: (v: unknown) -> (BigInt | nil, string | nil)",
+            "function M.new(v)",
+            "  if type(v) == \"table\" and getmetatable(v) == mt then",
+            "    -- Clone",
+            "    local v_ = v --[[:! BigInt]]",
+            "    local d = {}",
+            "    for i = 1, #v_.d do d[i] = v_.d[i] end",
+            "    return from_raw(d, v_.s)",
+            "  end",
+            "  if type(v) == \"number\" then",
+            "    v = (\"%.0f\"):format(v)",
+            "  end",
+            "  if type(v) ~= \"string\" then",
+            "    return nil, \"bigint.new: expected string or number, got \" .. type(v)",
+            "  end",
+            "  local s = v:match(\"^%s*(.-)%s*$\") -- trim",
+            "  if s == \"\" then return nil, \"bigint.new: empty string\" end",
+          ],
+        },
+      ],
+    },
+    notes: {
+      subtract: [], primitive: [], invert: [], evidence: [],
+      "saturation-a": [], "saturation-b": [], synthesis: [],
+    },
+  },
+  {
+    id: "hand-lru-field-shape",
+    label: "Hand #3: lru constructor table shape — field arms",
+    provenance: "hand",
+    citation: "hand-derived; code: lib/lru/init.lua:77-101",
+    facts: {
+      shape: "hand_claims",
+      file: "lib/lru/init.lua",
+      claims: [
+        {
+          id: "map-table-arm",
+          subject: "Cache._map",
+          unionArms: ["table", "nil"],
+          claimedArms: ["table"],
+          site: { lineStart: 91, lineEnd: 91 },
+          evidence: {
+            kind: "field_assign",
+            valueForm: "table_literal",
+            establishesArms: ["table"],
+            span: { lineStart: 91, lineEnd: 91 },
+          },
+          groundTruth: true,
+        },
+        {
+          id: "ttl-number-arm",
+          subject: "Cache._ttl",
+          unionArms: ["number", "nil"],
+          claimedArms: ["number"],
+          site: { lineStart: 94, lineEnd: 94 },
+          evidence: {
+            kind: "field_assign",
+            valueForm: "opt_expr", // o.ttl -- optional, may be nil
+            establishesArms: null,
+            span: { lineStart: 94, lineEnd: 94 },
+          },
+          // opts.ttl is documented optional; the nil arm is real.
+          groundTruth: false,
+        },
+      ],
+    },
+    source: {
+      file: "lib/lru/init.lua",
+      excerpts: [
+        {
+          key: "new",
+          lineStart: 77,
+          lineEnd: 101,
+          lines: [
+            "-- Create a new LRU cache with the given maximum capacity.",
+            "-- opts.ttl: default TTL in seconds (optional)",
+            "-- opts.on_evict: callback(key, value) on eviction (optional)",
+            "-- opts.clock: injectable clock (required for TTL)",
+            "--: (number, LruOpts | nil) -> Cache | (nil, string)",
+            "function M.new(capacity, opts)",
+            "  if type(capacity) ~= \"number\" or capacity < 1 then",
+            "    return nil, \"capacity must be a positive number\"",
+            "  end",
+            "  local cap = math.floor(capacity --[[:! number]])",
+            "  local o = opts or {} --[[:! LruOpts]]",
+            "  return setmetatable({",
+            "    _cap       = cap,",
+            "    _size      = 0,",
+            "    _map       = {},",
+            "    _head      = nil,",
+            "    _tail      = nil,",
+            "    _ttl       = o.ttl,",
+            "    _on_evict  = o.on_evict,",
+            "    _clock     = o.clock,",
+            "    _hits      = 0,",
+            "    _misses    = 0,",
+            "    _evictions = 0,",
+            "  }, Cache) --[[:! Cache]]",
+            "end",
+          ],
+        },
+      ],
+    },
+    notes: {
+      subtract: [], primitive: [], invert: [], evidence: [],
+      "saturation-a": [], "saturation-b": [], synthesis: [],
+    },
+  },
+  {
+    id: "hand-lru-closure-upvalue",
+    label: "Hand #4: lru iterator closure — captured upvalue arms",
+    provenance: "hand",
+    citation: "hand-derived; code: lib/lru/init.lua:248-264",
+    facts: {
+      shape: "hand_claims",
+      file: "lib/lru/init.lua",
+      claims: [
+        {
+          id: "cache-upvalue-arm",
+          subject: "upvalue cache",
+          unionArms: ["Cache", "nil"],
+          claimedArms: ["Cache"],
+          site: { lineStart: 252, lineEnd: 252, colStart: 9, colEnd: 13 },
+          evidence: {
+            kind: "upvalue_capture",
+            capturedFrom: "self",
+            reassignedInClosure: false,
+            establishesArms: ["Cache"],
+            span: { lineStart: 252, lineEnd: 252 },
+          },
+          groundTruth: true,
+        },
+        {
+          id: "node-upvalue-arm",
+          subject: "upvalue node",
+          unionArms: ["LruNode", "nil"],
+          claimedArms: ["LruNode"],
+          site: { lineStart: 253, lineEnd: 253, colStart: 9, colEnd: 12 },
+          evidence: {
+            kind: "upvalue_capture",
+            capturedFrom: "self._head",
+            reassignedInClosure: true, // node = node.next at 257
+            establishesArms: null,
+            span: { lineStart: 253, lineEnd: 257 },
+          },
+          // node reaches the nil arm at exhaustion (line 257 walks off the
+          // list); nil is an ordinary arm this claim wrongly excludes.
+          groundTruth: false,
+        },
+      ],
+    },
+    source: {
+      file: "lib/lru/init.lua",
+      excerpts: [
+        {
+          key: "iter",
+          lineStart: 248,
+          lineEnd: 264,
+          lines: [
+            "-- Iterator over (key, value) pairs, most recently used first.",
+            "-- Expired entries are lazily removed during iteration.",
+            "--: (Cache) -> (() -> (unknown, unknown) | nil)",
+            "function Cache:iter()",
+            "  local cache = self --[[:! Cache]]",
+            "  local node = self._head",
+            "  return function()",
+            "    while node do",
+            "      local current = node --[[:! LruNode]]",
+            "      node = node.next",
+            "      if not _check_expired(cache, current) then",
+            "        return current.key, current.value",
+            "      end",
+            "    end",
+            "    return nil",
+            "  end",
+            "end",
+          ],
+        },
+      ],
+    },
+    notes: {
+      subtract: [], primitive: [], invert: [], evidence: [],
+      "saturation-a": [], "saturation-b": [], synthesis: [],
+    },
+  },
+  {
+    id: "hand-json-generic-for",
+    label: "Hand #5: json generic-for — pairs() control var excludes nil arm",
+    provenance: "hand",
+    citation: "hand-derived; code: lib/json/init.lua:429-443",
+    facts: {
+      shape: "hand_claims",
+      file: "lib/json/init.lua",
+      claims: [
+        {
+          id: "k-nonterminator-arms",
+          subject: "k",
+          unionArms: ["nil", "boolean", "number", "string", "table", "function"],
+          // Everything except nil -- expressed as an ordinary arm subset,
+          // not a non-nil primitive. pairs()'s protocol: nil is the
+          // termination signal, so the loop body never sees the nil arm.
+          claimedArms: ["boolean", "number", "string", "table", "function"],
+          site: { lineStart: 437, lineEnd: 437, colStart: 7, colEnd: 7 },
+          evidence: {
+            kind: "generic_for_protocol",
+            iterator: "pairs",
+            establishesArms: ["boolean", "number", "string", "table", "function"],
+            span: { lineStart: 437, lineEnd: 443 },
+          },
+          groundTruth: true,
+        },
+      ],
+    },
+    source: {
+      file: "lib/json/init.lua",
+      excerpts: [
+        {
+          key: "is-array-scan",
+          lineStart: 429,
+          lineEnd: 443,
+          lines: [
+            "\telseif t == \"table\" then",
+            "\t\t-- Determine array vs object: array if sequential integer keys from 1",
+            "\t\t-- An empty table with no keys encodes as array []",
+            "\t\tlocal tval = val --[[:! { [integer]: unknown }]]",
+            "\t\tlocal n = #tval",
+            "\t\tlocal is_array = true",
+            "\t\t-- Check that table has no non-integer or out-of-range keys",
+            "\t\tlocal count = 0",
+            "\t\tfor k in pairs(tval) do",
+            "\t\t\tcount = count + 1",
+            "\t\t\tif type(k) ~= \"number\" or floor(k --[[:! number]]) ~= k or (k --[[:! number]]) < 1 or (k --[[:! number]]) > n then",
+            "\t\t\t\tis_array = false",
+            "\t\t\t\tbreak",
+            "\t\t\tend",
+            "\t\tend",
+          ],
+        },
+      ],
+    },
+    notes: {
+      subtract: [], primitive: [], invert: [], evidence: [],
+      "saturation-a": [], "saturation-b": [], synthesis: [],
     },
   },
 ];
