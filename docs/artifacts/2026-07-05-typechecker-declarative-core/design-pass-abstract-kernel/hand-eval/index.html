@@ -1,4 +1,4 @@
-<title>Kernel candidates — hand-eval stepper</title>
+<title>Kernel candidates — LLM abstract-eval traces</title>
 <meta charset="utf-8" />
 <style>
   :root {
@@ -13,7 +13,10 @@
     --refuted: #f85149;
     --open: #d29922;
     --flagged: #db6d28;
-    --underspec: #8957e5;
+    --halt: #f778ba;
+    --determined: #3fb950;
+    --underdetermined: #d29922;
+    --unsure: #f85149;
   }
   * { box-sizing: border-box; }
   body {
@@ -24,8 +27,9 @@
     padding: 1.5rem;
     line-height: 1.5;
   }
-  h1 { font-size: 1.3rem; margin: 0 0 0.25rem 0; }
-  .subtitle { color: var(--muted); margin-bottom: 1.25rem; font-size: 0.9rem; }
+  h1 { font-size: 1.2rem; margin: 0 0 0.25rem 0; }
+  h2 { font-size: 1rem; margin: 0 0 0.6rem 0; }
+
   .controls {
     display: flex;
     flex-wrap: wrap;
@@ -39,27 +43,17 @@
   }
   .control { display: flex; flex-direction: column; gap: 0.3rem; }
   .control label { font-size: 0.75rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.03em; }
-  select, button {
+  select {
     background: #0d1117;
     color: var(--text);
     border: 1px solid var(--border);
     border-radius: 6px;
     padding: 0.45rem 0.6rem;
     font-size: 0.9rem;
+    min-width: 22rem;
   }
-  select { min-width: 22rem; }
-  button {
-    cursor: pointer;
-  }
-  button:hover:not(:disabled) { border-color: var(--accent); }
-  button:disabled { opacity: 0.4; cursor: default; }
-  .citation {
-    font-size: 0.8rem;
-    color: var(--muted);
-    max-width: 60rem;
-  }
-  .step-nav { display: flex; gap: 0.5rem; align-items: center; }
-  .step-count { font-size: 0.85rem; color: var(--muted); min-width: 5rem; text-align: center; }
+
+  .citation { font-size: 0.8rem; color: var(--muted); max-width: 60rem; }
 
   .panel {
     background: var(--panel);
@@ -67,13 +61,6 @@
     border-radius: 8px;
     padding: 1rem;
     margin-bottom: 1rem;
-  }
-  .panel h2 { font-size: 1rem; margin: 0 0 0.6rem 0; }
-
-  .description {
-    font-size: 0.95rem;
-    white-space: pre-wrap;
-    margin-bottom: 0.75rem;
   }
 
   .badge {
@@ -85,73 +72,18 @@
     border: 1px solid transparent;
   }
   .badge.v-proved { background: rgba(63,185,80,0.15); color: var(--proved); border-color: var(--proved); }
-  .badge.v-disproved, .badge.v-refuted { background: rgba(248,81,73,0.15); color: var(--refuted); border-color: var(--refuted); }
+  .badge.v-refuted { background: rgba(248,81,73,0.15); color: var(--refuted); border-color: var(--refuted); }
   .badge.v-open { background: rgba(210,153,34,0.15); color: var(--open); border-color: var(--open); }
   .badge.v-flagged { background: rgba(219,109,40,0.15); color: var(--flagged); border-color: var(--flagged); }
-  .badge.v-underspecified { background: rgba(137,87,229,0.15); color: var(--underspec); border-color: var(--underspec); }
+  .badge.v-halt { background: rgba(247,120,186,0.15); color: var(--halt); border-color: var(--halt); }
   .badge.v-none { background: rgba(139,148,158,0.15); color: var(--muted); border-color: var(--muted); }
 
-  table { border-collapse: collapse; width: 100%; font-size: 0.85rem; margin-bottom: 0.75rem; }
-  th, td { border: 1px solid var(--border); padding: 0.35rem 0.5rem; text-align: left; vertical-align: top; }
-  th { color: var(--muted); font-weight: 600; }
-  code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.82rem; }
-  pre { white-space: pre-wrap; word-break: break-word; margin: 0; }
-
-  .note-box {
-    border-left: 3px solid var(--flagged);
-    background: rgba(219,109,40,0.08);
-    padding: 0.6rem 0.8rem;
-    font-size: 0.85rem;
-    margin-top: 0.5rem;
-  }
-
-  svg { background: #0d1117; border: 1px solid var(--border); border-radius: 6px; max-width: 100%; }
-
-  .summary-table { width: 100%; }
-  .summary-table td { font-size: 0.85rem; }
-
-  .section-title { font-size: 0.8rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.03em; margin: 0.9rem 0 0.3rem 0; }
-
-  footer { color: var(--muted); font-size: 0.75rem; margin-top: 2rem; }
-
-  .split { display: flex; gap: 1rem; align-items: flex-start; flex-wrap: wrap; }
-  .split > .col-main { flex: 1 1 26rem; min-width: 20rem; }
-  .split > .col-source { flex: 1 1 26rem; min-width: 20rem; }
-
-  .source-block { margin-bottom: 0.9rem; }
-  .source-block .source-label { font-size: 0.78rem; color: var(--muted); margin-bottom: 0.3rem; }
-  .source-file {
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-    font-size: 0.8rem;
-    background: #0d1117;
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    overflow-x: auto;
-  }
-  .source-line {
-    display: flex;
-    white-space: pre;
-    padding: 0.05rem 0.4rem;
-    cursor: default;
-  }
-  .source-line .ln {
-    color: var(--muted);
-    text-align: right;
-    width: 2.6rem;
-    flex: none;
-    padding-right: 0.6rem;
-    user-select: none;
-  }
-  .source-line .code { flex: 1 1 auto; }
-  .source-line.hl-hover { background: rgba(88,166,255,0.18); }
-  .source-line.hl-step { background: rgba(63,185,80,0.16); box-shadow: inset 3px 0 0 var(--proved); }
-  .source-line .col-hl { background: rgba(219,109,40,0.35); border-radius: 2px; }
-  .source-line .step-refs {
-    color: var(--accent);
-    font-size: 0.72rem;
-    margin-left: 0.6rem;
-    flex: none;
-  }
+  .conf-badge { font-weight: 700; }
+  .conf-badge.c-determined { background: rgba(63,185,80,0.15); color: var(--determined); border-color: var(--determined); }
+  .conf-badge.c-underdetermined { background: rgba(210,153,34,0.15); color: var(--underdetermined); border-color: var(--underdetermined); }
+  .conf-badge.c-unsure { background: rgba(248,81,73,0.15); color: var(--unsure); border-color: var(--unsure); }
+  .conf-badge.c-none { background: rgba(139,148,158,0.15); color: var(--muted); border-color: var(--muted); }
+  .conf-icon { font-size: 0.9em; }
 
   .prov-badge {
     display: inline-block;
@@ -165,651 +97,117 @@
     text-transform: uppercase;
     letter-spacing: 0.03em;
   }
-  .citation-token {
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-    font-size: 0.78rem;
-    color: var(--accent);
+  .prov-badge.prov-llm { border-color: var(--accent); color: var(--accent); }
+
+  table { border-collapse: collapse; width: 100%; font-size: 0.85rem; margin-bottom: 0.5rem; }
+  th, td { border: 1px solid var(--border); padding: 0.35rem 0.5rem; text-align: left; vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; }
+  code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.8rem; }
+  pre { white-space: pre-wrap; word-break: break-word; margin: 0; }
+
+  .split { display: flex; gap: 1rem; align-items: flex-start; flex-wrap: wrap; }
+  .split > .col-main { flex: 1 1 30rem; min-width: 22rem; }
+  .split > .col-source { flex: 1 1 26rem; min-width: 20rem; position: sticky; top: 1rem; max-height: 92vh; overflow-y: auto; }
+
+  .steps-list { display: flex; flex-direction: column; gap: 0.75rem; }
+  .step-card {
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 0.7rem 0.8rem;
+    background: #0d1117;
   }
+  .step-card.hl-hover { outline: 1px solid var(--accent); }
+  .step-head { display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; margin-bottom: 0.4rem; }
+  .step-no { font-weight: 700; font-size: 0.85rem; }
+  .step-desc { font-size: 0.9rem; white-space: pre-wrap; margin-bottom: 0.5rem; }
+
+  .state-table td { font-size: 0.8rem; }
+  .state-table .state-key { color: var(--muted); width: 10rem; white-space: nowrap; }
+  .state-table .state-val pre { max-height: 10rem; overflow: auto; }
+
+  .code-spans { display: flex; flex-wrap: wrap; gap: 0.35rem; margin-top: 0.4rem; }
+  .span-chip {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.7rem;
+    color: var(--muted);
+    background: rgba(139,148,158,0.1);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 0.1rem 0.4rem;
+  }
+  .span-chip.live { color: var(--accent); border-color: var(--accent); background: rgba(88,166,255,0.1); }
+
+  .source-block { margin-bottom: 0.9rem; }
+  .source-block .source-label { font-size: 0.78rem; color: var(--muted); margin-bottom: 0.3rem; }
+  .source-file {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.8rem;
+    background: #0d1117;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    overflow-x: auto;
+  }
+  .source-line { display: flex; white-space: pre; padding: 0.05rem 0.4rem; cursor: default; }
+  .source-line .ln { color: var(--muted); text-align: right; width: 2.6rem; flex: none; padding-right: 0.6rem; user-select: none; }
+  .source-line .code { flex: 1 1 auto; }
+  .source-line.hl-hover { background: rgba(88,166,255,0.18); }
+  .source-line .step-refs { color: var(--accent); font-size: 0.72rem; margin-left: 0.6rem; flex: none; }
+
+  .verdict-table .verdict-note { font-size: 0.78rem; color: var(--muted); }
+  .summary-table td, .summary-table th { text-align: center; }
+  .summary-table td:first-child, .summary-table th:first-child { text-align: left; }
 </style>
 
-<h1>Kernel candidates — hand-eval stepper</h1>
+<h1>Kernel candidates — LLM abstract-eval traces</h1>
 
 <div class="controls">
   <div class="control">
-    <label for="engine-select">Engine</label>
-    <select id="engine-select"></select>
+    <label for="design-select">Design</label>
+    <select id="design-select"></select>
   </div>
   <div class="control">
     <label for="scenario-select">Scenario</label>
     <select id="scenario-select"></select>
   </div>
-  <div class="control step-nav">
-    <button id="btn-first">|&lt;</button>
-    <button id="btn-prev">&lt; step back</button>
-    <span class="step-count" id="step-count">-/-</span>
-    <button id="btn-next">step forward &gt;</button>
-    <button id="btn-last">&gt;|</button>
-  </div>
 </div>
 
 <div class="panel">
-  <span class="citation" id="scenario-citation"></span><span id="scenario-provenance"></span>
+  <span class="citation" id="scenario-citation"></span><span id="scenario-provenance"></span><span id="trace-provenance"></span>
 </div>
 
 <div class="split">
   <div class="col-main panel">
-    <h2>Step <span id="current-step-no">-</span> <span id="current-step-verdict"></span></h2>
-    <div class="description" id="current-description"></div>
-    <div id="current-state"></div>
+    <h2>Steps</h2>
+    <div class="steps-list" id="steps-list"></div>
   </div>
   <div class="col-source panel">
-    <h2>Real source</h2>
+    <h2>Source</h2>
     <div id="source-pane"></div>
   </div>
 </div>
 
 <div class="panel">
-  <h2>Verdict summary</h2>
-  <div id="summary"></div>
+  <h2>Verdicts — all designs, current scenario</h2>
+  <div id="verdict-row"></div>
 </div>
 
-<!-- Classic (non-module) scripts on purpose: `type="module"` can fail under
-     file:// CORS restrictions in some browsers. Load order matters: scenarios
-     first, then each engine (each attaches one function to `window`), then
-     the app logic that ties them together. -->
+<div class="panel">
+  <h2>Determinacy summary — across all scenarios</h2>
+  <div id="summary-table"></div>
+</div>
+
+<!-- Classic (non-module) scripts on purpose: file:// blocks fetch() of
+     local JSON and can restrict type="module". Traces are pre-baked into
+     .trace.js files that assign onto window.TRACES; scenarios.js/
+     producers.js are the same real-source/reference data as before. No
+     engine files: this page executes no evaluation logic, only renders. -->
 <script src="scenarios.js"></script>
 <script src="producers.js"></script>
-<script src="engine-subtract.js"></script>
-<script src="engine-primitive.js"></script>
-<script src="engine-invert.js"></script>
-<script src="engine-evidence.js"></script>
-<script src="engine-saturation-a.js"></script>
-<script src="engine-saturation-b.js"></script>
-<script src="engine-synthesis.js"></script>
-
-<script>
-  // ---------------------------------------------------------------------
-  // Engine registry. Each entry names the global function an engine.js
-  // file attaches to `window`. This is the ONLY place index.html knows
-  // engine names exist -- it never branches on scenario shape or rule
-  // content, only calls whichever function is selected.
-  // ---------------------------------------------------------------------
-  var ENGINES = [
-    { id: "subtract", label: "subtract", run: function (s) { return window.runSubtractEngine(s); } },
-    { id: "primitive", label: "primitive", run: function (s) { return window.runPrimitiveEngine(s); } },
-    { id: "invert", label: "invert", run: function (s) { return window.runInvertEngine(s); } },
-    { id: "evidence", label: "evidence", run: function (s) { return window.runEvidenceEngine(s); } },
-    { id: "saturation-a", label: "saturation (Reading A: monotone accumulation)", run: function (s) { return window.runSaturationAEngine(s); } },
-    { id: "saturation-b", label: "saturation (Reading B: term rewriting)", run: function (s) { return window.runSaturationBEngine(s); } },
-    { id: "synthesis", label: "synthesis (composite proposal)", run: function (s) { return window.runSynthesisEngine(s); } },
-  ];
-
-  var engineSelect = document.getElementById("engine-select");
-  var scenarioSelect = document.getElementById("scenario-select");
-  var btnFirst = document.getElementById("btn-first");
-  var btnPrev = document.getElementById("btn-prev");
-  var btnNext = document.getElementById("btn-next");
-  var btnLast = document.getElementById("btn-last");
-  var stepCountEl = document.getElementById("step-count");
-  var scenarioCitationEl = document.getElementById("scenario-citation");
-  var currentStepNoEl = document.getElementById("current-step-no");
-  var currentVerdictEl = document.getElementById("current-step-verdict");
-  var currentDescriptionEl = document.getElementById("current-description");
-  var currentStateEl = document.getElementById("current-state");
-  var summaryEl = document.getElementById("summary");
-  var sourcePaneEl = document.getElementById("source-pane");
-
-  // Populate selectors.
-  ENGINES.forEach(function (e) {
-    var opt = document.createElement("option");
-    opt.value = e.id;
-    opt.textContent = e.label;
-    engineSelect.appendChild(opt);
-  });
-  window.SCENARIOS.forEach(function (s) {
-    var opt = document.createElement("option");
-    opt.value = s.id;
-    opt.textContent = s.label;
-    scenarioSelect.appendChild(opt);
-  });
-
-  var currentSnapshots = [];
-  var currentIndex = 0;
-
-  function findEngine(id) {
-    for (var i = 0; i < ENGINES.length; i++) if (ENGINES[i].id === id) return ENGINES[i];
-    return null;
-  }
-  function findScenario(id) {
-    for (var i = 0; i < window.SCENARIOS.length; i++) if (window.SCENARIOS[i].id === id) return window.SCENARIOS[i];
-    return null;
-  }
-
-  // Verdict string -> badge CSS class. Purely presentational, generic over
-  // whatever string an engine returns (engines are free to append detail
-  // like "(flagged: ...)" - the badge just does a substring match).
-  function verdictClass(v) {
-    if (!v) return "v-none";
-    var s = v.toLowerCase();
-    if (s.indexOf("false-proved") !== -1 || s.indexOf("false-refuted") !== -1 || s.indexOf("flagged") !== -1) return "v-flagged";
-    if (s.indexOf("underspecified") !== -1) return "v-underspecified";
-    if (s.indexOf("disproved") !== -1 || s.indexOf("refuted") !== -1) return "v-refuted";
-    if (s.indexOf("proved") !== -1) return "v-proved";
-    if (s.indexOf("open") !== -1) return "v-open";
-    return "v-none";
-  }
-
-  // Render one step's `state` object generically: a pool table if
-  // state.pool exists, an edges table + inline SVG DAG if state.edges
-  // exists, a note box if state.note exists, and a raw JSON fallback for
-  // anything else so no state shape is ever silently dropped.
-  function renderState(state) {
-    var out = document.createElement("div");
-    if (!state) return out;
-
-    if (Array.isArray(state.pool) && state.pool.length) {
-      var title = document.createElement("div");
-      title.className = "section-title";
-      title.textContent = "Pool";
-      out.appendChild(title);
-      var table = document.createElement("table");
-      var thead = document.createElement("tr");
-      thead.innerHTML = "<th>id</th><th>payload / term</th><th>provenance</th>";
-      table.appendChild(thead);
-      state.pool.forEach(function (p) {
-        var tr = document.createElement("tr");
-        var payload = p.payload !== undefined ? p.payload : p.term !== undefined ? p.term : p.check;
-        tr.innerHTML =
-          "<td><code>" + escapeHtml(String(p.id)) + "</code></td>" +
-          "<td><pre>" + escapeHtml(JSON.stringify(payload, null, 0)) + "</pre></td>" +
-          "<td>" + escapeHtml(p.provenance || "") + "</td>";
-        table.appendChild(tr);
-      });
-      out.appendChild(table);
-    }
-
-    if (Array.isArray(state.edges) && state.edges.length) {
-      var title2 = document.createElement("div");
-      title2.className = "section-title";
-      title2.textContent = "Edges";
-      out.appendChild(title2);
-      out.appendChild(renderDag(state.pool || [], state.edges));
-
-      var table2 = document.createElement("table");
-      var thead2 = document.createElement("tr");
-      thead2.innerHTML = "<th>rule</th><th>premises</th><th>target</th><th>polarity</th><th>strength</th>";
-      table2.appendChild(thead2);
-      state.edges.forEach(function (e) {
-        var tr = document.createElement("tr");
-        tr.innerHTML =
-          "<td><code>" + escapeHtml(e.rule || "") + "</code></td>" +
-          "<td><code>" + escapeHtml(JSON.stringify(e.premises || [])) + "</code></td>" +
-          "<td><code>" + escapeHtml(String(e.target || "")) + "</code></td>" +
-          "<td>" + escapeHtml(e.polarity || "") + "</td>" +
-          "<td>" + escapeHtml(e.strength || "") + "</td>";
-        table2.appendChild(tr);
-      });
-      out.appendChild(table2);
-    }
-
-    // Any other keys not already handled above (witnesses, calls, entries,
-    // attemptedCertificate, rule, etc.) get a generic raw dump so nothing
-    // is silently hidden from the viewer.
-    var handledKeys = { pool: 1, edges: 1, note: 1 };
-    var rest = {};
-    var hasRest = false;
-    for (var k in state) {
-      if (Object.prototype.hasOwnProperty.call(state, k) && !handledKeys[k]) {
-        rest[k] = state[k];
-        hasRest = true;
-      }
-    }
-    if (hasRest) {
-      var title3 = document.createElement("div");
-      title3.className = "section-title";
-      title3.textContent = "Other state";
-      out.appendChild(title3);
-      var pre = document.createElement("pre");
-      pre.textContent = JSON.stringify(rest, null, 2);
-      out.appendChild(pre);
-    }
-
-    if (state.note) {
-      var noteBox = document.createElement("div");
-      noteBox.className = "note-box";
-      noteBox.appendChild(renderCitedText(state.note));
-      out.appendChild(noteBox);
-    }
-
-    return out;
-  }
-
-  // Every engine's note/description text ends citation-bearing segments in
-  // "... [file.md#anchor--long-slug]". Render those bracket groups as a
-  // short link-style token (file.md#anchor, full anchor kept as a title
-  // tooltip) instead of the long slug reading as a prose sentence. A
-  // bracket group with no ".md" in it (e.g. JSON array text like
-  // ["self","Cache:peek"]) is left untouched -- this only ever recognizes
-  // doc citations, never scenario-keyed.
-  function shortCite(cite) {
-    var hashIdx = cite.indexOf("#");
-    if (hashIdx === -1) return cite; // already short, e.g. "candidates/synthesis.md §1"
-    var file = cite.slice(0, hashIdx);
-    var anchor = cite.slice(hashIdx + 1);
-    var ddIdx = anchor.indexOf("--");
-    var shortAnchor = ddIdx !== -1 ? anchor.slice(0, ddIdx) : anchor.split("-").slice(0, 2).join("-");
-    return file + "#" + shortAnchor;
-  }
-  function renderCitedText(str) {
-    var frag = document.createDocumentFragment();
-    if (typeof str !== "string" || !str) {
-      frag.appendChild(document.createTextNode(str == null ? "" : String(str)));
-      return frag;
-    }
-    var re = /([^\[\]]*)\[([^\]]+)\]/g;
-    var m, lastEnd = 0, any = false;
-    while ((m = re.exec(str))) {
-      any = true;
-      if (m[1]) frag.appendChild(document.createTextNode(m[1]));
-      var cite = m[2];
-      if (cite.indexOf(".md") !== -1) {
-        var tok = document.createElement("span");
-        tok.className = "citation-token";
-        tok.textContent = shortCite(cite);
-        tok.title = cite;
-        frag.appendChild(tok);
-      } else {
-        frag.appendChild(document.createTextNode("[" + cite + "]"));
-      }
-      lastEnd = re.lastIndex;
-    }
-    frag.appendChild(document.createTextNode(str.slice(lastEnd)));
-    return frag;
-  }
-
-  function escapeHtml(s) {
-    return String(s)
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;");
-  }
-
-  // Minimal inline-SVG DAG renderer: lays nodes out in a single row (or a
-  // grid if there are many), draws an arrow from each premise to each
-  // edge's target. Deliberately simple -- this is a generic renderer, not
-  // per-engine visualization code.
-  function renderDag(pool, edges) {
-    var nodeIds = [];
-    function addNode(id) { if (nodeIds.indexOf(id) === -1) nodeIds.push(id); }
-    pool.forEach(function (p) { addNode(p.id); });
-    edges.forEach(function (e) {
-      (e.premises || []).forEach(addNode);
-      addNode(e.target);
-    });
-
-    var perRow = 4;
-    var cellW = 150, cellH = 70;
-    var positions = {};
-    nodeIds.forEach(function (id, i) {
-      var col = i % perRow, row = Math.floor(i / perRow);
-      positions[id] = { x: col * cellW + 70, y: row * cellH + 35 };
-    });
-    var rows = Math.ceil(nodeIds.length / perRow);
-    var width = Math.min(nodeIds.length, perRow) * cellW + 40;
-    var height = rows * cellH + 40;
-
-    var svgNS = "http://www.w3.org/2000/svg";
-    var svg = document.createElementNS(svgNS, "svg");
-    svg.setAttribute("width", width);
-    svg.setAttribute("height", height);
-    svg.setAttribute("viewBox", "0 0 " + width + " " + height);
-
-    var defs = document.createElementNS(svgNS, "defs");
-    var marker = document.createElementNS(svgNS, "marker");
-    marker.setAttribute("id", "arrow");
-    marker.setAttribute("markerWidth", "8");
-    marker.setAttribute("markerHeight", "8");
-    marker.setAttribute("refX", "8");
-    marker.setAttribute("refY", "4");
-    marker.setAttribute("orient", "auto");
-    var arrowPath = document.createElementNS(svgNS, "path");
-    arrowPath.setAttribute("d", "M0,0 L8,4 L0,8 Z");
-    arrowPath.setAttribute("fill", "#58a6ff");
-    marker.appendChild(arrowPath);
-    defs.appendChild(marker);
-    svg.appendChild(defs);
-
-    edges.forEach(function (e) {
-      (e.premises || []).forEach(function (premId) {
-        var a = positions[premId], b = positions[e.target];
-        if (!a || !b) return;
-        var line = document.createElementNS(svgNS, "line");
-        line.setAttribute("x1", a.x + 40);
-        line.setAttribute("y1", a.y);
-        line.setAttribute("x2", b.x - 40);
-        line.setAttribute("y2", b.y);
-        line.setAttribute("stroke", e.polarity === "refutes" ? "#f85149" : "#58a6ff");
-        line.setAttribute("stroke-width", "1.5");
-        line.setAttribute("marker-end", "url(#arrow)");
-        svg.appendChild(line);
-      });
-    });
-
-    nodeIds.forEach(function (id) {
-      var pos = positions[id];
-      var rect = document.createElementNS(svgNS, "rect");
-      rect.setAttribute("x", pos.x - 40);
-      rect.setAttribute("y", pos.y - 16);
-      rect.setAttribute("width", 80);
-      rect.setAttribute("height", 32);
-      rect.setAttribute("rx", 6);
-      rect.setAttribute("fill", "#161b22");
-      rect.setAttribute("stroke", "#30363d");
-      svg.appendChild(rect);
-      var text = document.createElementNS(svgNS, "text");
-      text.setAttribute("x", pos.x);
-      text.setAttribute("y", pos.y + 4);
-      text.setAttribute("text-anchor", "middle");
-      text.setAttribute("font-size", "11");
-      text.setAttribute("fill", "#e6edf3");
-      text.textContent = String(id).length > 12 ? String(id).slice(0, 11) + "…" : String(id);
-      svg.appendChild(text);
-    });
-
-    return svg;
-  }
-
-  // -----------------------------------------------------------------------
-  // Source pane: renders the real Lua excerpt(s) for the current scenario,
-  // with real starting line numbers, and supports bidirectional highlight
-  // between steps and source lines.
-  //
-  // Data shapes read (see scenarios.js):
-  //   scenario.source = { file, excerpts: [{ key, lineStart, lineEnd, lines }] }
-  //   OR (two_self_facts_for_merge scenarios) scenario.facts.factA.source /
-  //   scenario.facts.factB.source, same shape, each with its own file.
-  //   snap.spans = [{ file, lineStart, lineEnd, colStart?, colEnd? }, ...]
-  // -----------------------------------------------------------------------
-
-  // sourceLineIndex: "file:line" -> DOM element for that rendered line.
-  var sourceLineIndex = {};
-  // stepRefIndex: "file:line" -> array of step numbers (1-based) whose
-  // spans in the CURRENT snapshot list cover that line.
-  var stepRefIndex = {};
-
-  function getSourceSets(scenario) {
-    if (scenario.source) {
-      return [{ label: null, file: scenario.source.file, excerpts: scenario.source.excerpts }];
-    }
-    var sets = [];
-    var f = scenario.facts;
-    if (f && f.factA && f.factA.source) sets.push({ label: "A (" + f.factA.funcName + ")", file: f.factA.source.file, excerpts: f.factA.source.excerpts });
-    if (f && f.factB && f.factB.source) sets.push({ label: "B (" + f.factB.funcName + ")", file: f.factB.source.file, excerpts: f.factB.source.excerpts });
-    return sets;
-  }
-
-  function buildStepRefIndex() {
-    stepRefIndex = {};
-    currentSnapshots.forEach(function (snap) {
-      (snap.spans || []).forEach(function (span) {
-        if (!span || !span.file) return;
-        for (var line = span.lineStart; line <= span.lineEnd; line++) {
-          var key = span.file + ":" + line;
-          if (!stepRefIndex[key]) stepRefIndex[key] = [];
-          if (stepRefIndex[key].indexOf(snap.step) === -1) stepRefIndex[key].push(snap.step);
-        }
-      });
-    });
-  }
-
-  function renderSourcePane(scenario) {
-    sourceLineIndex = {};
-    sourcePaneEl.innerHTML = "";
-    var sets = getSourceSets(scenario);
-    if (!sets.length) {
-      sourcePaneEl.textContent = "(no source excerpt recorded for this scenario)";
-      return;
-    }
-    sets.forEach(function (set) {
-      var block = document.createElement("div");
-      block.className = "source-block";
-      var label = document.createElement("div");
-      label.className = "source-label";
-      label.textContent = (set.label ? set.label + " — " : "") + set.file;
-      block.appendChild(label);
-      var fileBox = document.createElement("div");
-      fileBox.className = "source-file";
-      (set.excerpts || []).forEach(function (ex) {
-        ex.lines.forEach(function (text, idx) {
-          var lineNo = ex.lineStart + idx;
-          var row = document.createElement("div");
-          row.className = "source-line";
-          row.dataset.file = set.file;
-          row.dataset.line = String(lineNo);
-          var lnSpan = document.createElement("span");
-          lnSpan.className = "ln";
-          lnSpan.textContent = String(lineNo);
-          var codeSpan = document.createElement("span");
-          codeSpan.className = "code";
-          codeSpan.textContent = text;
-          codeSpan.dataset.raw = text;
-          row.appendChild(lnSpan);
-          row.appendChild(codeSpan);
-          var refsSpan = document.createElement("span");
-          refsSpan.className = "step-refs";
-          row.appendChild(refsSpan);
-          row.addEventListener("mouseenter", function () { onHoverSourceLine(set.file, lineNo, true); });
-          row.addEventListener("mouseleave", function () { onHoverSourceLine(set.file, lineNo, false); });
-          fileBox.appendChild(row);
-          sourceLineIndex[set.file + ":" + lineNo] = row;
-        });
-      });
-      block.appendChild(fileBox);
-      sourcePaneEl.appendChild(block);
-    });
-  }
-
-  // Removes `cls` from every rendered line. Only resets the column-level
-  // sub-highlight (raw text) once NEITHER highlight class remains on that
-  // row, so clearing hover doesn't blow away the current step's own
-  // column highlight (and vice versa) when both happen to cover the same
-  // line.
-  function clearSourceHighlight(cls) {
-    for (var key in sourceLineIndex) {
-      var row = sourceLineIndex[key];
-      row.classList.remove(cls);
-      if (!row.classList.contains("hl-step") && !row.classList.contains("hl-hover")) {
-        var codeSpan = row.querySelector(".code");
-        if (codeSpan && codeSpan.dataset.raw !== undefined && codeSpan.textContent !== codeSpan.dataset.raw) {
-          codeSpan.textContent = codeSpan.dataset.raw;
-        }
-      }
-    }
-  }
-
-  // Apply a column-level sub-highlight within one line's code text (only
-  // used where a span pinpoints a sub-expression, e.g. the `self` in
-  // `self._map[key]`).
-  function applyColHighlight(row, colStart, colEnd) {
-    var codeSpan = row.querySelector(".code");
-    if (!codeSpan) return;
-    var raw = codeSpan.dataset.raw;
-    var start = Math.max(0, colStart - 1);
-    var end = Math.min(raw.length, colEnd);
-    if (start >= end) return;
-    codeSpan.textContent = "";
-    codeSpan.appendChild(document.createTextNode(raw.slice(0, start)));
-    var mark = document.createElement("span");
-    mark.className = "col-hl";
-    mark.textContent = raw.slice(start, end);
-    codeSpan.appendChild(mark);
-    codeSpan.appendChild(document.createTextNode(raw.slice(end)));
-  }
-
-  // Highlight the given spans in the source pane (used both for the
-  // current step's auto-highlight and for hovering a claim/step).
-  function highlightSpans(spans, cls) {
-    clearSourceHighlight(cls);
-    (spans || []).forEach(function (span) {
-      if (!span || !span.file) return;
-      for (var line = span.lineStart; line <= span.lineEnd; line++) {
-        var row = sourceLineIndex[span.file + ":" + line];
-        if (!row) continue;
-        row.classList.add(cls);
-        if (line === span.lineStart && line === span.lineEnd && span.colStart && span.colEnd) {
-          applyColHighlight(row, span.colStart, span.colEnd);
-        }
-      }
-    });
-  }
-
-  // Hovering a source line highlights the step(s) anchored to it: shows
-  // the referencing step numbers inline, and if that line's step includes
-  // the CURRENTLY displayed step, also flashes the description panel.
-  function onHoverSourceLine(file, line, entering) {
-    var key = file + ":" + line;
-    var row = sourceLineIndex[key];
-    if (!row) return;
-    var refsSpan = row.querySelector(".step-refs");
-    if (entering) {
-      row.classList.add("hl-hover");
-      var refs = stepRefIndex[key] || [];
-      refsSpan.textContent = refs.length ? "← step " + refs.join(", ") : "";
-      currentStateEl.parentElement && (currentStateEl.parentElement.style.outline = refs.indexOf(currentSnapshots[currentIndex] && currentSnapshots[currentIndex].step) !== -1 ? "1px solid var(--accent)" : "");
-    } else {
-      row.classList.remove("hl-hover");
-      refsSpan.textContent = "";
-      if (currentStateEl.parentElement) currentStateEl.parentElement.style.outline = "";
-    }
-  }
-
-  // Hovering the claim/step panel (description + state) highlights that
-  // step's span(s) in the source pane, same class the auto-highlight uses
-  // so hover and "current step" visually agree.
-  function wireStepPanelHover() {
-    var panel = currentDescriptionEl.closest(".panel") || currentDescriptionEl.parentElement;
-    if (!panel || panel._hoverWired) return;
-    panel._hoverWired = true;
-    panel.addEventListener("mouseenter", function () {
-      var snap = currentSnapshots[currentIndex];
-      if (snap) highlightSpans(snap.spans, "hl-hover");
-    });
-    panel.addEventListener("mouseleave", function () {
-      clearSourceHighlight("hl-hover");
-    });
-  }
-
-  function renderCurrentStep() {
-    var total = currentSnapshots.length;
-    if (total === 0) {
-      currentStepNoEl.textContent = "-";
-      currentVerdictEl.innerHTML = "";
-      currentDescriptionEl.textContent = "(no snapshots for this engine/scenario combination)";
-      currentStateEl.innerHTML = "";
-      stepCountEl.textContent = "0/0";
-      btnFirst.disabled = btnPrev.disabled = btnNext.disabled = btnLast.disabled = true;
-      return;
-    }
-    var snap = currentSnapshots[currentIndex];
-    currentStepNoEl.textContent = snap.step;
-    if (snap.verdict) {
-      currentVerdictEl.innerHTML = '<span class="badge ' + verdictClass(snap.verdict) + '">' + escapeHtml(snap.verdict) + "</span>";
-    } else {
-      currentVerdictEl.innerHTML = "";
-    }
-    currentDescriptionEl.innerHTML = "";
-    currentDescriptionEl.appendChild(renderCitedText(snap.description));
-    currentStateEl.innerHTML = "";
-    currentStateEl.appendChild(renderState(snap.state));
-
-    stepCountEl.textContent = (currentIndex + 1) + "/" + total;
-    btnFirst.disabled = btnPrev.disabled = currentIndex === 0;
-    btnNext.disabled = btnLast.disabled = currentIndex === total - 1;
-
-    // Auto-highlight the current step's span(s) in the source pane, no
-    // hover needed.
-    highlightSpans(snap.spans, "hl-step");
-  }
-
-  var provenanceEl = document.getElementById("scenario-provenance");
-
-  // Bare link-style token for the scenario-level citation: source doc only
-  // (up to the first comma), full string kept as a title tooltip. Not a
-  // per-step judgment citation (see renderCitedText for those) -- this is
-  // the scenario's own top-of-panel source locator.
-  function shortScenarioCitation(cite) {
-    var idx = cite.indexOf(",");
-    return idx === -1 ? cite : cite.slice(0, idx);
-  }
-
-  function loadCurrent() {
-    var engine = findEngine(engineSelect.value);
-    var scenario = findScenario(scenarioSelect.value);
-    scenarioCitationEl.textContent = shortScenarioCitation(scenario.citation);
-    scenarioCitationEl.title = scenario.citation;
-    provenanceEl.innerHTML = "";
-    if (scenario.provenance) {
-      var pb = document.createElement("span");
-      pb.className = "prov-badge";
-      pb.textContent = scenario.provenance;
-      pb.title = "provenance: " + scenario.provenance;
-      provenanceEl.appendChild(pb);
-    }
-    try {
-      currentSnapshots = engine.run(scenario) || [];
-    } catch (err) {
-      currentSnapshots = [{ step: 1, description: "ENGINE ERROR: " + err.message, state: {} }];
-    }
-    currentIndex = 0;
-    renderSourcePane(scenario);
-    buildStepRefIndex();
-    wireStepPanelHover();
-    renderCurrentStep();
-    renderSummary();
-  }
-
-  function renderSummary() {
-    var scenario = findScenario(scenarioSelect.value);
-    var table = document.createElement("table");
-    table.className = "summary-table";
-    var thead = document.createElement("tr");
-    thead.innerHTML = "<th>Engine</th><th>Final verdict</th>";
-    table.appendChild(thead);
-    ENGINES.forEach(function (e) {
-      var verdict = "(no snapshots)";
-      try {
-        var snaps = e.run(scenario) || [];
-        for (var i = snaps.length - 1; i >= 0; i--) {
-          if (snaps[i].verdict) { verdict = snaps[i].verdict; break; }
-        }
-        if (verdict === "(no snapshots)" && snaps.length) verdict = "Open (no verdict set)";
-      } catch (err) {
-        verdict = "ENGINE ERROR: " + err.message;
-      }
-      var tr = document.createElement("tr");
-      var td1 = document.createElement("td");
-      td1.textContent = e.label;
-      var td2 = document.createElement("td");
-      var badge = document.createElement("span");
-      badge.className = "badge " + verdictClass(verdict);
-      badge.textContent = verdict;
-      td2.appendChild(badge);
-      tr.appendChild(td1);
-      tr.appendChild(td2);
-      table.appendChild(tr);
-    });
-    summaryEl.innerHTML = "";
-    summaryEl.appendChild(table);
-  }
-
-  engineSelect.addEventListener("change", loadCurrent);
-  scenarioSelect.addEventListener("change", loadCurrent);
-  btnFirst.addEventListener("click", function () { currentIndex = 0; renderCurrentStep(); });
-  btnPrev.addEventListener("click", function () { if (currentIndex > 0) currentIndex--; renderCurrentStep(); });
-  btnNext.addEventListener("click", function () { if (currentIndex < currentSnapshots.length - 1) currentIndex++; renderCurrentStep(); });
-  btnLast.addEventListener("click", function () { currentIndex = currentSnapshots.length - 1; renderCurrentStep(); });
-
-  // Initial load.
-  loadCurrent();
-</script>
+<script src="traces/subtract.trace.js"></script>
+<script src="traces/primitive.trace.js"></script>
+<script src="traces/invert.trace.js"></script>
+<script src="traces/evidence.trace.js"></script>
+<script src="traces/saturation-a.trace.js"></script>
+<script src="traces/saturation-b.trace.js"></script>
+<script src="traces/synthesis.trace.js"></script>
+<script src="app.js"></script>

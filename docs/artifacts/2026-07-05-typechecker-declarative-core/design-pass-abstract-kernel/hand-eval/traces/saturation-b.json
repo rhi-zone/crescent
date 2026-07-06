@@ -1,0 +1,465 @@
+{
+  "design": "saturation-b",
+  "provenance": "llm-abstract-eval",
+  "scenarios": {
+    "corpus-1-lru-self": {
+      "steps": [
+        {
+          "step": 1,
+          "description": "admit initial terms: def_form(peek,colon), receiver_param(peek,self), deref_site(peek,self,155) into the term store, each its own class",
+          "state": { "terms": ["def_form(peek,colon)", "receiver_param(peek,self)", "deref_site(peek,self,155)"], "classes": "3 singleton classes" },
+          "codeSpans": [
+            { "file": "docs/artifacts/2026-07-05-typechecker-declarative-core/design-pass-abstract-kernel/candidates/saturation.md", "lines": [96, 102] },
+            { "file": "lib/lru/init.lua", "lines": [152, 159] }
+          ],
+          "confidence": "determined"
+        },
+        {
+          "step": 2,
+          "description": "RewriteRule lhs (colon-self shape) matches the subterm formed by these 3 facts; rhs replaces it with canonical term nonnil_binding(self,peek) -- the design's §1.2 rhs is keyed on the full binding (subject + defining function), not on subject alone, so this canonical term still carries site/function identity",
+          "state": { "rewritten": "nonnil_binding(self,peek)", "lhs_consumed": ["def_form(peek,colon)", "receiver_param(peek,self)", "deref_site(peek,self,155)"] },
+          "codeSpans": [{ "file": "docs/artifacts/2026-07-05-typechecker-declarative-core/design-pass-abstract-kernel/candidates/saturation.md", "lines": [96, 108] }],
+          "confidence": "determined"
+        },
+        {
+          "step": 3,
+          "description": "normalize continues; no further lhs matches the new term; normalize halts (no rule applies)",
+          "state": { "normal_form": true },
+          "codeSpans": [{ "file": "docs/artifacts/2026-07-05-typechecker-declarative-core/design-pass-abstract-kernel/candidates/saturation.md", "lines": [104, 108] }],
+          "confidence": "determined"
+        },
+        {
+          "step": 4,
+          "description": "conflict check: this canonical class carries a supports polarity (from the rewrite's own construction) and no rule in this set ever produces a refutes term or merges this class with anything carrying refutes -> no conflict",
+          "state": { "conflict": false, "canonical": "nonnil_binding(self,peek)" },
+          "codeSpans": [{ "file": "docs/artifacts/2026-07-05-typechecker-declarative-core/design-pass-abstract-kernel/candidates/saturation.md", "lines": [110, 122] }],
+          "confidence": "determined"
+        },
+        {
+          "step": 5,
+          "description": "verdict: Proved. No merge opportunity exists with only one fact family in the store -- identical outcome to Reading A for this instance, correct by luck (calledOnlyViaColon=true) but built on the same unsound rule content",
+          "state": { "verdict": "Proved" },
+          "codeSpans": [{ "file": "docs/artifacts/2026-07-05-typechecker-declarative-core/design-pass-abstract-kernel/candidates/saturation.md", "lines": [147, 157] }],
+          "confidence": "determined"
+        }
+      ],
+      "verdict": "proved",
+      "verdictNote": "Single-instance rewrite, no merge risk triggered; same rule-content defect as Reading A, correct here only by ground-truth luck."
+    },
+    "corpus-2-json-hex": {
+      "steps": [
+        {
+          "step": 1,
+          "description": "admit terms: single_assignment(HEX), assigned_kind(HEX,table), deref_site(HEX,125)",
+          "state": { "terms": ["single_assignment(HEX)", "assigned_kind(HEX,table)", "deref_site(HEX,125)"] },
+          "codeSpans": [{ "file": "lib/json/init.lua", "lines": [27, 33] }],
+          "confidence": "determined"
+        },
+        {
+          "step": 2,
+          "description": "RewriteRule (never-reassigned shape) lhs matches; rewrites to canonical nonnil_binding(HEX,table) -- no ordering/dominance subterm exists to gate this, identical gap to Reading A, unexercised here",
+          "state": { "rewritten": "nonnil_binding(HEX,table)" },
+          "codeSpans": [{ "file": "docs/artifacts/2026-07-05-typechecker-declarative-core/design-pass-abstract-kernel/candidates/saturation.md", "lines": [158, 164] }],
+          "confidence": "determined"
+        },
+        {
+          "step": 3,
+          "description": "normal form reached; no conflict (no refutes term exists or is ever produced)",
+          "state": { "normal_form": true, "conflict": false },
+          "codeSpans": [],
+          "confidence": "determined"
+        },
+        {
+          "step": 4,
+          "description": "verdict: Proved, matches ground truth",
+          "state": { "verdict": "Proved" },
+          "codeSpans": [],
+          "confidence": "determined"
+        }
+      ],
+      "verdict": "proved",
+      "verdictNote": "Single rewrite, no merge; identical to Reading A's outcome for this instance."
+    },
+    "corpus-3-queue-fifo": {
+      "steps": [
+        {
+          "step": 1,
+          "description": "admit terms: single_assignment(FIFO), assigned_kind(FIFO,table), deref_site(FIFO,157) -- identical shape to corpus-2",
+          "state": { "terms": ["single_assignment(FIFO)", "assigned_kind(FIFO,table)", "deref_site(FIFO,157)"] },
+          "codeSpans": [{ "file": "lib/queue/init.lua", "lines": [152, 169] }],
+          "confidence": "determined"
+        },
+        {
+          "step": 2,
+          "description": "rewrites to canonical nonnil_binding(FIFO,table); normal form reached; no conflict",
+          "state": { "rewritten": "nonnil_binding(FIFO,table)", "normal_form": true, "conflict": false },
+          "codeSpans": [],
+          "confidence": "determined"
+        },
+        {
+          "step": 3,
+          "description": "verdict: Proved, matches ground truth",
+          "state": { "verdict": "Proved" },
+          "codeSpans": [],
+          "confidence": "determined"
+        }
+      ],
+      "verdict": "proved",
+      "verdictNote": "Identical mechanism to corpus-2; no merge triggered."
+    },
+    "corpus-4-deque-self-x4": {
+      "steps": [
+        {
+          "step": 1,
+          "description": "admit terms: def_form(pop_front,colon), receiver_param(pop_front,self), and 4 deref_site facts at lines 62/63/64/65",
+          "state": { "terms": ["def_form(pop_front,colon)", "receiver_param(pop_front,self)", "deref_site(pop_front,self,62..65)x4"] },
+          "codeSpans": [{ "file": "lib/deque/init.lua", "lines": [56, 67] }],
+          "confidence": "determined"
+        },
+        {
+          "step": 2,
+          "description": "the honest rewrite rule's rhs is keyed on (subject, defining function[, site]) per §1.2's rhs shape -- this scenario's own notes explicitly state 'no merge opportunity exists in isolation (single fact per site)', so the 4 rewrites produce 4 DISTINCT canonical terms, one per site, not one shared class",
+          "state": { "rewritten": ["nonnil_binding(self,pop_front,62)", "nonnil_binding(self,pop_front,63)", "nonnil_binding(self,pop_front,64)", "nonnil_binding(self,pop_front,65)"] },
+          "codeSpans": [
+            { "file": "docs/artifacts/2026-07-05-typechecker-declarative-core/design-pass-abstract-kernel/hand-eval/scenarios.js", "lines": [509, 515] },
+            { "file": "docs/artifacts/2026-07-05-typechecker-declarative-core/design-pass-abstract-kernel/candidates/saturation.md", "lines": [96, 102] }
+          ],
+          "confidence": "underdetermined"
+        },
+        {
+          "step": 3,
+          "description": "normal form reached for all 4 classes; no conflict at any of them (no refutes term ever produced by this rule set)",
+          "state": { "normal_form": true, "conflict": false },
+          "codeSpans": [],
+          "confidence": "determined"
+        },
+        {
+          "step": 4,
+          "description": "verdict: Proved at all 4 sites independently, matches ground truth (calledOnlyViaColon=true). Note the counterfactual: a wrong rule here would rewrite (not just add) at all 4 sites identically -- same blast radius as Reading A for this instance since no cross-site merge occurs, but the design doc names rewriting as strictly more dangerous IN GENERAL when a merge does occur (see the dedicated adversarial scenario)",
+          "state": { "verdict": "Proved x4" },
+          "codeSpans": [{ "file": "docs/artifacts/2026-07-05-typechecker-declarative-core/design-pass-abstract-kernel/candidates/saturation.md", "lines": [391, 410] }],
+          "confidence": "determined"
+        }
+      ],
+      "verdict": "proved",
+      "verdictNote": "4 independent rewrites, one per site, no merge triggered here (design doc and scenario notes agree the rhs's site-inclusion keeps identities distinct in isolation) -- flagged underdetermined at step 2 because the doc's Term/Pattern grammar (§1.1-1.2) never spells out the exact rhs arity/fields precisely enough to derive this without leaning on the scenario notes' own stated conclusion."
+    },
+    "corpus-5-bigint-reachable": {
+      "steps": [
+        {
+          "step": 1,
+          "description": "admit term: reachable(bigint,then,115)",
+          "state": { "terms": ["reachable(bigint,then,115)"] },
+          "codeSpans": [{ "file": "lib/bigint/init.lua", "lines": [97, 121] }],
+          "confidence": "determined"
+        },
+        {
+          "step": 2,
+          "description": "no RewriteRule lhs pattern matches a bare reachable(...) term (same 3 producer rules as Reading A, none reference this predicate); normalize halts immediately, term stays un-rewritten",
+          "state": { "normal_form": true, "matching_lhs": [] },
+          "codeSpans": [{ "file": "docs/artifacts/2026-07-05-typechecker-declarative-core/design-pass-abstract-kernel/candidates/saturation.md", "lines": [171, 179] }],
+          "confidence": "determined"
+        },
+        {
+          "step": 3,
+          "description": "no conflict (term is isolated, unmerged, no supports/refutes ever attached)",
+          "state": { "conflict": false },
+          "codeSpans": [],
+          "confidence": "determined"
+        },
+        {
+          "step": 4,
+          "description": "verdict: Open, identical mechanism to Reading A for this instance -- neither reading's rule set touches reachability claims at all",
+          "state": { "verdict": "Open" },
+          "codeSpans": [],
+          "confidence": "determined"
+        }
+      ],
+      "verdict": "open",
+      "verdictNote": "No lhs matches; identical to Reading A's outcome and reasoning for this instance."
+    },
+    "adversarial-subtract-false-proved": {
+      "steps": [
+        {
+          "step": 1,
+          "description": "admit terms: def_form(peek,colon), receiver_param(peek,self), deref_site(peek,self,155) -- structurally identical to corpus-1's terms; the real counterexample call Cache.peek(nil,key) has no term representation anywhere in the store (no call-site harvesting)",
+          "state": { "terms": ["def_form(peek,colon)", "receiver_param(peek,self)", "deref_site(peek,self,155)"], "world_counterexample": "not represented" },
+          "codeSpans": [{ "file": "lib/lru/init.lua", "lines": [152, 159] }],
+          "confidence": "determined"
+        },
+        {
+          "step": 2,
+          "description": "rewrite rule fires identically to corpus-1 (the rule cannot distinguish this term set from corpus-1's -- structurally the same 3 terms), producing canonical nonnil_binding(self,peek)",
+          "state": { "rewritten": "nonnil_binding(self,peek)" },
+          "codeSpans": [],
+          "confidence": "determined"
+        },
+        {
+          "step": 3,
+          "description": "normal form reached; no conflict (no refutes term possible, no merge with any other fact since only this one term family exists in the store)",
+          "state": { "normal_form": true, "conflict": false },
+          "codeSpans": [],
+          "confidence": "determined"
+        },
+        {
+          "step": 4,
+          "description": "verdict: Proved -- FALSE Proved, same underlying content-defect as corpus-1/adversarial-a under Reading A; rewriting-as-framing changes nothing here since no merge is even in play (single fact, no identity collision)",
+          "state": { "verdict": "Proved (false)" },
+          "codeSpans": [{ "file": "docs/artifacts/2026-07-05-typechecker-declarative-core/design-pass-abstract-kernel/candidates/saturation.md", "lines": [147, 157] }],
+          "confidence": "determined"
+        }
+      ],
+      "verdict": "proved",
+      "verdictNote": "False Proved, identical mechanism to Reading A for this instance -- the rewrite-vs-add distinction is not what causes the false positive here (rule content is the sole cause, no merge occurs since only one fact family exists)."
+    },
+    "adversarial-saturation-b-identity-merge": {
+      "steps": [
+        {
+          "step": 1,
+          "description": "admit factA's terms (def_form(peek,colon), receiver_param(peek,self), deref_site(peek,self,155)) and factB's terms (def_form(pop_front,colon), receiver_param(pop_front,self), deref_site(pop_front,self,62..65))",
+          "state": { "terms_A": ["def_form(peek,colon)", "receiver_param(peek,self)", "deref_site(peek,self,155)"], "terms_B": ["def_form(pop_front,colon)", "receiver_param(pop_front,self)", "deref_site(pop_front,self,62..65)"] },
+          "codeSpans": [{ "file": "lib/lru/init.lua", "lines": [152, 159] }, { "file": "lib/deque/init.lua", "lines": [56, 67] }],
+          "confidence": "determined"
+        },
+        {
+          "step": 2,
+          "description": "the honest colon-self rewrite rule fires independently on A and B, producing two distinct canonical terms: nonnil_binding(self,peek) and nonnil_binding(self,pop_front) -- these are NOT yet merged, since the honest rule's rhs (per §1.2) includes the defining function, keeping them distinct",
+          "state": { "rewritten_A": "nonnil_binding(self,peek)", "rewritten_B": "nonnil_binding(self,pop_front)" },
+          "codeSpans": [{ "file": "docs/artifacts/2026-07-05-typechecker-declarative-core/design-pass-abstract-kernel/candidates/saturation.md", "lines": [96, 102] }],
+          "confidence": "determined"
+        },
+        {
+          "step": 3,
+          "description": "the scenario's own notes specify a SECOND, hand-constructed adversarial RewriteRule (not in producers.js -- an ad-hoc addition per the scenario's stated purpose, 'this engine's mandatory adversarial case'): lhs matches any nonnil_binding(self,_) term regardless of second arg, rhs canonicalizes/merges it into ONE shared class nonnil_binding_by_name(self), discarding which defining function it came from",
+          "state": { "adversarial_rule": "nonnil_binding(self,_) -> nonnil_binding_by_name(self)" },
+          "codeSpans": [
+            { "file": "docs/artifacts/2026-07-05-typechecker-declarative-core/design-pass-abstract-kernel/hand-eval/scenarios.js", "lines": [877, 900] },
+            { "file": "docs/artifacts/2026-07-05-typechecker-declarative-core/design-pass-abstract-kernel/candidates/saturation.md", "lines": [391, 410] }
+          ],
+          "confidence": "determined"
+        },
+        {
+          "step": 4,
+          "description": "the order in which this second rule fires relative to any per-site supports-polarity attachment is NOT specified anywhere in the design doc -- §4's non-confluence discussion names order-dependence as an open, unresolved property of Reading B generally, not something this document pins down; I picked: (a) honest rewrite for A, (b) honest rewrite for B, (c) both individually acquire a supports polarity from their own rule firing (A's rule still can't see the counterexample; B's rule is genuinely sound here), (d) THEN the adversarial merge rule collapses both classes into nonnil_binding_by_name(self)",
+          "state": { "order_chosen": "honest-rewrite-then-merge", "reason": "no rule ever un-fires; merge is the last thing that could structurally happen to two already-supports terms" },
+          "codeSpans": [{ "file": "docs/artifacts/2026-07-05-typechecker-declarative-core/design-pass-abstract-kernel/candidates/saturation.md", "lines": [472, 491] }],
+          "confidence": "underdetermined"
+        },
+        {
+          "step": 5,
+          "description": "post-merge: nonnil_binding_by_name(self) is now the SAME store entry for what were A's and B's terms -- this is the destructive, irreversible egraph-style merge the design doc names explicitly; the term store's identity structure no longer distinguishes 'self at Cache:peek' from 'self at Deque:pop_front'",
+          "state": { "merged_class": "nonnil_binding_by_name(self)", "members": ["ex-A(peek,155)", "ex-B(pop_front,62-65)"] },
+          "codeSpans": [{ "file": "docs/artifacts/2026-07-05-typechecker-declarative-core/design-pass-abstract-kernel/candidates/saturation.md", "lines": [391, 410] }],
+          "confidence": "determined"
+        },
+        {
+          "step": 6,
+          "description": "conflict check on the merged class: both original terms independently carried supports (no refutes anywhere in this rule set, per producers.js), so the merged class carries only supports -- not a conflict in the ⊥ sense, but a silent identification: B's genuinely-supported polarity now reads back as if it also independently corroborates A, and A's real counterexample (which was never even representable as a refuting term) is doubly invisible now that A and B's site identities are gone from the store",
+          "state": { "conflict": false, "merged_polarity": "supports (from both, now indistinguishable)" },
+          "codeSpans": [{ "file": "docs/artifacts/2026-07-05-typechecker-declarative-core/design-pass-abstract-kernel/candidates/saturation.md", "lines": [391, 410] }],
+          "confidence": "determined"
+        },
+        {
+          "step": 7,
+          "description": "verdict: the merged canonical representative is Proved. Read back per-original-site, this means A (Cache:peek, real counterexample, should be Open or Refuted on its own unsound-rule terms) now reads as Proved via the SAME store entry as B's genuinely-sound derivation -- 'a wrong rewrite rewrites the world,' exactly as the design doc's §4 names as this reading's single sharpest failure mode, with no analogue possible under Reading A (where A and B stayed permanently distinct addresses, per the saturation-a trace for this same scenario)",
+          "state": { "verdict_merged": "Proved", "verdict_readback_A": "Proved (false, via merge)", "verdict_readback_B": "Proved (true)" },
+          "codeSpans": [{ "file": "docs/artifacts/2026-07-05-typechecker-declarative-core/design-pass-abstract-kernel/candidates/saturation.md", "lines": [391, 410] }],
+          "confidence": "determined"
+        }
+      ],
+      "verdict": "proved",
+      "verdictNote": "Merged canonical class reads as Proved; A's false-Proved is now indistinguishable from B's true-Proved because the merge is destructive and irreversible -- this is the design doc's own named worst-case for Reading B, and it required a hand-constructed second rule (not in producers.js) to trigger, exactly as the scenario's notes specify. Step 4's firing order is underdetermined by the design doc itself (named as an open non-confluence problem, not resolved here)."
+    },
+    "hand-json-type-guard": {
+      "steps": [
+        {
+          "step": 1,
+          "description": "admit term: evidence(type_guard,[number]) for subject val; admit claim term val-number-arm(claimedArms=[number])",
+          "state": { "terms": ["evidence(val,type_guard,[number])", "claim(val-number-arm,[number])"] },
+          "codeSpans": [{ "file": "lib/json/init.lua", "lines": [406, 428] }],
+          "confidence": "determined"
+        },
+        {
+          "step": 2,
+          "description": "arm-subset-entailment rewrite lhs matches (subject-equality skipped since ev.subject undefined, as in Reading A -- this is producer-rule content, identical under both readings' generic mechanism); isSubset([number],[number]) holds",
+          "state": { "matched": true, "subject_check": "skipped" },
+          "codeSpans": [{ "file": "docs/artifacts/2026-07-05-typechecker-declarative-core/design-pass-abstract-kernel/hand-eval/producers.js", "lines": [45, 50] }],
+          "confidence": "underdetermined"
+        },
+        {
+          "step": 3,
+          "description": "rhs rewrites/canonicalizes to in_arms(val-number-arm,{number})[supports]; normal form reached (only one term family, no merge candidate exists); no conflict",
+          "state": { "rewritten": "in_arms(val-number-arm,{number})[supports]", "normal_form": true, "conflict": false },
+          "codeSpans": [],
+          "confidence": "determined"
+        },
+        {
+          "step": 4,
+          "description": "verdict: Proved, matches ground truth",
+          "state": { "verdict": "Proved" },
+          "codeSpans": [],
+          "confidence": "determined"
+        }
+      ],
+      "verdict": "proved",
+      "verdictNote": "Identical outcome to Reading A for this instance; no merge candidate exists (single evidence/claim pair)."
+    },
+    "hand-bigint-err-arm": {
+      "steps": [
+        {
+          "step": 1,
+          "description": "admit two evidence terms (establishesArms=[nil] and [string]) and two claim terms (ret1 claimedArms=[nil], ret2 claimedArms=[string])",
+          "state": { "terms": ["evidence1[nil]", "evidence2[string]", "claim(ret1,[nil])", "claim(ret2,[string])"] },
+          "codeSpans": [{ "file": "lib/bigint/init.lua", "lines": [291, 308] }],
+          "confidence": "determined"
+        },
+        {
+          "step": 2,
+          "description": "arm-subset-entailment lhs matches (ret1,evidence1) and (ret2,evidence2) only -- cross pairs (ret1,evidence2) and (ret2,evidence1) fail the isSubset test even with subject-check skipped, because the arm-sets are disjoint; this is the same latent subject-blindness noted in Reading A, incidentally non-triggering here",
+          "state": { "matched": ["ret1<-evidence1", "ret2<-evidence2"], "cross_rejected": 2 },
+          "codeSpans": [{ "file": "docs/artifacts/2026-07-05-typechecker-declarative-core/design-pass-abstract-kernel/hand-eval/producers.js", "lines": [45, 50] }],
+          "confidence": "underdetermined"
+        },
+        {
+          "step": 3,
+          "description": "rhs rewrites both to in_arms(ret1,{nil})[supports] and in_arms(ret2,{string})[supports] -- these are two DISTINCT canonical terms (different claimedArms, different subject strings), no merge candidate: the design's §1.2 rhs is keyed on the claim's own subject/arms, and 'M.new return#1' vs 'M.new return#2' are different subject strings, so no lhs pattern in this rule set would ever unify them into one class",
+          "state": { "rewritten_ret1": "in_arms(ret1,{nil})[supports]", "rewritten_ret2": "in_arms(ret2,{string})[supports]", "merged": false },
+          "codeSpans": [],
+          "confidence": "determined"
+        },
+        {
+          "step": 4,
+          "description": "normal form reached for both; no conflict at either address",
+          "state": { "normal_form": true, "conflict": false },
+          "codeSpans": [],
+          "confidence": "determined"
+        },
+        {
+          "step": 5,
+          "description": "verdict: both Proved, matching ground truth",
+          "state": { "verdict_ret1": "Proved", "verdict_ret2": "Proved" },
+          "codeSpans": [],
+          "confidence": "determined"
+        }
+      ],
+      "verdict": "proved",
+      "verdictNote": "No merge candidate exists (distinct subject strings keep the two claims as separate canonical terms); identical outcome to Reading A."
+    },
+    "hand-lru-field-shape": {
+      "steps": [
+        {
+          "step": 1,
+          "description": "admit evidence(map,field_assign,[table]) and claim(map-table-arm,[table]); admit claim(ttl-number-arm,[number]) with evidence establishesArms=null",
+          "state": { "terms": ["evidence(map,field_assign,[table])", "claim(map-table-arm,[table])", "evidence(ttl,opt_expr,null)", "claim(ttl-number-arm,[number])"] },
+          "codeSpans": [{ "file": "lib/lru/init.lua", "lines": [77, 101] }],
+          "confidence": "determined"
+        },
+        {
+          "step": 2,
+          "description": "arm-subset-entailment lhs matches for map (isSubset([table],[table])); for ttl, the guard requiring Array.isArray(ev.establishesArms) fails on null -- no lhs pattern matches, term stays un-rewritten",
+          "state": { "rewritten_map": true, "rewritten_ttl": false },
+          "codeSpans": [{ "file": "docs/artifacts/2026-07-05-typechecker-declarative-core/design-pass-abstract-kernel/hand-eval/producers.js", "lines": [45, 50] }],
+          "confidence": "determined"
+        },
+        {
+          "step": 3,
+          "description": "map rewritten to in_arms(map-table-arm,{table})[supports]; ttl's claim term remains exactly as admitted, no supports/refutes ever attached, no merge candidate exists for either (distinct subjects, and ttl has nothing to merge with)",
+          "state": { "rewritten_map": "in_arms(map-table-arm,{table})[supports]", "ttl_state": "unchanged, isolated" },
+          "codeSpans": [],
+          "confidence": "determined"
+        },
+        {
+          "step": 4,
+          "description": "normal form reached; no conflict at map (supports only) or ttl (nothing at all)",
+          "state": { "normal_form": true, "conflict_map": false, "conflict_ttl": false },
+          "codeSpans": [],
+          "confidence": "determined"
+        },
+        {
+          "step": 5,
+          "description": "verdict: map-table-arm -> Proved (matches ground truth). ttl-number-arm -> Open, same three-valued gap as Reading A -- no rule/rewrite in this set can ever produce a refuting term for an overclaiming claim, it can only fail to canonicalize it",
+          "state": { "verdict_map": "Proved", "verdict_ttl": "Open" },
+          "codeSpans": [],
+          "confidence": "determined"
+        }
+      ],
+      "verdict": "open",
+      "verdictNote": "Identical outcome to Reading A: map Proved, ttl Open (not Refuted) despite ground truth being false for ttl. No merge candidate for either claim in this scenario."
+    },
+    "hand-lru-closure-upvalue": {
+      "steps": [
+        {
+          "step": 1,
+          "description": "admit evidence(cache,upvalue_capture,[Cache]) and claim(cache-upvalue-arm,[Cache]); admit claim(node-upvalue-arm,[LruNode]) with evidence establishesArms=null",
+          "state": { "terms": ["evidence(cache,upvalue_capture,[Cache])", "claim(cache-upvalue-arm,[Cache])", "evidence(node,upvalue_capture,null)", "claim(node-upvalue-arm,[LruNode])"] },
+          "codeSpans": [{ "file": "lib/lru/init.lua", "lines": [248, 264] }],
+          "confidence": "determined"
+        },
+        {
+          "step": 2,
+          "description": "lhs matches for cache (isSubset([Cache],[Cache])); for node, Array.isArray(null) fails -- no rewrite occurs for node",
+          "state": { "rewritten_cache": true, "rewritten_node": false },
+          "codeSpans": [{ "file": "docs/artifacts/2026-07-05-typechecker-declarative-core/design-pass-abstract-kernel/hand-eval/producers.js", "lines": [45, 50] }],
+          "confidence": "determined"
+        },
+        {
+          "step": 3,
+          "description": "cache rewritten to in_arms(cache-upvalue-arm,{Cache})[supports]; node's claim term stays as-admitted, isolated, no merge candidate (distinct subjects: 'upvalue cache' vs 'upvalue node')",
+          "state": { "rewritten_cache": "in_arms(cache-upvalue-arm,{Cache})[supports]", "node_state": "unchanged" },
+          "codeSpans": [],
+          "confidence": "determined"
+        },
+        {
+          "step": 4,
+          "description": "normal form reached; no conflict at either address",
+          "state": { "normal_form": true, "conflict_cache": false, "conflict_node": false },
+          "codeSpans": [],
+          "confidence": "determined"
+        },
+        {
+          "step": 5,
+          "description": "verdict: cache-upvalue-arm -> Proved (matches ground truth). node-upvalue-arm -> Open, despite ground truth false (node genuinely reaches nil at exhaustion) -- same gap as Reading A, no refuting mechanism exists in this rule set",
+          "state": { "verdict_cache": "Proved", "verdict_node": "Open" },
+          "codeSpans": [],
+          "confidence": "determined"
+        }
+      ],
+      "verdict": "open",
+      "verdictNote": "Identical outcome to Reading A; no merge candidate for either claim."
+    },
+    "hand-json-generic-for": {
+      "steps": [
+        {
+          "step": 1,
+          "description": "admit evidence(k,generic_for_protocol,[boolean,number,string,table,function]) and claim(k-nonterminator-arms,[boolean,number,string,table,function])",
+          "state": { "terms": ["evidence(k,generic_for_protocol,[...])", "claim(k-nonterminator-arms,[...])"] },
+          "codeSpans": [{ "file": "lib/json/init.lua", "lines": [429, 443] }],
+          "confidence": "determined"
+        },
+        {
+          "step": 2,
+          "description": "lhs matches (isSubset(claimedArms,claimedArms) trivially true); rhs rewrites to in_arms(k-nonterminator-arms,{boolean,number,string,table,function})[supports]; no merge candidate exists (single term family)",
+          "state": { "rewritten": "in_arms(k-nonterminator-arms,...)[supports]" },
+          "codeSpans": [{ "file": "docs/artifacts/2026-07-05-typechecker-declarative-core/design-pass-abstract-kernel/hand-eval/producers.js", "lines": [45, 50] }],
+          "confidence": "determined"
+        },
+        {
+          "step": 3,
+          "description": "normal form reached; no conflict",
+          "state": { "normal_form": true, "conflict": false },
+          "codeSpans": [],
+          "confidence": "determined"
+        },
+        {
+          "step": 4,
+          "description": "verdict: Proved, matches ground truth",
+          "state": { "verdict": "Proved" },
+          "codeSpans": [],
+          "confidence": "determined"
+        }
+      ],
+      "verdict": "proved",
+      "verdictNote": "Identical outcome to Reading A; no merge candidate in this scenario."
+    }
+  }
+}

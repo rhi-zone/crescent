@@ -936,6 +936,10 @@ window.SCENARIOS = [
           claimedArms: ["number"],
           site: { lineStart: 416, lineEnd: 416, colStart: 16, colEnd: 18 },
           evidence: {
+            // subject derived from boundFrom "type(val)" at lib/json/init.lua:408
+            // (`local t = type(val)`) -- the guarded variable is `val`, matching
+            // claim.subject exactly.
+            subject: "val",
             kind: "type_guard",
             guardVar: "t",
             boundFrom: "type(val)",
@@ -1003,6 +1007,10 @@ window.SCENARIOS = [
           claimedArms: ["nil"],
           site: { lineStart: 305, lineEnd: 305, colStart: 12, colEnd: 14 },
           evidence: {
+            // subject derived from lib/bigint/init.lua:305's first return value
+            // (`return nil, ...`) -- matches claim.subject exactly, the
+            // type-error path's first return slot.
+            subject: "M.new return#1 (type-error path)",
             kind: "guard_return",
             guardLine: 304,
             returnedForm: "nil_literal",
@@ -1018,6 +1026,10 @@ window.SCENARIOS = [
           claimedArms: ["string"],
           site: { lineStart: 305, lineEnd: 305, colStart: 17, colEnd: 66 },
           evidence: {
+            // subject derived from lib/bigint/init.lua:305's second return value
+            // (the `.. type(v)` string-concat expression) -- matches
+            // claim.subject exactly, the type-error path's second return slot.
+            subject: "M.new return#2 (type-error path)",
             kind: "guard_return",
             guardLine: 304,
             returnedForm: "string_concat_literal",
@@ -1079,6 +1091,10 @@ window.SCENARIOS = [
           claimedArms: ["table"],
           site: { lineStart: 91, lineEnd: 91 },
           evidence: {
+            // subject derived from lib/lru/init.lua:91 (`_map = {}`) -- the
+            // assigned field is `_map` on the constructed Cache, matching
+            // claim.subject exactly.
+            subject: "Cache._map",
             kind: "field_assign",
             valueForm: "table_literal",
             establishesArms: ["table"],
@@ -1093,6 +1109,10 @@ window.SCENARIOS = [
           claimedArms: ["number"],
           site: { lineStart: 94, lineEnd: 94 },
           evidence: {
+            // subject derived from lib/lru/init.lua:94 (`_ttl = o.ttl`) -- the
+            // assigned field is `_ttl` on the constructed Cache, matching
+            // claim.subject exactly.
+            subject: "Cache._ttl",
             kind: "field_assign",
             valueForm: "opt_expr", // o.ttl -- optional, may be nil
             establishesArms: null,
@@ -1161,6 +1181,10 @@ window.SCENARIOS = [
           claimedArms: ["Cache"],
           site: { lineStart: 252, lineEnd: 252, colStart: 9, colEnd: 13 },
           evidence: {
+            // subject derived from lib/lru/init.lua:252 (`local cache = self`)
+            // -- the captured local is named `cache`, matching claim.subject
+            // exactly.
+            subject: "upvalue cache",
             kind: "upvalue_capture",
             capturedFrom: "self",
             reassignedInClosure: false,
@@ -1176,6 +1200,11 @@ window.SCENARIOS = [
           claimedArms: ["LruNode"],
           site: { lineStart: 253, lineEnd: 253, colStart: 9, colEnd: 12 },
           evidence: {
+            // subject derived from lib/lru/init.lua:253 (`local node =
+            // self._head`), reassigned at :257 (`node = node.next`) -- the
+            // captured/reassigned local is named `node`, matching
+            // claim.subject exactly.
+            subject: "upvalue node",
             kind: "upvalue_capture",
             capturedFrom: "self._head",
             reassignedInClosure: true, // node = node.next at 257
@@ -1241,6 +1270,10 @@ window.SCENARIOS = [
           claimedArms: ["boolean", "number", "string", "table", "function"],
           site: { lineStart: 437, lineEnd: 437, colStart: 7, colEnd: 7 },
           evidence: {
+            // subject derived from lib/json/init.lua:437 (`for k in
+            // pairs(tval) do`) -- the loop control variable is `k`, matching
+            // claim.subject exactly.
+            subject: "k",
             kind: "generic_for_protocol",
             iterator: "pairs",
             establishesArms: ["boolean", "number", "string", "table", "function"],

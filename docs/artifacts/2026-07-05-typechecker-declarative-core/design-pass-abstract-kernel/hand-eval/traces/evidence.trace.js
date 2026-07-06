@@ -1,0 +1,500 @@
+// Auto-generated from evidence.json — do not hand-edit; regenerate from the .json if it changes.
+window.TRACES = window.TRACES || {}; window.TRACES['evidence'] = {
+  "design": "evidence",
+  "provenance": "llm-abstract-eval",
+  "scenarios": {
+    "corpus-1-lru-self": {
+      "steps": [
+        {
+          "step": 1,
+          "description": "Calling-convention producer (design §3.1 item 1) mints Claim: address=app(\"param_binding\",{atom(\"self\"),atom(\"Cache:peek\")}), modal=box, phi=Predicate(\"self ∈ {Cache}\").",
+          "state": { "claim": { "address": "app(param_binding,[self,Cache:peek])", "modal": "box" } },
+          "codeSpans": [{ "file": "lib/lru/init.lua", "lines": [152, 159] }],
+          "confidence": "determined"
+        },
+        {
+          "step": 2,
+          "description": "Producer builds InvariantCert: invariant grounded in oracle.cfg_at exposing colon-call desugaring (obj:m(args) → obj.m(obj,args)) as a static fact.",
+          "state": { "cert": { "invariant": "first-bound-param == receiver-expr-value" } },
+          "codeSpans": [{ "file": "lib/lru/init.lua", "lines": [154, 154] }],
+          "confidence": "determined"
+        },
+        {
+          "step": 3,
+          "description": "check_box.entries_satisfy walks oracle.entries(Cache:peek), 'finitely many static call sites', confirming none passes a nil receiver. Doc never defines whether this static enumeration is scoped to colon-syntax call sites only or to every real invocation of the function value regardless of spelling (dot vs colon) — for THIS scenario it doesn't change the outcome since calledOnlyViaColon=true (no counterexample exists either way), but the scope of oracle.entries() itself is unresolved in the text.",
+          "state": { "entries_satisfy": "passes (vacuously, no counterexample call exists)" },
+          "codeSpans": [{ "file": "lib/lru/init.lua", "lines": [152, 159] }],
+          "confidence": "underdetermined"
+        },
+        {
+          "step": 4,
+          "description": "preserved_by_every_step: self is never rebound within Cache:peek's body (no assignment to self in source); invariant remains true at every reachable step.",
+          "state": { "preserved_by_every_step": "true" },
+          "codeSpans": [{ "file": "lib/lru/init.lua", "lines": [152, 159] }],
+          "confidence": "determined"
+        },
+        {
+          "step": 5,
+          "description": "implies(invariant, phi) requires 'the receiver expression's value is never nil at any call site' — design's own text says this is a separate claim the producer must cite recursively (same no-reassign/construction shape as #2/#3). No Cache-constructor code is given in this scenario's facts, so whether the recursive citation actually grounds cannot be directly verified from the supplied data; the doc asserts (not shows) that this closes.",
+          "state": { "cert.cites": ["receiver-nonnil-at-construction (unshown)"] },
+          "codeSpans": [],
+          "confidence": "underdetermined"
+        },
+        {
+          "step": 6,
+          "description": "grounded_and_acyclic(cert.cites, store): assuming the recursive citation resolves as the design claims, the citation graph is acyclic and fully grounded.",
+          "state": { "grounded_and_acyclic": "assumed true" },
+          "codeSpans": [],
+          "confidence": "underdetermined"
+        },
+        {
+          "step": 7,
+          "description": "mint(\"proved\", cert).",
+          "state": { "verdict": "proved" },
+          "codeSpans": [],
+          "confidence": "determined"
+        }
+      ],
+      "verdict": "proved",
+      "verdictNote": "Design explicitly walks through this exact corpus instance in §3.1 item 1 and claims closure; the recursive receiver-non-nil citation is asserted, not shown, for this specific file."
+    },
+
+    "corpus-2-json-hex": {
+      "steps": [
+        {
+          "step": 1,
+          "description": "no_reassign.lua producer (design §2, verbatim sketch): cfg=oracle.cfg_at(def_site=28); lexically_between(28,125,cfg) holds.",
+          "state": { "producer": "no_reassign.try(\"HEX\",28,125,oracle)" },
+          "codeSpans": [{ "file": "lib/json/init.lua", "lines": [28, 28] }],
+          "confidence": "determined"
+        },
+        {
+          "step": 2,
+          "description": "invariant.decide scans state.trace_so_far for a bind event to 'HEX' with ev.site>28; cert={invariant, cites={}}.",
+          "state": { "cert": { "invariant": "no bind(HEX) since site 28", "cites": [] } },
+          "codeSpans": [{ "file": "lib/json/init.lua", "lines": [27, 33] }],
+          "confidence": "determined"
+        },
+        {
+          "step": 3,
+          "description": "check_box.entries_satisfy calls oracle.entries(site) — but the design never specifies which 'site' anchors a module-scope non-reassignment claim (module-chunk load entry vs. entry of the function containing the use, decode_string). The invariant's decide reads state.trace_so_far, but State's shape (whole-program history vs. per-call-scoped history) is never defined in the doc beyond this one usage.",
+          "state": { "entries": "site ambiguous: module-chunk-entry (assumed) vs decode_string-entry" },
+          "codeSpans": [{ "file": "lib/json/init.lua", "lines": [101, 133] }],
+          "confidence": "underdetermined"
+        },
+        {
+          "step": 4,
+          "description": "Adopting the reading that entries()=module chunk's single load-time entry (the only reading under which trace_so_far meaningfully spans HEX's whole lifetime): invariant true trivially there (trace_so_far empty at load).",
+          "state": { "entries_satisfy": "true (under assumed reading)" },
+          "codeSpans": [],
+          "confidence": "underdetermined"
+        },
+        {
+          "step": 5,
+          "description": "preserved_by_every_step walks the whole-program step relation (finite CFG); assignmentCount=1 means no bind event to HEX ever recurs; invariant preserved.",
+          "state": { "preserved_by_every_step": "true" },
+          "codeSpans": [{ "file": "lib/json/init.lua", "lines": [27, 33] }],
+          "confidence": "determined"
+        },
+        {
+          "step": 6,
+          "description": "A second producer mints non_nil_at_construction(HEX, def_site=28), cites={}, grounded trivially: eval of table literal {} always yields a table per fixed op semantics, checkable directly against oracle.step (this exact pattern is spelled out verbatim in the design).",
+          "state": { "claim": "non_nil_at_construction(HEX,28)", "cites": [] },
+          "codeSpans": [{ "file": "lib/json/init.lua", "lines": [28, 28] }],
+          "confidence": "determined"
+        },
+        {
+          "step": 7,
+          "description": "Original deref claim's cert.cites = {no_reassign_id, non_nil_at_construction_id}; grounded_and_acyclic holds (both cited claims independently Proved, cites={}, no cycle).",
+          "state": { "grounded_and_acyclic": "true" },
+          "codeSpans": [],
+          "confidence": "determined"
+        },
+        {
+          "step": 8,
+          "description": "mint(\"proved\").",
+          "state": { "verdict": "proved" },
+          "codeSpans": [],
+          "confidence": "determined"
+        }
+      ],
+      "verdict": "proved",
+      "verdictNote": "Matches design's own worked producer sketch in §2 near-verbatim; the site-anchoring of oracle.entries() for a module-scope claim is unresolved in the text but doesn't change the outcome under the only sensible reading."
+    },
+
+    "corpus-3-queue-fifo": {
+      "steps": [
+        {
+          "step": 1,
+          "description": "Design groups this with corpus-2: 'Exactly the producer sketch in §2.' Same no_reassign producer instantiated with name='FIFO', def_site=156, use_site=157.",
+          "state": { "producer": "no_reassign.try(\"FIFO\",156,157,oracle)" },
+          "codeSpans": [{ "file": "lib/queue/init.lua", "lines": [152, 169] }],
+          "confidence": "determined"
+        },
+        {
+          "step": 2,
+          "description": "Same entries()-site-anchoring ambiguity as corpus-2 recurs identically here (module-scope trace_so_far semantics undefined).",
+          "state": { "entries": "site ambiguous, same as corpus-2" },
+          "codeSpans": [],
+          "confidence": "underdetermined"
+        },
+        {
+          "step": 3,
+          "description": "preserved_by_every_step: assignmentCount=1, no rebind of FIFO ever recurs; invariant preserved.",
+          "state": { "preserved_by_every_step": "true" },
+          "codeSpans": [{ "file": "lib/queue/init.lua", "lines": [152, 169] }],
+          "confidence": "determined"
+        },
+        {
+          "step": 4,
+          "description": "non_nil_at_construction(FIFO,156) grounded trivially via table-literal eval, cites={}; original claim cites={no_reassign_id, non_nil_at_construction_id}; grounded_and_acyclic holds.",
+          "state": { "grounded_and_acyclic": "true" },
+          "codeSpans": [{ "file": "lib/queue/init.lua", "lines": [156, 156] }],
+          "confidence": "determined"
+        },
+        {
+          "step": 5,
+          "description": "mint(\"proved\").",
+          "state": { "verdict": "proved" },
+          "codeSpans": [],
+          "confidence": "determined"
+        }
+      ],
+      "verdict": "proved",
+      "verdictNote": "Design explicitly treats this as identical in shape to corpus-2; same underlying entries()-site-anchoring gap, same outcome."
+    },
+
+    "corpus-4-deque-self-x4": {
+      "steps": [
+        {
+          "step": 1,
+          "description": "Design (§3.1 item 4): 'same shape as #1, same producer, different instantiation. No new kernel behavior.' Same calling-convention producer, one rule registration reused against 4 targets (useLines 62-65).",
+          "state": { "claim_count": 4, "producer": "reused from corpus-1" },
+          "codeSpans": [{ "file": "lib/deque/init.lua", "lines": [56, 67] }],
+          "confidence": "determined"
+        },
+        {
+          "step": 2,
+          "description": "For each of the 4 sites, entries_satisfy walks oracle.entries(Deque:pop_front); calledOnlyViaColon=true (ground truth) means no counterexample exists regardless of how 'static call sites' is scoped — same unresolved entries()-scope question as corpus-1, moot here.",
+          "state": { "entries_satisfy": "true (vacuously, per ground truth)" },
+          "codeSpans": [{ "file": "lib/deque/init.lua", "lines": [58, 58] }],
+          "confidence": "underdetermined"
+        },
+        {
+          "step": 3,
+          "description": "preserved_by_every_step: self is never rebound in pop_front's body (no assignment to self in source).",
+          "state": { "preserved_by_every_step": "true" },
+          "codeSpans": [{ "file": "lib/deque/init.lua", "lines": [56, 67] }],
+          "confidence": "determined"
+        },
+        {
+          "step": 4,
+          "description": "implies(invariant, phi) again routes through the same unshown recursive citation to a receiver-non-nil-at-construction claim, as in corpus-1 — asserted by the design, not demonstrated from the given facts.",
+          "state": { "cert.cites": ["receiver-nonnil-at-construction (unshown)"] },
+          "codeSpans": [],
+          "confidence": "underdetermined"
+        },
+        {
+          "step": 5,
+          "description": "grounded_and_acyclic assumed true (per design's claim of closure); mint(\"proved\") ×4, one per site, same cert content, distinct claim ids.",
+          "state": { "verdict": "proved x4" },
+          "codeSpans": [],
+          "confidence": "underdetermined"
+        }
+      ],
+      "verdict": "proved",
+      "verdictNote": "Design explicitly claims one producer closes all 4 sites at once; ground truth (calledOnlyViaColon=true) means no counterexample manifests, so the blast-radius concern raised elsewhere about this rule shape does not fire in this specific scenario."
+    },
+
+    "corpus-5-bigint-reachable": {
+      "steps": [
+        {
+          "step": 1,
+          "description": "Test-trace-harvesting producer (design §3.1 item 5): bin/cr test's existing runs are fed through oracle.replay per test input, producing recorded event traces.",
+          "state": { "producer": "test-trace-harvesting" },
+          "codeSpans": [{ "file": "lib/bigint/init.lua", "lines": [97, 121] }],
+          "confidence": "determined"
+        },
+        {
+          "step": 2,
+          "description": "Claim is ◇reachable(branch:then@115), modal=diamond. Design's §1 prose states Proved(◇φ) for a claim whose site appears in any harvested trace, calling this 'Proved by witness directly ... via the trivial existential rule', not via check_box.",
+          "state": { "claim": { "modal": "diamond", "subject": "branch:then@115" } },
+          "codeSpans": [{ "file": "lib/bigint/init.lua", "lines": [115, 117] }],
+          "confidence": "determined"
+        },
+        {
+          "step": 3,
+          "description": "The concrete M.check_witness code in §2 is written ONLY to detect phi.decide(state)==\"false\" and mint \"refuted\" (for refuting a box claim), or else return (nil, \"no violating state found\"). It contains no branch that mints \"proved\" on a matching event for a diamond claim. The design's narrative (§1, §3.1) asserts a dual Proved(◇) path exists, but the shown kernel code never implements it — genuinely unclear whether this is an unshown variant of check_witness or an inconsistency between the prose and the concrete sketch.",
+          "state": { "check_witness_code": "only mints refuted or open, per §2 as literally written" },
+          "codeSpans": [],
+          "confidence": "unsure"
+        },
+        {
+          "step": 4,
+          "description": "Assuming (per the prose's stated intent, generously) that a dual witness rule mints Proved when a harvested trace contains an event at the claimed site: outcome depends on whether bin/cr test's actual recorded traces exercise the 'then' arm at line 115 (ai ~= 0 during some multiplication). No test-coverage fact is given in this scenario's data.",
+          "state": { "test_coverage_of_site": "not given in scenario facts" },
+          "codeSpans": [{ "file": "lib/bigint/init.lua", "lines": [104, 105] }],
+          "confidence": "underdetermined"
+        }
+      ],
+      "verdict": "open",
+      "verdictNote": "Design's own §2 code sketch does not literally implement the Proved(◇)-via-witness path its prose describes (unsure); even granting the prose's intent, whether this specific branch is covered by the harvested test traces is not stated in the scenario data, so the design's own stated fallback applies: 'where no test trace covers a branch, the claim stays Open honestly.'"
+    },
+
+    "adversarial-subtract-false-proved": {
+      "steps": [
+        {
+          "step": 1,
+          "description": "Same calling-convention producer/cert construction as corpus-1: invariant = 'first bound param == receiver expr value', plus the separately-stated requirement of 'confirming none passes a nil receiver' via an oracle.entries(method) walk.",
+          "state": { "cert": { "invariant": "first-bound-param == receiver-expr-value" } },
+          "codeSpans": [{ "file": "lib/lru/init.lua", "lines": [152, 159] }],
+          "confidence": "determined"
+        },
+        {
+          "step": 2,
+          "description": "kernel.check_box → entries_satisfy calls oracle.entries(Cache:peek). Ground truth for this scenario: calledOnlyViaColon=false, a real counterexample call Cache.peek(nil,key) exists (same function value, dot syntax). The design NEVER specifies whether 'statically enumerable entry states for a definition site' is scoped to colon-syntax call sites only, or to every real static invocation of the function value regardless of spelling. This is load-bearing: if entries() is call-graph-faithful (matching the design's own stated philosophy that oracle is 'ground truth' for real Lua semantics, where colon vs dot are the same underlying call), the dot-call site is a real entry with self=nil and the check correctly fails; if entries() is implemented as a syntactic colon-call scan (mirroring the corpus-1 producer's own framing of 'static call sites' as colon call sites specifically), the dot-call escape is invisible and the invariant appears to hold everywhere it looked.",
+          "state": { "entries_faithfulness": "genuinely unresolved by the text" },
+          "codeSpans": [{ "file": "lib/lru/init.lua", "lines": [152, 159] }],
+          "confidence": "unsure"
+        },
+        {
+          "step": 3,
+          "description": "Separately: the invariant AS STATED ('first bound param equals receiver expr's value') is a tautology true regardless of whether the receiver is nil — it does not by itself imply non-nilness. The substantive check ('none passes a nil receiver') is described in prose as an added condition checked 'by walking oracle.entries', but §2's check_box code models exactly one predicate-entailment step, implies(cert.invariant, claim.phi, oracle) — the doc does not show how these two different invariants (the tautological identity vs. the nil-receiver-exclusion fact) compose into the single InvariantCert.invariant field check_box actually calls. Unclear how the prose's two-part reasoning maps onto the one-predicate-per-cert code shape.",
+          "state": { "invariant_composition": "unclear how §3.1 prose maps onto §2 check_box's single invariant field" },
+          "codeSpans": [],
+          "confidence": "unsure"
+        },
+        {
+          "step": 4,
+          "description": "Cannot proceed to a determinate mint(...) outcome: whether entries_satisfy fails (correctly rejecting, Open) or vacuously passes (false Proved) depends entirely on the unresolved scope of oracle.entries(), which is the design's own flagship self-test for exactly this failure mode.",
+          "state": {},
+          "codeSpans": [],
+          "confidence": "unsure"
+        }
+      ],
+      "verdict": "halt",
+      "verdictNote": "Blocking gap: evidence.md never specifies whether oracle.entries()'s static enumeration of a definition's call sites includes calls that invoke the same function value via different syntax (dot vs colon). This single unresolved point determines whether the design's own flagship self-non-nil producer catches the real Cache.peek(nil,key) counterexample or mints a false Proved, and the doc gives no way to resolve it either way."
+    },
+
+    "adversarial-saturation-b-identity-merge": {
+      "steps": [
+        {
+          "step": 1,
+          "description": "Two independent producers build factA (Cache:peek colon-self, real counterexample exists) and factB (Deque:pop_front colon-self, calledOnlyViaColon=true). Each gets a distinct Claim.id and a distinct Address whose functor args differ by function name/site.",
+          "state": { "claims": ["factA: app(param_binding,[self,Cache:peek])", "factB: app(param_binding,[self,Deque:pop_front])"] },
+          "codeSpans": [
+            { "file": "lib/lru/init.lua", "lines": [152, 159] },
+            { "file": "lib/deque/init.lua", "lines": [56, 67] }
+          ],
+          "confidence": "determined"
+        },
+        {
+          "step": 2,
+          "description": "kernel.unify(addrA, addrB): Robinson unification over the two Address terms. Since the second arg atoms ('Cache:peek' vs 'Deque:pop_front') are distinct, non-unifying atoms, no substitution reconciles them — unify returns nil. The design's unify is stated as producing a Substitution|nil for two terms; nothing in the doc describes unify (or any other kernel operation) as merging two claims' stored verdicts into one shared identity — each Claim keeps its own id, cert, and citation edges throughout.",
+          "state": { "unify(addrA,addrB)": "nil (no merge)" },
+          "codeSpans": [],
+          "confidence": "determined"
+        },
+        {
+          "step": 3,
+          "description": "check_box runs independently on factA. Its own outcome is unresolved for the same reason as the adversarial-subtract-false-proved scenario (oracle.entries() scope ambiguity re: dot-call visibility) — but that unresolved outcome, whatever it is, cannot propagate to factB because no merge/rewrite mechanism exists in this design.",
+          "state": { "factA_outcome": "independently unresolved (see adversarial-subtract-false-proved)" },
+          "codeSpans": [],
+          "confidence": "determined"
+        },
+        {
+          "step": 4,
+          "description": "check_box runs independently on factB: calledOnlyViaColon=true, same reasoning as corpus-4 — entries_satisfy passes vacuously, preserved_by_every_step holds (self never rebound in pop_front), implies() routes through the same unshown recursive receiver-non-nil citation as corpus-1/4. mint(\"proved\") for factB, independent of factA's fate.",
+          "state": { "factB_outcome": "proved (same caveats as corpus-1/4)" },
+          "codeSpans": [{ "file": "lib/deque/init.lua", "lines": [56, 67] }],
+          "confidence": "underdetermined"
+        },
+        {
+          "step": 5,
+          "description": "No shared store entry, no equivalence-class collapse, no cross-contamination: factA's and factB's mint outcomes stand entirely independently under this design's citation-graph model.",
+          "state": {},
+          "codeSpans": [],
+          "confidence": "determined"
+        }
+      ],
+      "verdict": "refuted",
+      "verdictNote": "The specific failure mode this scenario probes (identity-merge amplification causing an unsound claim to inherit a genuine claim's Proved status) does not occur in this design as written: unify never merges distinct claims, and the citation graph keeps every claim's verdict independently computed. factA's own individual soundness is a separate, still-open question (see adversarial-subtract-false-proved), but it is not amplified onto factB or vice versa."
+    },
+
+    "hand-json-type-guard": {
+      "steps": [
+        {
+          "step": 1,
+          "description": "A hypothetical type-narrowing producer would build Claim address=app(\"type_at\",{atom(\"val\"),atom(\"encode_value:416\")}), phi=Predicate(\"val ∈ {number}\"), modal=box. Design's stated principle ('a new claim shape needs no kernel change: it's a new Predicate implementation plus new Address functors') licenses this in the abstract, but no such producer is worked through anywhere in the doc.",
+          "state": { "claim": "hypothetical, unworked in doc" },
+          "codeSpans": [{ "file": "lib/json/init.lua", "lines": [406, 428] }],
+          "confidence": "underdetermined"
+        },
+        {
+          "step": 2,
+          "description": "val is a parameter never reassigned inside encode_value's body, so a no-reassign-style invariant ('val never rebound since entry') is groundable by the same mechanism as corpus-2/3 — but this alone only shows val's value at 416 equals its entry value; it does not establish that value is specifically of type number.",
+          "state": { "no_reassign(val)": "groundable, same mechanism as corpus-2/3" },
+          "codeSpans": [{ "file": "lib/json/init.lua", "lines": [406, 416] }],
+          "confidence": "underdetermined"
+        },
+        {
+          "step": 3,
+          "description": "Establishing the number-arm specifically requires grounding 'entering the elseif t==\"number\" arm implies type(val)==\"number\" holds for every state in that arm.' The design's fixed Event grammar is stated explicitly as exactly six kinds (eval/bind/call/ret/effect/err) — no branch/guard-taken event is named. oracle.cfg_at is explicitly typed as giving 'structure only, no semantic claim.' No named Oracle capability or Event kind lets a producer ground 'the guard condition held true for every state within this arm', which is required for any ordinary type()-guard narrowing claim (as distinct from the three worked shapes: name-rebinding freedom, colon-desugaring, test-trace witness reachability).",
+          "state": { "branch_condition_grounding": "no named mechanism in Oracle/Event vocabulary" },
+          "codeSpans": [{ "file": "lib/json/init.lua", "lines": [408, 415] }],
+          "confidence": "unsure"
+        }
+      ],
+      "verdict": "halt",
+      "verdictNote": "Blocking gap: evidence.md's fixed Event vocabulary (eval/bind/call/ret/effect/err) has no branch/guard-taken event, and oracle.cfg_at is explicitly structure-only with no semantic claim — there is no named mechanism by which a producer's invariant can ground 'the guard condition held for every state within this arm,' which is required for this claim and is not covered by any of the three worked producer shapes in the doc."
+    },
+
+    "hand-bigint-err-arm": {
+      "steps": [
+        {
+          "step": 1,
+          "description": "Claim ret1-nil-arm: address=app(\"return_value\",{atom(\"M.new\"),int(305),int(1)}), phi=Predicate(\"value ∈ {nil}\"), modal=box. The returned expression at this position is syntactically the literal `nil`.",
+          "state": { "claim": "return-value #1 == nil literal" },
+          "codeSpans": [{ "file": "lib/bigint/init.lua", "lines": [304, 306] }],
+          "confidence": "determined"
+        },
+        {
+          "step": 2,
+          "description": "cert.invariant is trivially grounded: eval of a nil literal always yields nil per fixed operational semantics, checkable directly against oracle.step — the same class of fact as the design's own worked table-literal example ({} always produces a table). cites={}; this is a single fixed-AST-node fact, not state-dependent, so entries_satisfy/preserved_by_every_step are trivial (nothing to preserve); implies(invariant,phi) is an identity.",
+          "state": { "cert": { "cites": [] }, "grounding": "same class as design's own {} example" },
+          "codeSpans": [{ "file": "lib/bigint/init.lua", "lines": [304, 306] }],
+          "confidence": "determined"
+        },
+        {
+          "step": 3,
+          "description": "grounded_and_acyclic trivially holds (cites empty); mint(\"proved\") for ret1-nil-arm.",
+          "state": { "verdict_ret1": "proved" },
+          "codeSpans": [],
+          "confidence": "determined"
+        },
+        {
+          "step": 4,
+          "description": "Claim ret2-string-arm: returned expression at this position is a string-concat of two operands (a fixed string-literal prefix and type(v), which per Lua's fixed operational semantics for `type` always returns a string). Concatenation of two strings always yields a string, checkable directly against oracle.step, same trivially-grounded class as step 2. cites={}.",
+          "state": { "claim": "return-value #2 == string-concat, always string" },
+          "codeSpans": [{ "file": "lib/bigint/init.lua", "lines": [304, 306] }],
+          "confidence": "determined"
+        },
+        {
+          "step": 5,
+          "description": "mint(\"proved\") for ret2-string-arm.",
+          "state": { "verdict_ret2": "proved" },
+          "codeSpans": [],
+          "confidence": "determined"
+        }
+      ],
+      "verdict": "proved",
+      "verdictNote": "Both claims fall directly into the design's own 'trivially grounded' literal/fixed-operator class (identical in kind to the HEX/FIFO table-literal construction-site example in §2); high confidence since this is exactly the pattern the design worked through itself."
+    },
+
+    "hand-lru-field-shape": {
+      "steps": [
+        {
+          "step": 1,
+          "description": "Claim map-table-arm: Cache._map ∈ {table}, established by a table-literal field assignment ({} at line 91 inside the constructor's returned table). Same trivially-grounded literal class as HEX/FIFO/bigint's nil-literal: eval of {} always produces a table, checkable directly against oracle.step. cites={}.",
+          "state": { "claim": "Cache._map == table literal" },
+          "codeSpans": [{ "file": "lib/lru/init.lua", "lines": [77, 101] }],
+          "confidence": "determined"
+        },
+        {
+          "step": 2,
+          "description": "mint(\"proved\") for map-table-arm.",
+          "state": { "verdict_map": "proved" },
+          "codeSpans": [],
+          "confidence": "determined"
+        },
+        {
+          "step": 3,
+          "description": "Claim ttl-number-arm: Cache._ttl ∈ {number}, from field_assign of o.ttl (evidence.valueForm='opt_expr', establishesArms=null in the scenario's own facts). o.ttl is documented optional; the code has no fallback/guard ensuring it is non-nil before assignment. A producer attempting entries_satisfy over oracle.entries(M.new) would need every real M.new call site's opts argument to supply ttl — the scenario's own groundTruth=false confirms ttl can genuinely be nil.",
+          "state": { "invariant_candidate": "o.ttl is number at every call site" },
+          "codeSpans": [{ "file": "lib/lru/init.lua", "lines": [77, 101] }],
+          "confidence": "determined"
+        },
+        {
+          "step": 4,
+          "description": "Per the design's stated re-execution discipline ('the kernel independently re-executes the predicate against the oracle rather than recording that the producer asserted the invariant holds'), a faithful oracle.entries walk over real call sites (any that omit ttl) would find an entry state where _ttl is nil, causing entries_satisfy to fail: check_box returns (nil, \"invariant fails at some entry state\"). No producer in this scenario supplies a concrete counterexample trace to check_witness, so the claim does not get minted Refuted either — it stays Open. This is the design's own stated non-false-positive discipline working as intended, though no actual M.new call sites are shown in the given excerpt to fully verify this trace-level.",
+          "state": { "verdict_ttl": "open (invariant fails / no witness supplied)" },
+          "codeSpans": [{ "file": "lib/lru/init.lua", "lines": [86, 91] }],
+          "confidence": "underdetermined"
+        }
+      ],
+      "verdict": "open",
+      "verdictNote": "Split outcome: map-table-arm proves cleanly (trivially-grounded literal, same class as design's own worked example); ttl-number-arm is correctly NOT proved given the design's stated re-execution discipline, and stays Open absent an explicit counterexample-trace producer — this is the design successfully avoiding a false Proved on the claim marked groundTruth=false, though the full call-site data needed to fully confirm entries_satisfy's failure is not in the scenario's excerpt."
+    },
+
+    "hand-lru-closure-upvalue": {
+      "steps": [
+        {
+          "step": 1,
+          "description": "Claim cache-upvalue-arm: upvalue `cache` (captured from self, reassignedInClosure=false) ∈ {Cache}. This composes two of the design's own worked patterns: a no-reassign invariant over the upvalue (no bind event to `cache` after capture, same mechanism as HEX/FIFO) plus a recursive citation to self's own non-nilness (same colon-desugaring chain as corpus-1, since Cache:iter is itself a colon method).",
+          "state": { "claim": "cache upvalue non-reassignment + self-non-nil citation" },
+          "codeSpans": [{ "file": "lib/lru/init.lua", "lines": [248, 264] }],
+          "confidence": "determined"
+        },
+        {
+          "step": 2,
+          "description": "check_box: entries_satisfy/preserved_by_every_step for the no-reassign half are groundable directly (no rebind of `cache` in the closure body). implies() routes through the same unshown recursive self-nonnil citation as corpus-1 — asserted-but-not-fully-demonstrated in this scenario's given facts, same caveat.",
+          "state": { "grounded_and_acyclic": "assumed true, same caveat as corpus-1" },
+          "codeSpans": [],
+          "confidence": "underdetermined"
+        },
+        {
+          "step": 3,
+          "description": "mint(\"proved\") for cache-upvalue-arm.",
+          "state": { "verdict_cache": "proved" },
+          "codeSpans": [],
+          "confidence": "underdetermined"
+        },
+        {
+          "step": 4,
+          "description": "Claim node-upvalue-arm: upvalue `node` (reassignedInClosure=true, via `node = node.next` at line 257), claimedArms excludes nil, groundTruth=false — node genuinely reaches nil at list exhaustion. preserved_by_every_step must walk the rebinding step `node = node.next`; since `.next` can genuinely be nil at the list tail (real Lua semantics, faithful oracle), invariant.decide would return \"false\" at that reachable state. check_box returns (nil, \"invariant not step-closed\") — correctly failing to prove.",
+          "state": { "preserved_by_every_step": "false (node.next can be nil)" },
+          "codeSpans": [{ "file": "lib/lru/init.lua", "lines": [252, 257] }],
+          "confidence": "determined"
+        },
+        {
+          "step": 5,
+          "description": "No producer in this scenario supplies a concrete counterexample trace (e.g. iterating a list to exhaustion) to check_witness, so node-upvalue-arm is not minted Refuted either — it stays Open, though such a witness is cheap and plausible per the design's own test-trace-harvesting philosophy (as in corpus-5), and no test-coverage fact is given to confirm whether it actually fires.",
+          "state": { "verdict_node": "open (plausible Refuted pending an actual witness producer)" },
+          "codeSpans": [],
+          "confidence": "underdetermined"
+        }
+      ],
+      "verdict": "open",
+      "verdictNote": "Split outcome: cache-upvalue-arm proves (same caveats as corpus-1's recursive citation); node-upvalue-arm correctly fails step-closure and stays Open (design avoids false Proved on the groundTruth=false claim), with Refuted plausible but unconfirmed absent a witness-trace producer in the given data."
+    },
+
+    "hand-json-generic-for": {
+      "steps": [
+        {
+          "step": 1,
+          "description": "Claim k-nonterminator-arms: loop variable k in `for k in pairs(tval) do` excludes the nil arm inside the loop body (pairs()/generic-for protocol: nil signals termination). Grounding this requires modeling that reaching the loop body is conditioned on the iterator's return being non-nil.",
+          "state": { "claim": "k excludes nil inside for-body" },
+          "codeSpans": [{ "file": "lib/json/init.lua", "lines": [429, 443] }],
+          "confidence": "determined"
+        },
+        {
+          "step": 2,
+          "description": "Considered whether this reduces to the colon-desugaring precedent (design explicitly allows oracle.cfg_at to expose syntactic desugaring, e.g. obj:m() → obj.m(obj)). Generic-for desugars to an iterator call plus an implicit nil-check/break — structurally analogous. But the design's actual mechanism for the self-nonnil case was NOT 'cfg_at exposes a semantic guarantee' (cfg_at is explicitly 'structure only, no semantic claim') — it was walking real call sites via oracle.entries. There is no analogous 'entries'-style enumeration for 'was the iterator's return nil at this point'; that is a control-flow-condition fact, same category as the branch-guard gap in hand-json-type-guard.",
+          "state": { "iterator_protocol_grounding": "same missing mechanism as hand-json-type-guard" },
+          "codeSpans": [{ "file": "lib/json/init.lua", "lines": [437, 437] }],
+          "confidence": "unsure"
+        },
+        {
+          "step": 3,
+          "description": "The fixed Event grammar (eval/bind/call/ret/effect/err) has no branch/guard/loop-condition event distinct from a plain call/ret pair; nothing in the doc shows how a Predicate.decide would access 'this call event's return was checked non-nil before entering this block' as opposed to merely observing the call/ret pair happened.",
+          "state": {},
+          "codeSpans": [],
+          "confidence": "unsure"
+        }
+      ],
+      "verdict": "halt",
+      "verdictNote": "Same blocking gap as hand-json-type-guard: the fixed Event vocabulary has no branch/guard-taken (or here, iterator-protocol-termination) event, and cfg_at is explicitly structure-only — there is no named mechanism to ground 'entering the for-body implies the iterator's return was non-nil,' and this is not one of the three worked producer shapes in the doc."
+    }
+  }
+}
+;
