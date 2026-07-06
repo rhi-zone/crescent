@@ -1,5 +1,5 @@
 {
-  "agent": "v15",
+  "agent": "me",
   "hooks": {
     "UserPromptSubmit": [
       {
