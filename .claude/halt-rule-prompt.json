@@ -1,0 +1,1 @@
+{"hookSpecificOutput":{"hookEventName":"UserPromptSubmit","additionalContext":"HALT-ON-UNDERSPECIFICATION (owner rule): ANYTHING undecided that affects semantics/behavior AT ALL, MUST halt — surface the gap instead of filling it. A fill-in that mints semantics/vocabulary downstream work will trust is a guess, not a decision."},"suppressOutput":true}
