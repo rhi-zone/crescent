@@ -113,6 +113,45 @@
   .section-title { font-size: 0.8rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.03em; margin: 0.9rem 0 0.3rem 0; }
 
   footer { color: var(--muted); font-size: 0.75rem; margin-top: 2rem; }
+
+  .split { display: flex; gap: 1rem; align-items: flex-start; flex-wrap: wrap; }
+  .split > .col-main { flex: 1 1 26rem; min-width: 20rem; }
+  .split > .col-source { flex: 1 1 26rem; min-width: 20rem; }
+
+  .source-block { margin-bottom: 0.9rem; }
+  .source-block .source-label { font-size: 0.78rem; color: var(--muted); margin-bottom: 0.3rem; }
+  .source-file {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.8rem;
+    background: #0d1117;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    overflow-x: auto;
+  }
+  .source-line {
+    display: flex;
+    white-space: pre;
+    padding: 0.05rem 0.4rem;
+    cursor: default;
+  }
+  .source-line .ln {
+    color: var(--muted);
+    text-align: right;
+    width: 2.6rem;
+    flex: none;
+    padding-right: 0.6rem;
+    user-select: none;
+  }
+  .source-line .code { flex: 1 1 auto; }
+  .source-line.hl-hover { background: rgba(88,166,255,0.18); }
+  .source-line.hl-step { background: rgba(63,185,80,0.16); box-shadow: inset 3px 0 0 var(--proved); }
+  .source-line .col-hl { background: rgba(219,109,40,0.35); border-radius: 2px; }
+  .source-line .step-refs {
+    color: var(--accent);
+    font-size: 0.72rem;
+    margin-left: 0.6rem;
+    flex: none;
+  }
 </style>
 
 <h1>Kernel candidates — hand-eval stepper</h1>
@@ -144,10 +183,16 @@
   <div class="citation" id="scenario-citation"></div>
 </div>
 
-<div class="panel">
-  <h2>Step <span id="current-step-no">-</span> <span id="current-step-verdict"></span></h2>
-  <div class="description" id="current-description"></div>
-  <div id="current-state"></div>
+<div class="split">
+  <div class="col-main panel">
+    <h2>Step <span id="current-step-no">-</span> <span id="current-step-verdict"></span></h2>
+    <div class="description" id="current-description"></div>
+    <div id="current-state"></div>
+  </div>
+  <div class="col-source panel">
+    <h2>Real source</h2>
+    <div id="source-pane"></div>
+  </div>
 </div>
 
 <div class="panel">
@@ -204,6 +249,7 @@
   var currentDescriptionEl = document.getElementById("current-description");
   var currentStateEl = document.getElementById("current-state");
   var summaryEl = document.getElementById("summary");
+  var sourcePaneEl = document.getElementById("source-pane");
 
   // Populate selectors.
   ENGINES.forEach(function (e) {
@@ -423,6 +469,186 @@
     return svg;
   }
 
+  // -----------------------------------------------------------------------
+  // Source pane: renders the real Lua excerpt(s) for the current scenario,
+  // with real starting line numbers, and supports bidirectional highlight
+  // between steps and source lines.
+  //
+  // Data shapes read (see scenarios.js):
+  //   scenario.source = { file, excerpts: [{ key, lineStart, lineEnd, lines }] }
+  //   OR (two_self_facts_for_merge scenarios) scenario.facts.factA.source /
+  //   scenario.facts.factB.source, same shape, each with its own file.
+  //   snap.spans = [{ file, lineStart, lineEnd, colStart?, colEnd? }, ...]
+  // -----------------------------------------------------------------------
+
+  // sourceLineIndex: "file:line" -> DOM element for that rendered line.
+  var sourceLineIndex = {};
+  // stepRefIndex: "file:line" -> array of step numbers (1-based) whose
+  // spans in the CURRENT snapshot list cover that line.
+  var stepRefIndex = {};
+
+  function getSourceSets(scenario) {
+    if (scenario.source) {
+      return [{ label: null, file: scenario.source.file, excerpts: scenario.source.excerpts }];
+    }
+    var sets = [];
+    var f = scenario.facts;
+    if (f && f.factA && f.factA.source) sets.push({ label: "A (" + f.factA.funcName + ")", file: f.factA.source.file, excerpts: f.factA.source.excerpts });
+    if (f && f.factB && f.factB.source) sets.push({ label: "B (" + f.factB.funcName + ")", file: f.factB.source.file, excerpts: f.factB.source.excerpts });
+    return sets;
+  }
+
+  function buildStepRefIndex() {
+    stepRefIndex = {};
+    currentSnapshots.forEach(function (snap) {
+      (snap.spans || []).forEach(function (span) {
+        if (!span || !span.file) return;
+        for (var line = span.lineStart; line <= span.lineEnd; line++) {
+          var key = span.file + ":" + line;
+          if (!stepRefIndex[key]) stepRefIndex[key] = [];
+          if (stepRefIndex[key].indexOf(snap.step) === -1) stepRefIndex[key].push(snap.step);
+        }
+      });
+    });
+  }
+
+  function renderSourcePane(scenario) {
+    sourceLineIndex = {};
+    sourcePaneEl.innerHTML = "";
+    var sets = getSourceSets(scenario);
+    if (!sets.length) {
+      sourcePaneEl.textContent = "(no source excerpt recorded for this scenario)";
+      return;
+    }
+    sets.forEach(function (set) {
+      var block = document.createElement("div");
+      block.className = "source-block";
+      var label = document.createElement("div");
+      label.className = "source-label";
+      label.textContent = (set.label ? set.label + " — " : "") + set.file;
+      block.appendChild(label);
+      var fileBox = document.createElement("div");
+      fileBox.className = "source-file";
+      (set.excerpts || []).forEach(function (ex) {
+        ex.lines.forEach(function (text, idx) {
+          var lineNo = ex.lineStart + idx;
+          var row = document.createElement("div");
+          row.className = "source-line";
+          row.dataset.file = set.file;
+          row.dataset.line = String(lineNo);
+          var lnSpan = document.createElement("span");
+          lnSpan.className = "ln";
+          lnSpan.textContent = String(lineNo);
+          var codeSpan = document.createElement("span");
+          codeSpan.className = "code";
+          codeSpan.textContent = text;
+          codeSpan.dataset.raw = text;
+          row.appendChild(lnSpan);
+          row.appendChild(codeSpan);
+          var refsSpan = document.createElement("span");
+          refsSpan.className = "step-refs";
+          row.appendChild(refsSpan);
+          row.addEventListener("mouseenter", function () { onHoverSourceLine(set.file, lineNo, true); });
+          row.addEventListener("mouseleave", function () { onHoverSourceLine(set.file, lineNo, false); });
+          fileBox.appendChild(row);
+          sourceLineIndex[set.file + ":" + lineNo] = row;
+        });
+      });
+      block.appendChild(fileBox);
+      sourcePaneEl.appendChild(block);
+    });
+  }
+
+  // Removes `cls` from every rendered line. Only resets the column-level
+  // sub-highlight (raw text) once NEITHER highlight class remains on that
+  // row, so clearing hover doesn't blow away the current step's own
+  // column highlight (and vice versa) when both happen to cover the same
+  // line.
+  function clearSourceHighlight(cls) {
+    for (var key in sourceLineIndex) {
+      var row = sourceLineIndex[key];
+      row.classList.remove(cls);
+      if (!row.classList.contains("hl-step") && !row.classList.contains("hl-hover")) {
+        var codeSpan = row.querySelector(".code");
+        if (codeSpan && codeSpan.dataset.raw !== undefined && codeSpan.textContent !== codeSpan.dataset.raw) {
+          codeSpan.textContent = codeSpan.dataset.raw;
+        }
+      }
+    }
+  }
+
+  // Apply a column-level sub-highlight within one line's code text (only
+  // used where a span pinpoints a sub-expression, e.g. the `self` in
+  // `self._map[key]`).
+  function applyColHighlight(row, colStart, colEnd) {
+    var codeSpan = row.querySelector(".code");
+    if (!codeSpan) return;
+    var raw = codeSpan.dataset.raw;
+    var start = Math.max(0, colStart - 1);
+    var end = Math.min(raw.length, colEnd);
+    if (start >= end) return;
+    codeSpan.textContent = "";
+    codeSpan.appendChild(document.createTextNode(raw.slice(0, start)));
+    var mark = document.createElement("span");
+    mark.className = "col-hl";
+    mark.textContent = raw.slice(start, end);
+    codeSpan.appendChild(mark);
+    codeSpan.appendChild(document.createTextNode(raw.slice(end)));
+  }
+
+  // Highlight the given spans in the source pane (used both for the
+  // current step's auto-highlight and for hovering a claim/step).
+  function highlightSpans(spans, cls) {
+    clearSourceHighlight(cls);
+    (spans || []).forEach(function (span) {
+      if (!span || !span.file) return;
+      for (var line = span.lineStart; line <= span.lineEnd; line++) {
+        var row = sourceLineIndex[span.file + ":" + line];
+        if (!row) continue;
+        row.classList.add(cls);
+        if (line === span.lineStart && line === span.lineEnd && span.colStart && span.colEnd) {
+          applyColHighlight(row, span.colStart, span.colEnd);
+        }
+      }
+    });
+  }
+
+  // Hovering a source line highlights the step(s) anchored to it: shows
+  // the referencing step numbers inline, and if that line's step includes
+  // the CURRENTLY displayed step, also flashes the description panel.
+  function onHoverSourceLine(file, line, entering) {
+    var key = file + ":" + line;
+    var row = sourceLineIndex[key];
+    if (!row) return;
+    var refsSpan = row.querySelector(".step-refs");
+    if (entering) {
+      row.classList.add("hl-hover");
+      var refs = stepRefIndex[key] || [];
+      refsSpan.textContent = refs.length ? "← step " + refs.join(", ") : "";
+      currentStateEl.parentElement && (currentStateEl.parentElement.style.outline = refs.indexOf(currentSnapshots[currentIndex] && currentSnapshots[currentIndex].step) !== -1 ? "1px solid var(--accent)" : "");
+    } else {
+      row.classList.remove("hl-hover");
+      refsSpan.textContent = "";
+      if (currentStateEl.parentElement) currentStateEl.parentElement.style.outline = "";
+    }
+  }
+
+  // Hovering the claim/step panel (description + state) highlights that
+  // step's span(s) in the source pane, same class the auto-highlight uses
+  // so hover and "current step" visually agree.
+  function wireStepPanelHover() {
+    var panel = currentDescriptionEl.closest(".panel") || currentDescriptionEl.parentElement;
+    if (!panel || panel._hoverWired) return;
+    panel._hoverWired = true;
+    panel.addEventListener("mouseenter", function () {
+      var snap = currentSnapshots[currentIndex];
+      if (snap) highlightSpans(snap.spans, "hl-hover");
+    });
+    panel.addEventListener("mouseleave", function () {
+      clearSourceHighlight("hl-hover");
+    });
+  }
+
   function renderCurrentStep() {
     var total = currentSnapshots.length;
     if (total === 0) {
@@ -448,6 +674,10 @@
     stepCountEl.textContent = (currentIndex + 1) + "/" + total;
     btnFirst.disabled = btnPrev.disabled = currentIndex === 0;
     btnNext.disabled = btnLast.disabled = currentIndex === total - 1;
+
+    // Auto-highlight the current step's span(s) in the source pane, no
+    // hover needed.
+    highlightSpans(snap.spans, "hl-step");
   }
 
   function loadCurrent() {
@@ -460,6 +690,9 @@
       currentSnapshots = [{ step: 1, description: "ENGINE ERROR: " + err.message, state: {} }];
     }
     currentIndex = 0;
+    renderSourcePane(scenario);
+    buildStepRefIndex();
+    wireStepPanelHover();
     renderCurrentStep();
     renderSummary();
   }

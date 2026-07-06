@@ -7,63 +7,60 @@
 // check_witness (existential/refutation via concrete replay), plus a
 // citation-graph acyclicity+groundedness law.
 //
-// Faithfully reproduces judgments/evidence-attack.md "Attack 4" (referenced
-// in synthesis.md §4.1): the self-non-nil invariant is certified via
-// `oracle.entries(method)`, described as a STATIC enumeration of colon-call
-// sites, with no argument that this enumeration soundly over-approximates
-// every actual invocation. When a scenario's ground truth includes a
-// counterexample call (e.g. a first-class function-value escape / dot-call),
-// this engine's `entries()` still only enumerates the syntactic colon-call
-// sites (exactly as evidence.md describes it), so `check_box` mechanically
-// reports the invariant holds at every ENUMERATED entry -- and mints a false
-// Proved, because the enumeration itself was never sound.
+// Faithfully reproduces the design's OWN blind spot: the self-non-nil
+// invariant is certified via `oracle.entries(method)`, described as a
+// STATIC enumeration of colon-call sites, with no argument that this
+// enumeration soundly over-approximates every actual invocation. When a
+// scenario's ground truth includes a counterexample call, this engine's
+// `entries()` still only enumerates the syntactic colon-call sites (exactly
+// as evidence.md describes it), so `check_box` mechanically reports the
+// invariant holds at every ENUMERATED entry -- and mints a false Proved,
+// because the enumeration itself was never sound. All narrative commentary
+// lives in scenario.notes.evidence as data.
 
 window.runEvidenceEngine = function (scenario) {
   const f = scenario.facts;
+  const notes = (scenario.notes && scenario.notes.evidence) || [];
+  function note(key) {
+    return notes.find((n) => n.key === key);
+  }
   const snaps = [];
   let stepNo = 0;
-  function snap(description, state, verdict) {
+  function snap(description, state, verdict, spans) {
     stepNo += 1;
     const s = { step: stepNo, description: description, state: state };
     if (verdict) s.verdict = verdict;
+    if (spans) s.spans = spans;
     snaps.push(s);
   }
+  function spanOf(fileFacts, span) {
+    if (!span) return null;
+    return Object.assign({ file: fileFacts }, span);
+  }
 
-  function runSelfShape(funcName, hasEscape, counterexampleCall) {
+  function runSelfShape(funcName, hasEscape, counterexampleCall, fileName, defSpan, useSpan) {
     const addr = { functor: "param_binding", args: [{ atom: "self" }, { atom: funcName }] };
     snap(
-      "Address term built: " + JSON.stringify(addr) + " (evidence.md §1: an Address is a " +
-        "first-order term the kernel never interprets)",
-      { pool: [{ id: "addr", term: addr }] }
+      "Address term built: " + JSON.stringify(addr),
+      { pool: [{ id: "addr", term: addr }] },
+      undefined,
+      defSpan ? [spanOf(fileName, defSpan)] : undefined
     );
     snap(
-      "oracle.entries(" + funcName + ") — a STATIC enumeration of this method's colon-call " +
-        "sites (evidence.md §2, \"static shape only, no semantic claim\"). " +
-        (hasEscape
-          ? "A first-class escape of the method value exists in this scenario (" +
-            counterexampleCall + "), but oracle.entries() as described only walks syntactic " +
-            "call sites — the escape is invisible to this enumeration."
-          : "No escapes exist in this scenario; the enumeration is complete."),
-      { pool: [{ id: "addr", term: addr }], entries: hasEscape ? ["colon-call sites only (escape invisible)"] : ["colon-call sites (complete)"] }
+      "oracle.entries(" + funcName + ") — static enumeration of colon-call sites." +
+        (hasEscape ? " A first-class escape (" + counterexampleCall + ") exists but is invisible to this enumeration." : " No escapes exist; the enumeration is complete."),
+      { pool: [{ id: "addr", term: addr }], entries: hasEscape ? ["colon-call sites only (escape invisible)"] : ["colon-call sites (complete)"] },
+      undefined,
+      useSpan ? [spanOf(fileName, useSpan)] : undefined
     );
     snap(
-      "check_box: entries_satisfy(invariant, oracle, claim) walks every ENUMERATED entry " +
-        "state and finds the invariant \"first bound parameter == receiver expr's value\" " +
-        "holds at each one; preserved_by_every_step holds trivially (no further steps " +
-        "change it); implies(invariant, claim) is identity here.",
+      "check_box: entries_satisfy(invariant, oracle, claim) walks every ENUMERATED entry state; preserved_by_every_step holds trivially; implies(invariant, claim) is identity here.",
       { pool: [{ id: "addr", term: addr }] }
     );
     if (hasEscape) {
+      const escapeNote = note("escape-blind");
       return {
-        description:
-          "FALSE PROVED — see judgments/evidence-attack.md \"Attack 4\" (cited in " +
-          "synthesis.md §4.1): the self-non-nil invariant is certified via " +
-          "`oracle.entries(method)`, described as a static enumeration of colon-call " +
-          "sites, with no argument that this enumeration soundly over-approximates every " +
-          "actual invocation — \"extracting the function value directly... a first-class " +
-          "escape of the method value is silently invisible to the invariant check.\" " +
-          "Mechanically walking oracle.entries() as specified never sees " + counterexampleCall +
-          ", so check_box reports the invariant holds everywhere it looked and mints Proved.",
+        description: escapeNote ? escapeNote.text + " [" + escapeNote.citesFinding + "]" : "FALSE PROVED",
         verdict: "False-Proved-flagged",
       };
     }
@@ -71,51 +68,40 @@ window.runEvidenceEngine = function (scenario) {
   }
 
   if (f.shape === "colon_self_nonnil") {
-    const r = runSelfShape(f.funcName, f.calledOnlyViaColon === false, f.counterexampleCall);
-    snap(r.description, {}, r.verdict);
+    const r = runSelfShape(f.funcName, f.calledOnlyViaColon === false, f.counterexampleCall, f.file, f.defSpan, f.useSpan);
+    snap(r.description, {}, r.verdict, f.useSpan ? [spanOf(f.file, f.useSpan)] : undefined);
   } else if (f.shape === "colon_self_nonnil_multi") {
-    const r = runSelfShape(f.funcName, false, null);
-    snap(r.description + " (applied uniformly across all 4 sites, evidence.md §3.1 instance 4)", {}, r.verdict);
+    const r = runSelfShape(f.funcName, false, null, f.file, f.defSpan, f.useSpans && f.useSpans[0]);
+    snap(r.description + " (applied uniformly across all 4 sites)", {}, r.verdict, f.useSpans ? f.useSpans.map((s) => spanOf(f.file, s)) : undefined);
   } else if (f.shape === "single_assign_nonnil") {
     const addr = { functor: "no_reassign", args: [{ atom: f.name }] };
-    snap("Address term: " + JSON.stringify(addr), { pool: [{ id: "addr", term: addr }] });
+    snap("Address term: " + JSON.stringify(addr), { pool: [{ id: "addr", term: addr }] }, undefined, f.assignSpan ? [spanOf(f.file, f.assignSpan)] : undefined);
     snap(
-      "Invariant: \"no bind event to " + f.name + " has occurred since def_site\" " +
-        "(evidence.md §2, producers/no_reassign.lua). A second producer mints " +
-        "non_nil_at_construction(" + f.name + ", def_site) grounded directly in the fixed " +
-        "operational semantics (table-constructor eval never produces nil).",
-      { pool: [{ id: "addr", term: addr }] }
+      "Invariant: \"no bind event to " + f.name + " has occurred since def_site\". A second producer mints non_nil_at_construction(" + f.name + ", def_site) grounded in table-constructor semantics.",
+      { pool: [{ id: "addr", term: addr }] },
+      undefined,
+      f.useSpan ? [spanOf(f.file, f.useSpan)] : undefined
     );
     snap(
-      "check_box walks the (finite, syntactically local) CFG span and confirms step-closure " +
-        "— cites two independently-grounded claims (no-reassign, non-nil-at-construction), " +
-        "satisfying the one law without the kernel ever knowing \"" + f.name + "\" or " +
-        "\"table\" mean anything (evidence.md §2 walkthrough).",
+      "check_box walks the (finite, syntactically local) CFG span and confirms step-closure — cites two independently-grounded claims, satisfying the one law without the kernel ever knowing what \"" + f.name + "\" or \"table\" mean.",
       { pool: [{ id: "addr", term: addr }] },
       "Proved"
     );
   } else if (f.shape === "branch_reachable") {
     snap(
-      "Test-trace-harvesting producer: feeds bin/cr test's recorded event traces through " +
-        "oracle.replay. No harvested trace covers this branch in this scenario (no test " +
-        "exercises it) — evidence.md §3.1 instance 5: \"Where no test trace covers a " +
-        "branch, the claim stays Open honestly — that's a real coverage gap report, not a " +
-        "bug.\"",
+      "Test-trace-harvesting producer feeds recorded event traces through oracle.replay. No harvested trace covers this branch in this scenario.",
       {},
-      "Open"
+      "Open",
+      f.lineSpan ? [spanOf(f.file, f.lineSpan)] : undefined
     );
   } else if (f.shape === "two_self_facts_for_merge") {
     const a = f.factA, b = f.factB;
-    const rA = runSelfShape(a.funcName, a.calledOnlyViaColon === false, a.counterexampleCall);
-    const rB = runSelfShape(b.funcName, false, null);
+    const rA = runSelfShape(a.funcName, a.calledOnlyViaColon === false, a.counterexampleCall, a.file, a.defSpan, a.useSpan);
+    const rB = runSelfShape(b.funcName, false, null, b.file, b.defSpan, b.useSpans && b.useSpans[0]);
+    const noAmpNote = note("no-shared-amplification");
     snap(
-      "evidence's citation graph never merges/unifies pool entries into a shared identity " +
-        "— `unify` (rejected as a kernel primitive by synthesis.md graft 5 anyway) only " +
-        "ever reconciles term VARIABLES at citation time, never collapses two DIFFERENT " +
-        "claims' truth values into one. " + a.funcName + " = " + rA.verdict + ", " +
-        b.funcName + " = " + rB.verdict + " — same underlying oracle.entries() blind spot " +
-        "(evidence-attack.md Attack 4) hits A independently of B, no shared amplification.",
-      {},
+      a.funcName + " = " + rA.verdict + ", " + b.funcName + " = " + rB.verdict,
+      { note: noAmpNote ? noAmpNote.text + " [" + noAmpNote.citesFinding + "]" : undefined },
       "A=" + rA.verdict + ", B=" + rB.verdict + " (no amplification)"
     );
   }

@@ -7,10 +7,10 @@
 //
 // Faithfully reproduces the design's OWN flagship bug: `colon-self-nonnil-v1`
 // (candidates/subtract.md §2.2) checks only the *definition* site
-// (`def.form == "colon"`) and never inspects call sites -- per
-// judgments/subtract-attack.md "Attack 1 — the flagship worked example is
-// itself an unsound rule (FATAL)", this rule fires (and this engine
-// reproduces it firing) even when a real counterexample call exists.
+// (`def.form == "colon"`) and never inspects call sites. All narrative
+// commentary about WHY that is a bug (citations, quotes, judgment findings)
+// lives in scenario.notes[<engineId>] as data -- this file only computes
+// structural step descriptions and looks up the matching note by key.
 //
 // This file is a PRODUCER/adapter over the shared scenario facts, not kernel
 // code -- it plays the role of "producer B/C" in subtract.md §2.2. The
@@ -19,13 +19,22 @@
 
 window.runSubtractEngine = function (scenario) {
   const f = scenario.facts;
+  const notes = (scenario.notes && scenario.notes.subtract) || [];
+  function note(key) {
+    return notes.find((n) => n.key === key);
+  }
   const snaps = [];
   let stepNo = 0;
-  function snap(description, state, verdict) {
+  function snap(description, state, verdict, spans) {
     stepNo += 1;
     const s = { step: stepNo, description: description, state: state };
     if (verdict) s.verdict = verdict;
+    if (spans) s.spans = spans;
     snaps.push(s);
+  }
+  function spanOf(fileFacts, span) {
+    if (!span) return null;
+    return Object.assign({ file: fileFacts }, span);
   }
 
   // --- generic kernel state ---------------------------------------------
@@ -102,89 +111,74 @@ window.runSubtractEngine = function (scenario) {
   // subtract.md §2.2: `check = function(premises, target) return
   // def.form == "colon" and def.receiver_param == target.expr and
   // target.claim == "non-nil" end`. It never reads anything about call
-  // sites -- that IS the bug judgments/subtract-attack.md Attack 1 found.
+  // sites -- that IS the bug this rule reproduces.
   function colonSelfNonnilV1Check(premises, target) {
     const def = premises[0];
     return def.form === "colon" && def.receiver_param === target.expr && target.claim === "non-nil";
   }
 
-  function runColonSelfShape(derefName, funcName, defForm, defLine, useLine, receiverParam, schema, counterexampleCall) {
+  function runColonSelfShape(fileName, derefName, funcName, defForm, defLine, useLine, receiverParam, schema, hasCounterexample, defSpan, useSpan) {
     const defId = admit(
-      { form: defForm, def_line: defLine, receiver_param: receiverParam, kind: "def-form", file: f.file },
+      { form: defForm, def_line: defLine, receiver_param: receiverParam, kind: "def-form", file: fileName },
       "mined"
     );
     snap(
-      "admit(pool, def-form payload) for " + funcName + " at " + f.file + ":" + defLine,
-      graphState()
+      "admit(pool, def-form payload) for " + funcName + " at " + fileName + ":" + defLine,
+      graphState(),
+      undefined,
+      defSpan ? [spanOf(fileName, defSpan)] : undefined
     );
     const derefId = admit(
-      { expr: derefName, claim: schema, kind: "presupposition", file: f.file, line: useLine },
+      { expr: derefName, claim: schema, kind: "presupposition", file: fileName, line: useLine },
       "mined"
     );
     snap(
-      "admit(pool, presupposition payload) for deref:" + derefName + " at " + f.file + ":" + useLine,
-      graphState()
+      "admit(pool, presupposition payload) for deref:" + derefName + " at " + fileName + ":" + useLine,
+      graphState(),
+      undefined,
+      useSpan ? [spanOf(fileName, useSpan)] : undefined
     );
 
     // Zero-premise axiom-style rule for the def-form fact itself (subtract.md
     // §2.2: "a producer submits a zero-premise edge for it").
-    const axiomOk = submit("def-form-read-from-parse-v1", () => true, [], defId, "supports");
+    submit("def-form-read-from-parse-v1", () => true, [], defId, "supports");
     snap(
       "submit(pool, def-form-read-from-parse-v1, premises={}, target=" + defId + ", supports) — axiom-style, zero premises",
       graphState()
     );
 
-    const ruleOk = submit(
-      "colon-self-nonnil-v1",
-      colonSelfNonnilV1Check,
-      [defId],
-      derefId,
-      "supports"
-    );
-    let note =
-      "kernel re-executes colon-self-nonnil-v1(premises, target) itself: " +
-      "def.form==\"colon\" && def.receiver_param==target.expr && target.claim==\"non-nil\" " +
-      "— note this NEVER inspects any call site.";
-    if (counterexampleCall) {
-      note +=
-        " A real counterexample call exists in this scenario (" + counterexampleCall +
-        "), but the rule as written cannot see it — judgments/subtract-attack.md " +
-        "Attack 1: \"Colon *definition* syntax... only sugars an implicit `self` " +
-        "parameter — it places zero obligation on *callers*. Nothing stops " +
-        "`Cache.peek(nil, key)`... The kernel re-executes this exact `check` " +
-        "faithfully, gets `true`, and mints Proved.\"";
-    }
+    submit("colon-self-nonnil-v1", colonSelfNonnilV1Check, [defId], derefId, "supports");
+    const mechanismNote = note("mechanism");
+    const counterexampleNote = hasCounterexample ? note("counterexample") : null;
+    const submitNotes = [mechanismNote, counterexampleNote].filter(Boolean);
     snap(
       "submit(pool, colon-self-nonnil-v1, premises={" + defId + "}, target=" + derefId + ", supports)",
-      graphState(note)
+      graphState(submitNotes.length ? submitNotes.map((n) => n.text + " [" + n.citesFinding + "]").join(" ") : undefined),
+      undefined,
+      defSpan && useSpan ? [spanOf(fileName, defSpan), spanOf(fileName, useSpan)] : undefined
     );
 
     const verdicts = close();
     let finalVerdict = verdicts[derefId] === "proved" ? "Proved" : verdicts[derefId] === "refuted" ? "Disproved" : "Open";
     let flagged = false;
-    if (counterexampleCall && finalVerdict === "Proved") {
+    if (hasCounterexample && finalVerdict === "Proved") {
       flagged = true;
       finalVerdict = "False-Proved-flagged";
     }
-    const closeNote = flagged
-      ? "FALSE PROVED — see judgments/subtract-attack.md finding \"Attack 1 — " +
-        "the flagship worked example is itself an unsound rule (FATAL)\": the rule " +
-        "establishes only \"this function was defined with colon sugar,\" a " +
-        "different, weaker fact than \"self is non-nil at this dereference,\" " +
-        "yet the kernel mints Proved anyway."
-      : undefined;
+    const verdictNote = flagged ? note("verdict") : null;
     snap(
       "close(pool) — monotone fixpoint. Verdict for deref:" + derefName + " = " + finalVerdict,
-      graphState(closeNote),
-      finalVerdict
+      graphState(verdictNote ? verdictNote.text + " [" + verdictNote.citesFinding + "]" : undefined),
+      finalVerdict,
+      useSpan ? [spanOf(fileName, useSpan)] : undefined
     );
     return { derefId, finalVerdict };
   }
 
   if (f.shape === "colon_self_nonnil") {
     runColonSelfShape(
-      f.derefName, f.funcName, f.defForm, f.defLine, f.useLine, f.receiverParam, f.schema,
-      f.calledOnlyViaColon === false ? f.counterexampleCall : null
+      f.file, f.derefName, f.funcName, f.defForm, f.defLine, f.useLine, f.receiverParam, f.schema,
+      f.calledOnlyViaColon === false, f.defSpan, f.useSpan
     );
   } else if (f.shape === "colon_self_nonnil_multi") {
     // "H1's payoff is per-rule, not per-claim" -- subtract.md §3.1 instance 4:
@@ -194,47 +188,64 @@ window.runSubtractEngine = function (scenario) {
       { form: f.defForm, def_line: f.defLine, receiver_param: f.receiverParam, kind: "def-form", file: f.file },
       "mined"
     );
-    snap("admit(pool, def-form payload) for " + f.funcName, graphState());
+    snap(
+      "admit(pool, def-form payload) for " + f.funcName,
+      graphState(),
+      undefined,
+      f.defSpan ? [spanOf(f.file, f.defSpan)] : undefined
+    );
     submit("def-form-read-from-parse-v1", () => true, [], defId, "supports");
-    snap("submit axiom edge for def-form fact (zero premises)", graphState());
+    const mechanismNote = note("mechanism");
+    snap(
+      "submit axiom edge for def-form fact (zero premises)",
+      graphState(mechanismNote ? mechanismNote.text + " [" + mechanismNote.citesFinding + "]" : undefined)
+    );
 
     let lastVerdict = "Open";
-    for (const useLine of f.useLines) {
+    f.useLines.forEach((useLine, idx) => {
       const derefId = admit(
         { expr: f.derefName, claim: f.schema, kind: "presupposition", file: f.file, line: useLine },
         "mined"
       );
       submit("colon-self-nonnil-v1", colonSelfNonnilV1Check, [defId], derefId, "supports");
+      const useSpan = f.useSpans && f.useSpans[idx];
       snap(
-        "submit(colon-self-nonnil-v1, premises={" + defId + "}, target=deref@" + useLine +
-          ") — same rule instance reused, zero new kernel machinery, per subtract.md §3.1 " +
-          "instance 4 (\"one rule registration, reused by the kernel's submit against as " +
-          "many targets as a producer names\")",
-        graphState()
+        "submit(colon-self-nonnil-v1, premises={" + defId + "}, target=deref@" + useLine + ")",
+        graphState(),
+        undefined,
+        useSpan ? [spanOf(f.file, useSpan)] : undefined
       );
       const verdicts = close();
       lastVerdict = verdicts[derefId] === "proved" ? "Proved" : "Open";
-    }
+    });
+    const blastNote = note("blast-radius");
     snap(
-      "close(pool) after all 4 sites — every site: " + lastVerdict + " " +
-        "(same unsound rule fires at all 4, per judgments/subtract-attack.md Attack 1: " +
-        "\"§3.1 #4 touts that one rule closes 4 sites 'at once' as a virtue... It is " +
-        "equally the liability multiplier — a single wrong rule produces false Proved " +
-        "at every site it's ever applied to\")",
-      graphState(),
-      "False-Proved-flagged"
+      "close(pool) after all 4 sites — every site: " + lastVerdict,
+      graphState(blastNote ? blastNote.text + " [" + blastNote.citesFinding + "]" : undefined),
+      "False-Proved-flagged",
+      f.useSpans ? f.useSpans.map((s) => spanOf(f.file, s)) : undefined
     );
   } else if (f.shape === "single_assign_nonnil") {
     const assignId = admit(
       { assignment_count: f.assignmentCount, initial_value_kind: f.assignKind, name: f.name, file: f.file, line: f.assignLine, kind: "def-use" },
       "mined"
     );
-    snap("admit(pool, def-use payload) for " + f.name + " assignment at " + f.file + ":" + f.assignLine, graphState());
+    snap(
+      "admit(pool, def-use payload) for " + f.name + " assignment at " + f.file + ":" + f.assignLine,
+      graphState(),
+      undefined,
+      f.assignSpan ? [spanOf(f.file, f.assignSpan)] : undefined
+    );
     const derefId = admit(
       { expr: f.name, claim: f.schema, kind: "presupposition", file: f.file, line: f.useLine },
       "mined"
     );
-    snap("admit(pool, presupposition payload) for deref:" + f.name + " at " + f.file + ":" + f.useLine, graphState());
+    snap(
+      "admit(pool, presupposition payload) for deref:" + f.name + " at " + f.file + ":" + f.useLine,
+      graphState(),
+      undefined,
+      f.useSpan ? [spanOf(f.file, f.useSpan)] : undefined
+    );
 
     submit("assign-fact-read-from-parse-v1", () => true, [], assignId, "supports");
     snap("submit axiom edge for the assignment fact (zero premises)", graphState());
@@ -244,25 +255,29 @@ window.runSubtractEngine = function (scenario) {
       return def.assignment_count === 1 && def.initial_value_kind === "table" && def.name === target.expr;
     }
     submit("never-reassigned-nonnil", neverReassignedNonnilCheck, [assignId], derefId, "supports");
+    const gapNote = note("gap");
     snap(
-      "submit(never-reassigned-nonnil, premises={" + assignId + "}, target=" + derefId + ", supports) " +
-        "— disclosed gap (subtract.md §3.1 item 2): no dominance/ordering check between " +
-        "assignment and dereference, not exercised in this scenario since the use is " +
-        "control-flow-after the assignment",
-      graphState()
+      "submit(never-reassigned-nonnil, premises={" + assignId + "}, target=" + derefId + ", supports)",
+      graphState(gapNote ? gapNote.text + " [" + gapNote.citesFinding + "]" : undefined),
+      undefined,
+      f.assignSpan && f.useSpan ? [spanOf(f.file, f.assignSpan), spanOf(f.file, f.useSpan)] : undefined
     );
     const verdicts = close();
     const finalVerdict = verdicts[derefId] === "proved" ? "Proved" : "Open";
-    snap("close(pool) — verdict = " + finalVerdict, graphState(), finalVerdict);
+    snap("close(pool) — verdict = " + finalVerdict, graphState(), finalVerdict, f.useSpan ? [spanOf(f.file, f.useSpan)] : undefined);
   } else if (f.shape === "branch_reachable") {
     admit({ kind: "presupposition", claim: f.schema, file: f.file, line: f.line, branch: f.branch }, "mined");
-    snap("admit(pool, branch reachability presupposition) — no producer registered a rule for it", graphState());
     snap(
-      "close(pool) — Open. Receipt (subtract.md §3.1 instance 5, verbatim): " +
-        "\"no registered rule connects a `branch:then` presupposition payload to any " +
-        "reachability-evidence payload\" — not hardcoded to Proved to make a number look better.",
+      "admit(pool, branch reachability presupposition) — no producer registered a rule for it",
       graphState(),
-      "Open"
+      undefined,
+      f.lineSpan ? [spanOf(f.file, f.lineSpan)] : undefined
+    );
+    snap(
+      "close(pool) — Open. No registered rule connects a branch:then presupposition payload to any reachability-evidence payload.",
+      graphState(),
+      "Open",
+      f.lineSpan ? [spanOf(f.file, f.lineSpan)] : undefined
     );
   } else if (f.shape === "two_self_facts_for_merge") {
     // subtract's edge model has NO merge/rewrite mechanism at all -- premises
@@ -271,19 +286,14 @@ window.runSubtractEngine = function (scenario) {
     // another's, because there is no shared "canonical representative" two
     // distinct ids could ever be folded into.
     const a = f.factA, b = f.factB;
-    const rA = runColonSelfShape("self", a.funcName, a.defForm, 0, 0, "self", "non-nil",
-      a.calledOnlyViaColon === false ? a.counterexampleCall : null);
-    const rB = runColonSelfShape("self", b.funcName, b.defForm, 0, 0, "self", "non-nil",
-      b.calledOnlyViaColon === false ? b.counterexampleCall : null);
+    const rA = runColonSelfShape(a.file, "self", a.funcName, a.defForm, a.defLine, a.useLine, "self", "non-nil",
+      a.calledOnlyViaColon === false, a.defSpan, a.useSpan);
+    const rB = runColonSelfShape(b.file, "self", b.funcName, b.defForm, b.defLine, (b.useLines && b.useLines[0]), "self", "non-nil",
+      b.calledOnlyViaColon === false, b.defSpan, b.useSpans && b.useSpans[0]);
+    const contrastNote = note("contrast");
     snap(
-      "CONTRAST WITH READING B: subtract's Pool/Edge model never merges or rewrites " +
-        "pool entries — " + a.funcName + "'s claim (id kept distinct) and " + b.funcName +
-        "'s claim (id kept distinct) each carry their own edges. " + a.funcName +
-        " = " + rA.finalVerdict + " (unsound rule fires, same bug as always — but the " +
-        "damage stays local to its own id), " + b.funcName + " = " + rB.finalVerdict +
-        " (genuinely true, unaffected by A's error). No identity-merge amplification " +
-        "is possible in this kernel shape at all.",
-      graphState(),
+      a.funcName + " = " + rA.finalVerdict + ", " + b.funcName + " = " + rB.finalVerdict + " (no identity-merge mechanism exists in this kernel shape)",
+      graphState(contrastNote ? contrastNote.text + " [" + contrastNote.citesFinding + "]" : undefined),
       "A=" + rA.finalVerdict + ", B=" + rB.finalVerdict + " (no amplification)"
     );
   }

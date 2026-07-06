@@ -7,24 +7,33 @@
 // second primitive, added in §2.4) treats "accept + unknown, nothing
 // rejects" as provisionally closed.
 //
-// Faithfully reproduces the design's OWN flagship bug
-// (judgments/primitive-attack.md "Attack 0 (the flagship demo does not run
-// as claimed) — FATAL"): `mined_deref_nonnil.check`, exactly as pasted in
-// primitive.md §2.3, has no branch that returns "unknown" for "no concrete
-// value" -- `witness.value == nil` unconditionally hits the `"reject"`
-// branch, because Lua cannot distinguish "field absent" from "field
-// explicitly nil". This engine literally implements that pasted check
-// function verbatim, so the bug reproduces itself rather than being asserted.
+// Faithfully reproduces the design's OWN flagship bug: `mined_deref_nonnil
+// .check`, exactly as pasted in primitive.md §2.3, has no branch that
+// returns "unknown" for "no concrete value" -- `witness.value == nil`
+// unconditionally hits the `"reject"` branch, because Lua cannot
+// distinguish "field absent" from "field explicitly nil". This engine
+// literally implements that pasted check function verbatim, so the bug
+// reproduces itself rather than being asserted. All narrative commentary
+// about WHY that is a bug lives in scenario.notes.primitive as data.
 
 window.runPrimitiveEngine = function (scenario) {
   const f = scenario.facts;
+  const notes = (scenario.notes && scenario.notes.primitive) || [];
+  function note(key) {
+    return notes.find((n) => n.key === key);
+  }
   const snaps = [];
   let stepNo = 0;
-  function snap(description, state, verdict) {
+  function snap(description, state, verdict, spans) {
     stepNo += 1;
     const s = { step: stepNo, description: description, state: state };
     if (verdict) s.verdict = verdict;
+    if (spans) s.spans = spans;
     snaps.push(s);
+  }
+  function spanOf(fileFacts, span) {
+    if (!span) return null;
+    return Object.assign({ file: fileFacts }, span);
   }
 
   // --- the axiom producer (primitive.md §2.2), verbatim in spirit -------
@@ -57,46 +66,39 @@ window.runPrimitiveEngine = function (scenario) {
     return null;
   }
 
-  function runSelfShape(funcName, useLine, calledOnlyViaColon, counterexampleCall) {
+  function runSelfShape(funcName, useLine, useSpan) {
     // The witness source is single-shot (primitive.md §2.3
     // `mined.witness_source`): the harvester has no concrete runtime value
     // (static analysis only), so value = nil.
     const witness = { kind: "binding", site: funcName + "@" + useLine, via: "colon_call_self", value: null };
     snap(
-      "witness_source(site, binding_info) emits ONE witness (single-shot, per primitive.md §2.3): " +
-        JSON.stringify(witness),
-      { pool: [{ id: "axiom", check: "axiomColonSelfCheck" }, { id: "mined-obligation", check: "minedDerefNonnilCheck" }], witnesses: [witness] }
+      "witness_source(site, binding_info) emits ONE witness (single-shot): " + JSON.stringify(witness),
+      { pool: [{ id: "axiom", check: "axiomColonSelfCheck" }, { id: "mined-obligation", check: "minedDerefNonnilCheck" }], witnesses: [witness] },
+      undefined,
+      useSpan ? [useSpan] : undefined
     );
 
     const ra = axiomColonSelfCheck(witness);
     snap("axiom.check(w) = \"" + ra + "\"", { witnesses: [witness], calls: { axiom: ra } });
 
     const rb = minedDerefNonnilCheck(witness);
+    const bugNote = note("witness-bug");
     snap(
-      "mined_deref_nonnil.check(w) = \"" + rb + "\" — witness.value is `nil` (no concrete " +
-        "runtime value collected), and the pasted check has no `\"unknown\"` branch for " +
-        "that case; it falls straight to `if witness.value == nil then return \"reject\" end`.",
-      { witnesses: [witness], calls: { axiom: ra, mined: rb } }
+      "mined_deref_nonnil.check(w) = \"" + rb + "\"",
+      { witnesses: [witness], calls: { axiom: ra, mined: rb }, note: bugNote ? bugNote.text + " [" + bugNote.citesFinding + "]" : undefined },
+      undefined,
+      useSpan ? [useSpan] : undefined
     );
 
     const disagreement = findDisagreement(axiomColonSelfCheck, minedDerefNonnilCheck, [witness]);
     if (disagreement) {
-      const note =
-        "FALSE REFUTED — see judgments/primitive-attack.md finding \"Attack 0 (the " +
-        "flagship demo does not run as claimed) — FATAL\": \"Lua cannot distinguish " +
-        "'field absent' from 'field explicitly nil'... Running the pasted code produces " +
-        "a Refuted finding, not an empty `findings` table... self is genuinely " +
-        "guaranteed non-nil; the tool would report a contradiction.\"" +
-        (counterexampleCall
-          ? " (In THIS scenario a real counterexample call, " + counterexampleCall +
-            ", also exists — the design still never reaches that fact; it Refutes for " +
-            "the wrong reason, via the nil/absent bug, not via detecting the counterexample.)"
-          : "");
+      const disagreementNote = note("disagreement");
       snap(
         "Kernel.find_disagreement(axiom, mined_obligation, [w]) found a disagreement: " +
           "axiom=\"" + ra + "\", mined=\"" + rb + "\" -> Refuted",
-        { witnesses: [witness], calls: { axiom: ra, mined: rb }, note: note },
-        "False-Refuted-flagged"
+        { witnesses: [witness], calls: { axiom: ra, mined: rb }, note: disagreementNote ? disagreementNote.text + " [" + disagreementNote.citesFinding + "]" : undefined },
+        "False-Refuted-flagged",
+        useSpan ? [useSpan] : undefined
       );
       return "False-Refuted-flagged";
     }
@@ -104,18 +106,19 @@ window.runPrimitiveEngine = function (scenario) {
   }
 
   if (f.shape === "colon_self_nonnil") {
-    runSelfShape(f.funcName, f.useLine, f.calledOnlyViaColon, f.calledOnlyViaColon === false ? f.counterexampleCall : null);
+    runSelfShape(f.funcName, f.useLine, f.useSpan ? Object.assign({ file: f.file }, f.useSpan) : undefined);
   } else if (f.shape === "colon_self_nonnil_multi") {
     let last = null;
-    for (const useLine of f.useLines) {
-      last = runSelfShape(f.funcName, useLine, true, null);
-    }
+    f.useLines.forEach((useLine, idx) => {
+      const useSpan = f.useSpans && f.useSpans[idx];
+      last = runSelfShape(f.funcName, useLine, useSpan ? Object.assign({ file: f.file }, useSpan) : undefined);
+    });
+    const amplificationNote = note("amplification");
     snap(
-      "Same nil/absent-conflation bug (primitive-attack.md Attack 0) fires identically at " +
-        "all 4 sites — the design's per-producer reuse (\"zero new code\", §3.1 instance 4) " +
-        "amplifies the bug exactly as it amplifies correctness would have.",
-      {},
-      last
+      "Same bug fires identically at all 4 sites (one producer, reused, zero new code).",
+      { note: amplificationNote ? amplificationNote.text + " [" + amplificationNote.citesFinding + "]" : undefined },
+      last,
+      f.useSpans ? f.useSpans.map((s) => Object.assign({ file: f.file }, s)) : undefined
     );
   } else if (f.shape === "single_assign_nonnil") {
     // Different producer family (no pasted code in primitive.md for this
@@ -132,36 +135,29 @@ window.runPrimitiveEngine = function (scenario) {
     const witness = { kind: "assignment_trace", name: f.name, assignments: f.assignmentCount };
     snap("witness_source emits ONE witness (single-shot): " + JSON.stringify(witness), { witnesses: [witness] });
     const r = dataflowCheck(witness);
-    snap("dataflow producer's own check(w) = \"" + r + "\" (accept: single assignment, before use)", { witnesses: [witness], calls: { dataflow: r } });
+    snap("dataflow producer's own check(w) = \"" + r + "\"", { witnesses: [witness], calls: { dataflow: r } });
+    const singletonNote = note("singleton-domain");
     snap(
-      "Kernel.exhaust(witness_source, ..., budget) observes termination after exactly ONE " +
-        "witness — per judgments/primitive-attack.md \"Attack 1 (pressure point 1 — does " +
-        "Proved ever fire on a claim that matters?)\": \"the kernel's honest claim... is " +
-        "*technically* true, but the domain it exhausted has cardinality one, and that " +
-        "one witness was constructed by the harvester... The producer relabeled the " +
-        "universal claim as a singleton fact and then let the kernel 'exhaust' that " +
-        "singleton.\"",
-      { witnesses: [witness] },
+      "Kernel.exhaust(witness_source, ..., budget) observes termination after exactly ONE witness.",
+      { witnesses: [witness], note: singletonNote ? singletonNote.text + " [" + singletonNote.citesFinding + "]" : undefined },
       "Proved (flagged: degenerate singleton domain)"
     );
   } else if (f.shape === "branch_reachable") {
     snap(
-      "No witness source and no claim registered for branch reachability in this scenario " +
-        "— no producer sketched in primitive.md supplies one (§3.1 instance 5). Stays Open.",
+      "No witness source and no claim registered for branch reachability in this scenario.",
       {},
-      "Open"
+      "Open",
+      f.lineSpan ? [Object.assign({ file: f.file }, f.lineSpan)] : undefined
     );
   } else if (f.shape === "two_self_facts_for_merge") {
     const a = f.factA, b = f.factB;
-    const rA = runSelfShape(a.funcName, 0, a.calledOnlyViaColon, a.calledOnlyViaColon === false ? a.counterexampleCall : null);
-    const rB = runSelfShape(b.funcName, 0, b.calledOnlyViaColon, null);
+    const rA = runSelfShape(a.funcName, a.useLine, a.useSpan ? Object.assign({ file: a.file }, a.useSpan) : undefined);
+    const rB = runSelfShape(b.funcName, b.useLines && b.useLines[0], b.useSpans && b.useSpans[0] ? Object.assign({ file: b.file }, b.useSpans[0]) : undefined);
+    const independentNote = note("independent-bug");
     snap(
-      "primitive has no merge/rewrite mechanism either — pool entries are independent " +
-        "claim closures, never unioned. " + a.funcName + " = " + rA + ", " + b.funcName +
-        " = " + rB + ". Both happen to hit the SAME nil/absent-conflation bug " +
-        "(primitive-attack.md Attack 0) independently, not via any shared amplification " +
-        "path.",
-      {},
+      "primitive has no merge/rewrite mechanism — pool entries are independent claim closures, never unioned. " +
+        a.funcName + " = " + rA + ", " + b.funcName + " = " + rB,
+      { note: independentNote ? independentNote.text + " [" + independentNote.citesFinding + "]" : undefined },
       "A=" + rA + ", B=" + rB + " (no amplification, but same bug fires independently)"
     );
   }
