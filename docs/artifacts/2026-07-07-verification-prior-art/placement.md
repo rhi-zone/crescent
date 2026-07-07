@@ -636,6 +636,8 @@ it.
   unverifiable in principle" limit `synthesis.md` §8 already names for
   every producer.
 
+  **2026-07-07 owner resolutions:** (1) NO vendoring of Z3/cvc5-class solver binaries — ruled out regardless of the dep/ carve-out reading. (2) If an SMT-grade tier is ever built, a pure-Lua implementation is mandatory per the standard tier rules (pure Lua baseline; no hard dependency on system/vendored C libs). (3) Owner challenge on record: SMT is the slowest, most brittle family in this survey and entered the map via the cited prior art's own architecture choices, not via a crescent requirement — whether crescent's claim mix needs theory reasoning at all remains [empirical], unanswered.
+
 - [empirical] Whether crescent's existing pure-Lua `lib/sat` (DPLL) and
   `lib/constraint_solver` (CSP backtracking) — per `docs/batteries.md`, not
   one of the four digests — are adequate as a pure-Lua solver tier for a
