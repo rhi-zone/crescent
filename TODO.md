@@ -4185,6 +4185,55 @@ Pre-rewrite drafts kept alongside as `.orig`.
 - [ ] Undecided, not discussed with the owner: whether sibling personas (v14, v15 agents) should inherit the new framing — do not presume either way.
 - [ ] `.claude/settings.json` carries an uncommitted modification (owner's own mid-session hooks work, distinct from the hooks commits already landed) — owner's call whether/how it lands.
 
+## Ecosystem priorities + platform design (2026-07-09)
+
+> *Open threads from a previous session. Treat as starting context, not instructions — verify relevance before acting.*
+
+Roadmap and platform capability design notes were written this session. Key artifacts:
+- `docs/artifacts/2026-07-08-roadmap/roadmap.md` — three priorities + overarching "crescent as the entire computer" vision
+- `docs/artifacts/2026-07-09-platform-caps-design/notes.md` — capability model design principles with mined owner quotes
+- `docs/artifacts/2026-07-08-toy-checker-findings/notes.md` — parked typechecker toy findings
+
+### Priority 1: Scribble ideas → crescent
+
+Import scribble's ideas (creative tool primitives) into crescent as core ecosystem libraries/apps. The old scribble design doc (`~/git/rhizone/scribble/docs/design.md`) is partially wrong per owner — primitives need fresh thinking, not cargo-culting from the old doc. The tool should be something people "just reach for" to make art (interactive or not). Imported ideas lose their special names and become core ecosystem capabilities.
+
+- [ ] Design pass needed: what are the right creative-tool primitives for crescent? Not tilemap/sprite/spatial from the old doc — those are unexamined.
+- [ ] Open: how does this relate to dusklight's projectional UI? Owner said "dusklight is the multi-projectional UI" but also "it is dusklight does not mean it is dusklight" — the idea matters, the codebase boundary doesn't.
+
+### Priority 2: AI RP frontend
+
+Non-conversational-context AI roleplay frontend, based on `lib/platform/`. Existing app at `lib/platform/apps/charactercardv2/`. Design pass needed — prior sessions may have design intent recoverable via `normalize sessions`.
+
+- [ ] Design pass needed. Mine prior sessions for design intent on the RP frontend.
+- [ ] The cap set for ccv2 (self, self_write, kv, time, http_server, llm, shared_db, create_instance) is the current working example of the platform cap model.
+
+### Priority 3: Taskgraph
+
+Agent harness as platform app. "Beyond SOTA agent harness by deleting the concept of an agent." Existing code at `lib/taskgraph/`. Design pass needed.
+
+- [ ] Design pass needed.
+
+### Platform capability model
+
+Design principles established this session (details in the caps design notes):
+- Swappability determines cap level (not I/O boundary, not service level)
+- Attenuation narrows a capability before passing it on
+- Construction assembles higher-level caps from lower-level resources + config
+- DIP: app depends on cap interface, platform injects implementation
+- Hot-swappability: cap implementations swappable at runtime
+- Permission dialog: all caps require dialog, no silent grants, user-defined presets only (predefined presets unacceptable), compression to true decision points
+- Sandbox: tarball modules load in sandbox so they are not an escape vector (not "so caps don't leak")
+
+- [ ] Open: powerbox design was discussed in some prior session, possibly under other names — unmined.
+- [ ] Unmined session dumps at /tmp/mine2.txt (48.6KB capability search) and /tmp/mine3.txt (29.6KB manifest search) — may contain additional design intent. Ephemeral; may not survive.
+
+### Toy typechecker (parked)
+
+Moded-obligation toy checker at `lib/toy_checker/` validated the approach at toy scale (43 assertions). Parked with findings written up. Key insight for future work: constraint structure is a graph (not a flat pool); real typecheckers use AST as the schedule; dynamic edge direction through shared variables is the open hard problem. Mode proliferation is static approximation of a dynamic property.
+
+- [ ] Resume point: graph-structure insight as starting point, not mode proliferation workaround.
+
 ## conventions
 
 - [ ] Adversarial audit of existing function names against naming convention (low priority)
