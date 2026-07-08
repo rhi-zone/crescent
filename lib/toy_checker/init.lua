@@ -23,28 +23,19 @@ end
 --
 -- ── SEMANTIC CHOICES AND WHY ─────────────────────────────────────────────
 --
--- 1. Modes drive scheduling for real, but NOT uniformly across judgments —
---    this was the single most interesting finding. Initially every "in"
---    position was pool-gated (deferred until resolved). That deadlocks:
---    Sub and Unify are perfectly capable of running against an unresolved
---    unification variable (that's what eager unification IS — bind the
---    var and move on), so gating them on "in" meant a Sub whose only path
---    to resolution was itself running would wait forever on itself
---    transitively (see the CLI-shaped test: dispatch's generic handler
---    type only ever gets pinned down by the very Sub obligation checking
---    a handler literal against it). The fix: blocking is declared
---    per-producer, per-argument-index at registration (`pool:register(...,
---    {1})`), not hardcoded per judgment name in the pool loop — and in
---    this toy only Instantiate's scheme position actually needs it, because
---    a scheme is atomic (there's no such thing as "half a scheme" the way
---    a partially-bound type is meaningful). Unify/Sub/Infer/Check/
---    Generalize never block. So: the in/out distinction is load-bearing
---    everywhere (out positions get written by exactly one producer, in
---    positions are read-only to their producer) but scheduling-by-mode
---    (deferral) is load-bearing only at the Instantiate boundary. Honestly
---    flagging this per the task brief: don't take "modes drive scheduling"
---    to mean every judgment needs pool-level blocking — most don't, in a
---    substrate built on mutable unification cells.
+-- 1. Three mode kinds — in, out, accumulate — drive scheduling, but with
+--    different mechanisms. Static pool-level blocking (declared at
+--    registration via `pool:register(..., {1})`) only applies to
+--    Instantiate's scheme position, because a scheme is atomic. Sub uses
+--    "accumulate" mode dynamically: when one operand is a uvar, it records
+--    the known side as a lower/upper bound on the uvar and returns
+--    "proved" immediately; when both operands are uvars it returns
+--    "deferred" with the left uvar's id, and the pool puts it in waiters.
+--    Unify/Infer/Check/Generalize never block. The in/out distinction is
+--    load-bearing everywhere (out positions get written by exactly one
+--    producer, in positions are read-only) but scheduling-by-mode takes
+--    three forms: static pool blocking (Instantiate), dynamic producer
+--    deferral (Sub both-uvar), and immediate accumulation (Sub one-uvar).
 --
 -- 2. Generalize is a real HM-style computation (free tyvars of the type,
 --    minus free tyvars of the env), not a degenerate wrapper around an
@@ -86,36 +77,30 @@ end
 -- instantiations) — but covariant is equally defensible for a read-only
 -- container and the two diverge in real programs.
 --
--- OWNER-CALL C — Sub against an unresolved unification variable. A fully
--- principled bidirectional-subtyping engine tracks upper/lower BOUND SETS
--- per uvar and defers a Sub obligation until enough is known to check
--- soundly. This toy instead collapses Sub to Unify (equality) the instant
--- either side derefs to an unresolved uvar. Chosen because bound-set
--- tracking is real substrate this sketch doesn't have; the cost is
--- genuine lost precision (Sub(int, ?x) forces ?x := int outright instead
--- of recording "?x >= int" and staying open to also unify ?x with
--- `number` later from a different call site).
+-- OWNER-CALL C — RESOLVED. Sub against an unresolved unification variable
+-- now uses CLP-style bound accumulation ("accumulate" mode) instead of
+-- collapsing to Unify. Sub(ground, ?x) records ground as a lower bound;
+-- Sub(?x, ground) records ground as an upper bound; Sub(?x, ?y) defers
+-- until the left side resolves. Cross-checks (every new bound vs all
+-- opposite-side bounds) are submitted as Sub obligations, catching
+-- contradictions structurally. When a fully-ground lower bound arrives,
+-- the uvar auto-resolves to it (see OWNER-CALL D in pool.lua for the
+-- resolution strategy). Compound bounds (e.g. Store<?a>) trigger
+-- structural decomposition through the normal Sub/Unify machinery when
+-- cross-checked against opposite-side bounds — no special compound-merge
+-- code, just the existing structural producers re-entered on the children.
 --
--- This fork turned out to be sharper than expected. First cut: never
--- block Sub at all (let the collapse-to-Unify fallback run immediately
--- against whatever's there). That's actually UNSOUND against ordering:
--- check_expr's fallback submits Infer(expr, fresh) and Sub(fresh,
--- expected) as FIFO siblings, and Sub could pop and collapse-bind `fresh`
--- straight to `expected` before the sibling Infer ever got to write
--- fresh's real inferred type into it — a race that silently produces the
--- wrong bind (caught by the SHOULD-FAIL string/int test only by luck: it
--- turned into a Unify mismatch instead of the intended Sub refutation,
--- which was the tell that something was wrong). The fix, now in place:
--- Sub blocks on position 1 (the "actual" value being checked) but never
--- on position 2 (the "expected"/upper-bound side). That's a real,
--- principled asymmetry — position 1 has to be genuinely known before
--- "is this a subtype of X" means anything, while position 2 is allowed to
--- still be an open variable that Sub itself pins (exactly the pattern the
--- CLI-shaped test needs: a generic handler-map's value type gets pinned
--- by the Sub checking a concrete handler literal against it). Still not
--- full bound-set tracking — a second, differently-shaped actual value
--- checked against the same still-open expected-side var later would
--- clobber rather than widen — but it's no longer ordering-dependent.
+-- The previous asymmetric-blocking-on-position-1 approach and the
+-- collapse-to-Unify fallback are both removed. The ordering issue that
+-- motivated position-1 blocking (Sub racing against a sibling Infer on
+-- the same fresh uvar) is now handled by accumulate: Sub(?fresh, expected)
+-- records an upper bound on ?fresh without needing ?fresh to be resolved;
+-- when Infer later resolves ?fresh via Unify, bind verifies the bound.
+--
+-- Known limitation: if a non-ground lower bound later becomes ground
+-- (because an internal uvar resolves), _try_resolve is NOT re-triggered
+-- on the outer uvar. The typical resolution path for compound-typed
+-- uvars is through Unify (structural matching), not bound accumulation.
 --
 -- ── PUNTED (stated limitations, not ambiguous forks) ─────────────────────
 -- - No parser/lexer — programs are hand-built Lua-table ASTs.
@@ -136,16 +121,24 @@ end
 --   if/let/map_lit for better error locality; it's a uniform
 --   infer-then-subtype "switch" rule everywhere.
 --
+-- OWNER-CALL D — uvar resolution strategy. When a uvar accumulates a
+-- fully-ground lower bound, _try_resolve auto-resolves the uvar to that
+-- bound. Alternatives not chosen: resolve to the GLB/LUB (requires
+-- lattice machinery); never auto-resolve (breaks existing tests); delay
+-- until both lower and upper bounds exist (too conservative). The cost:
+-- auto-resolve is eager, so a uvar resolved from its first ground lower
+-- bound cannot later be widened by a second lower bound arriving through
+-- a different path. See pool.lua _try_resolve for the full rationale.
+--
 -- ── WHAT WOULD BREAK FIRST IF EXTENDED ────────────────────────────────────
 -- Real let-polymorphism (generalizing over unification variables that
--- happen not to escape into the surrounding env) would immediately need
--- OWNER-CALL C's bound-set tracking to be done properly first — the
--- current Sub-collapses-to-Unify shortcut would silently over-constrain
--- inferred types the moment two different call sites want to instantiate
--- the same let-bound value at different subtypes. Records/field
--- projection would need a genuine 7th judgment (or an env-like
--- side-channel of the same OWNER-CALL-A shape) and is the next thing
--- someone will reach for once the map-only stand-in stops being enough.
+-- happen not to escape into the surrounding env) would need OWNER-CALL D's
+-- resolution strategy to be less eager — currently a uvar auto-resolves
+-- on the first ground lower bound, which forecloses widening from a
+-- second call site. Records/field projection would need a genuine 7th
+-- judgment (or an env-like side-channel of the same OWNER-CALL-A shape)
+-- and is the next thing someone will reach for once the map-only stand-in
+-- stops being enough.
 
 local ir = require("lib.toy_checker.ir")
 local Pool = require("lib.toy_checker.pool")

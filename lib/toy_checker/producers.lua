@@ -130,14 +130,14 @@ local function unify_producer(ob, ctx)
 		if ir.occurs(a, b) then
 			return "refuted", "occurs check failed: " .. ir.type_to_string(a) .. " occurs in " .. ir.type_to_string(b)
 		end
-		ctx:bind(a, b)
+		ctx:bind(a, b, ob.id)
 		return "proved"
 	end
 	if b.kind == "uvar" then
 		if ir.occurs(b, a) then
 			return "refuted", "occurs check failed: " .. ir.type_to_string(b) .. " occurs in " .. ir.type_to_string(a)
 		end
-		ctx:bind(b, a)
+		ctx:bind(b, a, ob.id)
 		return "proved"
 	end
 	if a.kind ~= b.kind then
@@ -183,26 +183,47 @@ end
 -- Sub: (in, in) — a <: b.
 -- ========================
 
---: (Obligation, PoolObj) -> (string, string | nil)
+-- Sub uses "accumulate" mode dynamically: when one operand is a uvar, it
+-- records the known side as a bound on that uvar (via pool:add_lower_bound
+-- / pool:add_upper_bound) instead of collapsing to Unify. This preserves
+-- subtyping precision — Sub(int, ?x) records "?x >= int" rather than
+-- forcing ?x := int, so a later Sub(?x, number) can still prove. When both
+-- operands are uvars, Sub defers (returns "deferred" with the left uvar's
+-- id) until at least one side resolves.
+--
+-- No static blocking positions — Sub handles all four ground/uvar
+-- combinations itself. This replaces the previous ad-hoc asymmetric
+-- blocking on position 1 and the collapse-to-Unify fallback (former
+-- OWNER-CALL C, now resolved by the accumulate mechanism).
+--: (Obligation, PoolObj) -> (string, string | integer | nil)
 local function sub_producer(ob, ctx)
 	local a0, b0 = ob.args[1], ob.args[2]
 	if not is_type_arg(a0) then return "refuted", "Sub expects Type arguments, got " .. tostring(a0.kind) end
 	if not is_type_arg(b0) then return "refuted", "Sub expects Type arguments, got " .. tostring(b0.kind) end
 	local a, b = ir.deref(a0) --[[: Type]], ir.deref(b0) --[[: Type]]
 
-	-- OWNER-CALL: Sub against an unresolved unification variable. A fully
-	-- principled bidirectional-subtyping engine tracks upper/lower bound
-	-- SETS per uvar and defers until enough is known to check them without
-	-- collapsing precision. This toy instead collapses Sub to Unify
-	-- (equality) the moment either side is an unresolved uvar — simpler,
-	-- no bound-set machinery, but genuinely loses subtyping precision
-	-- (e.g. Sub(int, ?x) binds ?x := int rather than recording "?x >= int"
-	-- and staying open to also admit ?x := number later). See init.lua.
-	if a.kind == "uvar" or b.kind == "uvar" then
-		ctx:submit("Unify", { a, b }, ob.id, "sub-fallback: unify against unresolved variable")
+	-- Both uvars: defer on the left side's id. When the left resolves,
+	-- this obligation re-enters the worklist and dispatches to one of the
+	-- three remaining cases below.
+	if a.kind == "uvar" and b.kind == "uvar" then
+		return "deferred", a.id
+	end
+
+	-- Left known, right uvar: record left as a lower bound on right.
+	-- "a <: ?b" means a is a lower bound on b.
+	if b.kind == "uvar" then
+		ctx:add_lower_bound(b --[[: UvarType]], a, ob.id)
 		return "proved"
 	end
 
+	-- Left uvar, right known: record right as an upper bound on left.
+	-- "?a <: b" means b is an upper bound on a.
+	if a.kind == "uvar" then
+		ctx:add_upper_bound(a --[[: UvarType]], b, ob.id)
+		return "proved"
+	end
+
+	-- Both ground/compound: structural subtype check.
 	if a.kind == "int" and b.kind == "number" then return "proved" end
 
 	if a.kind ~= b.kind then
@@ -227,7 +248,7 @@ local function sub_producer(ob, ctx)
 		if a.name ~= b.name or #a.args ~= #b.args then
 			return "refuted", "generic head/arity mismatch in subtyping: " .. ir.type_to_string(a) .. " vs " .. ir.type_to_string(b)
 		end
-		-- OWNER-CALL: generic type-constructor argument variance. This toy
+		-- OWNER-CALL B: generic type-constructor argument variance. This toy
 		-- has no per-parameter variance annotations, so there are two
 		-- defensible, semantically-diverging choices: treat all generic
 		-- args invariantly (require exact equality via Unify) or
@@ -528,11 +549,11 @@ end
 --: (PoolObj) -> nil
 function M.register_all(pool)
 	pool:register("Unify", unify_producer)
-	-- Sub blocks on position 1 (the "actual" side) only — see init.lua
-	-- OWNER-CALL C. Position 2 (the "expected/upper-bound" side) is
-	-- deliberately left eager: that's what lets Sub pin an unresolved
-	-- generic parameter from a now-known actual argument type.
-	pool:register("Sub", sub_producer, { 1 })
+	-- Sub has no static blocking positions — it handles all four
+	-- ground/uvar combinations dynamically via accumulate mode (see
+	-- sub_producer above). When both operands are uvars, the producer
+	-- returns "deferred" with the left uvar's id.
+	pool:register("Sub", sub_producer)
 	pool:register("Instantiate", instantiate_producer, { 1 })
 	pool:register("Generalize", generalize_producer)
 	pool:register("Infer", infer_check_producer)

@@ -14,7 +14,14 @@ local M = {}
 -- TYPES
 -- ========================
 -- A Type is a tagged union on `kind`.
---:: Type = { kind: "int" } | { kind: "string" } | { kind: "bool" } | { kind: "number" } | { kind: "void" } | { kind: "fn", params: Type[], ret: Type } | { kind: "generic", name: string, args: Type[] } | { kind: "array", elem: Type } | { kind: "map", key: Type, value: Type } | { kind: "tyvar", name: string } | { kind: "uvar", id: integer, bound: Type | nil }
+-- Mode kinds: "in", "out", "accumulate".
+-- "in": value must be ground before the obligation can run; defer otherwise.
+-- "out": the obligation produces this value.
+-- "accumulate": records a constraint (upper/lower bound) on the variable;
+--   the obligation can run immediately without the variable being ground.
+--   Sub uses accumulate dynamically when one operand is a uvar — see
+--   producers.lua sub_producer.
+--:: Type = { kind: "int" } | { kind: "string" } | { kind: "bool" } | { kind: "number" } | { kind: "void" } | { kind: "fn", params: Type[], ret: Type } | { kind: "generic", name: string, args: Type[] } | { kind: "array", elem: Type } | { kind: "map", key: Type, value: Type } | { kind: "tyvar", name: string } | { kind: "uvar", id: integer, bound: Type | nil, lower_bounds: Type[], upper_bounds: Type[] }
 --:: Scheme = { kind: "scheme", vars: string[], type: Type }
 --:: SchemeCell = { kind: "scheme_cell", id: integer, bound: Scheme | nil }
 
@@ -93,7 +100,7 @@ end
 
 --: () -> Type
 function M.mk_uvar()
-	return { kind = "uvar", id = next_id(), bound = nil }
+	return { kind = "uvar", id = next_id(), bound = nil, lower_bounds = {}, upper_bounds = {} }
 end
 
 --: (string[], Type) -> Scheme
@@ -135,6 +142,18 @@ function M.type_children(t)
 		return { t.key, t.value }
 	end
 	return {}
+end
+
+-- Is `t` fully ground (no unresolved uvars anywhere inside)?
+-- Rigid tyvars count as ground — they are fixed names, not holes.
+--: (Type) -> boolean
+function M.is_ground(t)
+	t = M.deref(t)
+	if t.kind == "uvar" then return false end
+	for _, c in ipairs(M.type_children(t)) do
+		if not M.is_ground(c) then return false end
+	end
+	return true
 end
 
 -- Does uvar `u` occur anywhere inside `t` (after dereferencing)?
