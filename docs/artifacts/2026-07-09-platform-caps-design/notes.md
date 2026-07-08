@@ -74,6 +74,26 @@ Caps are injected at the entrypoint and passed explicitly to code that needs the
 
 `docs/platform-design.md` is the canonical platform design reference. Should be consulted before any platform work. (See turn 251 for context on scoping this to platform-specific CLAUDE.md rather than the top-level one.)
 
+### Permission dialog and grant fatigue
+
+From sessions `cabdea3b` and `4b24c1b4`:
+
+> "ALL the caps need to be 'trusted' through a permissions dialog, that's the point" (cabdea3b)
+
+> "never auto-grant?" (cabdea3b)
+
+> "--grant mustn't be persisted imo" (cabdea3b)
+
+> "A 'default allow for harmless caps' reduces grant fatigue... not too sure about that. can be recommended during setup but not default" (cabdea3b)
+
+> "the same set of permissions every time sounds like decision fatigue though... may need a way to go 'this is the same as your <x> settings preset' AND/OR a preset selector" (4b24c1b4, turn 145)
+
+No silent grants — every cap goes through a permission dialog. But repeated identical dialogs are zero-information decisions. The mitigation is user-defined presets: the user creates their own permission profiles, not predefined app-type categories. Predefined presets are unacceptable — the system must not decide what's "normal."
+
+The goal is compression: only surface dialogs that carry actual information (genuinely context-dependent decisions). Risk/severity levels on caps (`M.risk()` in cap implementations) already flag which grants are low-information vs high-information.
+
+Open: the condition DSL for presets ("sexpr dsl structured editor style conditions" — turn 147) was mentioned but not designed.
+
 ## Existing caps in charactercardv2 (the only platform app so far)
 
 | Cap | Type | What it does |
@@ -132,4 +152,5 @@ Each of these implies capabilities. Design pass needed to determine the right fa
 - How does attenuation compose across multiple levels? (app attenuates a cap before passing to a sub-component — does that work cleanly?)
 - What's the cap story for browser-only apps (no server, service worker only)?
 - Mining previous sessions for design intent: `normalize sessions messages --grep` on platform-related sessions.
-- Powerbox vs caps: are they the same thing in crescent, or is there a meaningful distinction? (raised 2026-04-20, turn 141, not resolved)
+- Powerbox vs caps: are they the same thing in crescent, or is there a meaningful distinction? (raised 2026-04-20, not resolved)
+- Permission presets: user-defined preset system with condition DSL mentioned but not designed. How to compress grant dialogs to only true decision points without predefined app-type categories.
