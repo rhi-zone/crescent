@@ -46,7 +46,7 @@ Findings from the toy checker sketch (docs/artifacts/2026-07-08-toy-checker-find
 
 ## Dusklight ideas → crescent
 
-Dusklight (~/git/rhizone/dusklight/) is a universal UI client for arbitrary data with a control plane. Like scribble, its ideas import into crescent — the project shell stays separate.
+Dusklight (~/git/rhizone/dusklight/) is a universal UI client for arbitrary data with a control plane. Like scribble, its ideas lose their special name and import into crescent as libraries and platform apps.
 
 Key ideas to import:
 - Pattern-first rendering (data shape → visualization)
