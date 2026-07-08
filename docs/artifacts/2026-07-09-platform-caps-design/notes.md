@@ -18,7 +18,7 @@ A capability is at the right level when it's a **swappable unit**: a stable inte
 
 **Swappability**: because the cap is an object with methods, the platform can swap the implementation while the app is running — switch LLM providers mid-session, migrate storage backend live, redirect a server to a different port. The app holds a reference; the internals change; the app doesn't know.
 
-**Not everything is a cap**: pure logic (combinators, parsers, encoders) is just code — `require` it directly. Caps are for things that involve external state, I/O, or platform-managed resources. But a library that *uses* I/O doesn't have to *be* a cap — it can be pure logic that receives I/O caps as function arguments.
+**Not everything is a cap**: pure logic (combinators, parsers, encoders) is just code — `require` it directly. Caps are for things that involve external state, I/O, platform-managed resources, or anything where swappability matters. A JSON parser doesn't need to be a cap because there's no reason to swap it behind the consumer's back. An LLM client does because the provider might change. But a library that *uses* I/O doesn't have to *be* a cap — it can be pure logic that receives I/O caps as function arguments.
 
 ## Existing caps in charactercardv2 (the only platform app so far)
 
