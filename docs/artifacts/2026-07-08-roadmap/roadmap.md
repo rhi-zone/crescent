@@ -24,15 +24,17 @@ Tools should work 100% in the browser without needing a backend. lib/platform/ a
 
 "SOTA AI RP frontend — non-conversational context."
 
-- Based on lib/platform/
+- Present in `lib/platform/apps/charactercardv2/` (character card v2 app) with supporting adapter at `lib/platform/apps/sillytavern/`
+- Sorely needs design
+- There is almost certainly a previous session worth mining via `normalize sessions`
 - Paused due to typechecker work
-- (Details to be filled in by owner)
 
 ## Priority 3: Taskgraph
 
 "Beyond SOTA agent harness by deleting the concept of an agent."
 
-- (Details to be filled in by owner)
+- Core so far: `lib/taskgraph/`
+- The agent harness itself would probably be a platform app, pending design
 
 ## Parked: typechecker / verification engine
 
@@ -42,6 +44,18 @@ Findings from the toy checker sketch (docs/artifacts/2026-07-08-toy-checker-find
 - Edge direction through shared variables is dynamic — the open hard problem
 - Parked, not abandoned. Resume with the graph-structure insight as the starting point.
 
+## Dusklight ideas → crescent
+
+Dusklight (~/git/rhizone/dusklight/) is a universal UI client for arbitrary data with a control plane. Like scribble, its ideas import into crescent — the project shell stays separate.
+
+Key ideas to import:
+- Pattern-first rendering (data shape → visualization)
+- Reactive lenses (read/write, no asymmetry)
+- Capability-based plugin architecture
+- Control plane for arbitrary data
+
+Design pass needed to figure out what the right crescent libraries are.
+
 ## Imported ideas (not yet placed as libraries)
 
 From scribble:
@@ -50,10 +64,4 @@ From scribble:
 - Layer-based composition
 - Live editor-runtime boundary dissolution
 
-From dusklight:
-- Pattern-first rendering (data shape → visualization)
-- Reactive lenses (read/write, no asymmetry)
-- Capability-based plugin architecture
-- Control plane for arbitrary data
-
-Marinada (dusklight's expression language) stays as its own thing — it's specifically designed (algebraic effects, linear types, specific reactive model), not a generic "the expr" for crescent.
+Marinada (~/git/rhizone/marinada/, extracted from dusklight) stays as its own thing — it's specifically designed (algebraic effects, linear types, specific reactive model), not a generic "the expr" for crescent. Where it would live relative to the crescent ecosystem (vendored dep? standalone tool? crescent-native port?) is an open question.
