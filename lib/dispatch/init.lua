@@ -4,11 +4,11 @@ end
 
 local M = {}
 
---:: DispatchHandler = (...unknown) -> unknown
---:: DispatchKeyFn = (...unknown) -> string
---:: DispatchHandlers = { [string]: DispatchHandler }
+--:: DispatchHandler<A, B, R> = (a: A, b: B) -> R
+--:: DispatchKeyFn<A, B> = (a: A, b: B) -> string
+--:: DispatchHandlers<A, B, R> = { [string]: DispatchHandler<A, B, R> }
 
---: (DispatchKeyFn, DispatchHandlers) -> (...unknown) -> unknown
+--: <A, B, R>((A, B) -> string, { [string]: (A, B) -> R }) -> (A, B) -> R
 function M.dispatcher_from_table_by(key_fn, handlers)
 	return function(...)
 		local key = key_fn(...)
@@ -20,7 +20,7 @@ function M.dispatcher_from_table_by(key_fn, handlers)
 	end
 end
 
---: (string, DispatchHandlers) -> (...unknown) -> unknown
+--: <A, B, R>(string, { [string]: (A, B) -> R }) -> (A, B) -> R
 function M.dispatcher_from_table(field_name, handlers)
 	return M.dispatcher_from_table_by(function(first, ...)
 		return first[field_name]
