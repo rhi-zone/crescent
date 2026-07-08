@@ -64,6 +64,13 @@ local M = {}
 --             0 = unset)
 --   data[4] = rank_n_call_id (per-call grouping for C_ESCAPE_CHECK; only
 --             meaningful when FLAG_SKOLEM is set; 0 = unset)
+--   data[5] = rank_n_tag (1 = this quantifier was resolved nested inside
+--             another function type's param/return in resolve_annotation_type
+--             i.e. genuinely rank-N; 0 = outermost forall of its declaration,
+--             rank-1. Only meaningful for annotation-introduced FLAG_GENERIC
+--             TVs, set by the TAG_FORALL branch of resolve_annotation_type.
+--             Read by env.collect_rank_n_generics instead of the old
+--             TAG_FUNCTION structural heuristic.)
 --   flags: FLAG_GENERIC if generalized; FLAG_SKOLEM if skolemized at a call site
 --
 -- TAG_LITERAL:
@@ -259,6 +266,12 @@ function M.var_parent(t) return t.data[2] end
 function M.var_skolem_name_id(t) return t.data[3] end
 --: (TypeSlot) -> integer
 function M.var_skolem_call_id(t) return t.data[4] end
+-- true iff this annotation-introduced FLAG_GENERIC TV's quantifier was
+-- resolved nested inside another function type's param/return (genuinely
+-- rank-N), as opposed to being the outermost forall of its declaration
+-- (rank-1). See the TAG_VAR layout comment above and env.collect_rank_n_generics.
+--: (TypeSlot) -> boolean
+function M.var_is_rank_n(t) return t.data[5] == 1 end
 
 -- LITERAL
 --: (TypeSlot) -> integer

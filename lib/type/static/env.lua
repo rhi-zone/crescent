@@ -550,20 +550,38 @@ function M.instantiate(ctx, tid, level, out_mapping)
     return result, mapping
 end
 
--- Rank-N: collect FLAG_GENERIC TVs that are STRICTLY nested inside a
--- function-typed parameter/return slot of `callee_tid` and are NOT also
--- reachable from a top-level non-function slot. Returns a set
--- { [tv_id] = true, ... } of TVs that should be skolemized at the call
--- site (instead of getting fresh let-poly unification vars).
+-- Rank-N: collect FLAG_GENERIC TVs that should be skolemized for THIS
+-- particular call of `callee_tid`. Returns a set { [tv_id] = true, ... }.
 --
--- Strategy: reuse env.instantiate (which already walks the entire type
--- structure with full coverage and is accepted at baseline) to enumerate
--- every FLAG_GENERIC TV via the mapping it produces. Compute "top-level"
--- TVs by instantiating each top-level slot individually with a SEPARATE
--- mapping when that slot is not itself a TAG_FUNCTION — any TV in such a
--- mapping belongs to the callee's own quantifier. Rank-N set is the
--- difference. This piggybacks on existing walker code and adds no new
--- arena-typing baseline errors.
+-- Two conditions must BOTH hold for a TV to qualify:
+--
+-- 1. STRUCTURAL, relative to the current callee_tid: the TV is reachable
+--    only through a function-typed top-level parameter/return slot of
+--    callee_tid (not directly at top level). This is call-site relative,
+--    not a fixed property of the TV: the same TV can be "top-level" for one
+--    callee_tid and "nested" for another. Concretely, `f: <T>(T)->T` used as
+--    a parameter of `bad: (f: (T)->T) -> number`: T is nested when
+--    callee_tid = bad's type (checking that an argument for `f` truly is
+--    polymorphic — must skolemize), but T is top-level when callee_tid = f's
+--    own type directly (calling the already-accepted abstract `f` inside
+--    bad's body is ordinary forall-elimination — must NOT skolemize).
+--
+-- 2. DECLARATION-relative, fixed at resolution time: the TV's own quantifier
+--    must not be the outermost forall of its declaration (see
+--    resolve_annotation_type's TAG_FORALL branch in constrain.lua, which
+--    stamps this onto TypeSlot.data[5] — types_mod.var_is_rank_n). This
+--    catches the case the pure structural check gets wrong: in
+--    `<R>(() -> R) -> () -> R`, R is condition-1-"nested" (both its param and
+--    return top-level slots are themselves TAG_FUNCTION) even though it's
+--    the declaration's own rank-1 quantifier — reused directly in both
+--    positions, not introduced by a separate nested forall. Condition 2
+--    excludes it because R's forall IS the outermost one (func_depth was 0
+--    when it was resolved).
+--
+-- Requiring both conditions together handles all three cases correctly:
+-- rejecting `bad(monomorphic_fn)` (1 & 2 true), accepting the call `f(x)`
+-- inside `bad`'s body (1 false), and accepting `wrap(function() ... end)`
+-- for `wrap: <R>(() -> R) -> () -> R` (2 false).
 --
 -- Only annotation-introduced FLAG_GENERIC TVs (those with a name_id in
 -- data[3], set by resolve_annotation_type) qualify. HM-generalized TVs
@@ -584,9 +602,10 @@ function M.collect_rank_n_generics(ctx, callee_tid)
     local all_map = {} --: { [integer]: integer, ... }
     M.instantiate(ctx, callee_tid, ctx.scope.level, all_map)
 
-    -- Top-level FLAG_GENERIC TVs: walk each top slot via instantiate, but
-    -- only when the slot is NOT itself a TAG_FUNCTION (nested function
-    -- contributes only rank-N TVs by definition).
+    -- Condition 1 (structural, relative to callee_tid): top-level FLAG_GENERIC
+    -- TVs are those reachable from a top-level slot that is NOT itself a
+    -- TAG_FUNCTION (a nested function-typed slot contributes only condition-1
+    -- candidates by definition).
     local top_map = {} --: { [integer]: integer, ... }
     --: (integer) -> ()
     local function consider_top_slot(slot_tid)
@@ -613,7 +632,11 @@ function M.collect_rank_n_generics(ctx, callee_tid)
                 and ot.flags == FLAG_GENERIC
                 -- Annotation-introduced FLAG_GENERIC TVs have name_id > 0;
                 -- HM-generalized TVs have 0.
-                and types_mod.var_skolem_name_id(ot) > 0 then
+                and types_mod.var_skolem_name_id(ot) > 0
+                -- Condition 2 (declaration-relative): excludes a
+                -- declaration's own outermost-forall TVs even when
+                -- condition 1 alone would flag them.
+                and types_mod.var_is_rank_n(ot) then
                 result[orig_tv] = true
             end
         end
