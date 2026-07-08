@@ -20,6 +20,60 @@ A capability is at the right level when it's a **swappable unit**: a stable inte
 
 **Not everything is a cap**: pure logic (combinators, parsers, encoders) is just code — `require` it directly. Caps are for things that involve external state, I/O, platform-managed resources, or anything where swappability matters. A JSON parser doesn't need to be a cap because there's no reason to swap it behind the consumer's back. An LLM client does because the provider might change. But a library that *uses* I/O doesn't have to *be* a cap — it can be pure logic that receives I/O caps as function arguments.
 
+## Design intent from prior sessions
+
+Mined from session `4b24c1b4` (2026-04-20 to 2026-04-23), where the capability model was originally designed. Owner's words verbatim or near-verbatim.
+
+### Capabilities are not just for security
+
+> "capabilities are not just for security." (turn 125)
+
+> "llms being a cap is wider api surface (bad!) but llms not being a cap means we must have a way to make apis swappable (like dependency injection?) with all the capability management that implies — but how?" (turn 126)
+
+> "permission boundaries are kinda the most important, right? but flexibility would be a sick feature to have, some way or other? it doesn't have to be as capabilities, right? but that doesn't mean it won't need to integrate with the cap system" (turn 139)
+
+Two concerns live in the same system: permission boundaries (security) and swappability (flexibility). They don't have to be the same mechanism, but they must integrate.
+
+### Prior art: powerbox, Sandstorm
+
+> "what the fuck is the difference between swappable deps and powerbox" (turn 141)
+
+> "also consider https://sandstorm.org/ as prior art?" (turn 139)
+
+### Caps are entrypoint-only
+
+> "caps.* global should only be accessible by the entrypoint. otherwise caps leak into the global scope of other scripts which is BAD" (turn 172)
+
+> "pure lua library does NOT need to be injected because it's just pure lua, just vendor it" (turn 171)
+
+Caps don't leak to dependencies. A library receives caps as function arguments from the entrypoint that holds them, not from a global.
+
+### FFI is not a grantable capability
+
+> [re: ffi is explicitly whitelisted as a cap] "unacceptable" (turn 163)
+
+### Even "zero-privilege" caps can be restricted
+
+> [re: making time cap required] "what about in an env that genuinely has no access to time?" (turn 181)
+
+No cap is unconditionally granted, even seemingly harmless ones.
+
+### Write as explicit enablement
+
+> "they should be 'regular' caps with write capability explicitly enabled" (turn 198)
+
+Read is the default. Write is an explicit grant — aligns with attenuation (narrowing from read-write to read-only).
+
+### Sandbox model
+
+Tarball modules load in the sandbox environment, not the host loader — otherwise they become an escape vector (a module loaded outside the sandbox could access host APIs and bypass the cap system entirely). Dev and prod sandbox behavior must be consistent — inconsistency is a bug, not a feature.
+
+Caps are injected at the entrypoint and passed explicitly to code that needs them — they don't propagate via globals or implicit require.
+
+### Reference doc
+
+`docs/platform-design.md` is the canonical platform design reference. Should be consulted before any platform work. (See turn 251 for context on scoping this to platform-specific CLAUDE.md rather than the top-level one.)
+
 ## Existing caps in charactercardv2 (the only platform app so far)
 
 | Cap | Type | What it does |
@@ -78,3 +132,4 @@ Each of these implies capabilities. Design pass needed to determine the right fa
 - How does attenuation compose across multiple levels? (app attenuates a cap before passing to a sub-component — does that work cleanly?)
 - What's the cap story for browser-only apps (no server, service worker only)?
 - Mining previous sessions for design intent: `normalize sessions messages --grep` on platform-related sessions.
+- Powerbox vs caps: are they the same thing in crescent, or is there a meaningful distinction? (raised 2026-04-20, turn 141, not resolved)
