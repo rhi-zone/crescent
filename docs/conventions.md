@@ -103,6 +103,21 @@ distinct from daemon-side libraries (`lib/<name>/` with no prefix). See
 - Private (module-internal): `_` prefix.
 - Module table: always `M` or the library name. Never `self` at module level.
 
+### Function names predict their signature
+
+A function name is a contract with the reader: it should let them predict the
+arguments and return type without looking up the signature.
+
+- Names read as verb phrases — either explicitly (`add`, `remove`, `set_running`)
+  or structurally (`x_to_y` implies convert, `noun_from_noun` implies make/construct).
+- Never sacrifice clarity to make a name shorter. Word count doesn't matter;
+  predictability does.
+- Module-name prefixes must not be relied on for reading — callers may rename
+  the require (`local d = require("lib.dispatch")`) or inline it. The function
+  name must stand alone without the module qualifier as a crutch.
+- If it's not immediately clear what arguments a function takes and what value
+  it returns, it's a bad name — rename it, don't document around it.
+
 ## Type annotations
 
 - Use `--:` (inline, preceding line) and `--::` (declarations). Never EmmyLua.

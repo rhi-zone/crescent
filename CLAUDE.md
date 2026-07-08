@@ -49,6 +49,7 @@ Short version (full spec: `docs/conventions.md`):
 - Annotations: `--:` / `--::` only. `unknown` = TS `unknown` (caller must narrow). `any` does not exist — do not write it.
 - Casts: `--[[: T]]` is checked (full subtyping required). `--[[:! T]]` is force — almost never correct. Force casts past unnarrowable `unknown` or `A | B` are wrong; fix the producer or the typechecker bug.
 - `...` vs index signatures are distinct. `...` is a structural subtyping marker. `{ [string]: T }` is an index signature. Confusing them is wrong on either side.
+- Naming: function names predict their signature — a reader should be able to guess arguments and return type without looking it up. Names read as verb phrases, either explicitly (`add`, `remove`) or structurally (`x_to_y` implies convert, `noun_from_noun` implies make). Never sacrifice clarity to shorten a name. Module-name prefixes must not be part of the reading — callers may rename or omit them.
 
 ## Type System
 
