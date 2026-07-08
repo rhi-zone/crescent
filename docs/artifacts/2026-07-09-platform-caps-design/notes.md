@@ -36,7 +36,7 @@ Two concerns live in the same system: permission boundaries (security) and swapp
 
 ### Prior art: powerbox, Sandstorm
 
-> "what the fuck is the difference between swappable deps and powerbox" (turn 141)
+> "what is the difference between swappable deps and powerbox" (turn 141)
 
 > "also consider https://sandstorm.org/ as prior art?" (turn 139)
 
