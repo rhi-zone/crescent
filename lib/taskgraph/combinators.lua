@@ -61,7 +61,7 @@ local function exec_refine(task, ctx)
 	return c:result(second_id)
 end
 
-M.executors = {
+M.handlers = {
 	map    = exec_map,
 	retry  = exec_retry,
 	refine = exec_refine,

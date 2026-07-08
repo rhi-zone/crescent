@@ -27,6 +27,7 @@ function M.record(eg, id, task_type, input, parent_id)
 		error     = nil,
 		parent_id = parent_id,
 		children  = {},
+		dependencies = {},
 	}
 	eg._nodes[id] = node
 	eg._order[#eg._order + 1] = id
@@ -36,6 +37,16 @@ function M.record(eg, id, task_type, input, parent_id)
 			p.children[#p.children + 1] = id
 		end
 	end
+end
+
+--: (ExecGraph, string, string) -> nil
+function M.add_dependency(eg, id, dependency_id)
+	local n = eg._nodes[id]
+	if not n then return end
+	for i = 1, #n.dependencies do
+		if n.dependencies[i] == dependency_id then return end
+	end
+	n.dependencies[#n.dependencies + 1] = dependency_id
 end
 
 --: (ExecGraph, string) -> nil

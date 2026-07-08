@@ -24,6 +24,7 @@ function M.add(g, task_def, parent_id)
 		output    = nil,
 		error     = nil,
 		spawned   = {},
+		dependencies = {},
 		log       = {},
 	}
 	g.tasks[id] = task
@@ -34,6 +35,16 @@ function M.add(g, task_def, parent_id)
 		end
 	end
 	return id
+end
+
+--: (Graph, string, string) -> nil
+function M.add_dependency(g, task_id, dependency_id)
+	local task = g.tasks[task_id]
+	if not task then return end
+	for i = 1, #task.dependencies do
+		if task.dependencies[i] == dependency_id then return end
+	end
+	task.dependencies[#task.dependencies + 1] = dependency_id
 end
 
 --: (Graph, string) -> TaskNode | nil

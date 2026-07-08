@@ -15,14 +15,14 @@ local M = {}
 --: RunTaskFn | nil
 M._run_task = nil
 
---: (Graph, ExecutorRegistry, Hooks, string) -> Context
-function M.make(g, executors, hooks, task_id)
+--: (Graph, ExecutorFn, Hooks, string) -> Context
+function M.make(g, executor, hooks, task_id)
 	local ctx = {}
 	ctx.task_id = task_id
 
 	function ctx:spawn(task_def)
 		local id = graph_mod.add(g, task_def, task_id)
-		-- tracking: register child in frontier and exec_graph
+		-- tracking: record child in frontier and exec_graph
 		if hooks.frontier then
 			frontier_mod.add(hooks.frontier, id, task_def.type, task_def.input, task_id)
 		end
@@ -55,10 +55,15 @@ function M.make(g, executors, hooks, task_id)
 		-- locals from function call returns aren't narrowed without annotation).
 		local task = graph_mod.get(g, id) --: TaskNode | nil
 		if not task then error("unknown task id: " .. tostring(id)); return nil end
+		graph_mod.add_dependency(g, task_id, id)
+		if hooks.exec_graph then
+			exec_graph_mod.add_dependency(hooks.exec_graph, task_id, id)
+		end
 		if task.status == "pending" then
 			-- M._run_task is always set by exec.lua before any task runs.
-			if M._run_task then M._run_task(g, executors, hooks, id) end
-		elseif task.status == "error" then
+			if M._run_task then M._run_task(g, executor, hooks, id) end
+		end
+		if task.status == "error" then
 			error(task.error)
 		end
 		return task.output

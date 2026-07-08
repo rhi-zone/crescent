@@ -1,13 +1,9 @@
 -- AI executor for lib/taskgraph.
--- Registers "llm.complete" and "llm.tool_loop" task types.
+-- Provides executor functions for "llm.complete" and "llm.tool_loop" task types.
 --
 -- Usage:
---   local orch = require("lib.taskgraph")
---   require("lib.taskgraph.executor.ai").register(orch)
---
--- Or standalone:
 --   local ai_exec = require("lib.taskgraph.executor.ai")
---   local executors = ai_exec.executors   -- merge into your own executor table
+--   local handlers = ai_exec.handlers   -- compose into your own executor function
 
 if not package.path:find("./?/init.lua", 1, true) then
 	package.path = "./?/init.lua;" .. package.path
@@ -135,17 +131,9 @@ local function exec_tool_loop(task, ctx)
 	error("llm.tool_loop: max_rounds exceeded")
 end
 
-M.executors = {
+M.handlers = {
 	["llm.complete"]   = exec_complete,
 	["llm.tool_loop"]  = exec_tool_loop,
 }
-
--- Convenience: register into an orch instance.
---: ({ register: (string, unknown) -> nil, ... }) -> nil
-function M.register(orch)
-	for k, v in pairs(M.executors) do
-		orch.register(k, v)
-	end
-end
 
 return M

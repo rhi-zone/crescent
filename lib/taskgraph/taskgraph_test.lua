@@ -4,6 +4,80 @@ end
 
 local T    = require("lib.test.assert")
 local orch = require("lib.taskgraph")
+local combinators = require("lib.taskgraph.combinators")
+local dispatch = require("lib.dispatch")
+
+--:: require "lib.taskgraph.taskgraph_types"
+--:: TestHandlers = { [string]: (...unknown) -> unknown }
+--:: TestOpts = { track?: boolean, scaffolds?: { [integer]: Scaffold }, on_task?: (TaskNode) -> () }
+
+-- Task outputs come back as `unknown` (the executor's return type is caller-defined).
+-- These assertion functions narrow a task result to the shape a given test expects
+-- to read, with a minimal runtime shape check backing the assertion.
+--: (x: unknown) -> asserts x is string
+local function assert_string(x)
+	if type(x) ~= "string" then error("expected string, got " .. type(x)) end
+end
+
+--: (x: unknown) -> asserts x is { doubled: unknown }
+local function assert_doubled(x)
+	if type(x) ~= "table" then error("expected table, got " .. type(x)) end
+end
+
+--: (x: unknown) -> asserts x is { results: { [integer]: { val: unknown } } }
+local function assert_results(x)
+	if type(x) ~= "table" then error("expected table, got " .. type(x)) end
+end
+
+--: (x: unknown) -> asserts x is { ok: unknown }
+local function assert_ok(x)
+	if type(x) ~= "table" then error("expected table, got " .. type(x)) end
+end
+
+--: (x: unknown) -> asserts x is { result: unknown }
+local function assert_result(x)
+	if type(x) ~= "table" then error("expected table, got " .. type(x)) end
+end
+
+--: (x: unknown) -> asserts x is { msg: unknown }
+local function assert_msg(x)
+	if type(x) ~= "table" then error("expected table, got " .. type(x)) end
+end
+
+--: (x: unknown) -> asserts x is { val: unknown }
+local function assert_val(x)
+	if type(x) ~= "table" then error("expected table, got " .. type(x)) end
+end
+
+--: (x: unknown) -> asserts x is { text: unknown, usage: { input: unknown } }
+local function assert_text_usage(x)
+	if type(x) ~= "table" then error("expected table, got " .. type(x)) end
+end
+
+--: (x: unknown) -> asserts x is { text: unknown, tool_calls: unknown }
+local function assert_text_tool_calls(x)
+	if type(x) ~= "table" then error("expected table, got " .. type(x)) end
+end
+
+--: (TestHandlers) -> ExecutorFn
+local function executor_from(handlers)
+	-- merge primary handlers with combinator handlers
+	local merged = {}
+	for k, v in pairs(combinators.handlers) do merged[k] = v end
+	for k, v in pairs(handlers) do merged[k] = v end  -- primary wins
+	return dispatch.dispatcher_from_table("type", merged)
+end
+
+--: (TaskDef, TestHandlers | nil, TestOpts | nil) -> (unknown, TrackedGraph)
+local function run_task(task_def, handlers, opts)
+	local o = opts or {}
+	local full_opts = {
+		track     = o.track,
+		scaffolds = o.scaffolds,
+		on_task   = o.on_task,
+	}
+	return orch.run(task_def, executor_from(handlers or {}), full_opts)
+end
 
 -- ── 1. Echo task ─────────────────────────────────────────────────────────────
 
@@ -11,7 +85,7 @@ T.describe("echo task", function()
 	T.it("returns input verbatim", function()
 		local out = orch.run(
 			{ type = "echo", input = { msg = "hello" } },
-			{ executors = { echo = function(t, _) return t.input end } }
+			executor_from({ echo = function(t, _) return t.input end })
 		)
 		T.eq(out.msg, "hello")
 	end)
@@ -21,7 +95,7 @@ end)
 
 T.describe("spawn + result", function()
 	T.it("parent uses child output", function()
-		local executors = {
+		local handlers = {
 			parent = function(t, ctx)
 				local id = ctx:spawn({ type = "child", input = { x = t.input.x } })
 				local res = ctx:result(id)
@@ -29,7 +103,8 @@ T.describe("spawn + result", function()
 			end,
 			child = function(t, _) return { val = t.input.x * 2 } end,
 		}
-		local out = orch.run({ type = "parent", input = { x = 7 } }, { executors = executors })
+		local out = run_task({ type = "parent", input = { x = 7 } }, handlers)
+		assert_doubled(out)
 		T.eq(out.doubled, 14)
 	end)
 end)
@@ -38,7 +113,7 @@ end)
 
 T.describe("graph lineage", function()
 	T.it("records parent_id and spawned list", function()
-		local executors = {
+		local handlers = {
 			root = function(t, ctx)
 				local id = ctx:spawn({ type = "leaf", input = {} })
 				ctx:result(id)
@@ -46,12 +121,14 @@ T.describe("graph lineage", function()
 			end,
 			leaf = function(_, _) return {} end,
 		}
-		local _, g = orch.run({ type = "root", input = {} }, { executors = executors })
+		local _, g = run_task({ type = "root", input = {} }, handlers)
 		local root = g.tasks[g.root]
 		T.eq(#root.spawned, 1)
 		local child_id = root.spawned[1]
 		local child = g.tasks[child_id]
 		T.eq(child.parent_id, g.root)
+		T.eq(#root.dependencies, 1)
+		T.eq(root.dependencies[1], child_id)
 
 		-- count tasks: root + leaf = 2
 		local count = 0
@@ -66,7 +143,7 @@ T.describe("error propagation", function()
 	T.it("executor error → task.status = error", function()
 		local _, g = pcall(orch.run,
 			{ type = "boom", input = {} },
-			{ executors = { boom = function() error("kaboom") end } }
+			executor_from({ boom = function() error("kaboom") end })
 		)
 		-- pcall swallows the error; inspect graph via a wrapper
 		local captured_g
@@ -77,7 +154,8 @@ T.describe("error propagation", function()
 			local gr = graph_mod.new()
 			local id = graph_mod.add(gr, { type = "boom", input = {} }, nil)
 			gr.root = id
-			exec_mod.run_task(gr, { boom = boom_exec }, {}, id)
+			exec_mod.run_task(gr, executor_from({ boom = boom_exec }),
+				{ on_task = nil, scaffolds = nil, frontier = nil, exec_graph = nil }, id)
 			captured_g = gr
 		end)
 		local task = captured_g.tasks[captured_g.root]
@@ -86,7 +164,7 @@ T.describe("error propagation", function()
 	end)
 
 	T.it("ctx:result re-raises child error", function()
-		local executors = {
+		local handlers = {
 			parent = function(_, ctx)
 				local id = ctx:spawn({ type = "boom", input = {} })
 				ctx:result(id)  -- should raise
@@ -94,21 +172,22 @@ T.describe("error propagation", function()
 			end,
 			boom = function() error("inner error") end,
 		}
-		local ok, err = pcall(orch.run, { type = "parent", input = {} }, { executors = executors })
+		local ok, err = pcall(run_task, { type = "parent", input = {} }, handlers)
 		T.fail(ok)
+		assert_string(err)
 		T.ok(err:find("inner error"))
 	end)
 end)
 
--- ── 5. Inline executors via opts ──────────────────────────────────────────────
+-- ── 5. Callable executor ──────────────────────────────────────────────────────
 
-T.describe("inline executors", function()
-	T.it("opts.executors override global registry", function()
-		orch.register("greet", function() return { msg = "global" } end)
+T.describe("callable executor", function()
+	T.it("run accepts a plain executor function", function()
 		local out = orch.run(
 			{ type = "greet", input = {} },
-			{ executors = { greet = function() return { msg = "local" } end } }
+			function(_, _) return { msg = "local" } end
 		)
+		assert_msg(out)
 		T.eq(out.msg, "local")
 	end)
 end)
@@ -117,10 +196,10 @@ end)
 
 T.describe("combinator: map", function()
 	T.it("spawns N tasks and collects results", function()
-		local executors = {
+		local handlers = {
 			double = function(t, _) return { val = t.input.n * 2 } end,
 		}
-		local out = orch.run(
+		local out = run_task(
 			{
 				type = "map",
 				input = {
@@ -131,8 +210,9 @@ T.describe("combinator: map", function()
 					},
 				},
 			},
-			{ executors = executors }
+			handlers
 		)
+		assert_results(out)
 		T.eq(#out.results, 3)
 		T.eq(out.results[1].val, 2)
 		T.eq(out.results[2].val, 4)
@@ -145,30 +225,32 @@ end)
 T.describe("combinator: retry", function()
 	T.it("retries a failing task up to max times", function()
 		local attempts = 0
-		local executors = {
+		local handlers = {
 			flaky = function()
 				attempts = attempts + 1
 				if attempts < 3 then error("not yet") end
 				return { ok = true }
 			end,
 		}
-		local out = orch.run(
+		local out = run_task(
 			{ type = "retry", input = { task = { type = "flaky", input = {} }, max = 3 } },
-			{ executors = executors }
+			handlers
 		)
+		assert_ok(out)
 		T.eq(out.ok, true)
 		T.eq(attempts, 3)
 	end)
 
 	T.it("errors after exhausting retries", function()
-		local executors = {
+		local handlers = {
 			always_fail = function() error("nope") end,
 		}
 		local ok, err = pcall(orch.run,
 			{ type = "retry", input = { task = { type = "always_fail", input = {} }, max = 2 } },
-			{ executors = executors }
+			executor_from(handlers)
 		)
 		T.fail(ok)
+		assert_string(err)
 		T.ok(err:find("retry exhausted"))
 	end)
 end)
@@ -177,11 +259,11 @@ end)
 
 T.describe("combinator: refine", function()
 	T.it("pipes first task output as input to second", function()
-		local executors = {
+		local handlers = {
 			upper = function(t, _) return { text = t.input.text:upper() } end,
 			wrap  = function(t, _) return { result = "[" .. t.input.text .. "]" } end,
 		}
-		local out = orch.run(
+		local out = run_task(
 			{
 				type = "refine",
 				input = {
@@ -189,8 +271,9 @@ T.describe("combinator: refine", function()
 					then_task = { type = "wrap",  input = {} },
 				},
 			},
-			{ executors = executors }
+			handlers
 		)
+		assert_result(out)
 		T.eq(out.result, "[HELLO]")
 	end)
 end)
@@ -200,7 +283,7 @@ end)
 T.describe("on_task hook", function()
 	T.it("fires for every completed task", function()
 		local fired = {}
-		local executors = {
+		local handlers = {
 			root = function(_, ctx)
 				local id = ctx:spawn({ type = "leaf", input = {} })
 				ctx:result(id)
@@ -208,10 +291,10 @@ T.describe("on_task hook", function()
 			end,
 			leaf = function() return {} end,
 		}
-		orch.run(
+		run_task(
 			{ type = "root", input = {} },
+			handlers,
 			{
-				executors = executors,
 				on_task   = function(t) fired[#fired + 1] = t.type end,
 			}
 		)
@@ -226,7 +309,7 @@ end)
 
 T.describe("exec_graph", function()
 	T.it("records every task spawned, in order", function()
-		local executors = {
+		local handlers = {
 			root = function(_, ctx)
 				local ha = ctx:spawn({ type = "child_a", input = {} })
 				local hb = ctx:spawn({ type = "child_b", input = {} })
@@ -237,14 +320,14 @@ T.describe("exec_graph", function()
 			child_a = function() return { a = 1 } end,
 			child_b = function() return { b = 2 } end,
 		}
-		local _, g = orch.run({ type = "root", input = {} }, { executors = executors, track = true })
+		local _, g = run_task({ type = "root", input = {} }, handlers, { track = true })
 		local log = orch.exec_graph_snapshot(g)
 		-- root + child_a + child_b = 3 entries
 		T.eq(#log, 3)
 	end)
 
 	T.it("records parent→children lineage", function()
-		local executors = {
+		local handlers = {
 			root = function(_, ctx)
 				local h = ctx:spawn({ type = "leaf", input = {} })
 				ctx:result(h)
@@ -252,7 +335,7 @@ T.describe("exec_graph", function()
 			end,
 			leaf = function() return {} end,
 		}
-		local _, g = orch.run({ type = "root", input = {} }, { executors = executors, track = true })
+		local _, g = run_task({ type = "root", input = {} }, handlers, { track = true })
 		local log = orch.exec_graph_snapshot(g)
 		-- log[1] = root, log[2] = leaf
 		local root_node = log[1]
@@ -264,25 +347,27 @@ T.describe("exec_graph", function()
 		-- root's children contains leaf's id
 		T.eq(#root_node.children, 1)
 		T.eq(root_node.children[1], leaf_node.id)
+		T.eq(#root_node.dependencies, 1)
+		T.eq(root_node.dependencies[1], leaf_node.id)
 	end)
 
 	T.it("completed nodes have status=completed and output set", function()
-		local executors = {
+		local handlers = {
 			work = function() return { done = true } end,
 		}
-		local _, g = orch.run({ type = "work", input = {} }, { executors = executors, track = true })
+		local _, g = run_task({ type = "work", input = {} }, handlers, { track = true })
 		local log = orch.exec_graph_snapshot(g)
 		T.eq(#log, 1)
 		T.eq(log[1].status, "completed")
-		local o = log[1].output --: any
+		local o = log[1].output --[[: { done: boolean }]]
 		T.ok(o.done)
 	end)
 
 	T.it("failed nodes have status=failed and error set", function()
-		local executors = {
+		local handlers = {
 			fail_task = function() error("exploded") end,
 		}
-		pcall(orch.run, { type = "fail_task", input = {} }, { executors = executors, track = true })
+		pcall(run_task, { type = "fail_task", input = {} }, handlers, { track = true })
 		-- run raises, so we use a wrapper to get the graph back
 		local captured_g
 		pcall(function()
@@ -300,8 +385,8 @@ T.describe("exec_graph", function()
 			gr._exec_graph = eg
 			gr._frontier   = fr
 			exec_mod.run_task(gr,
-				{ fail_task = function() error("exploded") end },
-				{ exec_graph = eg, frontier = fr, scaffolds = {} },
+				executor_from({ fail_task = function() error("exploded") end }),
+				{ on_task = nil, exec_graph = eg, frontier = fr, scaffolds = {} },
 				id)
 			captured_g = gr
 		end)
@@ -313,16 +398,16 @@ T.describe("exec_graph", function()
 	end)
 
 	T.it("exec_graphs from independent runs are independent", function()
-		local _, g1 = orch.run({ type = "work", input = {} },
-			{ executors = { work = function() return { n = 1 } end }, track = true })
-		local _, g2 = orch.run({ type = "work", input = {} },
-			{ executors = { work = function() return { n = 2 } end }, track = true })
+		local _, g1 = run_task({ type = "work", input = {} },
+			{ work = function() return { n = 1 } end }, { track = true })
+		local _, g2 = run_task({ type = "work", input = {} },
+			{ work = function() return { n = 2 } end }, { track = true })
 		local log1 = orch.exec_graph_snapshot(g1)
 		local log2 = orch.exec_graph_snapshot(g2)
 		T.eq(#log1, 1)
 		T.eq(#log2, 1)
-		local o1 = log1[1].output --: any
-		local o2 = log2[1].output --: any
+		local o1 = log1[1].output --[[: { n: number }]]
+		local o2 = log2[1].output --[[: { n: number }]]
 		T.eq(o1.n, 1)
 		T.eq(o2.n, 2)
 	end)
@@ -332,22 +417,21 @@ end)
 
 T.describe("frontier", function()
 	T.it("is empty after a run completes", function()
-		local _, g = orch.run({ type = "work", input = {} },
-			{ executors = { work = function() return {} end }, track = true })
+		local _, g = run_task({ type = "work", input = {} },
+			{ work = function() return {} end }, { track = true })
 		local pending = orch.frontier_snapshot(g)
 		T.eq(#pending, 0)
 	end)
 
 	T.it("contains the running task during execution", function()
 		local captured_frontier = nil
-		orch.run({ type = "observer", input = {} }, {
+		run_task({ type = "observer", input = {} }, {
+			observer = function(_, ctx)
+				captured_frontier = ctx:frontier()
+				return {}
+			end,
+		}, {
 			track = true,
-			executors = {
-				observer = function(_, ctx)
-					captured_frontier = ctx:frontier()
-					return {}
-				end,
-			},
 		})
 		T.ok(captured_frontier ~= nil)
 		T.ok(#captured_frontier >= 1)
@@ -360,17 +444,16 @@ T.describe("frontier", function()
 
 	T.it("tracks child tasks while they are pending", function()
 		local captured = nil
-		orch.run({ type = "parent", input = {} }, {
+		run_task({ type = "parent", input = {} }, {
+			parent = function(_, ctx)
+				local h = ctx:spawn({ type = "slow_child", input = {} })
+				-- capture frontier after spawning child but before ctx:result drives it
+				captured = ctx:frontier()
+				return ctx:result(h)
+			end,
+			slow_child = function() return { x = 42 } end,
+		}, {
 			track = true,
-			executors = {
-				parent = function(_, ctx)
-					local h = ctx:spawn({ type = "slow_child", input = {} })
-					-- capture frontier after spawning child but before ctx:result drives it
-					captured = ctx:frontier()
-					return ctx:result(h)
-				end,
-				slow_child = function() return { x = 42 } end,
-			},
 		})
 		T.ok(captured ~= nil)
 		local types = {}
@@ -387,41 +470,39 @@ end)
 T.describe("scaffolds", function()
 	T.it("scaffold is applied to each task before execution", function()
 		local seen = {}
-		local out = orch.run({ type = "work", input = { x = 5 } }, {
-			executors = {
+		local out = run_task({ type = "work", input = { x = 5 } }, {
 				work = function(task, _)
-					local t = task --: any
+					local t = task --[[: { input: { x: number } }]]
 					return { val = t.input.x }
 				end,
-			},
+			}, {
 			scaffolds = {
 				function(task_def)
-					local td = task_def --: any
+					local td = task_def --[[: { type: string, input: { x: number } }]]
 					seen[#seen + 1] = td.type
 					-- transform: multiply input x by 10
 					return { type = td.type, input = { x = (td.input and td.input.x or 0) * 10 } }
 				end,
 			},
 		})
-		local r = out --: any
+		assert_val(out)
 		-- scaffold multiplied x by 10 → 50
-		T.eq(r.val, 50)
+		T.eq(out.val, 50)
 		T.eq(seen[1], "work")
 	end)
 
 	T.it("scaffold is applied to child tasks too", function()
 		local scaffold_count = 0
-		orch.run({ type = "parent", input = {} }, {
-			executors = {
+		run_task({ type = "parent", input = {} }, {
 				parent = function(_, ctx)
 					local h = ctx:spawn({ type = "child", input = { x = 1 } })
 					return ctx:result(h)
 				end,
 				child = function(task, _)
-					local t = task --: any
+					local t = task --[[: { input: { x: number } }]]
 					return { v = t.input.x }
 				end,
-			},
+			}, {
 			scaffolds = {
 				function(task_def)
 					scaffold_count = scaffold_count + 1
@@ -446,13 +527,14 @@ T.describe("llm executor (mocked)", function()
 		end
 
 		local ai_exec = require("lib.taskgraph.executor.ai")
-		local out = orch.run(
+		local out = run_task(
 			{
 				type  = "llm.complete",
 				input = { messages = { { role = "user", content = "hi" } }, model = "test" },
 			},
-			{ executors = ai_exec.executors }
+			ai_exec.handlers
 		)
+		assert_text_usage(out)
 		T.eq(out.text, "mock response")
 		T.eq(out.usage.input, 10)
 
@@ -478,12 +560,12 @@ T.describe("llm executor (mocked)", function()
 		end
 
 		local ai_exec = require("lib.taskgraph.executor.ai")
-		local executors = {
+		local handlers = {
 			add     = function(t, _) return { result = t.input.a + t.input.b } end,
 		}
-		for k, v in pairs(ai_exec.executors) do executors[k] = v end
+		for k, v in pairs(ai_exec.handlers) do handlers[k] = v end
 
-		local out, g = orch.run(
+		local out, g = run_task(
 			{
 				type  = "llm.tool_loop",
 				input = {
@@ -492,8 +574,9 @@ T.describe("llm executor (mocked)", function()
 					tools    = { { name = "add", description = "add two numbers", handler_type = "add" } },
 				},
 			},
-			{ executors = executors }
+			handlers
 		)
+		assert_text_tool_calls(out)
 		T.eq(out.text, "the answer is 7")
 		T.eq(out.tool_calls, 1)
 

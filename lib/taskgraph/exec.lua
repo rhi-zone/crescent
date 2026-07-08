@@ -22,8 +22,8 @@ local function apply_scaffolds(scaffolds, task_def)
 	return t
 end
 
---: (Graph, ExecutorRegistry, Hooks, string) -> nil
-function M.run_task(g, executors, hooks, task_id)
+--: (Graph, ExecutorFn, Hooks, string) -> nil
+function M.run_task(g, executor, hooks, task_id)
 	-- Annotate as TaskNode | nil so narrowing works (known typechecker gap:
 	-- locals from function call returns aren't narrowed without annotation).
 	local task = graph_mod.get(g, task_id) --: TaskNode | nil
@@ -39,10 +39,9 @@ function M.run_task(g, executors, hooks, task_id)
 		task.input = task_def.input
 	end
 
-	local executor = executors[task.type]
 	if not executor then
 		task.status = "error"
-		task.error  = "no executor for task type: " .. tostring(task.type)
+		task.error  = "no executor"
 		-- tracking: mark failed in frontier and exec_graph
 		if hooks.frontier  then frontier_mod.remove(hooks.frontier, task_id) end
 		if hooks.exec_graph and task.error then
@@ -57,7 +56,7 @@ function M.run_task(g, executors, hooks, task_id)
 	if hooks.frontier   then frontier_mod.set_running(hooks.frontier, task_id) end
 	if hooks.exec_graph then exec_graph_mod.set_running(hooks.exec_graph, task_id) end
 
-	local ctx = ctx_mod.make(g, executors, hooks, task_id)
+	local ctx = ctx_mod.make(g, executor, hooks, task_id)
 	local ok, result = pcall(executor, task, ctx)
 	if ok then
 		task.status = "done"
@@ -78,16 +77,12 @@ function M.run_task(g, executors, hooks, task_id)
 	end -- else (status == "pending")
 end
 
---: (TaskDef, RunOpts | nil) -> (unknown, TrackedGraph)
-function M.run(task_def, opts)
-	local executors = {}
+--: (TaskDef, ExecutorFn, RunOpts | nil) -> (unknown, TrackedGraph)
+function M.run(task_def, executor, opts)
 	local track     = false
 	local scaffolds = {}
 	local on_task   = nil
 	if opts then
-		if opts.executors then
-			for k, v in pairs(opts.executors) do executors[k] = v end
-		end
 		if opts.track then track = opts.track end
 		if opts.scaffolds then scaffolds = opts.scaffolds end
 		if opts.on_task then on_task = opts.on_task end
@@ -108,7 +103,7 @@ function M.run(task_def, opts)
 			frontier   = frontier,
 			exec_graph = exec_graph,
 		}
-		M.run_task(g, executors, hooks, root_id)
+		M.run_task(g, executor, hooks, root_id)
 		local root = graph_mod.get(g, root_id) --: TaskNode | nil
 		if root and root.status == "error" then error(root.error) end
 		local tg = {
@@ -126,7 +121,7 @@ function M.run(task_def, opts)
 			frontier   = nil,
 			exec_graph = nil,
 		}
-		M.run_task(g, executors, hooks, root_id)
+		M.run_task(g, executor, hooks, root_id)
 		local root = graph_mod.get(g, root_id) --: TaskNode | nil
 		if root and root.status == "error" then error(root.error) end
 		local tg = {
