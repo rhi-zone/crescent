@@ -103,6 +103,19 @@ distinct from daemon-side libraries (`lib/<name>/` with no prefix). See
 - Private (module-internal): `_` prefix.
 - Module table: always `M` or the library name. Never `self` at module level.
 
+### Names must be unambiguous
+
+This is the general principle; the function-naming rule below is one specific
+case of it.
+
+Names — modules, functions, variables, everything — must be fully unambiguous
+and 100% clear from the perspective of the general public. Jargon terms are
+acceptable for the sake of 100% clarity (a precise technical term beats a
+vague plain-English paraphrase). Never sacrifice clarity to shorten a name.
+
+There must not be any viable alternative reading where someone could
+reasonably interpret the name as referring to a different concept.
+
 ### Function names predict their signature
 
 A function name is a contract with the reader: it should let them predict the
