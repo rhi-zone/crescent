@@ -181,15 +181,19 @@ T.describe("v4 compare cli: end-to-end", function()
 	end)
 
 	T.it("diverge on decision: legacy accepts, v4 rejects → exit 1", function()
-		-- A non-empty table literal: legacy accepts it as a closed record;
-		-- v4's NODE_TABLE_EXPR handler currently rejects anything beyond
-		-- the empty case (sub-phase F item §3.10, "non-empty table
-		-- literals land in a later sub-phase"). This is a stable
-		-- divergence in K6c — once the full table-literal pass lands, this
-		-- test will need updating to a still-divergent shape.
+		-- string.match with a 2-arg call (pattern, no init): legacy accepts
+		-- it fine. v4's stdlib declares string.match/gmatch/find with a
+		-- fallback type pending the $PatternReturn/$FindReturn walker hook
+		-- (see lib/type/static-v4/README.md "Known degradations"), which
+		-- currently mis-declares the arity as requiring the optional third
+		-- `init` argument, so a 2-arg call trips a spurious arity-mismatch
+		-- error that then cascades into undefined-name errors for the
+		-- destructured captures. This is a stable divergence tracking a
+		-- documented, still-open v4 stdlib gap — once $PatternReturn lands,
+		-- this test will need updating to a still-divergent shape.
 		local path = write_tmp("dec_div.lua",
-			"local zz_unique_compare_decision = { a = 1 }\n" ..
-			"return zz_unique_compare_decision\n")
+			"local zz_a_dec, zz_b_dec = string.match(\"x=1\", \"(%a+)=(%d+)\")\n" ..
+			"return zz_a_dec, zz_b_dec\n")
 		local stdout, _stderr, code = run_cli(path)
 		T.eq(code, 1, "expected exit 1 for decision divergence; got " ..
 			tostring(code) .. " stdout=" .. stdout)
