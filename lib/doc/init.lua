@@ -362,7 +362,8 @@ M.generate_package = function(dir)
     end
     local results = {}
     for _, name in ipairs(entries) do
-        local path = dir_ .. name
+        local sep = dir_:sub(-1) == "/" and "" or "/"
+        local path = dir_ .. sep .. name
         local result, err = M.generate(path)
         if result then
             results[#results + 1] = result
