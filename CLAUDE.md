@@ -25,6 +25,7 @@ Pointers to conditional context — read on demand, not loaded by default.
 - `docs/lua-gotchas.md` — LuaJIT 5.1 quirks (unpack vs table.unpack, hidden-class table construction, `local x = expr` scope).
 - `lib/test/` — assertions, property testing, fixtures/snapshots (`UPDATE_SNAPSHOTS=1`), fuzz (`FUZZ_SEED` replay), arb shrinking.
 - `lib/type/static/lsp.lua` — LSP daemon.
+- `docs/intent-engine.md` — intent engine design philosophy (directness, friction, lossy channels). Read when discussing UX, AI integration, or ecosystem "why."
 
 ## Development
 
