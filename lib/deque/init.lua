@@ -10,7 +10,7 @@ end
 
 local M = {}
 
---:: Deque = { _data: { [integer]: unknown }, _head: integer, _tail: integer, push_back: (Deque, unknown) -> (), push_front: (Deque, unknown) -> (), pop_back: (Deque) -> unknown | nil, pop_front: (Deque) -> unknown | nil, peek_back: (Deque) -> unknown | nil, peek_front: (Deque) -> unknown | nil, get: (Deque, integer) -> unknown | nil, set: (Deque, integer, unknown) -> boolean, size: (Deque) -> integer, empty: (Deque) -> boolean, clear: (Deque) -> (), to_array: (Deque) -> { [integer]: unknown }, iter: (Deque) -> () -> unknown, iter_reverse: (Deque) -> () -> unknown, rotate: (Deque, integer) -> (), contains: (Deque, unknown) -> boolean }
+--:: Deque = { _data: { [integer]: unknown }, _head: integer, _tail: integer, push_back: (Deque, unknown) -> (), push_front: (Deque, unknown) -> (), pop_back: (Deque) -> (unknown | nil, string | nil), pop_front: (Deque) -> (unknown | nil, string | nil), peek_back: (Deque) -> (unknown | nil, string | nil), peek_front: (Deque) -> (unknown | nil, string | nil), get: (Deque, integer) -> (unknown | nil, string | nil), set: (Deque, integer, unknown) -> (boolean | nil, string | nil), size: (Deque) -> integer, empty: (Deque) -> boolean, clear: (Deque) -> (), to_array: (Deque) -> { [integer]: unknown }, iter: (Deque) -> () -> unknown, iter_reverse: (Deque) -> () -> unknown, rotate: (Deque, integer) -> (), contains: (Deque, unknown) -> boolean }
 
 local Deque = {}
 Deque.__index = Deque
@@ -40,11 +40,11 @@ function Deque:push_front(v)
 	self._data[self._head] = v
 end
 
---- Pop a value from the back. Returns nil if empty.
---: (Deque) -> unknown | nil
+--- Pop a value from the back. Returns nil, errmsg if empty.
+--: (Deque) -> (unknown | nil, string | nil)
 function Deque:pop_back()
 	if self._head > self._tail then
-		return nil
+		return nil, "deque is empty"
 	end
 	local tail = self._tail
 	local v = self._data[tail]
@@ -53,11 +53,11 @@ function Deque:pop_back()
 	return v
 end
 
---- Pop a value from the front. Returns nil if empty.
---: (Deque) -> unknown | nil
+--- Pop a value from the front. Returns nil, errmsg if empty.
+--: (Deque) -> (unknown | nil, string | nil)
 function Deque:pop_front()
 	if self._head > self._tail then
-		return nil
+		return nil, "deque is empty"
 	end
 	local head = self._head
 	local v = self._data[head]
@@ -66,38 +66,38 @@ function Deque:pop_front()
 	return v
 end
 
---- Peek at the back value without removing it. Returns nil if empty.
---: (Deque) -> unknown | nil
+--- Peek at the back value without removing it. Returns nil, errmsg if empty.
+--: (Deque) -> (unknown | nil, string | nil)
 function Deque:peek_back()
 	if self._head > self._tail then
-		return nil
+		return nil, "deque is empty"
 	end
 	return self._data[self._tail]
 end
 
---- Peek at the front value without removing it. Returns nil if empty.
---: (Deque) -> unknown | nil
+--- Peek at the front value without removing it. Returns nil, errmsg if empty.
+--: (Deque) -> (unknown | nil, string | nil)
 function Deque:peek_front()
 	if self._head > self._tail then
-		return nil
+		return nil, "deque is empty"
 	end
 	return self._data[self._head]
 end
 
---- Get element at 1-based index. Returns nil on out-of-bounds.
---: (Deque, integer) -> unknown | nil
+--- Get element at 1-based index. Returns nil, errmsg on out-of-bounds.
+--: (Deque, integer) -> (unknown | nil, string | nil)
 function Deque:get(i)
 	if i < 1 or i > self._tail - self._head + 1 then
-		return nil
+		return nil, "index out of bounds"
 	end
 	return self._data[self._head + i - 1]
 end
 
---- Set element at 1-based index. Returns false on out-of-bounds.
---: (Deque, integer, unknown) -> boolean
+--- Set element at 1-based index. Returns nil, errmsg on out-of-bounds.
+--: (Deque, integer, unknown) -> (boolean | nil, string | nil)
 function Deque:set(i, v)
 	if i < 1 or i > self._tail - self._head + 1 then
-		return false
+		return nil, "index out of bounds"
 	end
 	self._data[self._head + i - 1] = v
 	return true
