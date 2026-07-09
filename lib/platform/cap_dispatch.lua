@@ -4,6 +4,7 @@ local M = {}
 
 local CAP_MODULES = --[[:! { [string]: string }]] {
 	cli         = "lib.platform.caps.cli",
+	create_instance = "lib.platform.caps.create_instance",
 	db          = "lib.platform.caps.db",
 	exec        = "lib.platform.caps.exec",
 	fs          = "lib.platform.caps.fs",
