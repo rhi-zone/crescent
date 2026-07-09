@@ -341,29 +341,30 @@ function Matcher:match(str)
 end
 
 -- Compile a glob pattern into a matcher object.
---: (pattern: string) -> Matcher | nil
+--: (pattern: string) -> (Matcher | nil, string | nil)
 function M.compile(pattern)
   local tokens, err = _compile(pattern)
-  if not tokens then return nil end
+  if not tokens then
+    if type(err) == "string" then return nil, err end
+    return nil, "glob.compile: unknown compile error"
+  end
   local m = setmetatable({ _tokens = tokens --[[:! { type: integer, ... }[] ]], _pattern = pattern }, Matcher) --[[:! Matcher]]
   return m
 end
 
 -- One-shot match: compile + match.
---: (pattern: string, str: string) -> boolean | nil
+--: (pattern: string, str: string) -> (boolean | nil, string | nil)
 function M.match(pattern, str)
-  --: Matcher | nil
-  local m = M.compile(pattern)
-  if not m then return nil end
+  local m, err = M.compile(pattern)
+  if not m then return nil, err end
   return m:match(str)
 end
 
 -- Filter an array of strings, returning those that match the pattern.
---: (list: string[], pattern: string) -> string[] | nil
+--: (list: string[], pattern: string) -> (string[] | nil, string | nil)
 function M.filter(list, pattern)
-  --: Matcher | nil
-  local m = M.compile(pattern)
-  if not m then return nil end
+  local m, err = M.compile(pattern)
+  if not m then return nil, err end
   local result = {}
   for _, s in ipairs(list) do
     if m:match(s) then
