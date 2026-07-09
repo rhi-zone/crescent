@@ -189,7 +189,7 @@ function CMS:reset()
   for i = 1, n do cnt[i] = 0 end
   self._total = 0
   if self._heavy then
-    for k in pairs(self._heavy) do self._heavy[k] = 0 end
+    for k in pairs(self._heavy) do self._heavy[k] = nil end
   end
 end
 
