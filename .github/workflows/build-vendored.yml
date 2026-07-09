@@ -91,7 +91,8 @@ jobs:
       - name: Build (x64)
         shell: cmd
         run: |
-          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
+          for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do set VSPATH=%%i
+          call "%VSPATH%\VC\Auxiliary\Build\vcvars64.bat"
           cd /d "%GITHUB_WORKSPACE%\src"
           msvcbuild.bat
       - name: Copy artifact
@@ -115,7 +116,8 @@ jobs:
       - name: Build (x86)
         shell: cmd
         run: |
-          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars32.bat"
+          for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do set VSPATH=%%i
+          call "%VSPATH%\VC\Auxiliary\Build\vcvars32.bat"
           cd /d "%GITHUB_WORKSPACE%\src"
           msvcbuild.bat
       - name: Copy artifact
@@ -183,7 +185,8 @@ jobs:
       - name: Build (x64)
         shell: cmd
         run: |
-          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
+          for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do set VSPATH=%%i
+          call "%VSPATH%\VC\Auxiliary\Build\vcvars64.bat"
           mkdir out
           cl /O2 /LD /DSQLITE_ENABLE_FTS5 dep\sqlite3\sqlite3.c /Fe:out\sqlite.dll
       - uses: actions/upload-artifact@v4
@@ -198,7 +201,8 @@ jobs:
       - name: Build (x86)
         shell: cmd
         run: |
-          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars32.bat"
+          for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do set VSPATH=%%i
+          call "%VSPATH%\VC\Auxiliary\Build\vcvars32.bat"
           mkdir out
           cl /O2 /LD dep\sqlite3\sqlite3.c /Fe:out\sqlite-x86.dll
       - uses: actions/upload-artifact@v4
@@ -261,7 +265,8 @@ jobs:
       - name: Build (x64)
         shell: cmd
         run: |
-          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
+          for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do set VSPATH=%%i
+          call "%VSPATH%\VC\Auxiliary\Build\vcvars64.bat"
           mkdir out
           cl /O2 /LD dep\zlib\adler32.c dep\zlib\compress.c dep\zlib\crc32.c dep\zlib\deflate.c dep\zlib\gzclose.c dep\zlib\gzlib.c dep\zlib\gzread.c dep\zlib\gzwrite.c dep\zlib\infback.c dep\zlib\inffast.c dep\zlib\inflate.c dep\zlib\inftrees.c dep\zlib\trees.c dep\zlib\uncompr.c dep\zlib\zutil.c /Fe:out\zlib.dll
       - uses: actions/upload-artifact@v4
@@ -276,7 +281,8 @@ jobs:
       - name: Build (x86)
         shell: cmd
         run: |
-          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars32.bat"
+          for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do set VSPATH=%%i
+          call "%VSPATH%\VC\Auxiliary\Build\vcvars32.bat"
           mkdir out
           cl /O2 /LD dep\zlib\adler32.c dep\zlib\compress.c dep\zlib\crc32.c dep\zlib\deflate.c dep\zlib\gzclose.c dep\zlib\gzlib.c dep\zlib\gzread.c dep\zlib\gzwrite.c dep\zlib\infback.c dep\zlib\inffast.c dep\zlib\inflate.c dep\zlib\inftrees.c dep\zlib\trees.c dep\zlib\uncompr.c dep\zlib\zutil.c /Fe:out\zlib-x86.dll
       - uses: actions/upload-artifact@v4
@@ -293,7 +299,8 @@ jobs:
       - name: Build (x64)
         shell: cmd
         run: |
-          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
+          for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do set VSPATH=%%i
+          call "%VSPATH%\VC\Auxiliary\Build\vcvars64.bat"
           mkdir out
           cl /O2 /LD /DWEPOLL_EXPORT=__declspec(dllexport) dep\wepoll\wepoll.c /Fe:out\wepoll-x64.dll /link ws2_32.lib
       - uses: actions/upload-artifact@v4
@@ -308,7 +315,8 @@ jobs:
       - name: Build (x86)
         shell: cmd
         run: |
-          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars32.bat"
+          for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do set VSPATH=%%i
+          call "%VSPATH%\VC\Auxiliary\Build\vcvars32.bat"
           mkdir out
           cl /O2 /LD /DWEPOLL_EXPORT=__declspec(dllexport) dep\wepoll\wepoll.c /Fe:out\wepoll-x86.dll /link ws2_32.lib
       - uses: actions/upload-artifact@v4
