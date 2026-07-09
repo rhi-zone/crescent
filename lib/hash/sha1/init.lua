@@ -34,8 +34,8 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 local mod = {}
 
-local bxor = bit.bxor; local band = bit.band; local bor = bit.bor; local rol = bit.rol; local tobit = bit.tobit
-local char = string.char; local byte = string.byte; local format = string.format; local rep = string.rep
+local bxor = bit.bxor; local band = bit.band; local bor = bit.bor; local rol = bit.rol; local tobit = bit.tobit; local tohex = bit.tohex
+local char = string.char; local byte = string.byte; local rep = string.rep
 
 --: (integer, integer, integer) -> integer
 local uint32_ternary = function (a, b, c)
@@ -120,7 +120,7 @@ mod.sha1 = function (str)
 		h3 = tobit((h3 + d) % 4294967296)
 		h4 = tobit((h4 + e) % 4294967296)
 	end
-	return format("%08x%08x%08x%08x%08x", h0, h1, h2, h3, h4)
+	return tohex(h0) .. tohex(h1) .. tohex(h2) .. tohex(h3) .. tohex(h4)
 end
 
 --[[Calculates SHA1 for a string, returns it as a binary string]]

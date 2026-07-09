@@ -178,7 +178,7 @@ Op-sem parity must hold at every commit. After the handler deletion, the adversa
   `docs/postmortem-agentic-sessions-2026-07.md`, primary-source line refs included.
   Identified-not-started: tier-1 structural uniformity rule + tier-2 renaming
   property tests as standalone pre-commit antibodies predating the linter.
-- [ ] **23 test files fail on master (pre-existing; CI red).** Discovered
+- [ ] **Test files fail on master (pre-existing; CI red).** Discovered
   2026-07-04 while verifying the banked fixes. Until then the full suite
   never finished at all: calendar_test hung forever (recur `until` limit
   never checked in next() — fixed, commit 0e4c52c3), so CI died at timeout
@@ -189,7 +189,38 @@ Op-sem parity must hold at every commit. After the handler deletion, the adversa
   deque (14), text_diff (10), glob (6), sat (6), sqlite (5), taskgraph (5),
   chan (4), utf8 (4), plus singles/doubles (count_min, db, doc, event,
   platform×4, type/static, static-v4 cli_compare). Full list in the session
-  log; rerun `bin/cr test` to reproduce. Untriaged — root causes unknown.
+  log; rerun `bin/cr test` to reproduce.
+  - [x] **crypto cluster (hash/sha1/hmac/pbkdf2) root cause found + fixed
+    (2026-07-10).** `lib/hash/sha1/init.lua` built each 32-bit word with
+    `bit.tobit` (signed) then formatted with `string.format("%08x", ...)`.
+    For negative words, `%x` sign-extends to the host C `long` width before
+    formatting — on this platform's 64-bit `long` that prints 16 hex digits
+    (`ffffffff`-prefixed) instead of 8, corrupting every digest containing a
+    high-bit word. hmac and pbkdf2 build on sha1 so inherited the corruption;
+    totp not yet re-verified (not exercised this session). Fixed by using
+    `bit.tohex` (LuaJIT's purpose-built unsigned-32-bit hex formatter)
+    instead of `string.format("%08x", ...)`. Verified against HEAD (bug
+    reproduces identically on a worktree at `acf0f58b`, well before this
+    session's unrelated epoll/kqueue/io_poll commits — confirms pre-existing,
+    not a regression). `bin/cr test lib/hash/ lib/pbkdf2/` now 8/8 files
+    green (was hash_test 24 failed, sha1_test 30 failed, hmac_test 12 failed).
+  - [x] **sqlite cluster root cause found + fixed (2026-07-10).**
+    `lib/sqlite/init.lua:189` `db_errmsg` returned the raw FFI `const char *`
+    cdata from `sqlite3_errmsg` and callers concatenated it directly into a
+    Lua string (`"sqlite: prepare: " .. db_errmsg(self)`), which errors
+    ("attempt to concatenate 'string' and 'const char *'") instead of
+    producing the error message. Fixed by wrapping the FFI return in
+    `ffi.string(...)` inside `db_errmsg` (single fix point, 4 call sites).
+    Verified pre-existing the same way as the crypto cluster (reproduces at
+    `acf0f58b`). `bin/cr test lib/sqlite/ lib/db/ lib/platform/caps/` now
+    all green (was sqlite_test 5 failed).
+  - [ ] Remaining clusters (deque 14, text_diff 10, glob 6, sat 6, taskgraph 5,
+    chan 4, utf8 4, count_min, doc, event, platform×4, type/static,
+    static-v4 cli_compare, cap_dispatch, projection_types, noise, audit) —
+    reconfirmed pre-existing and unrelated to the kqueue/epoll/io_poll/
+    diagnostic-cache-key/vendored-binary-layout commits (2026-07-10 CI
+    triage; identical failures on a worktree at `acf0f58b`). Still
+    untriaged — root causes unknown.
 ## v9 vertical slice — dynamism-boundary roadmap (2026-07-03)
 
 The v9 slice (frontend seam -> total lowering -> engine -> `lib/type/v9/check.lua`)

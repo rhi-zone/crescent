@@ -187,7 +187,7 @@ sqlite.changes = function(self)
 end
 
 local function db_errmsg(self)
-	return sqlite_ffi.sqlite3_errmsg(self.db[0])
+	return ffi.string(sqlite_ffi.sqlite3_errmsg(self.db[0]))
 end
 
 --: (self: { db: cdata, ... }, string, ...number | string | boolean | nil) -> (boolean | nil, string | nil)
