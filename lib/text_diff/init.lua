@@ -27,11 +27,11 @@ local function myers_forward(a, b)
   local max_d = n + m
   local offset = max_d + 2
   local v = {} --: { [integer]: integer }
-  v[offset] = 0
+  v[offset + 1] = 0
   local trace = {} --: { [integer]: { [integer]: integer } }
 
   if max_d == 0 then
-    trace[1] = { [offset] = 0 }
+    trace[1] = { [offset + 1] = 0 }
     return trace, 0, offset
   end
 
