@@ -4,7 +4,11 @@
 -- Cache layout:
 --   .crescentcache/
 --     <sha256hex>.cri    ← .cri file named by SHA-256 of its content
---     manifest.lua       ← source_hash → entry table (loadable chunk)
+--     manifest.lua       ← entry_key(path, source_hash) → entry table (loadable chunk)
+--
+-- The manifest key (see M.entry_key) combines the file path with the source
+-- content hash: cached diagnostics bake in the filename they were produced
+-- for, so two different paths with identical content must not collide.
 --
 -- Manifest entry format (v2):
 --   { cri_hash = "<hex>", deps = { ["path/to/dep.lua"] = "<dep_src_hash>", ... } }
@@ -299,6 +303,18 @@ end
 -- Hash a source string directly.
 function M.hash_source(src)
     return sha256.hash(src)
+end
+
+-- Compute the manifest key for a checked file, combining its path and content
+-- hash. Cached diagnostics bake in the filename they were produced for (see
+-- errors.lua DiagEntry.filename); keying purely on content hash would let two
+-- different paths with identical content collide in the manifest and return
+-- diagnostics carrying the wrong path. Callers that only need a path-independent
+-- content hash (e.g. dependency change detection) should keep using hash_file /
+-- hash_source directly — this function is specifically for the manifest key
+-- used by M.lookup / M.store.
+function M.entry_key(filename, content_hash)
+    return sha256.hash(filename .. "\0" .. content_hash)
 end
 
 return M

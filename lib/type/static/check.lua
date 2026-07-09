@@ -320,7 +320,13 @@ function M.check_file(filename, parent_scope, explicit_pool, opts)
     -- Used for dep lookups (cri_loader calls) where only types matter.
     local src_hash
     if _disk_cache_dir and not (opts and opts.no_disk_cache) then
-        src_hash = cache_mod.hash_file(filename)
+        -- entry_key folds the path into the manifest key: cached diagnostics
+        -- bake in `filename`, so two paths with identical content must not
+        -- share a manifest entry (see cache.lua M.entry_key).
+        local content_hash = cache_mod.hash_file(filename)
+        if content_hash then
+            src_hash = cache_mod.entry_key(filename, content_hash)
+        end
     end
 
     local err_ctx, ctx

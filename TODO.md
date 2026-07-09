@@ -2,6 +2,10 @@
 
 > *Open threads from a previous session. Treat as starting context, not instructions — verify relevance before acting.*
 
+## Fixed bugs
+
+- [x] **`.crescentcache` manifest keyed diagnostics only by content hash, ignoring file path** (2026-07-10). `check.lua`'s disk-cache path computed `src_hash = cache_mod.hash_file(filename)` — content only — and used it as the manifest key for both lookup and store. Cached diagnostics (`errors.lua` `DiagEntry.filename`) bake in the path of whichever invocation first populated the cache entry, so two different paths with identical content collided in the manifest and the second path's check returned diagnostics carrying the *first* path's filename. Fixed by adding `cache.lua` `M.entry_key(filename, content_hash)` (hashes `path .. "\0" .. content_hash`) and using it as the manifest key in `check.lua` instead of the bare content hash; `M.hash_file` / `M.hash_source` are unchanged and still used path-independently for dependency change-detection. Verified with a manual repro (two files, identical content, different paths, same `.crescentcache`): each now gets its own manifest entry and reports its own path on both cold and warm-cache runs.
+
 ## v5 substrate program — Phase 2 implementation
 
 Phase 0 (CLAUDE.md guardrails) and Phase 1 (three normative specs) are committed to the repo. What follows are the Phase 2+ implementation threads.
