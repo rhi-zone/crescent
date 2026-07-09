@@ -207,7 +207,7 @@ function Chan:try_send(value)
   return nil, "full"
 end
 
---: (ChanObj) -> (unknown, boolean)
+--: (ChanObj) -> (unknown, boolean, string | nil)
 function Chan:try_recv()
   if self._len > 0 then
     local value = buf_pop(self)
@@ -220,7 +220,7 @@ function Chan:try_recv()
       local ok, err = co_resume(eco)
       if not ok then error(err) end
     end
-    return value, true
+    return value, true, nil
   end
   if #self._send_q > 0 then
     local sq4_ = self._send_q
@@ -230,12 +230,12 @@ function Chan:try_recv()
     local eco = raw_e4.co --[[:! Thread]]
     local ok, err = co_resume(eco)
     if not ok then error(err) end
-    return value, true
+    return value, true, nil
   end
   if self._closed then
-    return nil, false
+    return nil, false, nil
   end
-  return nil, false
+  return nil, false, "empty"
 end
 
 -- ── state queries ─────────────────────────────────────────────────────────────
