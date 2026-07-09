@@ -167,7 +167,7 @@ Notable structure:
   [p]Cⁱ[ε:q]}, §5.2); Backwards Variant for unbounded depth: premise
   [p(n)∧nat(n)] C [ok: p(n+1)∧nat(n)] concludes [p(0)] C* [ok: ∃n.p(n)∧nat(n)] — a
   *subvariant* that decreases when executing backwards (§4; forward version is vacuous).
-  Used to get [x==0](x=x+1)*[ok: x>=0] covering infinitely many paths (§6.1). Errors
+  Used to get [x==0]\(x=x+1)*[ok: x>=0] covering infinitely many paths (§6.1). Errors
   inside loops: prove the ok "frontier", then one more erroneous iteration via
   Iterate-non-zero (§6.1, completeness proof §5.1).
 - Summaries: presumes/achieves pairs ARE procedure summaries (§6); adaptation to call

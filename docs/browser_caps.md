@@ -44,7 +44,7 @@ The classification is conservative on purpose. Anything not in the day-zero expo
 
 A **daemon cap** is a Lua-side capability, enforced by the platform daemon, mediating OS resources (filesystem, processes, network sockets, KV stores) on the operator's machine. The app's daemon-side Lua code reaches the daemon cap through the platform's daemon API.
 
-A **browser cap** is a JS-side capability, enforced by the host stub via [`lib/js_cap_bridge/bridge.js`](../lib/js_cap_bridge/bridge.js), exposed to the app realm (a sandboxed iframe today, a ShadowRealm tomorrow) under `globalThis.__cap__.<name>`. The app realm has been stripped of every Web Platform global by the [`lib/js_realm_sandbox/`](../lib/js_realm_sandbox/) bootstrap; the only way the realm reaches anything beyond pure JS computation is by calling a declared, granted cap.
+A **browser cap** is a JS-side capability, enforced by the host stub via [`lib/js_cap_bridge/bridge.js`](../lib/js_cap_bridge/bridge.js), exposed to the app realm (a sandboxed iframe today, a ShadowRealm tomorrow) under `globalThis.__cap__.<name>`. The app realm has been stripped of every Web Platform global by the [`lib/js_realm_sandbox/`](../lib/js_realm_sandbox/sandbox.js) bootstrap; the only way the realm reaches anything beyond pure JS computation is by calling a declared, granted cap.
 
 The two are parallel, both flowing from the same manifest. As of the
 "Framing" note at the top of this doc, browser caps are sub-caps of the
