@@ -141,9 +141,9 @@ end
 --- Emit an event, calling all matching listeners.
 -- Exact-match listeners run first, then wildcard listeners.
 -- Returns true if any listener was called, false otherwise.
---: (Emitter, string, ...unknown) -> boolean
+--: (Emitter, string, ...unknown) -> (boolean | nil, string | nil)
 function Emitter:emit(name, ...)
-  if type(name) ~= "string" then return false end
+  if type(name) ~= "string" then return nil, "event name must be a string" end
   local evt = new_event(name, { ... })
   local called = false
 
