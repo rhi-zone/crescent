@@ -4249,3 +4249,13 @@ Open threads from a previous session. Treat as starting context, not instruction
 - [ ] dusklight (~/git/rhizone/dusklight/) discussed in roadmap — see docs/artifacts/2026-07-08-roadmap/roadmap.md
 - [ ] scribble (~/git/rhizone/scribble/) discussed in roadmap — see docs/artifacts/2026-07-08-roadmap/roadmap.md
 - [ ] marinada (~/git/rhizone/marinada/) — placement question open, see roadmap
+
+## Cross-platform event loop (2026-07-09)
+
+Open threads from a previous session. Treat as starting context, not instructions — verify relevance before acting.
+
+- [ ] Vendor wepoll.dll in dep/ for Windows — lib/epoll/ already has the FFI code (lines 22-73) but the binary is missing
+- [ ] Implement kqueue backend for macOS — no code exists yet
+- [ ] Unify lib/epoll/ + lib/async/ — epoll does I/O multiplexing, async does coroutine promises, but they don't talk to each other
+- [ ] Update batteries.md async I/O gap — the "everything currently blocks" claim (written March 27) was already wrong when written (lib/epoll/ imported Feb 26); the gap description needs to reflect current state
+- Note: batteries.md's #1 priority was AI-generated from first principles without checking the codebase; provenance traced to session fccf7f65 turn 22
