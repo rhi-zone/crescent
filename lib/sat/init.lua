@@ -247,7 +247,7 @@ end
 function M.solve(formula)
   local clauses = copy_clauses(formula.clauses)
   local nvars = (formula.vars or 0) --[[:! integer]]
-  local ok, assignment = dpll(clauses, nvars, {}, nil)
+  local ok, assignment = dpll(clauses, nvars, {}, nil --[[: { [integer]: { [string]: boolean } } | nil]])
   if ok then
     return { sat = true, assignment = assignment }
   else
@@ -262,7 +262,7 @@ function M.solve_all(formula, _opts)
   local clauses = copy_clauses(formula.clauses)
   local nvars = (formula.vars or 0) --[[:! integer]]
   local collect = {} --[[: { [integer]: { [string]: boolean } }]]
-  dpll(clauses, nvars, {}, nil)
+  dpll(clauses, nvars, {}, collect)
   return collect --[[:! { [integer]: { [integer]: boolean } }]]
 end
 
