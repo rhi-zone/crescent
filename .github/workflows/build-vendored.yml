@@ -11,6 +11,7 @@ on:
     paths:
       - "dep/sqlite3/**"
       - "dep/zlib/**"
+      - "dep/wepoll/**"
 
 jobs:
   # ── LuaJIT ────────────────────────────────────────────────────────────────
@@ -283,6 +284,38 @@ jobs:
           name: zlib-windows-x86
           path: out/
 
+  # ── wepoll ────────────────────────────────────────────────────────────────
+
+  wepoll-windows-x86_64:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build (x64)
+        shell: cmd
+        run: |
+          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
+          mkdir out
+          cl /O2 /LD /DWEPOLL_EXPORT=__declspec(dllexport) dep\wepoll\wepoll.c /Fe:out\wepoll-x64.dll /link ws2_32.lib
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wepoll-windows-x86_64
+          path: out/
+
+  wepoll-windows-x86:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build (x86)
+        shell: cmd
+        run: |
+          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars32.bat"
+          mkdir out
+          cl /O2 /LD /DWEPOLL_EXPORT=__declspec(dllexport) dep\wepoll\wepoll.c /Fe:out\wepoll-x86.dll /link ws2_32.lib
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wepoll-windows-x86
+          path: out/
+
   # ── Commit all artifacts back to the repo ─────────────────────────────────
 
   commit:
@@ -302,6 +335,8 @@ jobs:
       - zlib-macos-arm64
       - zlib-windows-x86_64
       - zlib-windows-x86
+      - wepoll-windows-x86_64
+      - wepoll-windows-x86
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -331,6 +366,8 @@ jobs:
           cp artifacts/libz-macos-arm64.dylib         dep/
           cp artifacts/zlib.dll                       dep/
           cp artifacts/zlib-x86.dll                   dep/
+          cp artifacts/wepoll-x64.dll                 dep/wepoll/
+          cp artifacts/wepoll-x86.dll                 dep/wepoll/
           chmod +x bin/luajit bin/luajit-aarch64 \
                    bin/luajit-bin bin/luajit-aarch64-bin bin/luajit-macos-aarch64 \
                    bin/luajit.exe bin/luajit32.exe \
@@ -339,5 +376,5 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add bin/ dep/
           git diff --cached --quiet || \
-            git commit -m "chore(bin): update vendored LuaJIT, sqlite3, and zlib binaries"
+            git commit -m "chore(bin): update vendored LuaJIT, sqlite3, zlib, and wepoll binaries"
           git push
