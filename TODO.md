@@ -4238,3 +4238,14 @@ Moded-obligation toy checker at `lib/toy_checker/` validated the approach at toy
 
 - [ ] Adversarial audit of existing function names against naming convention (low priority)
 - [ ] 2026-07-07 owner: design-it-twice skill removed. Grounds: 2026-07-06 evidence — 4/4 same-model 'decorrelated' candidates failed identically (flagship overclaim); supporting 'adversarial critique panel' numbers died in verification (aggregator gloss, no primary source); evidenced alternative is cross-model review + output verification (see docs/artifacts/2026-07-06-agentic-coding-research/agentic-coding-evidence.md). Open: whether design-an-interface and the CLAUDE.md 'decorrelate via parallel subagents' disposition line follow.
+
+## Prior art survey — rhi ecosystem (2026-07-09)
+
+Open threads from a previous session. Treat as starting context, not instructions — verify relevance before acting.
+
+- [ ] Survey all repos under ~/git/rhizone/ for ideas/functionality to subsume into crescent
+- [ ] Survey all repos under ~/git/exoplace/ for ideas/functionality to subsume into crescent
+- [ ] unshape (~/git/rhizone/unshape/) partially surveyed — see docs/artifacts/2026-07-09-userspace-exploration/unshape-xref.md
+- [ ] dusklight (~/git/rhizone/dusklight/) discussed in roadmap — see docs/artifacts/2026-07-08-roadmap/roadmap.md
+- [ ] scribble (~/git/rhizone/scribble/) discussed in roadmap — see docs/artifacts/2026-07-08-roadmap/roadmap.md
+- [ ] marinada (~/git/rhizone/marinada/) — placement question open, see roadmap
