@@ -154,7 +154,8 @@ structure; the model is a function over it. The context window is a view, not th
 - **Encoding** — JSON, CBOR, base64, UTF-8, URL encoding, MessagePack
 - **Hashing** — SHA-1, SHA-256, HMAC
 - **System** — fs, process, path, env, time, signal, epoll, inotify, timerfd
-- **Concurrency** — epoll event loop (partial), fork-based parallelism in test runner
+- **Concurrency** — epoll/kqueue/io_poll readiness backends, async promise/coroutine
+  library (not yet integrated with io_poll), fork-based parallelism in test runner
 - **Random** — CSPRNG (getrandom / /dev/urandom)
 - **Functional** — fp/ typeclasses (Maybe, Either, lens, prism), iter combinators
 - **AI** — provider dispatch (Anthropic, OpenAI, Google), streaming, embeddings, tools
@@ -174,11 +175,16 @@ structure; the model is a function over it. The context window is a view, not th
 
 These belong in `lib/` and block real applications:
 
-**Async I/O / event loop** — the largest gap. Without a proper event loop (io_uring on
-Linux, kqueue on macOS), crescent can't do high-concurrency servers or multiplex
-connections. Everything currently blocks. This is the single change that unlocks the
-most use cases. Design: sans-I/O core, injectable scheduler, `lib/reactor` or
-`lib/loop`.
+**Async I/O / event loop** — the backends exist; integration is the remaining gap.
+`lib/epoll` (Linux epoll FFI, with a Windows branch via vendored wepoll) and
+`lib/kqueue` (macOS kqueue FFI) provide readiness notification; `lib/io_poll`
+dispatches to the right backend per platform. `lib/async` provides the
+promise/coroutine abstraction (async/await, combinators, an event loop) but is
+not yet wired to `lib/io_poll` — so today's async code can compose and schedule
+work, but I/O readiness and the promise scheduler are two separate systems.
+Wiring `lib/async` to `lib/io_poll` is the single change that unlocks
+high-concurrency servers and multiplexed connections built on the existing
+promise API.
 
 **Datetime** (`lib/datetime`) — implemented. Date/time library exists.
 
