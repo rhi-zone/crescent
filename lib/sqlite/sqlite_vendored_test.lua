@@ -16,12 +16,12 @@ local T = require("lib.test.assert")
 local function expected_vendored_path()
 	local os_, arch = ffi.os, ffi.arch
 	if os_ == "Linux" then
-		return arch == "arm64" and "dep/libsqlite3-linux-aarch64.so"
-		                       or  "dep/libsqlite3-linux-x86_64.so"
+		return arch == "arm64" and "dep/sqlite3/libsqlite3-linux-aarch64.so"
+		                       or  "dep/sqlite3/libsqlite3-linux-x86_64.so"
 	elseif os_ == "OSX" then
-		return arch == "arm64" and "dep/libsqlite3-macos-arm64.dylib" or nil
+		return arch == "arm64" and "dep/sqlite3/libsqlite3-macos-arm64.dylib" or nil
 	elseif os_ == "Windows" then
-		return arch == "x64" and "dep/sqlite.dll" or "dep/sqlite-x86.dll"
+		return arch == "x64" and "dep/sqlite3/sqlite3-x64.dll" or "dep/sqlite3/sqlite3-x86.dll"
 	end
 	return nil
 end

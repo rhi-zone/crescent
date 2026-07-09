@@ -54,12 +54,12 @@ ffi.cdef [[
 local function vendored_name()
   local os, arch = ffi.os, ffi.arch
   if os == "Linux" then
-    return arch == "arm64" and "dep/libz-linux-aarch64.so"
-                           or  "dep/libz-linux-x86_64.so"
+    return arch == "arm64" and "dep/zlib/libz-linux-aarch64.so"
+                           or  "dep/zlib/libz-linux-x86_64.so"
   elseif os == "OSX" then
-    return arch == "arm64" and "dep/libz-macos-arm64.dylib" or nil
+    return arch == "arm64" and "dep/zlib/libz-macos-arm64.dylib" or nil
   elseif os == "Windows" then
-    return arch == "x86" and "dep/zlib-x86.dll" or "dep/zlib.dll"
+    return arch == "x86" and "dep/zlib/zlib-x86.dll" or "dep/zlib/zlib-x64.dll"
   end
   return nil
 end

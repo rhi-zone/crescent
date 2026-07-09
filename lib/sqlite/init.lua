@@ -62,7 +62,7 @@ local SQLITE_NULL    = 5
 
 local function load_sqlite()
 	if ffi.os == "Windows" then
-		local name = ffi.arch == "x64" and "dep/sqlite.dll" or "dep/sqlite-x86.dll"
+		local name = ffi.arch == "x64" and "dep/sqlite3/sqlite3-x64.dll" or "dep/sqlite3/sqlite3-x86.dll"
 		local lib = ffi_any.load(name)
 		return lib, name
 	else
@@ -70,10 +70,10 @@ local function load_sqlite()
 	local function vendored_name()
 		local os, arch = ffi.os, ffi.arch
 		if os == "Linux" then
-			return arch == "arm64" and "dep/libsqlite3-linux-aarch64.so"
-			                       or  "dep/libsqlite3-linux-x86_64.so"
+			return arch == "arm64" and "dep/sqlite3/libsqlite3-linux-aarch64.so"
+			                       or  "dep/sqlite3/libsqlite3-linux-x86_64.so"
 		elseif os == "OSX" then
-			return arch == "arm64" and "dep/libsqlite3-macos-arm64.dylib" or nil
+			return arch == "arm64" and "dep/sqlite3/libsqlite3-macos-arm64.dylib" or nil
 		end
 		return nil
 	end

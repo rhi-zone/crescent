@@ -81,16 +81,16 @@ ffi.cdef[[
 local function load_sqlite()
 	local names = {} --: { [integer]: string }
 	if ffi.os == "Windows" then
-		if ffi.arch == "x64" then names[#names + 1] = "dep/sqlite.dll"
-		else names[#names + 1] = "dep/sqlite-x86.dll" end
+		if ffi.arch == "x64" then names[#names + 1] = "dep/sqlite3/sqlite3-x64.dll"
+		else names[#names + 1] = "dep/sqlite3/sqlite3-x86.dll" end
 	else
 		local os, arch = ffi.os, ffi.arch
 		if os == "Linux" then
-			names[#names + 1] = arch == "arm64" and "dep/libsqlite3-linux-aarch64.so"
-			                                    or  "dep/libsqlite3-linux-x86_64.so"
+			names[#names + 1] = arch == "arm64" and "dep/sqlite3/libsqlite3-linux-aarch64.so"
+			                                    or  "dep/sqlite3/libsqlite3-linux-x86_64.so"
 		elseif os == "OSX" then
-			names[#names + 1] = arch == "arm64" and "dep/libsqlite3-macos-arm64.dylib"
-			                                    or  "dep/libsqlite3-macos-x86_64.dylib"
+			names[#names + 1] = arch == "arm64" and "dep/sqlite3/libsqlite3-macos-arm64.dylib"
+			                                    or  "dep/sqlite3/libsqlite3-macos-x86_64.dylib"
 		end
 		names[#names + 1] = "sqlite3"
 		names[#names + 1] = "libsqlite3.so"

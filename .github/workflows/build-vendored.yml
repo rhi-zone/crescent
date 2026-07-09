@@ -348,7 +348,7 @@ jobs:
           merge-multiple: true
       - name: Copy artifacts and commit
         run: |
-          mkdir -p bin dep
+          mkdir -p bin dep/sqlite3 dep/zlib dep/wepoll
           cp artifacts/luajit                          bin/luajit-bin
           cp artifacts/luajit-aarch64                  bin/luajit-aarch64-bin
           cp artifacts/luajit-macos-aarch64            bin/luajit-macos-aarch64
@@ -356,16 +356,16 @@ jobs:
           cp artifacts/luajit32.exe                    bin/luajit32.exe
           cp artifacts/ld-musl-x86_64.so.1             bin/
           cp artifacts/ld-musl-aarch64.so.1            bin/
-          cp artifacts/libsqlite3-linux-x86_64.so      dep/
-          cp artifacts/libsqlite3-linux-aarch64.so     dep/
-          cp artifacts/libsqlite3-macos-arm64.dylib    dep/
-          cp artifacts/sqlite.dll                      dep/
-          cp artifacts/sqlite-x86.dll                  dep/
-          cp artifacts/libz-linux-x86_64.so           dep/
-          cp artifacts/libz-linux-aarch64.so          dep/
-          cp artifacts/libz-macos-arm64.dylib         dep/
-          cp artifacts/zlib.dll                       dep/
-          cp artifacts/zlib-x86.dll                   dep/
+          cp artifacts/libsqlite3-linux-x86_64.so      dep/sqlite3/
+          cp artifacts/libsqlite3-linux-aarch64.so     dep/sqlite3/
+          cp artifacts/libsqlite3-macos-arm64.dylib    dep/sqlite3/
+          cp artifacts/sqlite.dll                      dep/sqlite3/sqlite3-x64.dll
+          cp artifacts/sqlite-x86.dll                  dep/sqlite3/sqlite3-x86.dll
+          cp artifacts/libz-linux-x86_64.so           dep/zlib/
+          cp artifacts/libz-linux-aarch64.so          dep/zlib/
+          cp artifacts/libz-macos-arm64.dylib         dep/zlib/
+          cp artifacts/zlib.dll                       dep/zlib/zlib-x64.dll
+          cp artifacts/zlib-x86.dll                   dep/zlib/zlib-x86.dll
           cp artifacts/wepoll-x64.dll                 dep/wepoll/
           cp artifacts/wepoll-x86.dll                 dep/wepoll/
           chmod +x bin/luajit bin/luajit-aarch64 \
