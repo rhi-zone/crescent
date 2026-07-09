@@ -26,7 +26,7 @@ local epoll_ctl_c = function(_epfd, _op, _fd, _event) error("epoll: epoll_ctl_c 
 local epoll_wait_c = function(_epfd, _events, _max, _timeout) error("epoll: epoll_wait_c not initialized") end
 
 if ffi.os == "Windows" then
-	local wepoll = assert(ffi.load("wepoll.dll"))
+	local wepoll = assert(ffi.load("dep/wepoll/wepoll-x64.dll"))
 	local ws2_32 = assert(ffi.load("Ws2_32.dll"))
 	-- https://github.com/piscisaureus/wepoll/blob/0598a791bf9cbbf480793d778930fc635b044980/wepoll.h
 	ffi.cdef [[
