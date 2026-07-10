@@ -12,7 +12,7 @@ local bit = require("bit")
 
 local M = {}
 
---:: epoll = { fd: integer, read_cbs: { [integer]: unknown }, write_cbs: { [integer]: unknown }, close_cbs: { [integer]: unknown }, rets: { [integer]: { write: (string) -> nil, remove: () -> nil } }, weak: { [integer]: boolean }, count: integer, add: (self: epoll, fd: integer, on_read: ((string) -> nil) | (() -> nil), close: (() -> nil) | nil, weak: boolean | nil) -> (((string) -> nil) | nil, (() -> nil) | nil, string | nil), remove: (self: epoll, fd: integer) -> nil, wait: (self: epoll) -> nil, loop: (self: epoll) -> nil }
+--:: epoll = { fd: integer, read_cbs: { [integer]: unknown }, write_cbs: { [integer]: unknown }, close_cbs: { [integer]: unknown }, rets: { [integer]: { write: (string) -> nil, remove: () -> nil } }, weak: { [integer]: boolean }, count: integer, add: (self: epoll, fd: integer, on_read: ((string) -> nil) | (() -> nil), close: (() -> nil) | nil, weak: boolean | nil) -> (((string) -> nil) | nil, (() -> nil) | nil, string | nil), remove: (self: epoll, fd: integer) -> nil, wait: (self: epoll, timeout_ms: integer | nil) -> nil, loop: (self: epoll) -> nil }
 
 --: (number, cdata, integer) -> integer
 local read_c = function(_fd, _buf, _n) error("epoll: read_c not initialized") end
@@ -228,10 +228,15 @@ epoll.modify = function (self, fd, on_read, close)
 	return rets.write, rets.remove, nil
 end
 
---: (epoll) -> nil
-epoll.wait = function (self)
+-- timeout_ms: milliseconds to block for (matches epoll_wait's native timeout
+-- parameter). nil or -1 blocks indefinitely (previous behavior); 0 returns
+-- immediately. If the timeout elapses with no event, wait returns without
+-- invoking any callback.
+--: (epoll, integer | nil) -> nil
+epoll.wait = function (self, timeout_ms)
 	local events = epoll_event() --[[@type epoll_event[] ]]
-	epoll_wait_c(self.fd, events, 1, -1)
+	local n = epoll_wait_c(self.fd, events, 1, timeout_ms or -1)
+	if n < 1 then return end
 	local event = events[0] --[[@type epoll_event]]
 	local fd = tonumber(event.fd)
 	if not fd then return end

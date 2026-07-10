@@ -11,7 +11,7 @@ local bit = require("bit")
 
 local M = {}
 
---:: kqueue_poller = { fd: integer, read_cbs: { [integer]: unknown }, write_cbs: { [integer]: unknown }, close_cbs: { [integer]: unknown }, rets: { [integer]: { write: (string) -> nil, remove: () -> nil } }, weak: { [integer]: boolean }, count: integer, add: (self: kqueue_poller, fd: integer, on_read: ((string) -> nil) | (() -> nil), close: (() -> nil) | nil, weak: boolean | nil) -> (((string) -> nil) | nil, (() -> nil) | nil, string | nil), modify: (self: kqueue_poller, fd: integer, on_read: ((string) -> nil) | (() -> nil), close: (() -> nil) | nil) -> (((string) -> nil) | nil, (() -> nil) | nil, string | nil), wait: (self: kqueue_poller) -> nil, loop: (self: kqueue_poller) -> nil }
+--:: kqueue_poller = { fd: integer, read_cbs: { [integer]: unknown }, write_cbs: { [integer]: unknown }, close_cbs: { [integer]: unknown }, rets: { [integer]: { write: (string) -> nil, remove: () -> nil } }, weak: { [integer]: boolean }, count: integer, add: (self: kqueue_poller, fd: integer, on_read: ((string) -> nil) | (() -> nil), close: (() -> nil) | nil, weak: boolean | nil) -> (((string) -> nil) | nil, (() -> nil) | nil, string | nil), modify: (self: kqueue_poller, fd: integer, on_read: ((string) -> nil) | (() -> nil), close: (() -> nil) | nil) -> (((string) -> nil) | nil, (() -> nil) | nil, string | nil), wait: (self: kqueue_poller, timeout_ms: integer | nil) -> nil, loop: (self: kqueue_poller) -> nil }
 
 pcall(ffi.cdef, "struct timespec { long tv_sec; long tv_nsec; };")
 
@@ -200,10 +200,20 @@ kqueue.modify = function (self, fd, on_read, close)
 	return rets.write, rets.remove, nil
 end
 
---: (kqueue_poller) -> nil
-kqueue.wait = function (self)
+-- timeout_ms: milliseconds to block for. nil or a negative value blocks
+-- indefinitely (previous behavior, passed to kevent as a NULL timespec);
+-- 0 returns immediately. If the timeout elapses with no event, wait
+-- returns without invoking any callback.
+--: (kqueue_poller, integer | nil) -> nil
+kqueue.wait = function (self, timeout_ms)
 	local events = kevent_arr1()
-	local n = ffi.C.kevent(self.fd, nil, 0, events, 1, nil)
+	local timeout_ptr --[[: unknown]] = nil
+	if timeout_ms and timeout_ms >= 0 then
+		local sec = math.floor(timeout_ms / 1000)
+		local nsec = (timeout_ms - sec * 1000) * 1000000
+		timeout_ptr = ffi.new("struct timespec", { sec, nsec })
+	end
+	local n = ffi.C.kevent(self.fd, nil, 0, events, 1, timeout_ptr)
 	if n < 1 then return end
 
 	local event = events[0]
