@@ -11,7 +11,7 @@ local bit = require("bit")
 
 local M = {}
 
---:: kqueue_poller = { fd: integer, read_cbs: { [integer]: unknown }, write_cbs: { [integer]: unknown }, close_cbs: { [integer]: unknown }, rets: { [integer]: { write: (string) -> nil, remove: () -> nil } }, weak: { [integer]: boolean }, count: integer, add: (self: kqueue_poller, fd: integer, on_read: ((string) -> nil) | (() -> nil), close: (() -> nil) | nil, weak: boolean | nil) -> (((string) -> nil) | nil, (() -> nil) | nil, string | nil), modify: (self: kqueue_poller, fd: integer, on_read: ((string) -> nil) | (() -> nil), close: (() -> nil) | nil) -> (((string) -> nil) | nil, (() -> nil) | nil, string | nil), wait: (self: kqueue_poller, timeout_ms: integer | nil) -> nil, loop: (self: kqueue_poller) -> nil }
+--:: kqueue_poller = { fd: integer, read_cbs: { [integer]: unknown }, write_cbs: { [integer]: unknown }, close_cbs: { [integer]: unknown }, rets: { [integer]: { write: ((string) -> nil) | nil, remove: () -> nil, _write_toggle: unknown, _del_changes: unknown } }, weak: { [integer]: boolean }, count: integer, add: (self: kqueue_poller, fd: integer, on_read: ((string) -> nil) | (() -> nil), close: (() -> nil) | nil, weak: boolean | nil) -> (((string) -> nil) | nil, (() -> nil) | nil, string | nil), modify: (self: kqueue_poller, fd: integer, on_read: ((string) -> nil) | (() -> nil), close: (() -> nil) | nil) -> (((string) -> nil) | nil, (() -> nil) | nil, string | nil), watch_writable: (self: kqueue_poller, fd: integer, cb: () -> nil) -> (nil | string), unwatch_writable: (self: kqueue_poller, fd: integer) -> (nil | string), wait: (self: kqueue_poller, timeout_ms: integer | nil) -> nil, loop: (self: kqueue_poller) -> nil }
 
 pcall(ffi.cdef, "struct timespec { long tv_sec; long tv_nsec; };")
 
@@ -110,6 +110,40 @@ local remove_fd = function (self, fd)
 	end
 end
 
+-- ── Write-readiness primitive ────────────────────────────────────────────────
+-- watch_writable enables EVFILT_WRITE interest for an already-registered fd and
+-- stores cb as the write-ready callback. unwatch_writable disables it.
+-- These are the primitive layer; the buffered write helper returned by add()
+-- is sugar built on top.
+
+--: (kqueue_poller, integer, () -> nil) -> (nil | string)
+kqueue.watch_writable = function (self, fd, cb)
+	if not self.rets[fd] then return "kqueue: watch_writable: fd not registered: " .. fd end
+	self.write_cbs[fd] = cb
+	local write_toggle = self.rets[fd]._write_toggle
+	write_toggle[0].flags = EV_ENABLE
+	if ffi.C.kevent(self.fd, write_toggle, 1, nil, 0, nil) < 0 then
+		return "kqueue: watch_writable: kevent failed"
+	end
+	return nil
+end
+M.watch_writable = kqueue.watch_writable
+
+--: (kqueue_poller, integer) -> (nil | string)
+kqueue.unwatch_writable = function (self, fd)
+	if not self.rets[fd] then return "kqueue: unwatch_writable: fd not registered: " .. fd end
+	self.write_cbs[fd] = nil
+	local write_toggle = self.rets[fd]._write_toggle
+	write_toggle[0].flags = EV_DISABLE
+	if ffi.C.kevent(self.fd, write_toggle, 1, nil, 0, nil) < 0 then
+		return "kqueue: unwatch_writable: kevent failed"
+	end
+	return nil
+end
+M.unwatch_writable = kqueue.unwatch_writable
+
+-- ── add ──────────────────────────────────────────────────────────────────────
+
 --: (self: kqueue_poller, fd: integer, on_read: (string) -> nil, close: (() -> nil) | nil, weak: boolean | nil) -> (((string) -> nil) | nil, (() -> nil) | nil, string | nil)
 kqueue.add = function (self, fd, on_read, close, weak)
 	local ep = self
@@ -136,9 +170,7 @@ kqueue.add = function (self, fd, on_read, close, weak)
 	else
 		ep.read_cbs[fd] = on_read_fn
 	end
-
-	local write_buf = ""
-	local kqfd = ep.fd
+	ep.close_cbs[fd] = close
 
 	-- pre-allocate change structs to avoid hot-path allocation
 	local write_toggle = kevent_arr1()
@@ -148,34 +180,31 @@ kqueue.add = function (self, fd, on_read, close, weak)
 	ev_set(del_changes[0], fd, EVFILT_READ, EV_DELETE, 0, 0, nil)
 	ev_set(del_changes[1], fd, EVFILT_WRITE, EV_DELETE, 0, 0, nil)
 
-	ep.write_cbs[fd] = function ()
-		ffi.C.write(fd, write_buf, #write_buf)
-		write_buf = ""
-		write_toggle[0].flags = EV_DISABLE
-		if ffi.C.kevent(kqfd, write_toggle, 1, nil, 0, nil) < 0 then
-			error("kqueue: write callback failed")
-		end
-	end
-	ep.close_cbs[fd] = close
-
-	--: (string) -> nil
-	local write = function (data)
-		write_buf = write_buf .. data
-		write_toggle[0].flags = EV_ENABLE
-		if ffi.C.kevent(kqfd, write_toggle, 1, nil, 0, nil) < 0 then
-			error("kqueue: write failed")
-		end
-	end
 	--: () -> nil
 	local remove = function ()
 		remove_fd(ep, fd)
 		-- may silently fail if fd already closed
-		ffi.C.kevent(kqfd, del_changes, 2, nil, 0, nil)
+		ffi.C.kevent(ep.fd, del_changes, 2, nil, 0, nil)
 	end
 
-	ep.rets[fd] = { write = write, remove = remove }
+	ep.rets[fd] = { write = nil, remove = remove, _write_toggle = write_toggle, _del_changes = del_changes }
 	if weak then ep.weak[fd] = true
 	else ep.count = ep.count + 1 end
+
+	-- Build the buffered-write convenience function on top of the primitive.
+	local write_buf = ""
+	--: () -> nil
+	local flush_cb = function ()
+		ffi.C.write(fd, write_buf, #write_buf)
+		write_buf = ""
+		ep:unwatch_writable(fd)
+	end
+	--: (string) -> nil
+	local write = function (data)
+		write_buf = write_buf .. data
+		ep:watch_writable(fd, flush_cb)
+	end
+	ep.rets[fd].write = write
 	return write, remove, nil
 end
 M.add = kqueue.add

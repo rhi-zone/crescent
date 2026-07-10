@@ -12,7 +12,7 @@ local bit = require("bit")
 
 local M = {}
 
---:: epoll = { fd: integer, read_cbs: { [integer]: unknown }, write_cbs: { [integer]: unknown }, close_cbs: { [integer]: unknown }, rets: { [integer]: { write: (string) -> nil, remove: () -> nil } }, weak: { [integer]: boolean }, count: integer, add: (self: epoll, fd: integer, on_read: ((string) -> nil) | (() -> nil), close: (() -> nil) | nil, weak: boolean | nil) -> (((string) -> nil) | nil, (() -> nil) | nil, string | nil), remove: (self: epoll, fd: integer) -> nil, wait: (self: epoll, timeout_ms: integer | nil) -> nil, loop: (self: epoll) -> nil }
+--:: epoll = { fd: integer, read_cbs: { [integer]: unknown }, write_cbs: { [integer]: unknown }, close_cbs: { [integer]: unknown }, rets: { [integer]: { write: ((string) -> nil) | nil, remove: () -> nil, _ev: unknown } }, weak: { [integer]: boolean }, count: integer, add: (self: epoll, fd: integer, on_read: ((string) -> nil) | (() -> nil), close: (() -> nil) | nil, weak: boolean | nil) -> (((string) -> nil) | nil, (() -> nil) | nil, string | nil), remove: (self: epoll, fd: integer) -> nil, watch_writable: (self: epoll, fd: integer, cb: () -> nil) -> (nil | string), unwatch_writable: (self: epoll, fd: integer) -> (nil | string), wait: (self: epoll, timeout_ms: integer | nil) -> nil, loop: (self: epoll) -> nil }
 
 --: (number, cdata, integer) -> integer
 local read_c = function(_fd, _buf, _n) error("epoll: read_c not initialized") end
@@ -156,6 +156,40 @@ local remove_fd = function (self, fd)
 	end
 end
 
+-- ── Write-readiness primitive ────────────────────────────────────────────────
+-- watch_writable enables EPOLLOUT interest for an already-registered fd and
+-- stores cb as the write-ready callback. unwatch_writable disables it.
+-- These are the primitive layer; the buffered write helper returned by add()
+-- is sugar built on top.
+
+--: (epoll, integer, () -> nil) -> (nil | string)
+epoll.watch_writable = function (self, fd, cb)
+	if not self.rets[fd] then return "epoll: watch_writable: fd not registered: " .. fd end
+	self.write_cbs[fd] = cb
+	local ev = self.rets[fd]._ev
+	ev[0].events = 5 --[[EPOLLIN | EPOLLOUT]]
+	if epoll_ctl_c(self.fd, --[[EPOLL_CTL_MOD]] 3, fd, ev) ~= 0 then
+		return "epoll: watch_writable: epoll_ctl_mod failed"
+	end
+	return nil
+end
+M.watch_writable = epoll.watch_writable
+
+--: (epoll, integer) -> (nil | string)
+epoll.unwatch_writable = function (self, fd)
+	if not self.rets[fd] then return "epoll: unwatch_writable: fd not registered: " .. fd end
+	self.write_cbs[fd] = nil
+	local ev = self.rets[fd]._ev
+	ev[0].events = 1 --[[EPOLLIN]]
+	if epoll_ctl_c(self.fd, --[[EPOLL_CTL_MOD]] 3, fd, ev) ~= 0 then
+		return "epoll: unwatch_writable: epoll_ctl_mod failed"
+	end
+	return nil
+end
+M.unwatch_writable = epoll.unwatch_writable
+
+-- ── add ──────────────────────────────────────────────────────────────────────
+
 --: (self: epoll, fd: integer, on_read: (string) -> nil, close: (() -> nil) | nil, weak: boolean | nil) -> (((string) -> nil) | nil, (() -> nil) | nil, string | nil)
 epoll.add = function (self, fd, on_read, close, weak)
 	local ep = self
@@ -173,37 +207,34 @@ epoll.add = function (self, fd, on_read, close, weak)
 	else
 		ep.read_cbs[fd] = on_read_fn
 	end
-	local write_buf = ""
-	local epfd = ep.fd
-	ep.write_cbs[fd] = function ()
-		write_c(fd, write_buf, #write_buf)
-		write_buf = ""
-		events[0].events = 1 --[[EPOLLIN]]
-		if epoll_ctl_c(epfd, --[[EPOLL_CTL_MOD]] 3, fd, events) ~= 0 then
-			error("epoll: write callback failed")
-		end
-	end
 	ep.close_cbs[fd] = close
-	--: (string) -> nil
-	local write = function (data)
-		write_buf = write_buf .. data
-		events[0].events = 5 --[[EPOLLIN | EPOLLOUT]]
-		if epoll_ctl_c(epfd, --[[EPOLL_CTL_MOD]] 3, fd, events) ~= 0 then
-			error("epoll: write failed")
-		end
-	end
 	--: () -> nil
 	local remove = function ()
 		remove_fd(ep, fd)
 		--[[this may silently fail if the socket has been closed.]]
-		epoll_ctl_c(epfd, --[[EPOLL_CTL_DEL]] 2, fd, events)
+		epoll_ctl_c(ep.fd, --[[EPOLL_CTL_DEL]] 2, fd, events)
 	end
-	if epoll_ctl_c(epfd, --[[EPOLL_CTL_ADD]] 1, fd, events) ~= 0 then
+	if epoll_ctl_c(ep.fd, --[[EPOLL_CTL_ADD]] 1, fd, events) ~= 0 then
 		return nil, nil, "epoll: add failed"
 	end
-	ep.rets[fd] = { write = write, remove = remove }
+	ep.rets[fd] = { write = nil, remove = remove, _ev = events }
 	if weak then ep.weak[fd] = true
 	else ep.count = ep.count + 1 end
+
+	-- Build the buffered-write convenience function on top of the primitive.
+	local write_buf = ""
+	--: () -> nil
+	local flush_cb = function ()
+		write_c(fd, write_buf, #write_buf)
+		write_buf = ""
+		ep:unwatch_writable(fd)
+	end
+	--: (string) -> nil
+	local write = function (data)
+		write_buf = write_buf .. data
+		ep:watch_writable(fd, flush_cb)
+	end
+	ep.rets[fd].write = write
 	return write, remove, nil
 end
 M.add = epoll.add
