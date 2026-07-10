@@ -2,6 +2,7 @@ if not package.path:find("./?/init.lua", 1, true) then
   package.path = "./?/init.lua;" .. package.path
 end
 
+local ffi = require("ffi")
 local T = require("lib.test.assert")
 local A = require("lib.async")
 
@@ -313,88 +314,7 @@ T.describe("M.defer", function()
   end)
 end)
 
--- ── Event loop ───────────────────────────────────────────────────────────────
-
-T.describe("event loop queue / tick", function()
-  T.it("runs queued functions on tick", function()
-    local lp = A.loop()
-    local log = {}
-    lp:queue(function() log[#log + 1] = "a" end)
-    lp:queue(function() log[#log + 1] = "b" end)
-    T.eq(#log, 0)
-    lp:tick()
-    T.eq(log[1], "a")
-    T.eq(log[2], "b")
-  end)
-
-  T.it("respects FIFO order", function()
-    local lp = A.loop()
-    local order = {}
-    for i = 1, 5 do
-      local n = i
-      lp:queue(function() order[#order + 1] = n end)
-    end
-    lp:tick()
-    for i = 1, 5 do T.eq(order[i], i) end
-  end)
-
-  T.it("clear removes all queued fns", function()
-    local lp = A.loop()
-    local ran = false
-    lp:queue(function() ran = true end)
-    lp:clear()
-    lp:tick()
-    T.ok(not ran)
-  end)
-
-  T.it("re-queued fns run on next tick", function()
-    local lp = A.loop()
-    local count = 0
-    local function inc()
-      count = count + 1
-      if count < 3 then lp:queue(inc) end
-    end
-    lp:queue(inc)
-    lp:tick()
-    T.eq(count, 1)
-    lp:tick()
-    T.eq(count, 2)
-    lp:tick()
-    T.eq(count, 3)
-  end)
-end)
-
--- ── Sleep ────────────────────────────────────────────────────────────────────
-
-T.describe("loop:sleep", function()
-  T.it("does not resolve before deadline", function()
-    local lp = A.loop()
-    local p = lp:sleep(100)
-    T.ok(p:is_pending())
-    lp:tick(50)
-    T.ok(p:is_pending())
-  end)
-
-  T.it("resolves at or after deadline", function()
-    local lp = A.loop()
-    local p = lp:sleep(100)
-    lp:tick(100)
-    T.ok(p:is_resolved())
-  end)
-
-  T.it("multiple sleeps resolve in order", function()
-    local lp = A.loop()
-    local p1 = lp:sleep(50)
-    local p2 = lp:sleep(150)
-    lp:tick(100)
-    T.ok(p1:is_resolved(), "p1 resolved at 100ms")
-    T.ok(p2:is_pending(), "p2 still pending at 100ms")
-    lp:tick(60)
-    T.ok(p2:is_resolved(), "p2 resolved at 160ms")
-  end)
-end)
-
--- ── M.run ────────────────────────────────────────────────────────────────────
+-- ── M.run (synchronous pure-promise) ─────────────────────────────────────────
 
 T.describe("M.run", function()
   T.it("drives a simple resolved promise", function()
@@ -508,24 +428,194 @@ T.describe("M.async + M.await", function()
   end)
 end)
 
--- ── loop:run_until ───────────────────────────────────────────────────────────
+-- ── Event loop with poller ───────────────────────────────────────────────────
 
-T.describe("loop:run_until", function()
-  T.it("runs until promise resolves via queue", function()
-    local lp = A.loop()
-    local p, resolve = A.promise()
-    lp:queue(function() resolve("done") end)
-    local val, err = lp:run_until(p)
-    T.eq(err, nil)
-    T.eq(val, "done")
+-- We need a real poller for event loop tests. Skip if not on a supported OS.
+local ok_io_poll, io_poll = pcall(require, "lib.io_poll")
+
+if ok_io_poll then
+
+  pcall(ffi.cdef, "int pipe(int pipefd[2]);")
+  pcall(ffi.cdef, "int close(int fd);")
+  pcall(ffi.cdef, "ssize_t write(int fd, const void *buf, size_t count);")
+  pcall(ffi.cdef, "ssize_t read(int fd, void *buf, size_t count);")
+
+  T.describe("event loop (poller-driven)", function()
+    T.it("requires a poller argument", function()
+      local ok, err = pcall(A.loop, nil)
+      T.ok(not ok)
+      T.ok(tostring(err):find("poller is required"), "error mentions poller")
+    end)
+
+    T.it("constructs with a poller", function()
+      local poller = io_poll.new()
+      local lp = A.loop(poller)
+      T.ok(lp ~= nil)
+    end)
+
+    T.it("queue runs on next iteration via run_until", function()
+      local poller = io_poll.new()
+      local lp = A.loop(poller)
+      local p, resolve = A.promise()
+      lp:queue(function() resolve("done") end)
+      local val, err = lp:run_until(p)
+      T.eq(err, nil)
+      T.eq(val, "done")
+    end)
+
+    T.it("run_until returns nil, reason for rejected promise", function()
+      local poller = io_poll.new()
+      local lp = A.loop(poller)
+      local p, _, reject = A.promise()
+      lp:queue(function() reject("bad") end)
+      local val, err = lp:run_until(p)
+      T.eq(val, nil)
+      T.eq(err, "bad")
+    end)
   end)
 
-  T.it("returns nil, reason for rejected promise", function()
-    local lp = A.loop()
-    local p, _, reject = A.promise()
-    lp:queue(function() reject("bad") end)
-    local val, err = lp:run_until(p)
-    T.eq(val, nil)
-    T.eq(err, "bad")
+  T.describe("loop:sleep (real time)", function()
+    T.it("resolves after the specified duration", function()
+      local poller = io_poll.new()
+      local lp = A.loop(poller)
+      local p = lp:sleep(10) -- 10ms
+      T.ok(p:is_pending(), "should be pending initially")
+      local val, err = lp:run_until(p)
+      T.eq(err, nil)
+      T.eq(val, nil)
+      T.ok(p:is_resolved(), "resolved after run_until")
+    end)
+
+    T.it("resolves multiple timers in order", function()
+      local poller = io_poll.new()
+      local lp = A.loop(poller)
+      local order = {}
+      lp:sleep(5):and_then(function() order[#order + 1] = "a" end)
+      lp:sleep(15):and_then(function() order[#order + 1] = "b" end)
+      local done = lp:sleep(20)
+      lp:run_until(done)
+      T.eq(order[1], "a")
+      T.eq(order[2], "b")
+    end)
+
+    T.it("accepts injected clock cap", function()
+      local poller = io_poll.new()
+      local fake_time = 0
+      local lp = A.loop(poller, { clock = function() return fake_time end })
+      local p = lp:sleep(100)
+      T.ok(p:is_pending())
+      -- Advance fake time and let the loop iterate
+      fake_time = 200
+      lp:queue(function() end) -- trigger one iteration
+      lp:run_until(p)
+      T.ok(p:is_resolved())
+    end)
   end)
-end)
+
+  T.describe("loop:await_readable", function()
+    T.it("resolves when fd becomes readable via pipe", function()
+      local pipefd = ffi.new("int[2]")
+      assert(ffi.C.pipe(pipefd) == 0, "pipe() failed")
+      local read_fd = pipefd[0]
+      local write_fd = pipefd[1]
+
+      local poller = io_poll.new()
+      local lp = A.loop(poller)
+
+      local p, err = lp:await_readable(read_fd)
+      T.eq(err, nil)
+      T.ok(p:is_pending())
+
+      -- Write to the pipe to make the read end readable.
+      ffi.C.write(write_fd, "hi", 2)
+
+      lp:run_until(p)
+      T.ok(p:is_resolved(), "resolved once fd is readable")
+
+      -- Clean up
+      ffi.C.close(read_fd)
+      ffi.C.close(write_fd)
+    end)
+
+    T.it("returns error for duplicate fd registration", function()
+      local pipefd = ffi.new("int[2]")
+      assert(ffi.C.pipe(pipefd) == 0)
+      local read_fd = pipefd[0]
+      local write_fd = pipefd[1]
+
+      local poller = io_poll.new()
+      local lp = A.loop(poller)
+
+      local p1, err1 = lp:await_readable(read_fd)
+      T.eq(err1, nil)
+
+      -- Second await on same fd should fail (already registered).
+      local p2, err2 = lp:await_readable(read_fd)
+      T.eq(p2, nil)
+      T.ok(err2 ~= nil, "got error for duplicate fd")
+
+      -- Clean up: resolve the first to unregister, then close
+      ffi.C.write(write_fd, "x", 1)
+      lp:run_until(p1)
+      ffi.C.close(read_fd)
+      ffi.C.close(write_fd)
+    end)
+  end)
+
+  T.describe("loop:await_writable", function()
+    T.it("resolves when fd is writable via pipe", function()
+      local pipefd = ffi.new("int[2]")
+      assert(ffi.C.pipe(pipefd) == 0, "pipe() failed")
+      local read_fd = pipefd[0]
+      local write_fd = pipefd[1]
+
+      local poller = io_poll.new()
+      local lp = A.loop(poller)
+
+      -- Pipe write end is immediately writable (buffer is empty).
+      local p, err = lp:await_writable(write_fd)
+      T.eq(err, nil)
+      T.ok(p ~= nil)
+
+      lp:run_until(p)
+      T.ok(p:is_resolved(), "resolved once fd is writable")
+
+      -- Clean up
+      ffi.C.close(read_fd)
+      ffi.C.close(write_fd)
+    end)
+  end)
+
+  T.describe("async/await with poller-driven loop", function()
+    T.it("await_readable inside async fn", function()
+      local pipefd = ffi.new("int[2]")
+      assert(ffi.C.pipe(pipefd) == 0)
+      local read_fd = pipefd[0]
+      local write_fd = pipefd[1]
+
+      local poller = io_poll.new()
+      local lp = A.loop(poller)
+
+      local reader = A.async(function()
+        local p, err = lp:await_readable(read_fd)
+        if not p then error(err) end
+        A.await(p)
+        return "readable"
+      end)
+
+      local result_p = reader()
+      T.ok(result_p:is_pending())
+
+      -- Make it readable
+      ffi.C.write(write_fd, "data", 4)
+
+      local val, err = lp:run_until(result_p)
+      T.eq(err, nil)
+      T.eq(val, "readable")
+
+      ffi.C.close(read_fd)
+      ffi.C.close(write_fd)
+    end)
+  end)
+
+end -- ok_io_poll

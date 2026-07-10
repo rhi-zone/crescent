@@ -2,12 +2,29 @@ if not package.path:find("./?/init.lua", 1, true) then
   package.path = "./?/init.lua;" .. package.path
 end
 
---- Promise-based async/await over Lua coroutines.
--- Promises are plain tables with a state machine: pending → fulfilled | rejected.
+local ffi = require("ffi")
+
+--- Promise-based async/await over Lua coroutines with real-time I/O.
+-- Promises are plain tables with a state machine: pending -> fulfilled | rejected.
 -- Async functions are coroutines that yield on promises and resume when settled.
--- M.run / loop:run_until drive all pending continuations synchronously.
+-- The event loop blocks on a poller (epoll/kqueue) and uses real wall-clock time.
 local M = {}
 M._tier = "pure"
+
+-- ── Real-time clock ──────────────────────────────────────────────────────────
+
+pcall(ffi.cdef, "struct timespec { long tv_sec; long tv_nsec; };")
+pcall(ffi.cdef, "int clock_gettime(int clk_id, struct timespec *tp);")
+
+-- Returns current monotonic time in milliseconds.
+--: () -> number
+local function monotonic_clock_ms()
+  local ts = ffi.new("struct timespec")
+  ffi.C.clock_gettime(1, ts) -- CLOCK_MONOTONIC = 1
+  local sec = ts.tv_sec --: number
+  local nsec = ts.tv_nsec --: number
+  return sec * 1000 + nsec / 1000000
+end
 
 -- ── Promise state constants ──────────────────────────────────────────────────
 
@@ -24,7 +41,10 @@ local REJECTED  = "rejected"
 --:: RejectFn = (reason: unknown) -> nil
 --:: LoopQ = { [integer]: () -> unknown }
 --:: LoopTimers = { [integer]: { number, ResolveFn } }
---:: LoopObj = { _queue: LoopQ, _timers: LoopTimers, _time: number, tick: (LoopObj, number | nil) -> nil, run_until: (LoopObj, PromiseP) -> (unknown, unknown), sleep: (LoopObj, number) -> PromiseP, clear: (LoopObj) -> nil, queue: (LoopObj, () -> unknown) -> nil, ... }
+--:: ClockFn = () -> number
+--:: Poller = { wait: (unknown, integer | nil) -> nil, add: (unknown, integer, (() -> nil) | ((string) -> nil), (() -> nil) | nil, boolean | nil) -> (((string) -> nil) | nil, (() -> nil) | nil, string | nil), watch_writable: (unknown, integer, () -> nil) -> (nil | string), unwatch_writable: (unknown, integer) -> (nil | string), count: integer, ... }
+--:: LoopOpts = { clock: ClockFn | nil }
+--:: LoopObj = { _queue: LoopQ, _timers: LoopTimers, _poller: Poller, _clock: ClockFn, _pending_io: integer, run_until: (LoopObj, PromiseP) -> (unknown, unknown), sleep: (LoopObj, number) -> PromiseP, clear: (LoopObj) -> nil, queue: (LoopObj, () -> unknown) -> nil, await_readable: (LoopObj, integer, Poller | nil) -> (PromiseP | nil, string | nil), await_writable: (LoopObj, integer, Poller | nil) -> (PromiseP | nil, string | nil), ... }
 
 -- ── Internal helpers ─────────────────────────────────────────────────────────
 
@@ -67,9 +87,8 @@ settle = function(p, state, value)
       _ = err
     end
   end
-  -- If rejected with no rejection handlers, also drain on_fulfill (none).
-  -- Drain the other side's "always" handlers (finally).
-  local fncbs = p._on_finally --[[:! FinallyList]]
+  -- Drain the "always" handlers (finally).
+  local fncbs = p._on_finally
   for i = 1, #fncbs do
     pcall(fncbs[i])
   end
@@ -121,9 +140,8 @@ function M.rejected(reason)
   return p
 end
 
---- Create a promise that resolves with fn()'s return value on next loop tick.
+--- Create a promise that resolves with fn()'s return value immediately.
 -- If fn raises, the promise is rejected with the error.
--- Note: without an event loop, the fn is called immediately (synchronous defer).
 function M.defer(fn)
   local p, resolve, reject = M.promise()
   local ok, result = pcall(fn)
@@ -335,70 +353,33 @@ end
 local Loop = {}
 Loop.__index = Loop
 
---- Create a new event loop.
---: () -> LoopObj
-function M.loop()
+--- Create a new event loop driven by a poller (epoll/kqueue/io_poll instance).
+-- poller: required. The io_poll instance that provides wait/add/watch_writable.
+-- opts.clock: optional clock cap returning monotonic milliseconds. Defaults to
+--   real wall-clock time via clock_gettime(CLOCK_MONOTONIC).
+--: (Poller, LoopOpts | nil) -> LoopObj
+function M.loop(poller, opts)
+  if not poller then
+    error("async.loop: poller is required (caps-first: inject an io_poll instance)")
+  end
+  local lopts = opts or {}
+  local clock_fn = lopts.clock or monotonic_clock_ms
   local lq = {} --: LoopQ
   local lt = {} --: LoopTimers
-  local ltime = 0 --: number
   local lobj = setmetatable({
-    _queue    = lq,
-    _timers   = lt,
-    _time     = ltime,
+    _queue      = lq,
+    _timers     = lt,
+    _poller     = poller,
+    _clock      = clock_fn,
+    _pending_io = 0,
   }, Loop) --[[: unknown]]
   return lobj --[[:! LoopObj]]
 end
 
---- Schedule fn for the next tick.
+--- Schedule fn for the next iteration of the loop.
 --: (LoopObj, () -> unknown) -> nil
 function Loop:queue(fn)
   self._queue[#self._queue + 1] = fn
-end
-
---- Run all currently queued functions (and anything they enqueue), advancing
--- internal time by `elapsed` milliseconds (default 0).
---: (LoopObj, number | nil) -> nil
-function Loop:tick(elapsed)
-  elapsed = elapsed or 0
-  self._time = self._time + (elapsed --[[:! number]])
-
-  -- Fire elapsed timers.
-  for i = #self._timers, 1, -1 do
-    local t = self._timers[i]
-    if self._time >= t[1] then
-      table.remove(self._timers, i)
-      t[2](nil)  -- resolve the timer promise with nil
-    end
-  end
-
-  -- Drain the queue (snapshot to avoid infinite loops if tick re-enqueues).
-  local batch = self._queue
-  self._queue = {}
-  for i = 1, #batch do
-    batch[i]()
-  end
-end
-
---- Run the loop until `promise` settles. Returns value, err.
--- Runs a bounded number of ticks (prevents infinite loops).
---: (LoopObj, PromiseP) -> (unknown, unknown)
-function Loop:run_until(promise)
-  local p_ = promise
-  local max_ticks = 100000
-  local ticks = 0
-  while p_._state == PENDING and ticks < max_ticks do
-    self:tick(0)
-    ticks = ticks + 1
-    -- If no more work to do but promise is still pending, bail.
-    if #self._queue == 0 and #self._timers == 0 then break end
-  end
-  if p_._state == FULFILLED then
-    return p_.value, nil
-  elseif p_._state == REJECTED then
-    return nil, p_.reason
-  else
-    return nil, "event loop exhausted without promise settling"
-  end
 end
 
 --- Clear all queued work and timers.
@@ -408,20 +389,164 @@ function Loop:clear()
   self._timers = {}
 end
 
---- Create a sleep promise that resolves after `ms` milliseconds.
--- Uses `clock_fn()` (defaults to loop's internal time counter).
+--- Create a sleep promise that resolves after `ms` real milliseconds.
 --: (LoopObj, number) -> PromiseP
 function Loop:sleep(ms)
-  local deadline = self._time + ms
+  local deadline = self._clock() + ms
   local p, resolve, _ = M.promise()
   self._timers[#self._timers + 1] = { deadline, resolve }
   return p
+end
+
+--- Return a promise that resolves when fd becomes readable (bare notification).
+-- The fd is registered with the poller for the lifetime of the await; it is
+-- automatically removed once the notification fires or the fd is closed.
+-- If custom_poller is provided, it is used instead of the loop's default poller.
+-- Returns (promise, nil) on success, (nil, errmsg) on registration failure.
+--: (LoopObj, integer, Poller | nil) -> (PromiseP | nil, string | nil)
+function Loop:await_readable(fd, custom_poller)
+  local poller = custom_poller or self._poller
+  local p, resolve, reject = M.promise()
+  local loop_ref = self
+  loop_ref._pending_io = loop_ref._pending_io + 1
+  local remove_box = {} --: { [integer]: (() -> nil) | nil }
+  local fired = false
+  --: (boolean) -> nil
+  local function on_fire(is_close)
+    if fired then return end
+    fired = true
+    local rm = remove_box[1]
+    if rm then rm() end
+    loop_ref._pending_io = loop_ref._pending_io - 1
+    if is_close then
+      reject("fd closed")
+    else
+      resolve(nil)
+    end
+  end
+  local _, remove_fn, err = poller:add(fd, function()
+    on_fire(false)
+  end, function()
+    on_fire(true)
+  end, true) -- weak: does not keep poller.loop alive
+  if err then
+    loop_ref._pending_io = loop_ref._pending_io - 1
+    return nil, err
+  end
+  remove_box[1] = remove_fn
+  return p, nil
+end
+
+--- Return a promise that resolves when fd becomes writable (bare notification).
+-- The fd is registered with the poller for the lifetime of the await; it is
+-- automatically removed once the notification fires or the fd is closed.
+-- If custom_poller is provided, it is used instead of the loop's default poller.
+-- Returns (promise, nil) on success, (nil, errmsg) on registration failure.
+--: (LoopObj, integer, Poller | nil) -> (PromiseP | nil, string | nil)
+function Loop:await_writable(fd, custom_poller)
+  local poller = custom_poller or self._poller
+  local p, resolve, reject = M.promise()
+  local loop_ref = self
+  loop_ref._pending_io = loop_ref._pending_io + 1
+  local remove_box = {} --: { [integer]: (() -> nil) | nil }
+  local fired = false
+  --: (boolean) -> nil
+  local function on_fire(is_close)
+    if fired then return end
+    fired = true
+    poller:unwatch_writable(fd)
+    local rm = remove_box[1]
+    if rm then rm() end
+    loop_ref._pending_io = loop_ref._pending_io - 1
+    if is_close then
+      reject("fd closed")
+    else
+      resolve(nil)
+    end
+  end
+  -- Register the fd with a no-op read callback (we only care about writability).
+  local _, remove_fn, err = poller:add(fd, function() end, function()
+    on_fire(true)
+  end, true) -- weak
+  if err then
+    loop_ref._pending_io = loop_ref._pending_io - 1
+    return nil, err
+  end
+  remove_box[1] = remove_fn
+  -- Now enable write-readiness notification.
+  local werr = poller:watch_writable(fd, function()
+    on_fire(false)
+  end)
+  if werr then
+    if remove_fn then remove_fn() end
+    loop_ref._pending_io = loop_ref._pending_io - 1
+    return nil, werr
+  end
+  return p, nil
+end
+
+--- Run the loop until `promise` settles. Returns (value, nil) or (nil, reason).
+-- Blocks on the poller between iterations; computes timeout from the nearest
+-- timer deadline so timers fire on schedule.
+--: (LoopObj, PromiseP) -> (unknown, unknown)
+function Loop:run_until(promise)
+  while promise._state == PENDING do
+    -- Compute timeout from nearest timer deadline.
+    local timeout_ms = -1 --: integer
+    if #self._timers > 0 then
+      local now = self._clock()
+      local nearest = self._timers[1][1]
+      for i = 2, #self._timers do
+        local d = self._timers[i][1]
+        if d < nearest then nearest = d end
+      end
+      local delta = tonumber(nearest - now) or 0
+      if delta <= 0 then
+        timeout_ms = 0
+      else
+        timeout_ms = math.ceil(delta)
+      end
+    end
+    -- If there is queued work, poll without blocking.
+    if #self._queue > 0 then
+      timeout_ms = 0
+    end
+    -- Block on poller (callbacks fire during wait, resolving I/O promises).
+    self._poller:wait(timeout_ms)
+    -- Fire expired timers.
+    local now = self._clock()
+    for i = #self._timers, 1, -1 do
+      if now >= self._timers[i][1] then
+        local resolve_fn = self._timers[i][2]
+        table.remove(self._timers, i)
+        resolve_fn(nil)
+      end
+    end
+    -- Drain the microtask queue.
+    local batch = self._queue
+    self._queue = {}
+    for i = 1, #batch do
+      batch[i]()
+    end
+    -- If nothing left to drive the promise, bail to avoid infinite block.
+    if #self._queue == 0 and #self._timers == 0 and self._pending_io == 0 then
+      break
+    end
+  end
+  if promise._state == FULFILLED then
+    return promise.value, nil
+  elseif promise._state == REJECTED then
+    return nil, promise.reason
+  else
+    return nil, "event loop exhausted without promise settling"
+  end
 end
 
 -- ── Module-level sleep / run ─────────────────────────────────────────────────
 
 --- Create a sleep promise on a given loop.
 -- M.sleep(ms, loop) -> promise
+--: (number, LoopObj) -> PromiseP
 function M.sleep(ms, loop_arg)
   if not loop_arg then
     error("M.sleep requires a loop argument; use loop:sleep(ms) or pass a loop as second arg")
@@ -430,9 +555,10 @@ function M.sleep(ms, loop_arg)
 end
 
 --- Drive a promise (or call fn and drive its result) synchronously to completion.
--- Returns value, err.
+-- For pure-promise code that needs no I/O poller. Spins a microtask queue until
+-- the promise settles or no more work remains.
+-- Returns (value, nil) or (nil, reason).
 function M.run(promise_or_fn)
-  local lp = M.loop()
   local p
   if type(promise_or_fn) == "function" then
     local ok, result = pcall(promise_or_fn)
@@ -445,7 +571,19 @@ function M.run(promise_or_fn)
   else
     p = promise_or_fn
   end
-  return lp:run_until(p)
+  -- Spin synchronously: no poller needed, just drain continuations.
+  local max_iters = 100000
+  local iters = 0
+  while p._state == PENDING and iters < max_iters do
+    iters = iters + 1
+  end
+  if p._state == FULFILLED then
+    return p.value, nil
+  elseif p._state == REJECTED then
+    return nil, p.reason
+  else
+    return nil, "M.run: promise did not settle synchronously"
+  end
 end
 
 -- ── Async / await ────────────────────────────────────────────────────────────
