@@ -2166,21 +2166,25 @@ emit `/* TODO */` comments. Metatables are emitted as plain objects. 112 tests.
 Ordered by how many other things unblock:
 
 1. **Async I/O / event loop** — unlocks: concurrent HTTP servers, multiplexed
-   connections, everything network-bound. Largest single gap.
-2. **Datetime** — unlocks: Lumen timeline, logging, any timestamped data.
-3. **CLI arg parsing** — unlocks: every CLI tool (Lumen CLI, `cr` package manager CLI).
-4. **Structured logging** — unlocks: production-grade observability in any service.
-5. **`lib/jsonrpc`** — unlocks: LSP, MCP, any JSON-RPC protocol.
-6. **`lib/lsp`** — unlocks: building language servers with crescent (including
-   crescent's own LSP daemon, which currently lives in `lib/type/static/lsp.lua`
-   and would benefit from a proper protocol layer).
-7. **UUID** — done (`lib/uuid`). Unblocks entity IDs everywhere.
-8. **TOML** — unblocks package manager config, application config.
-9. **Regex** — unblocks search syntax, text processing.
-10. **Compression** — unblocks HTTP content encoding, sync.
-11. **More crypto** — unblocks E2E sync (AES-GCM, HKDF).
-12. **Template engine** — unblocks prose assembly, HTML generation.
-13. **World state lib** — unblocks RP substrate, Lumen entity model.
+   connections, everything network-bound. Wiring `lib/async` to `lib/io_poll`
+   (see "Missing — stdlib tier" above) is the last item still open. Every
+   other item that used to sit in this list has shipped — see below.
+
+Done since this list was last accurate (kept here for the unblock rationale,
+not because they're still open):
+
+- **Datetime** (`lib/datetime`) — unblocked Lumen timeline, logging, timestamped data.
+- **CLI arg parsing** (`lib/cli`) — unblocked every CLI tool (Lumen CLI, `cr` package manager CLI).
+- **Structured logging** (`lib/log`) — unblocked production-grade observability in any service.
+- **`lib/jsonrpc`** — unblocked LSP, MCP, and JSON-RPC protocols generally.
+- **`lib/lsp`** — protocol layer for building language servers with crescent.
+- **UUID** (`lib/uuid`) — unblocked entity IDs everywhere.
+- **TOML** (`lib/toml`) — unblocked package manager config, application config.
+- **Regex** (`lib/regex`) — unblocked search syntax, text processing.
+- **Compression** (`lib/compress`) — unblocked HTTP content encoding, sync.
+- **More crypto** (`lib/crypto`: AES-256-GCM, HKDF-SHA256) — unblocked E2E sync.
+- **Template engine** (`lib/template_engine`) — unblocked prose assembly, HTML generation.
+- **World state lib** (`lib/ecs`) — unblocked RP substrate, Lumen entity model.
 
 ## The logical conclusion
 
