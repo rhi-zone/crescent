@@ -4898,16 +4898,24 @@ local function load_decl_file(ctx, mod_name)
     -- Temporarily swap ctx.ann and ctx.filename so process_type_decls operates
     -- on the loaded file's annotations and reports errors under the right filename.
     -- process_type_decls will report ar.warnings and ar.parse_errors under rel_path.
+    -- ctx._ann_consumed is keyed by bare line number with no file component (see
+    -- collect_preceding_run/consume_ann above), so it must be swapped in lockstep
+    -- with ctx.ann — otherwise a line consumed while processing an earlier file
+    -- can collide with an unrelated declaration at the same absolute line number
+    -- in this file, silently dropping that declaration's preceding annotation.
     local saved_ann      = ctx.ann
     local saved_filename = ctx.filename
+    local saved_consumed = ctx._ann_consumed
     ctx.ann      = ar --[[:! AnnResult]]
     ctx.filename = rel_path
+    ctx._ann_consumed = nil
     -- Pass nil for chunk_root: we do NOT want to walk the loaded module's AST
     -- for top-level require()s here. The module's --:: aliases are what we
     -- need; transitively walking its requires would balloon work and recurse.
     process_type_decls(ctx, nil)
     ctx.ann      = saved_ann
     ctx.filename = saved_filename
+    ctx._ann_consumed = saved_consumed
 end
 
 -- ---------------------------------------------------------------------------

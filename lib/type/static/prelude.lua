@@ -92,20 +92,33 @@ local function load_decls(ctx, path)
     end
 
     -- Temporarily attach annotation arenas so resolve_annotation_type can read them.
-    local saved_ann = ctx.ann
+    -- ctx._ann_consumed tracks which lines of the CURRENTLY-ATTACHED arena have
+    -- been consumed as preceding-line annotations (collect_preceding_run /
+    -- consume_ann in constrain.lua). It is keyed by bare line number with no file
+    -- component, so it must be swapped in lockstep with ctx.ann — otherwise a
+    -- line consumed while loading an earlier globals file can collide with an
+    -- unrelated declaration at the same absolute line number in a later file
+    -- (or the user source), silently dropping that declaration's annotation.
+    local saved_ann      = ctx.ann
+    local saved_consumed = ctx._ann_consumed
     ctx.ann = ar
+    ctx._ann_consumed = nil
 
     local resolve = constrain_mod.resolve_annotation_type
 
     -- Collect all ANN_DECL, ANN_MODULE, and ANN_AUGMENT results.
     --: { [integer]: { kind: integer, name_id: integer, type_id: integer, decl_var: boolean, newtype: boolean, type_params_len: integer | nil, type_params_start: integer | nil, ... }, ... }
     local decls = {}
+    -- decl_lines uses table-reference keys (result records as keys) so decls can be
+    -- sorted into source order below.
+    local decl_lines = {} --: { [unknown]: integer }
     local module_decls = {}
     local augment_decls = {}
     local augment_decl_lines = {}
     for line, r in pairs(ar.results) do
         if r.kind == defs_mod.ANN_DECL then
             decls[#decls + 1] = r
+            decl_lines[r] = line
         elseif r.kind == defs_mod.ANN_MODULE then
             module_decls[#module_decls + 1] = r
         elseif r.kind == defs_mod.ANN_AUGMENT then
@@ -113,6 +126,21 @@ local function load_decls(ctx, path)
             augment_decl_lines[r] = line
         end
     end
+    -- Pass 2a below resolves alias bodies in this order and EAGERLY snapshots
+    -- alias.body for any alias referenced by an earlier-processed one
+    -- (env.lua resolve_named_type returns alias.body directly, no laziness).
+    -- ar.results is keyed by absolute line number, so iterating it with pairs()
+    -- yields Lua's hash-part traversal order — a function of the specific line
+    -- numbers present, unrelated to declaration order. A same-file alias that
+    -- references an earlier-declared alias (the prevailing style in every
+    -- *_types.lua file: Style before Props before DomCtor, etc.) would then only
+    -- resolve correctly by accident of hash bucket layout, and silently capture
+    -- the Pass 1 placeholder (T_ANY) otherwise. Sorting by source line makes
+    -- resolution order match declaration order, so this reference shape resolves
+    -- deterministically. This does NOT make genuine forward references (an alias
+    -- used before its OWN later declaration) sound — that needs dependency-order
+    -- (topological) resolution or lazy alias bodies; either is a deeper change.
+    table.sort(decls, function(a, b) return decl_lines[a] < decl_lines[b] end)
 
     -- Pass 1: pre-register type aliases with placeholder body so that
     -- forward references within the file resolve correctly.
@@ -295,6 +323,7 @@ local function load_decls(ctx, path)
     end
 
     ctx.ann = saved_ann
+    ctx._ann_consumed = saved_consumed
 
     -- Derive ctx primitive meta type fields from the loaded type aliases.
     local function get_alias(name)
