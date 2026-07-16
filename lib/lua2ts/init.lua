@@ -1472,6 +1472,34 @@ local function emit_class(ctx, proto_name, info)
     ctx:emit("}")
 end
 
+-- Emit the chunk's trailing `return` as an ESM export instead of a bare
+-- `return`, which is a SyntaxError at module top level. Lua grammar permits
+-- `return` only as the final statement of a block, so within the root
+-- chunk's own statement list (not a nested block reached via emit_block)
+-- this fires at most once, and only on the last statement.
+--: (L2TSCtx, L2TSNodeInfo) -> nil
+local function emit_module_export(ctx, n)
+    local d = n.d
+    local rs = d[1]
+    local rl = d[2]
+    if rl == 0 then
+        -- Nothing returned. A bare top-level `return;` is illegal in ESM;
+        -- dropping the statement is equivalent (falling off the end of the
+        -- module body is the same as returning nothing).
+        return
+    elseif rl == 1 then
+        local exprs = ctx:list(rs, rl)
+        ctx:emit("export default " .. emit_expr(ctx, exprs[1], 0) .. ";")
+    else
+        local exprs = ctx:list(rs, rl)
+        local parts = {}
+        for i, eid in ipairs(exprs) do
+            parts[i] = emit_expr(ctx, eid, 0)
+        end
+        ctx:emit("export default [" .. table.concat(parts, ", ") .. "];")
+    end
+end
+
 -- Emit the top-level chunk, scanning for class patterns first.
 --: (L2TSCtx, number, number) -> nil
 local function emit_chunk_with_classes(ctx, bs, bl)
@@ -1502,7 +1530,12 @@ local function emit_chunk_with_classes(ctx, bs, bl)
             local rhs_s = emit_expr(ctx, d.rhs_id, 0)
             ctx:emit("Object.setPrototypeOf(" .. d.lhs .. ", " .. rhs_s .. ");")
         elseif not skip[sid] then
-            emit_stmt(ctx, sid)
+            local sn = ctx:node(sid)
+            if sn.kind == defs.NODE_RETURN_STMT and ctx.opts.module ~= "cjs" then
+                emit_module_export(ctx, sn)
+            else
+                emit_stmt(ctx, sid)
+            end
         end
         -- (else: skip — absorbed into class)
     end

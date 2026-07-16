@@ -1770,6 +1770,28 @@ to that endpoint.
   Commits `844dd384` (`opts.imports`) and related lua2ts work shipped under
   an abandoned framing; their continued purpose needs explicit assessment.
 
+- [ ] **`lib/lua2ts/`: declared globals (`--:: declare x = T`) don't resolve to
+  ESM imports** — open substrate gap, not implemented. Fixed alongside it:
+  chunk-level `return` now emits `export default` (or an array for multi-return)
+  instead of a bare `return`, since the latter is a SyntaxError at ESM module
+  top level. That part was purely structural (detect the chunk's own trailing
+  return statement, independent of any annotation). The declared-global case is
+  different: `--:: declare x = T` (see `docs/typechecker-reference.md`) only
+  tells the typechecker "assume a global `x : T` exists" — it carries no
+  module/import-path information, so there is nothing in the annotation lua2ts
+  can turn into an `import` statement. Closing this needs new substrate,
+  choice not yet made: (a) extend the `--:: declare` syntax to optionally carry
+  a source (e.g. `--:: declare x = T from "./x.js"`), which changes the
+  typechecker's annotation grammar too, not just lua2ts; or (b) a caller-supplied
+  `opts.global_imports = { [name] = path }` map, mirroring the existing
+  `opts.imports` require-remap, populated by whoever wires up the projection
+  pipeline / prelude for a given deployment. Neither was picked — inventing one
+  unprompted would mint vocabulary this task didn't ask for. Until decided, a
+  Lua source that references a declared-global identifier without a matching
+  `require(...)` transpiles that identifier through unchanged (bare
+  identifier), which is a ReferenceError in the emitted ESM unless the runtime
+  happens to provide that global some other way.
+
 ## Platform isolation (top priority)
 
 - [ ] **Deprecate `http_server` in favour of `web_runtime` for browser-UI apps.**

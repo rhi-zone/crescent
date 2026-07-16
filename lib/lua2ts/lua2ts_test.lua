@@ -18,6 +18,24 @@ local function has(lua_src, expected, desc)
     end
 end
 
+-- Helper: build a fully-specified opts table (every optional field present,
+-- explicit nil where unused). `M.transpile`'s opts type spells each field as
+-- `T | nil` rather than `T?`, so a literal that merely omits a field is a
+-- different (narrower) record type and the typechecker rejects the call —
+-- an existing, pre-noted quirk elsewhere in this file. Building the literal
+-- through one helper keeps that friction to a single call site instead of
+-- one per test.
+local function opts_with(module_val)
+    return {
+        filename = "test.lua",
+        module = module_val,
+        strict = nil,
+        harden = nil,
+        bundle_mode = nil,
+        imports = nil,
+    }
+end
+
 -- Helper: transpile and assert output does NOT contain a substring.
 local function hasnt(lua_src, unexpected, desc)
     local ts, err = lua2ts.transpile(lua_src, { filename = "test.lua" })
@@ -294,7 +312,18 @@ end)
 -- ---------------------------------------------------------------------------
 
 T.describe("multiple return values", function()
-    has("return a, b, c", "return [a, b, c]", "multiple returns → array")
+    -- Default module mode is ESM; a chunk-level return becomes an export
+    -- default (a bare top-level `return` is a SyntaxError in ESM).
+    has("return a, b, c", "export default [a, b, c];", "multiple returns → export default array")
+end)
+
+T.describe("multiple return values in cjs mode keep bare return", function()
+    local cjs_opts = opts_with("cjs")
+    local ts = lua2ts.transpile("return a, b, c", cjs_opts)
+    T.ok(ts ~= nil, "cjs transpiles")
+    if ts then
+        T.ok(ts:find("return [a, b, c]", 1, true) ~= nil, "cjs: bare return array kept")
+    end
 end)
 
 T.describe("multiple assignment", function()
@@ -498,6 +527,87 @@ end
 ]]
     hasnt(src, "Object.setPrototypeOf", "no setPrototypeOf for self-referential __index")
     has(src, "class M {", "class emitted for self-referential pattern")
+end)
+
+-- ---------------------------------------------------------------------------
+-- ESM module boundary: chunk-level `return` → `export default`
+-- ---------------------------------------------------------------------------
+
+T.describe("ESM: chunk return M → export default M", function()
+    local src = [[
+local M = {}
+M.x = 1
+return M
+]]
+    has(src, "export default M;", "trailing return becomes export default")
+    hasnt(src, "return M", "no bare top-level return left in output")
+end)
+
+T.describe("ESM: bare chunk return (no value) emits nothing, no bare return", function()
+    local esm_opts = opts_with("esm")
+    local ts, err = lua2ts.transpile("local x = 1\nreturn", esm_opts)
+    T.ok(ts ~= nil, "transpiles: " .. tostring(err))
+    if ts then
+        local found_bare_return = false
+        for line in ts:gmatch("[^\n]+") do
+            local trimmed = line:match("^%s*(.-)%s*$")
+            if trimmed == "return;" or trimmed == "return" then
+                found_bare_return = true
+            end
+        end
+        T.ok(not found_bare_return, "no bare `return;` statement in ESM output")
+    end
+end)
+
+T.describe("ESM: chunk return of multiple values → export default array", function()
+    local esm_opts = opts_with("esm")
+    local ts, err = lua2ts.transpile("return a, b", esm_opts)
+    T.ok(ts ~= nil, "transpiles: " .. tostring(err))
+    if ts then
+        T.ok(ts:find("export default [a, b];", 1, true) ~= nil,
+            "multi-return exported as array")
+    end
+end)
+
+T.describe("ESM: cjs mode is unaffected by the export-default transform", function()
+    local src = [[
+local M = {}
+return M
+]]
+    local cjs_opts = opts_with("cjs")
+    local ts, err = lua2ts.transpile(src, cjs_opts)
+    T.ok(ts ~= nil, "cjs transpiles: " .. tostring(err))
+    if ts then
+        T.ok(ts:find("return M;", 1, true) ~= nil, "cjs: bare return kept")
+        T.ok(ts:find("export default", 1, true) == nil, "cjs: no export default")
+    end
+end)
+
+T.describe("ESM: full module with require + trailing return is valid-shaped ESM", function()
+    -- No bare top-level `return`, has `export default`, require resolves to import.
+    local src = [[
+local dep = require("lib.dep")
+local M = {}
+M.value = dep.value
+return M
+]]
+    local esm_opts = opts_with("esm")
+    local ts, err = lua2ts.transpile(src, esm_opts)
+    T.ok(ts ~= nil, "transpiles: " .. tostring(err))
+    if ts then
+        T.ok(ts:find('import * as dep from "./lib/dep";', 1, true) ~= nil,
+            "require resolved to import")
+        T.ok(ts:find("export default M;", 1, true) ~= nil,
+            "trailing return resolved to export default")
+        local found_bare_return = false
+        for line in ts:gmatch("[^\n]+") do
+            local trimmed = line:match("^%s*(.-)%s*$")
+            if trimmed == "return;" or trimmed == "return" then
+                found_bare_return = true
+            end
+        end
+        T.ok(not found_bare_return, "no illegal top-level return remains")
+    end
 end)
 
 -- ---------------------------------------------------------------------------

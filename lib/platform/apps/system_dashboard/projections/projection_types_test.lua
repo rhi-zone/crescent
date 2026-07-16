@@ -133,7 +133,10 @@ T.describe("projection_types: example_text transpiles to hardened JS", function(
             "expected projection function name in output")
         T.ok(ts:find("dom.span", 1, true) ~= nil,
             "expected dom.span call to be preserved")
-        T.ok(ts:find("return project_text", 1, true) ~= nil,
-            "expected the function to be the module export")
+        -- Default module mode is ESM; a bare top-level `return` is a
+        -- SyntaxError there, so the chunk's trailing return is emitted as
+        -- `export default` instead of `return`.
+        T.ok(ts:find("export default project_text", 1, true) ~= nil,
+            "expected the function to be the module's default export")
     end)
 end)
