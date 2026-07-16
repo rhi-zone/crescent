@@ -14,7 +14,7 @@
       "main": "server.lua",
       "caps": {
         "server":         { "type": "http_server",  "reason": "Accepts HTTP requests and routes POST /chat, POST /chat-stream, GET /count-tokens, and all conversation management endpoints." },
-        "llm":            { "type": "llm",           "key_name": "anthropic", "reason": "Invokes llm.call and llm.call_stream to send assembled message sequences to the language model and stream back the assistant's reply. key_name identifies the keyring entry (crescent/anthropic) used to resolve the API key." },
+        "llm":            { "type": "llm",           "key_name": "anthropic", "required": false, "reason": "Invokes llm.call and llm.call_stream to send assembled message sequences to the language model and stream back the assistant's reply. key_name identifies the keyring entry (crescent/anthropic) used to resolve the API key. Optional: the app is viewable and editable without it; only send/regenerate/continue/impersonate/swipe actions need it." },
         "conversations":  { "type": "shared_db",   "required": false, "allow_write": true, "reason": "Shared SQLite database for conversation sessions and messages. The server sets up the schema on init (idempotent) and accesses the db via raw SQL helpers. Falls back to an in-memory lib/conversation db when absent." },
       "create_instance": { "type": "create_instance", "required": false, "reason": "Lets the New Card button install a new blank card as a fresh app instance instead of downloading a PNG the user must manually re-import." }
       }
