@@ -112,6 +112,7 @@ local sqlite_ffi = load_sqlite()
 
 local SQLITE_OPEN_READONLY  = 0x00000001
 local SQLITE_OPEN_READWRITE = 0x00000002
+local SQLITE_OPEN_CREATE    = 0x00000004
 
 local SQLITE_OK   = 0
 local SQLITE_DENY = 1
@@ -309,7 +310,7 @@ function M.shared_db_cap(path, app_id, tables, opts)
 	local allow_write = opts.allow_write and true or false
 
 	local db_ptr = ffi.new("sqlite3 *[1]")
-	local flags = allow_write and SQLITE_OPEN_READWRITE or SQLITE_OPEN_READONLY
+	local flags = allow_write and (SQLITE_OPEN_READWRITE + SQLITE_OPEN_CREATE) or SQLITE_OPEN_READONLY
 	-- Passing nil as const char* VFS arg; LuaJIT FFI converts nil to NULL for pointer params.
 	local null_str = ffi.cast("const char*", 0)
 	local rc = sqlite_ffi.sqlite3_open_v2(path, db_ptr, flags, null_str)

@@ -121,6 +121,7 @@ local CONV_SCHEMA = {
   ]] },
 	{ name = "messages", cols = [[
     id                 TEXT PRIMARY KEY,
+    app_id             TEXT NOT NULL,
     session_id         TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
     parent_id          TEXT REFERENCES messages(id),
     role               TEXT NOT NULL,
