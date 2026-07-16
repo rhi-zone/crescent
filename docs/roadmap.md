@@ -31,11 +31,53 @@ and each app raises the floor for whatever gets forked from it next.
 
 ## Which apps
 
-Open question — needs actual thought before committing to a list. The
-categories should be picked by asking what's most commonly vibe-coded /
-reached for as a "quick app" today (todo apps, note apps, bookmark managers,
-trackers, small CRMs, and the like are candidates per `the-80-percent.md`,
-but the actual roadmap list is TBD, not decided here).
+The "which apps" question is answered by three substrates, not by picking
+from a list. Most apps in the same-substrate group — todo, notes, bookmarks,
+contacts, habit tracker, CRM, recipe collection, and the like — are
+configurations over these substrates, not separate products. This is the
+thesis from `the-80-percent.md` made concrete. Which specific libraries to
+build first, and the exact boundaries between the three substrates at the
+library level, are still open.
+
+## Three substrates
+
+Three substrates emerge from existing rhi projects. Ideas import into
+crescent as libraries; the project names don't follow.
+
+1. **Capture substrate** (prior art: pad, `~/git/pad/`) — universal ingest.
+   Anything in, structured, linked, searchable. Content-addressed,
+   provenance-preserving, format-agnostic. pad is prior art to mine for
+   design decisions, not a port target. pad is almost entirely ingestion —
+   minimal UI surface.
+
+2. **Display/control substrate** (prior art: dusklight,
+   `~/git/rhizone/dusklight/`) — universal interface for external data.
+   Format-agnostic rendering + control plane. Subsumes dedicated viewers
+   (theoretically covers what wireshark, conky, and similar tools do). Key
+   ideas to import: pattern-first rendering, reactive lenses,
+   capability-based plugin architecture, control plane for arbitrary data.
+
+3. **Creation substrate** (prior art: scribble, `~/git/rhizone/scribble/`) —
+   universal composition for internal creation. Pluggable, extensible,
+   composable. Can scale to zero (mspaint-level). Key ideas: append-only
+   event log, content-addressed assets, layer-based composition, live
+   editor-runtime dissolution. Scope is "near universal creation" — the
+   creation primitives are general, domain-specific things (tiles, audio,
+   GPU) are kernels that plug in.
+
+Distinction between display and creation: dusklight is optimized for
+external data (what exists elsewhere); scribble is optimized for internal
+creation (what you're bringing into existence).
+
+Library names for the imported ideas are not decided.
+
+## Sequencing
+
+Substrate before surface. The libraries underneath can be built now; UI
+design for the actual interfaces people see is blocked on design time.
+Ordered by immediate/broad usefulness to a layman: capture and display have
+the broadest surface; creation is the most powerful but most optional for
+most people.
 
 ## Relation to the Jevons thesis
 
