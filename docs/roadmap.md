@@ -50,12 +50,24 @@ crescent as libraries; the project names don't follow.
    design decisions, not a port target. pad is almost entirely ingestion —
    minimal UI surface.
 
+   FTS5 support added to `lib/sqlite/` (`lib/sqlite/fts5.lua`) — all three
+   content modes, normalized search interface, 71 tests. Content-addressed
+   blob store (hash + dedup + insert-or-get) is the next composition to
+   build from existing pieces (`lib/hash`, `lib/sqlite`).
+
 2. **Display/control substrate** (prior art: dusklight,
    `~/git/rhizone/dusklight/`) — universal interface for external data.
    Format-agnostic rendering + control plane. Subsumes dedicated viewers
    (theoretically covers what wireshark, conky, and similar tools do). Key
    ideas to import: pattern-first rendering, reactive lenses,
    capability-based plugin architecture, control plane for arbitrary data.
+
+   Display doesn't care about addressing scheme — it renders whatever it's
+   pointed at, whether content-addressed (capture) or identity-addressed
+   (creation). The async + `io_poll` integration gap (already flagged in
+   `batteries.md`) is the main blocker for live control surfaces. Reactive
+   rendering needs deduplication — pick one of `lib/reactive/` vs
+   `lib/signals/` before building on top.
 
 3. **Creation substrate** (prior art: scribble, `~/git/rhizone/scribble/`) —
    universal composition for internal creation. Pluggable, extensible,
@@ -65,9 +77,22 @@ crescent as libraries; the project names don't follow.
    creation primitives are general, domain-specific things (tiles, audio,
    GPU) are kernels that plug in.
 
+   The minimum creation primitive is a mutable, identity-addressed object
+   (not content-addressed — creation makes new things, not deduplicates
+   existing ones). No fixed schema, typed fields, or constraints —
+   convention over spec. At minimum: identity-addressed mutable objects
+   with edges between them, plus persistence. The data layer is simpler
+   than expected; the hard part is making it feel like creation, which is
+   display's job.
+
 Distinction between display and creation: dusklight is optimized for
 external data (what exists elsewhere); scribble is optimized for internal
 creation (what you're bringing into existence).
+
+The three substrates share a common object+edges+persistence layer but
+differ in addressing: capture is content-addressed (dedup matters),
+creation is identity-addressed (mutability matters), display is
+address-agnostic.
 
 Library names for the imported ideas are not decided.
 
@@ -78,6 +103,10 @@ design for the actual interfaces people see is blocked on design time.
 Ordered by immediate/broad usefulness to a layman: capture and display have
 the broadest surface; creation is the most powerful but most optional for
 most people.
+
+Browser targeting strategy (lua2ts) is an open question that affects all
+three substrates if they need browser UIs. Current status of lua2ts not
+verified.
 
 ## Relation to the Jevons thesis
 
