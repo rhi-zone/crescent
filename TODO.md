@@ -4267,6 +4267,18 @@ Non-conversational-context AI roleplay frontend, based on `lib/platform/`. Exist
 - [ ] Design pass needed. Mine prior sessions for design intent on the RP frontend.
 - [ ] The cap set for ccv2 (self, self_write, kv, time, http_server, llm, shared_db, create_instance) is the current working example of the platform cap model.
 
+### AI RP frontend UX — persona-based mental model discovery (2026-07-16)
+
+- [x] First batch personas: new-user, returning-user, multi-char-scenario, card-creator
+- [x] Second batch personas (tool-specific): st-migrator, chub-browser, chatgpt-casual, kobold-local, talemate-narrative
+- [x] Consolidated mental model analysis across all 9 personas
+- [ ] Revisit conflicts: catalog-first vs import-first entry, engine visibility, single-target vs autonomous multi-actor
+- [ ] Structured context construction vs embed-and-pray — crescent's persistence model advantage
+- [ ] Test longer sessions: world-state grounding survival past context window, auto-progress director autonomy
+- [ ] Outputs in `docs/artifacts/2026-07-16-ux-personas/`
+
+Key insight from owner: ChatGPT dominates AI RP because of persistence (cross-conversation memory), not despite lacking it. The gap is character (stays in character, doesn't break fourth wall). Crescent's advantage is structured context construction over embed-and-pray retrieval. Mental models are discovered, not designed.
+
 ### Priority 3: Taskgraph
 
 Agent harness as platform app. "Beyond SOTA agent harness by deleting the concept of an agent." Existing code at `lib/taskgraph/`. Design pass needed.
