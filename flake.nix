@@ -53,10 +53,14 @@
             # bare clone with only the vendored LuaJIT. See docs/proof-kernel.md.
             coq
             coqPackages.QuickChick
+            # Browser binaries for playwright-driven UI screenshots/tests.
+            playwright-driver.browsers
           ] ++ extraInputs;
           LD_LIBRARY_PATH = "${pkgs.lib.makeLibraryPath buildInputs}:$LD_LIBRARY_PATH";
           shellHook = ''
             export PATH="$PWD/bin:$PATH"
+            export PLAYWRIGHT_BROWSERS_PATH="${pkgs.playwright-driver.browsers}"
+            export PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS=true
           '';
         };
       }
