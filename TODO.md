@@ -4368,3 +4368,12 @@ Open threads from a previous session. Treat as starting context, not instruction
 - [ ] pad (`~/git/pad/`) was mined as prior art for the capture substrate — not a port target. Its design decisions were sorted into three buckets: mechanisms general enough to become crescent libraries, architectural patterns/conventions worth following, and app-specific policy that should stay out of `lib/`. Documented ingestion sources: stdin, shell, clipboard, git, file watch, browser extension, 19 output parsers. Pad has its own session history (all dated Jan 28–29 2026) that hasn't been fully mined yet.
 - [ ] Browser targeting is settled as lua2ts (transpile Lua → JS) rather than VM-in-browser; pipeline is typecheck → transpile → hardened sandboxed iframe. `docs/platform_isolation.md` is explicitly a draft — cap naming, the JS subset allow-list, and bootstrap order are all still open, and Initiative B (lua2ts + projection-Lua) is gated on this doc's open questions per the existing entry around line 2498.
 - [ ] FTS5 full-text search landed in `lib/sqlite` this session (commit `d7364b1f`); design findings from that work (also commit `51f62838`) are in the roadmap doc — worth checking they're reflected in `docs/inventory.md`/`docs/inventory_summary.md` if those are meant to be current.
+
+## FFI library naming convention migration (2026-07-17)
+
+- [ ] Migrate FFI library naming convention (medium-high priority)
+  - New convention: all FFI wrapper libraries get `_ffi` suffix unconditionally (e.g. `lib/pty_ffi/`, `lib/epoll_ffi/`)
+  - Split pure FFI bindings from their higher-level wrappers — the FFI lib is thin bindings only, higher-level API is a separate library that gets the short name
+  - Existing libraries to migrate: epoll, kqueue, inotify, timerfd, process, sqlite (and any others that are thin FFI wrappers)
+  - lib/pty_ffi/ is the first library following the new convention
+  - This is a codebase-wide migration: rename directories, update all require() paths, update tests, update docs
