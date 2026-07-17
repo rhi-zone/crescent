@@ -155,7 +155,8 @@ structure; the model is a function over it. The context window is a view, not th
 - **Hashing** — SHA-1, SHA-256, HMAC
 - **System** — fs, process, path, env, time, signal, epoll, inotify, timerfd
 - **Concurrency** — epoll/kqueue/io_poll readiness backends, async promise/coroutine
-  library (not yet integrated with io_poll), fork-based parallelism in test runner
+  library with poller-driven event loop (integrated with io_poll), fork-based parallelism
+  in test runner
 - **Random** — CSPRNG (getrandom / /dev/urandom)
 - **Functional** — fp/ typeclasses (Maybe, Either, lens, prism), iter combinators
 - **AI** — provider dispatch (Anthropic, OpenAI, Google), streaming, embeddings, tools
@@ -175,16 +176,26 @@ structure; the model is a function over it. The context window is a view, not th
 
 These belong in `lib/` and block real applications:
 
-**Async I/O / event loop** — the backends exist; integration is the remaining gap.
+**Async I/O / event loop** — integration is done; adoption is the remaining gap.
 `lib/epoll` (Linux epoll FFI, with a Windows branch via vendored wepoll) and
 `lib/kqueue` (macOS kqueue FFI) provide readiness notification; `lib/io_poll`
 dispatches to the right backend per platform. `lib/async` provides the
-promise/coroutine abstraction (async/await, combinators, an event loop) but is
-not yet wired to `lib/io_poll` — so today's async code can compose and schedule
-work, but I/O readiness and the promise scheduler are two separate systems.
-Wiring `lib/async` to `lib/io_poll` is the single change that unlocks
-high-concurrency servers and multiplexed connections built on the existing
-promise API.
+promise/coroutine abstraction (async/await, combinators, a poller-driven event
+loop). `async.loop(poller)` accepts an injected `io_poll` instance;
+`await_readable`, `await_writable`, and `sleep` all work end-to-end (tested
+with 133 assertions including a poller-driven suite). What's missing is a
+production consumer — no existing server or multiplexed connection code uses
+the integrated loop yet.
+
+**Text/sequence CRDTs** — not yet implemented. `lib/crdt` covers data-type
+CRDTs (counters, sets, registers, maps), but text/sequence CRDTs (RGA-style
+collaborative text editing) and the collaborative sync protocol (state vectors,
+update encoding, awareness) are missing. The goal is y.js protocol
+compatibility, not a clean-room CRDT implementation: a `lib/y-crdt` that
+implements the Yjs sync protocol (state vectors, update encoding, awareness)
+so Lua servers can interoperate with y.js browser clients. For now,
+application-specific sync protocols (e.g. terminal state replication) are
+simpler and sufficient.
 
 **Datetime** (`lib/datetime`) — implemented. Date/time library exists.
 
@@ -2165,10 +2176,11 @@ emit `/* TODO */` comments. Metatables are emitted as plain objects. 112 tests.
 
 Ordered by how many other things unblock:
 
-1. **Async I/O / event loop** — unlocks: concurrent HTTP servers, multiplexed
-   connections, everything network-bound. Wiring `lib/async` to `lib/io_poll`
-   (see "Missing — stdlib tier" above) is the last item still open. Every
-   other item that used to sit in this list has shipped — see below.
+1. **Async I/O adoption** — unlocks: concurrent HTTP servers, multiplexed
+   connections, everything network-bound. The integration is complete
+   (`lib/async` wired to `lib/io_poll`, tested end-to-end). The remaining
+   gap is adopting the integrated loop in production code — no existing
+   server or network consumer uses it yet.
 
 Done since this list was last accurate (kept here for the unblock rationale,
 not because they're still open):

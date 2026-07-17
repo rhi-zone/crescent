@@ -4351,10 +4351,10 @@ Open threads from a previous session. Treat as starting context, not instruction
 
 Open threads from a previous session. Treat as starting context, not instructions — verify relevance before acting.
 
-- [ ] Vendor wepoll.dll in dep/ for Windows — lib/epoll/ already has the FFI code (lines 22-73) but the binary is missing
-- [ ] Implement kqueue backend for macOS — no code exists yet
-- [ ] Unify lib/epoll/ + lib/async/ — epoll does I/O multiplexing, async does coroutine promises, but they don't talk to each other
-- [ ] Update batteries.md async I/O gap — the "everything currently blocks" claim (written March 27) was already wrong when written (lib/epoll/ imported Feb 26); the gap description needs to reflect current state
+- [x] Vendor wepoll.dll in dep/ for Windows — done: `dep/wepoll/wepoll-x64.dll` and `dep/wepoll/wepoll-x86.dll` present
+- [x] Implement kqueue backend for macOS — done: `lib/kqueue/init.lua` (284 lines, 6 passing tests)
+- [x] Unify lib/epoll/ + lib/async/ — done: `lib/async`'s `loop(poller)` accepts an injected `io_poll` instance; `await_readable`/`await_writable`/`sleep` work end-to-end (133 passing assertions including poller-driven suite). Remaining gap: no production consumer (HTTP server, etc.) uses this integration yet.
+- [x] Update batteries.md async I/O gap — done: updated to reflect integration complete, gap reframed as adoption
 - Note: batteries.md's #1 priority was AI-generated from first principles without checking the codebase; provenance traced to session fccf7f65 turn 22
 
 ## Three substrates + ecosystem audit + FTS5 + lua2ts ESM fixes (2026-07-16)
