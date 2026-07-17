@@ -1770,27 +1770,32 @@ to that endpoint.
   Commits `844dd384` (`opts.imports`) and related lua2ts work shipped under
   an abandoned framing; their continued purpose needs explicit assessment.
 
-- [ ] **`lib/lua2ts/`: declared globals (`--:: declare x = T`) don't resolve to
-  ESM imports** — open substrate gap, not implemented. Fixed alongside it:
-  chunk-level `return` now emits `export default` (or an array for multi-return)
-  instead of a bare `return`, since the latter is a SyntaxError at ESM module
-  top level. That part was purely structural (detect the chunk's own trailing
-  return statement, independent of any annotation). The declared-global case is
-  different: `--:: declare x = T` (see `docs/typechecker-reference.md`) only
-  tells the typechecker "assume a global `x : T` exists" — it carries no
-  module/import-path information, so there is nothing in the annotation lua2ts
-  can turn into an `import` statement. Closing this needs new substrate,
-  choice not yet made: (a) extend the `--:: declare` syntax to optionally carry
-  a source (e.g. `--:: declare x = T from "./x.js"`), which changes the
-  typechecker's annotation grammar too, not just lua2ts; or (b) a caller-supplied
+- [x] **`lib/lua2ts/`: declared globals (`--:: declare x = T`) don't resolve to
+  ESM imports** — closed via option (b): a caller-supplied
   `opts.global_imports = { [name] = path }` map, mirroring the existing
-  `opts.imports` require-remap, populated by whoever wires up the projection
-  pipeline / prelude for a given deployment. Neither was picked — inventing one
-  unprompted would mint vocabulary this task didn't ask for. Until decided, a
-  Lua source that references a declared-global identifier without a matching
-  `require(...)` transpiles that identifier through unchanged (bare
-  identifier), which is a ReferenceError in the emitted ESM unless the runtime
-  happens to provide that global some other way.
+  `opts.imports` require-remap. When a declared-global identifier (introduced
+  by `--:: declare x = T`) is referenced and `opts.global_imports` has an entry
+  for its name, lua2ts hoists a named import — ESM: `import { x } from "path";`,
+  CJS: `const { x } = require("path");` — instead of leaving `x` bare. Names
+  absent from the map are unchanged (bare identifier, pre-existing behaviour).
+  Not consulted in bundle mode. Option (a) (extending the `--:: declare`
+  grammar itself to carry a source) was not pursued — the caller-supplied-map
+  option was the one explicitly requested when this was picked up. Implemented
+  in `lib/lua2ts/init.lua`; tests in `lib/lua2ts/lua2ts_test.lua`.
+
+- [ ] **`lib/lua2ts/`: `ann_for` doesn't check `ann.kind`, so a `--:: declare`
+  line immediately preceding a `local` or `function` statement gets
+  (mis-)consumed as if it were a `--:` type annotation for that statement.**
+  Found while adding `opts.global_imports` tests: `--:: declare baz =
+  integer\nlocal a = baz` emits `const a: declare baz = number = baz;` instead
+  of `const a = baz;`, because `emit_stmt`'s two call sites
+  (`ctx:ann_for(n.line)` in the `NODE_LOCAL_STMT` and `NODE_FUNC_DECL`
+  branches) do `ann and ann.content or nil` without checking `ann.kind ==
+  "type"` first — a `"decl"`-kind annotation (`--::`) passes through the same
+  path as a `"type"`-kind one (`--:`). Pre-existing, orthogonal to
+  `global_imports`; worked around in the new tests by inserting a separator
+  statement between the `declare` line and the reference so the two don't sit
+  on adjacent lines. Fix: guard both call sites on `ann.kind == "type"`.
 
 ## Platform isolation (top priority)
 
@@ -4363,7 +4368,7 @@ Open threads from a previous session. Treat as starting context, not instruction
 
 - [ ] Roadmap now frames the ecosystem around three substrates instead of an app list: capture (pad-like, content-addressed), display (dusklight-like, address-agnostic), creation (scribble-like, identity-addressed, mutable object with no fixed schema — convention over spec). Library names for these substrates are undecided, the exact boundaries between them at the library level are undecided, and which to build first is undecided.
 - [ ] An ecosystem audit mapped existing libraries against the three substrates' needs. Findings, roughly in order of how load-bearing they seemed: async + io_poll integration is the biggest cross-cutting gap (also flagged in batteries.md, and overlaps the "Cross-platform event loop" thread above — worth reconciling into one gap rather than tracked twice); the creation substrate has no composition/layering mechanism at all yet; a content-addressed blob store has the pieces (hashing, storage) but needs composition work to become a real library; `lib/reactive` and `lib/signal`/`lib/signals` look like unresolved duplication — worth checking whether these three are actually distinct in scope or need consolidating. On the solid side: hashing, sqlite, event_sourcing, transport (http/ws/unix socket), jsonrpc, and mimetype (real and working despite `docs/inventory.md` marking it "stub" — doc drift worth fixing separately).
-- [ ] `lib/lua2ts/`'s declared-global → ESM import gap (documented at TODO.md line ~1773, "declared globals don't resolve to ESM imports") is still open; the export-default and bare-top-level-return gaps next to it in that entry were fixed this session (commit `0dbc9933`). Two candidate approaches are already written up at that location — check there before re-deriving from scratch.
+- [x] `lib/lua2ts/`'s declared-global → ESM import gap (documented at TODO.md line ~1773, "declared globals don't resolve to ESM imports") is closed via `opts.global_imports` (option (b) from the two candidates written up there); the export-default and bare-top-level-return gaps next to it in that entry were fixed earlier this session (commit `0dbc9933`).
 - [ ] User wants a `lib/platform/` app that multiplexes existing terminal PTYs into a web UI (tabs/tiling), reachable over tailscale from phone/TV, motivated by wanting to monitor ~10 concurrent claude code sessions remotely. Would exercise the async/io_poll gap, the lua2ts browser pipeline, and websocket streaming end to end — but whether this is the right thing to prioritize next, and its design, are both open.
 - [ ] pad (`~/git/pad/`) was mined as prior art for the capture substrate — not a port target. Its design decisions were sorted into three buckets: mechanisms general enough to become crescent libraries, architectural patterns/conventions worth following, and app-specific policy that should stay out of `lib/`. Documented ingestion sources: stdin, shell, clipboard, git, file watch, browser extension, 19 output parsers. Pad has its own session history (all dated Jan 28–29 2026) that hasn't been fully mined yet.
 - [ ] Browser targeting is settled as lua2ts (transpile Lua → JS) rather than VM-in-browser; pipeline is typecheck → transpile → hardened sandboxed iframe. `docs/platform_isolation.md` is explicitly a draft — cap naming, the JS subset allow-list, and bootstrap order are all still open, and Initiative B (lua2ts + projection-Lua) is gated on this doc's open questions per the existing entry around line 2498.

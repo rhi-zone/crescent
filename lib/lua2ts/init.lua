@@ -20,6 +20,17 @@
 --       unchanged. Use for cross-language linkage (e.g. require("foo") →
 --       import * as foo from "./foo.js") or any case where the default
 --       "./a/b" mapping is wrong for the consumer's module resolver.
+--   global_imports : { [string]: string } | nil
+--       Caller-supplied map from declared-global name (a name introduced via
+--       `--:: declare x = T`, which tells the typechecker a global exists but
+--       carries no module path) to the import-path string to emit. When a
+--       declared-global identifier is referenced and this map has an entry
+--       for its name, lua2ts hoists a named import for it — ESM:
+--       `import { x } from "path";`, CJS: `const { x } = require("path");` —
+--       instead of leaving `x` as a bare identifier (a ReferenceError in
+--       emitted ESM/CJS with no other binding for it). Names absent from the
+--       map are left as bare identifiers (unchanged, pre-existing behaviour).
+--       Not consulted in bundle mode.
 
 if not package.path:find("./?/init.lua", 1, true) then
     package.path = "./?/init.lua;" .. package.path
@@ -167,7 +178,7 @@ local binop_prec = {
 --:: L2TSAnn = { kind: string, content: string }
 --:: L2TSNodeData = { [integer]: number }
 --:: L2TSNodeInfo = { kind: number, flags: number, line: number, col: number, d: L2TSNodeData }
---:: L2TSCtx = { pool: unknown, nodes: unknown, lists: unknown, indent: integer, lines: { [integer]: string }, anns: { [integer]: L2TSAnn }, opts: { filename: string | nil, module: string | nil, strict: boolean | nil, harden: boolean | nil, bundle_mode: boolean | nil, imports: { [string]: string } | nil }, imports: { [string]: string }, import_order: { [integer]: string }, bundle_mode: boolean, bundle_requires: { [integer]: string }, bundle_req_seen: { [string]: boolean }, harden: boolean, harden_used: { [string]: boolean }, skip_stmts: { [integer]: boolean } | nil, check_ident: (self: L2TSCtx, name: string) -> nil, use_harden: (self: L2TSCtx, name: string) -> nil, istr: (self: L2TSCtx) -> string, emit: (self: L2TSCtx, line: string) -> nil, raw: (self: L2TSCtx, line: string) -> nil, name: (self: L2TSCtx, id: number) -> string, list: (self: L2TSCtx, start: number, len: number) -> { [integer]: number }, node: (self: L2TSCtx, id: number) -> L2TSNodeInfo, ann_for: (self: L2TSCtx, lineno: number) -> L2TSAnn | nil, add_import: (self: L2TSCtx, alias: string, modname: string) -> nil, add_bundle_require: (self: L2TSCtx, modname: string) -> nil }
+--:: L2TSCtx = { pool: unknown, nodes: unknown, lists: unknown, indent: integer, lines: { [integer]: string }, anns: { [integer]: L2TSAnn }, declared_globals: { [string]: boolean }, opts: { filename: string | nil, module: string | nil, strict: boolean | nil, harden: boolean | nil, bundle_mode: boolean | nil, imports: { [string]: string } | nil, global_imports: { [string]: string } | nil }, imports: { [string]: string }, import_order: { [integer]: string }, global_import_names: { [string]: { [integer]: string } }, global_import_order: { [integer]: string }, global_import_seen: { [string]: boolean }, bundle_mode: boolean, bundle_requires: { [integer]: string }, bundle_req_seen: { [string]: boolean }, harden: boolean, harden_used: { [string]: boolean }, skip_stmts: { [integer]: boolean } | nil, check_ident: (self: L2TSCtx, name: string) -> nil, use_harden: (self: L2TSCtx, name: string) -> nil, istr: (self: L2TSCtx) -> string, emit: (self: L2TSCtx, line: string) -> nil, raw: (self: L2TSCtx, line: string) -> nil, name: (self: L2TSCtx, id: number) -> string, list: (self: L2TSCtx, start: number, len: number) -> { [integer]: number }, node: (self: L2TSCtx, id: number) -> L2TSNodeInfo, ann_for: (self: L2TSCtx, lineno: number) -> L2TSAnn | nil, add_import: (self: L2TSCtx, alias: string, modname: string) -> nil, add_bundle_require: (self: L2TSCtx, modname: string) -> nil, add_global_import: (self: L2TSCtx, name: string, path: string) -> nil }
 --: (string) -> { [integer]: L2TSAnn }
 local function scan_annotations(source)
   --: { [integer]: L2TSAnn }
@@ -194,6 +205,23 @@ local function scan_annotations(source)
         i = (nl and nl + 1) or (len + 1)
     end
     return anns
+end
+
+-- Extract the set of names introduced by `--:: declare NAME = ...` among the
+-- scanned annotations. A "decl" annotation whose content doesn't start with
+-- the `declare` keyword (e.g. a plain type alias `Foo = { ... }`) is not a
+-- global declaration and is ignored here.
+--: ({ [integer]: L2TSAnn }) -> { [string]: boolean }
+local function scan_declared_globals(anns)
+    --: { [string]: boolean }
+    local names = {}
+    for _, ann in pairs(anns) do
+        if ann.kind == "decl" then
+            local name = ann.content:match("^declare%s+([%a_][%w_]*)%s*=")
+            if name then names[name] = true end
+        end
+    end
+    return names
 end
 
 -- ---------------------------------------------------------------------------
@@ -224,8 +252,9 @@ end
 -- Emit context
 -- Produces indented TS output line by line.
 -- ---------------------------------------------------------------------------
---: (unknown, unknown, unknown, string, { filename: string | nil, module: string | nil, strict: boolean | nil, harden: boolean | nil, bundle_mode: boolean | nil, imports: { [string]: string } | nil } | nil) -> L2TSCtx
+--: (unknown, unknown, unknown, string, { filename: string | nil, module: string | nil, strict: boolean | nil, harden: boolean | nil, bundle_mode: boolean | nil, imports: { [string]: string } | nil, global_imports: { [string]: string } | nil } | nil) -> L2TSCtx
 local function new_ctx(pool, nodes, lists, source, opts)
+    local anns = scan_annotations(source)
     local ctx = {
         pool   = pool,
         nodes  = nodes,
@@ -233,11 +262,21 @@ local function new_ctx(pool, nodes, lists, source, opts)
         indent = 0,
         lines  = {},    -- collected output lines
         -- annotation map: lineno → { kind, content }
-        anns   = scan_annotations(source),
-        opts   = opts or {} --[[:! { filename: string | nil, module: string | nil, strict: boolean | nil, harden: boolean | nil, bundle_mode: boolean | nil, imports: { [string]: string } | nil }]],
+        anns   = anns,
+        -- names introduced via `--:: declare NAME = T` (typechecker-only
+        -- global declarations with no module-path info of their own).
+        declared_globals = scan_declared_globals(anns),
+        opts   = opts or {} --[[:! { filename: string | nil, module: string | nil, strict: boolean | nil, harden: boolean | nil, bundle_mode: boolean | nil, imports: { [string]: string } | nil, global_imports: { [string]: string } | nil }]],
         -- pending ESM imports: { modname → alias }
         imports = {},
         import_order = {},
+        -- pending declared-global imports, keyed by import path so multiple
+        -- names sharing a path are combined into one named-import statement:
+        -- { path → { name1, name2, ... } }, plus insertion-order path list
+        -- and a per-name dedup set (a name is only ever imported once).
+        global_import_names = {},
+        global_import_order = {},
+        global_import_seen  = {},
         -- bundle mode: collect required module names (dot-separated)
         bundle_mode     = (opts or {}).bundle_mode or false,
         bundle_requires = {},   -- ordered list of required module names
@@ -337,6 +376,23 @@ local function new_ctx(pool, nodes, lists, source, opts)
         end
     end
 
+    -- Register a declared-global named import (see opts.global_imports).
+    -- Multiple names sharing the same path are combined into one named-import
+    -- statement at emission time; a given name is only ever registered once.
+    function ctx:add_global_import(name, path)
+        if self.global_import_seen[name] then return end
+        self.global_import_seen[name] = true
+        local by_path = self.global_import_names --[[:! { [string]: { [integer]: string } }]]
+        local names = by_path[path]
+        if not names then
+            names = {}
+            by_path[path] = names
+            local order = self.global_import_order --[[:! { [integer]: string }]]
+            order[#order + 1] = path
+        end
+        names[#names + 1] = name
+    end
+
     -- Record a bundle-mode require dependency (dot-separated module name).
     function ctx:add_bundle_require(modname)
         if not self.bundle_req_seen[modname] then
@@ -422,6 +478,17 @@ emit_expr = function(ctx, nid, parent_prec)
     elseif kind == defs.NODE_IDENTIFIER then
         local name = ctx:name(d[1])
         ctx:check_ident(name)
+        -- Declared global (--:: declare name = T) with a caller-supplied
+        -- module path: hoist a named import instead of leaving a bare
+        -- identifier (a ReferenceError in emitted ESM/CJS). Not consulted in
+        -- bundle mode, where require()s route through the bundler's own
+        -- module registry rather than a real import/require.
+        if not ctx.bundle_mode and ctx.declared_globals[name] and ctx.opts.global_imports then
+            local gpath = ctx.opts.global_imports[name]
+            if gpath then
+                ctx:add_global_import(name, gpath)
+            end
+        end
         return name
 
     elseif kind == defs.NODE_VARARG_EXPR then
@@ -1545,9 +1612,9 @@ end
 -- Public API
 -- ---------------------------------------------------------------------------
 
---: (string, ({ filename: string | nil, module: string | nil, strict: boolean | nil, harden: boolean | nil, bundle_mode: boolean | nil, imports: { [string]: string } | nil }) | nil) -> (string | nil, string | nil)
+--: (string, ({ filename: string | nil, module: string | nil, strict: boolean | nil, harden: boolean | nil, bundle_mode: boolean | nil, imports: { [string]: string } | nil, global_imports: { [string]: string } | nil }) | nil) -> (string | nil, string | nil)
 function M.transpile(source, opts)
-    opts = opts or {} --[[:! { filename: string | nil, module: string | nil, strict: boolean | nil, harden: boolean | nil, bundle_mode: boolean | nil, imports: { [string]: string } | nil }]]
+    opts = opts or {} --[[:! { filename: string | nil, module: string | nil, strict: boolean | nil, harden: boolean | nil, bundle_mode: boolean | nil, imports: { [string]: string } | nil, global_imports: { [string]: string } | nil }]]
     local filename = opts.filename or "?"
     local ok, result = pcall(function()
         local parsed = parse_mod.parse(source, filename)
@@ -1593,6 +1660,24 @@ function M.transpile(source, opts)
             out[#out + 1] = ""
         end
 
+        -- Declared-global imports (opts.global_imports), hoisted as named
+        -- imports/requires regardless of module mode (the reference site is
+        -- an arbitrary expression, not a require() call, so there is nothing
+        -- to rewrite in place — the binding must come from a top-level
+        -- statement).
+        if #ctx.global_import_order > 0 then
+            for _, path in ipairs(ctx.global_import_order) do
+                local names = ctx.global_import_names[path]
+                local names_str = table.concat(names, ", ")
+                if opts.module == "cjs" then
+                    out[#out + 1] = 'const { ' .. names_str .. ' } = require("' .. path .. '");'
+                else
+                    out[#out + 1] = 'import { ' .. names_str .. ' } from "' .. path .. '";'
+                end
+            end
+            out[#out + 1] = ""
+        end
+
         -- Type declarations
         if #decl_lines > 0 then
             for _, dl in ipairs(decl_lines) do
@@ -1614,13 +1699,13 @@ function M.transpile(source, opts)
     return result --[[:! string | nil]]
 end
 
---: (string, ({ filename: string | nil, module: string | nil, strict: boolean | nil, harden: boolean | nil, bundle_mode: boolean | nil, imports: { [string]: string } | nil }) | nil) -> (string | nil, string | nil)
+--: (string, ({ filename: string | nil, module: string | nil, strict: boolean | nil, harden: boolean | nil, bundle_mode: boolean | nil, imports: { [string]: string } | nil, global_imports: { [string]: string } | nil }) | nil) -> (string | nil, string | nil)
 function M.transpile_file(path, opts)
     local f, err = io.open(path, "r")
     if not f then return nil, "cannot open " .. path .. ": " .. (err or "?") end
     local source = f:read("*a") --[[:! string]]
     f:close()
-    opts = opts or {} --[[:! { filename: string | nil, module: string | nil, strict: boolean | nil, harden: boolean | nil, bundle_mode: boolean | nil, imports: { [string]: string } | nil }]]
+    opts = opts or {} --[[:! { filename: string | nil, module: string | nil, strict: boolean | nil, harden: boolean | nil, bundle_mode: boolean | nil, imports: { [string]: string } | nil, global_imports: { [string]: string } | nil }]]
     opts.filename = opts.filename or path
     return M.transpile(source, opts)
 end

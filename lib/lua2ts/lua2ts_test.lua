@@ -33,6 +33,21 @@ local function opts_with(module_val)
         harden = nil,
         bundle_mode = nil,
         imports = nil,
+        global_imports = nil,
+    }
+end
+
+-- Same as opts_with, plus explicit imports / global_imports maps — for tests
+-- covering the require-remap and declared-global-import features together.
+local function opts_with_imports(module_val, imports_val, global_imports_val)
+    return {
+        filename = "test.lua",
+        module = module_val,
+        strict = nil,
+        harden = nil,
+        bundle_mode = nil,
+        imports = imports_val,
+        global_imports = global_imports_val,
     }
 end
 
@@ -266,6 +281,79 @@ T.describe("cjs mode keeps require", function()
     T.ok(ts ~= nil, "cjs mode transpiles")
     if ts then
         T.ok(ts:find("require", 1, true) ~= nil, "cjs: require kept")
+    end
+end)
+
+-- ---------------------------------------------------------------------------
+-- opts.global_imports: declared-global (`--:: declare x = T`) → ESM/CJS import
+-- ---------------------------------------------------------------------------
+
+T.describe("opts.global_imports: declared global with mapping emits named import", function()
+    local src = "--:: declare print2 = (string) -> nil\nprint2(\"hi\")"
+    local opts = opts_with_imports("esm", nil, { print2 = "./runtime.js" })
+    local ts, err = lua2ts.transpile(src, opts)
+    T.ok(ts ~= nil, "transpiles: " .. tostring(err))
+    if ts then
+        T.ok(ts:find('import { print2 } from "./runtime.js"', 1, true) ~= nil,
+            "named import emitted")
+        T.ok(ts:find("print2(\"hi\")", 1, true) ~= nil,
+            "identifier reference unchanged (bare name, bound by import)")
+    end
+end)
+
+T.describe("opts.global_imports: multiple declared globals, different paths", function()
+    local src = "--:: declare foo = integer\n--:: declare bar = string\nlocal a = foo\nlocal b = bar"
+    local opts = opts_with_imports("esm", nil, { foo = "./foo.js", bar = "./bar.js" })
+    local ts, err = lua2ts.transpile(src, opts)
+    T.ok(ts ~= nil, "transpiles: " .. tostring(err))
+    if ts then
+        T.ok(ts:find('import { foo } from "./foo.js"', 1, true) ~= nil,
+            "foo import emitted")
+        T.ok(ts:find('import { bar } from "./bar.js"', 1, true) ~= nil,
+            "bar import emitted")
+    end
+end)
+
+T.describe("opts.global_imports: declared global without a mapping stays bare", function()
+    -- The blank separator statement keeps the `--::` annotation from being
+    -- (mis-)consumed by emit_stmt's ann_for lookup as a type annotation for
+    -- `local a` — a pre-existing quirk (ann_for doesn't check ann.kind) noted
+    -- separately, orthogonal to what this test is checking.
+    local src = "--:: declare baz = integer\nlocal _sep = 1\nlocal a = baz"
+    local opts = opts_with_imports("esm", nil, {})
+    local ts, err = lua2ts.transpile(src, opts)
+    T.ok(ts ~= nil, "transpiles: " .. tostring(err))
+    if ts then
+        T.ok(ts:find("import { baz }", 1, true) == nil,
+            "no import emitted for unmapped declared global")
+        T.ok(ts:find("const a = baz;", 1, true) ~= nil,
+            "identifier left bare")
+    end
+end)
+
+T.describe("opts.global_imports coexists with opts.imports", function()
+    local src = "local foo = require(\"lib.foo\")\n--:: declare g = integer\nlocal x = g"
+    local opts = opts_with_imports("esm", { ["lib.foo"] = "./foo.js" }, { g = "./g.js" })
+    local ts, err = lua2ts.transpile(src, opts)
+    T.ok(ts ~= nil, "transpiles: " .. tostring(err))
+    if ts then
+        T.ok(ts:find('import * as foo from "./foo.js"', 1, true) ~= nil,
+            "require remap via opts.imports still works")
+        T.ok(ts:find('import { g } from "./g.js"', 1, true) ~= nil,
+            "declared-global import via opts.global_imports")
+    end
+end)
+
+T.describe("opts.global_imports in cjs mode emits require destructure", function()
+    local src = "--:: declare h = integer\nlocal x = h"
+    local opts = opts_with_imports("cjs", nil, { h = "./h.js" })
+    local ts, err = lua2ts.transpile(src, opts)
+    T.ok(ts ~= nil, "transpiles: " .. tostring(err))
+    if ts then
+        T.ok(ts:find('const { h } = require("./h.js");', 1, true) ~= nil,
+            "cjs: require destructure emitted")
+        T.ok(ts:find("import {", 1, true) == nil,
+            "cjs: no ESM import syntax")
     end
 end)
 
