@@ -118,6 +118,8 @@ Per-feature reference: `docs/typechecker-reference.md`. Design rationale: `docs/
 
 **Write things down.** Problems and tech debt → `TODO.md`. Design decisions → `docs/`. Mark `[x]` in `TODO.md` when done, same commit. Never delete unchecked TODO items.
 
+**When a typechecker limitation forces a code workaround:** add a `-- TYPECHECKER WORKAROUND:` comment at the workaround site explaining what the natural code would be and which typechecker gap prevents it, and add a TODO.md entry to revert the workaround when the gap is resolved. Both in the same commit as the workaround. Cross-reference the relevant `docs/decisions/` document if one exists.
+
 ## Commit Convention
 
 Conventional commits: `type(scope): message`. Types: `feat`, `fix`, `refactor`, `docs`, `chore`, `test`. Scope is the library or component (`feat(http): chunked encoding`).

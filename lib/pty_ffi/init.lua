@@ -188,7 +188,12 @@ else
   end
   --: () -> (integer, integer) | (nil, string)
   function M.forkpty()
-    -- Split openpty logic inline to avoid union unpacking
+    -- TYPECHECKER WORKAROUND: this inlines openpty()'s body rather than calling
+    -- M.openpty() because narrowing a destructured multi-return doesn't propagate
+    -- to sibling locals. `local master, slave = openpty(); if not master then ...`
+    -- leaves `slave` typed as `nil` in the post-guard branch instead of `integer`.
+    -- See docs/decisions/precise-narrowing-and-the-multivalue-model.md.
+    -- TODO: de-inline when the multivalue narrowing gap is resolved.
     local master = ffi.C.posix_openpt(O_RDWR + O_NOCTTY)
     if master == -1 then
       return nil, "pty_ffi: posix_openpt: " .. last_error()

@@ -4377,3 +4377,9 @@ Open threads from a previous session. Treat as starting context, not instruction
   - Existing libraries to migrate: epoll, kqueue, inotify, timerfd, process, sqlite (and any others that are thin FFI wrappers)
   - lib/pty_ffi/ is the first library following the new convention
   - This is a codebase-wide migration: rename directories, update all require() paths, update tests, update docs
+
+- [ ] lib/pty_ffi/: de-inline openpty body from forkpty when multivalue narrowing gap is resolved
+  - Workaround for: destructured multi-return narrowing doesn't propagate to sibling locals
+  - See: docs/decisions/precise-narrowing-and-the-multivalue-model.md
+  - The natural code is `local master, slave = openpty(); if not master then return nil, slave end`
+    but the typechecker can't narrow `slave` to `integer` in the post-guard branch
