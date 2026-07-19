@@ -4392,3 +4392,13 @@ Open threads from a previous session. Treat as starting context, not instruction
   - See: docs/decisions/precise-narrowing-and-the-multivalue-model.md
   - The natural code is `local master, slave = openpty(); if not master then return nil, slave end`
     but the typechecker can't narrow `slave` to `integer` in the post-guard branch
+
+## Async-first daemon rewrite (2026-07-19)
+
+- [ ] Replace synchronous daemon with async-first architecture (lib/async + lib/io_poll)
+  - Design doc: docs/daemon-async.md
+  - Motivation: terminal mux needs WebSocket + PTY fd multiplexing + server-push, none possible in current sync request-response model
+  - Phases: core loop → HTTP → WS upgrade → DaemonCtx cap convention → PTY cap → WS cap → terminal mux app
+  - Preserves: all existing features (routing, sessions, caps, apps, rate limiting, sandbox)
+  - Blocked: terminal mux platform app depends on this
+  - See also: docs/terminal-mux.md for the driving use case
