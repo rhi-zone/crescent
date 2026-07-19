@@ -139,6 +139,7 @@ Conventional commits: `type(scope): message`. Types: `feat`, `fix`, `refactor`, 
 - No assuming a tool is missing — check `nix develop`.
 - No dependencies that require a build step — pure Lua + FFI only.
 - No special-casing. If the type system cannot express a construct declaratively, that is a substrate gap — fill it or escalate, never work around it with name-keyed or hardcoded handling in the gen-pass or solver. Making a demo pass or lowering an error count never justifies ad-hoc behavior. (Ad-hoc accumulation is the documented root cause of v1→v4 failure; v5 exists to prevent it.)
+- No compromises, no laziness. Code taken as a shortcut — "I'll do this right later" — doesn't stay local. It becomes precedent. Agents and future contributors read existing code as canonical and copy patterns forward. A compromise that seems contained radiates outward, poisoning every decision downstream. If something can't be done right yet, don't do it wrong "for now" — leave it undone and document the substrate it requires. The cost of a shortcut is not the shortcut itself; it's every future choice that treats it as settled pattern.
 
 The following three rules are PLANNING-level — they bind the orchestrator and plan author, complementing the code-level no-special-casing rule above (which binds the implementer).
 
