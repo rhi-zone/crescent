@@ -44,7 +44,7 @@ local REJECTED  = "rejected"
 --:: ClockFn = () -> number
 --:: Poller = { wait: (unknown, integer | nil) -> nil, add: (unknown, integer, (() -> nil) | ((string) -> nil), (() -> nil) | nil, boolean | nil) -> (((string) -> nil) | nil, (() -> nil) | nil, string | nil), watch_writable: (unknown, integer, () -> nil) -> (nil | string), unwatch_writable: (unknown, integer) -> (nil | string), count: integer, ... }
 --:: LoopOpts = { clock: ClockFn | nil }
---:: LoopObj = { _queue: LoopQ, _timers: LoopTimers, _poller: Poller, _clock: ClockFn, _pending_io: integer, run_until: (LoopObj, PromiseP) -> (unknown, unknown), sleep: (LoopObj, number) -> PromiseP, clear: (LoopObj) -> nil, queue: (LoopObj, () -> unknown) -> nil, await_readable: (LoopObj, integer, Poller | nil) -> (PromiseP | nil, string | nil), await_writable: (LoopObj, integer, Poller | nil) -> (PromiseP | nil, string | nil), ... }
+--:: LoopObj = { _queue: LoopQ, _timers: LoopTimers, _poller: Poller, _clock: ClockFn, _pending_io: integer, step: (LoopObj) -> nil, run_until: (LoopObj, PromiseP) -> (unknown, unknown), sleep: (LoopObj, number) -> PromiseP, clear: (LoopObj) -> nil, queue: (LoopObj, () -> unknown) -> nil, await_readable: (LoopObj, integer, Poller | nil) -> (PromiseP | nil, string | nil, (() -> nil) | nil), await_writable: (LoopObj, integer, Poller | nil) -> (PromiseP | nil, string | nil, (() -> nil) | nil), ... }
 
 -- ── Internal helpers ─────────────────────────────────────────────────────────
 
@@ -402,8 +402,9 @@ end
 -- The fd is registered with the poller for the lifetime of the await; it is
 -- automatically removed once the notification fires or the fd is closed.
 -- If custom_poller is provided, it is used instead of the loop's default poller.
--- Returns (promise, nil) on success, (nil, errmsg) on registration failure.
---: (LoopObj, integer, Poller | nil) -> (PromiseP | nil, string | nil)
+-- Returns (promise, nil, cancel) on success, (nil, errmsg, nil) on failure.
+-- cancel() forces the await to reject immediately (for timeout races).
+--: (LoopObj, integer, Poller | nil) -> (PromiseP | nil, string | nil, (() -> nil) | nil)
 function Loop:await_readable(fd, custom_poller)
   local poller = custom_poller or self._poller
   local p, resolve, reject = M.promise()
@@ -431,18 +432,21 @@ function Loop:await_readable(fd, custom_poller)
   end, true) -- weak: does not keep poller.loop alive
   if err then
     loop_ref._pending_io = loop_ref._pending_io - 1
-    return nil, err
+    return nil, err, nil
   end
   remove_box[1] = remove_fn
-  return p, nil
+  --: () -> nil
+  local function cancel() on_fire(true) end
+  return p, nil, cancel
 end
 
 --- Return a promise that resolves when fd becomes writable (bare notification).
 -- The fd is registered with the poller for the lifetime of the await; it is
 -- automatically removed once the notification fires or the fd is closed.
 -- If custom_poller is provided, it is used instead of the loop's default poller.
--- Returns (promise, nil) on success, (nil, errmsg) on registration failure.
---: (LoopObj, integer, Poller | nil) -> (PromiseP | nil, string | nil)
+-- Returns (promise, nil, cancel) on success, (nil, errmsg, nil) on failure.
+-- cancel() forces the await to reject immediately (for timeout races).
+--: (LoopObj, integer, Poller | nil) -> (PromiseP | nil, string | nil, (() -> nil) | nil)
 function Loop:await_writable(fd, custom_poller)
   local poller = custom_poller or self._poller
   local p, resolve, reject = M.promise()
@@ -470,7 +474,7 @@ function Loop:await_writable(fd, custom_poller)
   end, true) -- weak
   if err then
     loop_ref._pending_io = loop_ref._pending_io - 1
-    return nil, err
+    return nil, err, nil
   end
   remove_box[1] = remove_fn
   -- Now enable write-readiness notification.
@@ -480,9 +484,53 @@ function Loop:await_writable(fd, custom_poller)
   if werr then
     if remove_fn then remove_fn() end
     loop_ref._pending_io = loop_ref._pending_io - 1
-    return nil, werr
+    return nil, werr, nil
   end
-  return p, nil
+  --: () -> nil
+  local function cancel() on_fire(true) end
+  return p, nil, cancel
+end
+
+--- Execute one iteration of the event loop: poll (with computed timeout from
+-- timers), fire expired timers, and drain the microtask queue.
+-- Used by servers that run their own outer loop rather than run_until.
+--: (LoopObj) -> nil
+function Loop:step()
+  local timeout_ms = -1 --: integer
+  local timers = self._timers
+  if #timers > 0 then
+    local now = self._clock()
+    local nearest = timers[1][1]
+    for i = 2, #timers do
+      local d = timers[i][1]
+      if d < nearest then nearest = d end
+    end
+    local delta = tonumber(nearest - now) or 0
+    if delta <= 0 then
+      timeout_ms = 0
+    else
+      timeout_ms = math.ceil(delta)
+    end
+  end
+  if #self._queue > 0 then
+    timeout_ms = 0
+  end
+  self._poller:wait(timeout_ms)
+  -- Fire expired timers.
+  local now = self._clock()
+  for i = #timers, 1, -1 do
+    if now >= timers[i][1] then
+      local resolve_fn = timers[i][2]
+      table.remove(timers, i)
+      resolve_fn(nil)
+    end
+  end
+  -- Drain the microtask queue.
+  local batch = self._queue
+  self._queue = {}
+  for i = 1, #batch do
+    batch[i]()
+  end
 end
 
 --- Run the loop until `promise` settles. Returns (value, nil) or (nil, reason).

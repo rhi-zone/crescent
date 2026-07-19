@@ -1,5 +1,6 @@
 local socket = require("lib.socket.server")
 local http = require("lib.http.format")
+local async = require("lib.async")
 
 local mod = {}
 
@@ -28,56 +29,130 @@ local function get_tls()
 	return tls_lib
 end
 
---:: http_client_sock = { receive: (self: http_client_sock, unknown) -> string | nil, send: (self: http_client_sock, string) -> unknown, close: (self: http_client_sock) -> unknown, fd: integer, on_send: unknown, on_receive: unknown }
+--:: http_client_sock = { receive: (self: http_client_sock, unknown) -> string | nil, send: (self: http_client_sock, string) -> unknown, close: (self: http_client_sock) -> unknown, fd: integer, on_send: unknown, on_receive: unknown, _loop: unknown }
 --:: HttpHandlerFn = (req: http_request, res: http_server_response, sock: http_client_sock) -> (boolean | nil)
+--:: HttpKeepAliveOpts = { idle_timeout: number | nil, max_requests: integer | nil }
 
---: (HttpHandlerFn) -> (http_client_sock) -> nil
-mod.make_connection_handler = function (handler)
-	return function (client)
+-- NOTE: cross-module named types are not yet supported; AsyncLoop is the
+-- structural subset of lib/async LoopObj used here.
+--:: AsyncLoop = { await_readable: (self: AsyncLoop, integer) -> (unknown, string | nil, (() -> nil) | nil), sleep: (self: AsyncLoop, number) -> { and_then: (self: unknown, (unknown) -> unknown) -> unknown, ... }, step: (self: AsyncLoop) -> nil, ... }
+
+-- Determine whether to keep the connection alive based on HTTP version and
+-- Connection header value.
+--: (string, string) -> boolean
+local function should_keep_alive(version, connection_header_val)
+	local conn = connection_header_val:lower()
+	if version == "HTTP/1.0" then
+		return conn == "keep-alive"
+	end
+	-- HTTP/1.1 defaults to keep-alive unless Connection: close
+	return conn ~= "close"
+end
+
+--: (HttpHandlerFn, HttpKeepAliveOpts | nil) -> (http_client_sock) -> nil
+mod.make_connection_handler = function(handler, ka_opts)
+	local ka = ka_opts or {}
+	local idle_timeout_ms = ka.idle_timeout or 60000
+	local max_requests = ka.max_requests or 0
+
+	--: (http_client_sock) -> nil
+	return function(client)
 		local client_ = client
-		local parts = {}
-		local total = 0
-		local header_end
-		--[[read until we have complete headers (\r\n\r\n)]]
-		while not header_end do
-			local s = client_:receive(buf)
-			if not s then return end
-			parts[#parts + 1] = s
-			total = total + #s
-			if total > max_header_size then client_:send(err_res); return end
-			local combined = table.concat(parts)
-			header_end = combined:find("\r\n\r\n", 1, true)
-			if header_end then parts = { combined } end
-		end
-		local data = parts[1]
-		local req, i = http.parse_request(data)
-		if not req or not i then client_:send(err_res); return end
-		--[[read remaining body if Content-Length specified]]
-		local content_length = req.headers["content-length"]
-		if content_length then
-			content_length = tonumber(content_length[1])
+		-- TYPECHECKER WORKAROUND: _loop is typed as `unknown` in http_client_sock
+		-- because cross-module named types are not yet supported. The field is set
+		-- by lib/socket/server to a LoopObj; force-cast here until the typechecker
+		-- can propagate the type across module boundaries.
+		local loop = (client_._loop --[[: unknown]]) --[[:! AsyncLoop | nil]]
+		local request_count = 0
+		local keep_alive = true
+
+		while keep_alive do
+			request_count = request_count + 1
+			if max_requests > 0 and request_count > max_requests then break end
+
+			-- Idle timeout between requests (skip for the very first read —
+			-- the connection just arrived, data may already be buffered).
+			if request_count > 1 and loop then
+				local p, _perr, cancel = loop:await_readable(client_.fd)
+				if not p then break end
+				local timed_out = false
+				local timer = loop:sleep(idle_timeout_ms)
+				timer:and_then(function(_v)
+					timed_out = true
+					if cancel then cancel() end
+				end)
+				local await_ok = pcall(async.await, p)
+				if timed_out or not await_ok then break end
+			end
+
+			-- Read until we have complete headers (\r\n\r\n).
+			local parts = {} --: { [integer]: string }
+			local total = 0
+			local header_end
+			while not header_end do
+				local s = client_:receive(buf)
+				if not s then keep_alive = false; break end
+				parts[#parts + 1] = s
+				total = total + #s
+				if total > max_header_size then client_:send(err_res); keep_alive = false; break end
+				local combined = table.concat(parts)
+				header_end = combined:find("\r\n\r\n", 1, true)
+				if header_end then parts = { combined } end
+			end
+			if not keep_alive or not header_end then break end
+
+			local data = parts[1]
+			if not data then break end
+			local req, i = http.parse_request(data)
+			if not req or not i then client_:send(err_res); break end
+
+			-- Read remaining body if Content-Length specified.
+			local content_length = (req --[[: http_request]]).headers["content-length"]
 			if content_length then
-				local body_start = header_end + 4
-				local body_so_far = #data - body_start + 1
-				while body_so_far < content_length do
-					local s = client_:receive(buf)
-					if not s then break end
-					parts[#parts + 1] = s
-					body_so_far = body_so_far + #s
-				end
-				if #parts > 1 then
-					data = table.concat(parts)
-					req = http.parse_request(data)
-					if not req then client_:send(err_res); return end
+				content_length = tonumber(content_length[1])
+				if content_length then
+					local body_start = header_end + 4
+					local body_so_far = #data - body_start + 1
+					while body_so_far < content_length do
+						local s = client_:receive(buf)
+						if not s then keep_alive = false; break end
+						parts[#parts + 1] = s
+						body_so_far = body_so_far + #s
+					end
+					if not keep_alive then break end
+					if #parts > 1 then
+						data = table.concat(parts)
+						req = http.parse_request(data)
+						if not req then client_:send(err_res); break end
+					end
 				end
 			end
-		end
-		local res = { status = 200, reason = "", version = "HTTP/1.1", headers = {}, body = nil, raw = nil } --: http_server_response
-		handler(req, res, client_)
-		if not res.raw then
+
+			-- Determine keep-alive from request headers.
+			local req_ = req --[[: http_request]]
+			local connection_hdr = req_.headers["connection"]
+			local conn_val = connection_hdr and connection_hdr[1] or ""
+			keep_alive = should_keep_alive(req_.version, conn_val)
+
+			local res = { status = 200, reason = "", version = "HTTP/1.1", headers = {}, body = nil, raw = nil } --: http_server_response
+			handler(req, res, client_)
+
+			if res.raw then
+				-- Handler took ownership of the socket (SSE, websocket, etc.).
+				return
+			end
+
+			-- Add Connection header to response.
+			if keep_alive then
+				res.headers["connection"] = { "keep-alive" }
+			else
+				res.headers["connection"] = { "close" }
+			end
+
 			client_:send(http.serialize_response(res))
-			client_:close()
 		end
+
+		client_:close()
 	end
 end
 
@@ -148,9 +223,11 @@ end
 -- When both are set and libtls is available, accepted connections are wrapped
 -- in TLS. If libtls is unavailable a warning is printed and the server falls
 -- back to plaintext — it does not hard-fail.
---: (HttpHandlerFn, integer | nil, unknown | nil, { host: string | nil, tls_cert: string | nil, tls_key: string | nil } | nil) -> unknown
-mod.server = function (handler, port, epoll, opts)
-	local opts_ = opts or { host = nil, tls_cert = nil, tls_key = nil } --: { host: string | nil, tls_cert: string | nil, tls_key: string | nil }
+-- opts.idle_timeout (optional): ms idle between keep-alive requests (default 60000).
+-- opts.max_requests (optional): max requests per connection (default 0 = no limit).
+--: (HttpHandlerFn, integer | nil, unknown | nil, { host: string | nil, tls_cert: string | nil, tls_key: string | nil, idle_timeout: number | nil, max_requests: integer | nil } | nil) -> unknown
+mod.server = function(handler, port, epoll, opts)
+	local opts_ = opts or { host = nil, tls_cert = nil, tls_key = nil, idle_timeout = nil, max_requests = nil } --: { host: string | nil, tls_cert: string | nil, tls_key: string | nil, idle_timeout: number | nil, max_requests: integer | nil }
 	local tls_ctx --: cdata | nil
 
 	local tls_cert = opts_.tls_cert
@@ -194,7 +271,8 @@ mod.server = function (handler, port, epoll, opts)
 		end
 	end
 
-	return socket.server(mod.make_connection_handler(handler), port or 80, epoll, server_opts)
+	local ka_opts = { idle_timeout = opts_.idle_timeout, max_requests = opts_.max_requests }
+	return socket.server(mod.make_connection_handler(handler, ka_opts), port or 80, epoll, server_opts)
 end
 
 return mod
