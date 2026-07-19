@@ -1788,7 +1788,7 @@ to that endpoint.
   option was the one explicitly requested when this was picked up. Implemented
   in `lib/lua2ts/init.lua`; tests in `lib/lua2ts/lua2ts_test.lua`.
 
-- [ ] **`lib/lua2ts/`: `ann_for` doesn't check `ann.kind`, so a `--:: declare`
+- [x] **`lib/lua2ts/`: `ann_for` doesn't check `ann.kind`, so a `--:: declare`
   line immediately preceding a `local` or `function` statement gets
   (mis-)consumed as if it were a `--:` type annotation for that statement.**
   Found while adding `opts.global_imports` tests: `--:: declare baz =
@@ -1797,10 +1797,9 @@ to that endpoint.
   (`ctx:ann_for(n.line)` in the `NODE_LOCAL_STMT` and `NODE_FUNC_DECL`
   branches) do `ann and ann.content or nil` without checking `ann.kind ==
   "type"` first — a `"decl"`-kind annotation (`--::`) passes through the same
-  path as a `"type"`-kind one (`--:`). Pre-existing, orthogonal to
-  `global_imports`; worked around in the new tests by inserting a separator
-  statement between the `declare` line and the reference so the two don't sit
-  on adjacent lines. Fix: guard both call sites on `ann.kind == "type"`.
+  path as a `"type"`-kind one (`--:`). Fixed: both call sites now guard on
+  `ann.kind == "type"`; the workaround separator statement in the
+  `global_imports` test was removed since it's no longer needed.
 
 ## Platform isolation (top priority)
 

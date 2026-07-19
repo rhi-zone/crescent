@@ -881,7 +881,7 @@ emit_stmt = function(ctx, nid)
         end
         -- Check for annotation on preceding line
         local ann = ctx:ann_for(n.line)
-        local ann_content = ann and ann.content or nil
+        local ann_content = (ann and ann.kind == "type") and ann.content or nil
 
         if el == 0 then
             -- local x [, y] (no initializer) → let x [, y]
@@ -948,7 +948,7 @@ emit_stmt = function(ctx, nid)
         local is_local = (n.flags % 4) >= 2    -- FLAG_LOCAL = 2
 
         local ann = ctx:ann_for(n.line)
-        local ann_content = ann and ann.content or nil
+        local ann_content = (ann and ann.kind == "type") and ann.content or nil
 
         local name_n = ctx:node(name_node_id)
         local is_method = name_n.kind == defs.NODE_FIELD_EXPR

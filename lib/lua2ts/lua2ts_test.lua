@@ -315,11 +315,7 @@ T.describe("opts.global_imports: multiple declared globals, different paths", fu
 end)
 
 T.describe("opts.global_imports: declared global without a mapping stays bare", function()
-    -- The blank separator statement keeps the `--::` annotation from being
-    -- (mis-)consumed by emit_stmt's ann_for lookup as a type annotation for
-    -- `local a` — a pre-existing quirk (ann_for doesn't check ann.kind) noted
-    -- separately, orthogonal to what this test is checking.
-    local src = "--:: declare baz = integer\nlocal _sep = 1\nlocal a = baz"
+    local src = "--:: declare baz = integer\nlocal a = baz"
     local opts = opts_with_imports("esm", nil, {})
     local ts, err = lua2ts.transpile(src, opts)
     T.ok(ts ~= nil, "transpiles: " .. tostring(err))
