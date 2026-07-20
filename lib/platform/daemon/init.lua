@@ -31,6 +31,7 @@ local policy_mod = require("lib.platform.policy")
 local _index_types = require("lib.platform.index") -- for Index, AppRow type aliases
 local _audit_types = require("lib.platform.audit") -- for AuditLog type alias
 
+--:: require "lib.http.server_ws"
 
 local M = {}
 
@@ -66,18 +67,23 @@ local M = {}
 --::   policy_path?: string,
 --::   tls_cert?: string,
 --::   tls_key?: string,
+--::   ws_handlers?: { [string]: unknown },
 --:: }
 --:: session_record = { created_at: integer, last_seen: integer, csrf_token: string | nil }
 --:: launch_token_record = { app_id: string, session_id: string | nil, expires_at: integer }
 --:: app_session_record = { app_id: string, created_at: integer, last_seen: integer }
+--:: ws_handler_entry = { ws_accept: ((http_req) -> (boolean | nil, string | nil)) | nil, ws: (unknown, http_req) -> nil }
 --:: daemon = {
 --::   handle: (http_req, http_res) -> nil,
+--::   ws_accept: (http_request) -> (boolean | nil, string | nil),
+--::   ws: (WsConn, http_request) -> nil,
 --::   register_app: (string) -> string,
 --::   sessions: { [string]: session_record },
 --::   launch_tokens: { [string]: launch_token_record },
 --::   app_sessions: { [string]: { [string]: app_session_record } },
 --::   loopback_id_to_ip: { [string]: string },
 --::   loopback_ip_to_id: { [string]: string },
+--::   ws_handlers: { [string]: unknown },
 --::   _host: string,
 --::   _library_app: unknown,
 --:: }
@@ -443,6 +449,25 @@ function M.make(opts)
 			.. "; frame-ancestors 'none'; form-action 'self'"
 	end
 
+	-- ── WS handler registry ──────────────────────────────────────────────────
+	-- Populated as a side effect of app loading: the ws_server cap's on_serve
+	-- callback writes here when the app calls cap:serve(handler_table).
+	-- Keyed by app_id -> { ws_accept = fn?, ws = fn }.
+	local ws_handlers = opts.ws_handlers or {} --: { [string]: unknown }
+
+	-- ── ensure_app_loaded ────────────────────────────────────────────────────
+	-- Shared load-on-demand logic for both HTTP and WS dispatch paths. Ensures
+	-- the app's handler(s) are in the cache; called before either path invokes
+	-- its respective handler.
+	--
+	-- Returns (true) when the app is loaded (handler in cache).
+	-- Returns (nil, err_msg) on load/policy failure.
+	-- Returns (nil, nil, redirect_url) when the grant gate requires redirect.
+	--
+	-- Only defined in the app_loader path — nil in the test-override and
+	-- v1-stub paths (those don't have on-demand loading).
+	local ensure_app_loaded --: ((string) -> (true | nil, string | nil, string | nil)) | nil
+
 	local app_handler --: ((http_req, http_res, string) -> nil) | nil
 	if opts.app_handler then
 		local override = opts.app_handler --: (http_req, http_res, string) -> nil
@@ -452,23 +477,26 @@ function M.make(opts)
 		end
 	elseif opts.app_loader then
 		local loader = opts.app_loader --: app_loader_fn
-		--: (http_req, http_res, string) -> nil
-		app_handler = function(req, res, app_id)
-			local cached = app_handlers:get(app_id) --: ((http_req, http_res) -> nil) | nil
-			if cached then
-				invoke_app_handler(app_id, cached, req, res)
-				return
-			end
+
+		-- ensure_app_loaded(app_id) -> (true | nil, string | nil, string | nil)
+		-- Grant gate, policy gate, loader invocation, caching. Pure side-effect
+		-- function: on success the handler is in app_handlers and (if the app
+		-- registered one) ws_handlers. Callers inspect the relevant registry
+		-- after this returns true.
+		--: (string) -> (true | nil, string | nil, string | nil)
+		ensure_app_loaded = function(app_id)
+			-- Already loaded?
+			if app_handlers:get(app_id) then return true end
+
+			-- Negative cache?
 			local cached_err = app_load_errors[app_id]
 			if cached_err then
 				if time_fn() < cached_err.retry_at then
-					res.status = 500
-					res.headers["Content-Type"] = { "text/plain; charset=utf-8" }
-					res.body = "app load failed: " .. cached_err.err
-					return
+					return nil, "app load failed: " .. cached_err.err, nil
 				end
 				rawset(app_load_errors, app_id, nil)
 			end
+
 			-- Grant gate: if index_obj is available and the app has required caps
 			-- without a stored grant decision, redirect to the grant page rather
 			-- than loading with auto_grants. Only runs on first load (cache miss).
@@ -479,7 +507,7 @@ function M.make(opts)
 				if irow then
 					local cap_decls = all_cap_decls_from_manifest(irow.manifest or {})
 					local stored = index_obj:get_grants(iapp_id)
-					local undecided = {}
+					local undecided = {} --: { [integer]: string }
 					for cname, decl in pairs(cap_decls) do
 						local required = true
 						if type(decl) == "table" then
@@ -491,11 +519,7 @@ function M.make(opts)
 					end
 					if #undecided > 0 then
 						local grant_url = "http://" .. host .. "/apps/" .. app_id .. "/grant"
-						res.status = 303
-						res.headers["Location"] = { grant_url }
-						res.headers["Content-Type"] = { "text/plain; charset=utf-8" }
-						res.body = ""
-						return
+						return nil, nil, grant_url
 					end
 				end
 			end
@@ -513,10 +537,7 @@ function M.make(opts)
 						if not pol_ok then
 							local msg = "blocked by admin policy: " .. cname .. ": " .. tostring(pol_reason)
 							app_load_errors[app_id] = { err = msg, retry_at = time_fn() + LOAD_ERROR_TTL }
-							res.status = 500
-							res.headers["Content-Type"] = { "text/plain; charset=utf-8" }
-							res.body = "app load failed: " .. msg
-							return
+							return nil, "app load failed: " .. msg, nil
 						end
 					end
 				end
@@ -526,20 +547,38 @@ function M.make(opts)
 			if not handler then
 				local msg = tostring(err or "unknown error")
 				app_load_errors[app_id] = { err = msg, retry_at = time_fn() + LOAD_ERROR_TTL }
-				res.status = 500
-				res.headers["Content-Type"] = { "text/plain; charset=utf-8" }
-				res.body = "app load failed: " .. msg
-				return
+				return nil, "app load failed: " .. msg, nil
 			end
 			-- Unreachable: handler was checked above, but the typechecker cannot
 			-- narrow across the tuple-return + early-return boundary.
-			if not handler then return end
+			if not handler then return nil, "app load failed: unknown error", nil end
 			local fn = handler or error("unreachable")
 			-- Cache BEFORE invoking: a throwing handler must not be evicted.
 			app_handlers:set(app_id, fn)
 			-- Compute and cache the app's CSP alongside its handler.
 			app_csp[app_id] = build_app_csp(app_id)
-			invoke_app_handler(app_id, fn, req, res)
+			return true
+		end
+
+		--: (http_req, http_res, string) -> nil
+		app_handler = function(req, res, app_id)
+			local load_ok, load_err, redirect_url = ensure_app_loaded(app_id)
+			if redirect_url then
+				res.status = 303
+				res.headers["Location"] = { redirect_url }
+				res.headers["Content-Type"] = { "text/plain; charset=utf-8" }
+				res.body = ""
+				return
+			end
+			if not load_ok then
+				res.status = 500
+				res.headers["Content-Type"] = { "text/plain; charset=utf-8" }
+				res.body = load_err or "app load failed"
+				return
+			end
+			local cached = app_handlers:get(app_id) --: ((http_req, http_res) -> nil) | nil
+			if not cached then return end -- should not happen after ensure_app_loaded
+			invoke_app_handler(app_id, cached, req, res)
 		end
 	else
 		--: (http_req, http_res, string) -> nil
@@ -547,6 +586,112 @@ function M.make(opts)
 			res.status = 200
 			res.headers["Content-Type"] = { "text/plain; charset=utf-8" }
 			res.body = "app " .. tostring(app_id) .. " not yet mountable — VM host pending"
+		end
+	end
+
+	-- ── WS routing ───────────────────────────────────────────────────────────
+	-- Top-level ws_accept/ws functions for the daemon's server_ws handler table.
+	-- Route WS upgrades by host header to the right app's registered WS handler.
+	-- Uses weak-keyed tables to pass per-connection state from ws_accept to ws
+	-- without mutating the raw request object.
+
+	local ws_req_app_ids = setmetatable({}, { __mode = "k" }) --: { [unknown]: string | nil }
+	local ws_req_clean = setmetatable({}, { __mode = "k" }) --: { [unknown]: unknown }
+
+	-- Split a raw request target into path and query (same as cli.lua's inline logic).
+	--: (string) -> (string, string | nil)
+	local function split_target(target)
+		local q = target:find("?", 1, true)
+		if q then
+			return target:sub(1, q - 1), target:sub(q + 1)
+		end
+		return target, nil
+	end
+
+	-- daemon_ws_accept(req) -> (true | nil, string | nil)
+	-- Called by server_ws before the WS handshake. Classifies the host,
+	-- triggers lazy-load if needed, and delegates to the app's ws_accept.
+	--: (http_request) -> (boolean | nil, string | nil)
+	local function daemon_ws_accept(raw_req)
+		local req = raw_req
+		local host_arr = req.headers["host"]
+		local host_val = host_arr and host_arr[1] or ""
+		local classified = M.classify_host(host_val, host, loopback_ip_to_id)
+
+		if classified.kind ~= "app" then
+			return nil, "WebSocket upgrades only supported on app origins"
+		end
+
+		local app_id = classified.id or ""
+
+		-- Trigger lazy-load (grant gate, policy gate, loader) if available.
+		if ensure_app_loaded then
+			local load_ok, load_err, _redirect = ensure_app_loaded(app_id)
+			if not load_ok then
+				return nil, load_err or "app not available"
+			end
+		end
+
+		-- Look up the app's WS handler in the registry.
+		local entry_raw = ws_handlers[app_id]
+		if type(entry_raw) ~= "table" then
+			return nil, "app does not accept WebSocket connections"
+		end
+		local entry = entry_raw --[[: { ws_accept: ((unknown) -> (boolean | nil, string | nil)) | nil, ws: (unknown, unknown) -> nil }]]
+
+		-- Build a clean request for the app (path/query split, no socket).
+		local target = req.target or "/"
+		local path, query = split_target(target)
+		local clean_req = {
+			method  = req.method,
+			path    = path,
+			query   = query,
+			headers = req.headers,
+			body    = req.body,
+		}
+
+		-- Stash for daemon_ws_handler via weak-keyed tables.
+		ws_req_app_ids[raw_req] = app_id
+		ws_req_clean[raw_req] = clean_req
+
+		-- Delegate to app's ws_accept if present.
+		if entry.ws_accept then
+			return entry.ws_accept(clean_req)
+		end
+
+		return true
+	end
+
+	-- daemon_ws_handler(ws_conn, req) -> nil
+	-- Called by server_ws after the handshake completes. Dispatches to the
+	-- app's ws handler. Wrapped in xpcall so a throwing handler doesn't
+	-- crash the daemon.
+	--: (WsConn, http_request) -> nil
+	local function daemon_ws_handler(ws_conn, raw_req)
+		local app_id = ws_req_app_ids[raw_req]
+		if not app_id then return end
+
+		-- Clean up stashed state (connection is now established).
+		ws_req_app_ids[raw_req] = nil
+		local clean_req = ws_req_clean[raw_req] or raw_req
+		ws_req_clean[raw_req] = nil
+
+		local entry_raw = ws_handlers[app_id]
+		if type(entry_raw) ~= "table" then return end
+		local entry = entry_raw --[[: { ws_accept: ((unknown) -> (boolean | nil, string | nil)) | nil, ws: (unknown, unknown) -> nil }]]
+
+		local tb --: string | nil
+		local function tb_handler(err)
+			tb = debug.traceback(tostring(err), 2)
+			return err
+		end
+		local ok, err = xpcall(function() entry.ws(ws_conn, clean_req) end, tb_handler)
+		if not ok then
+			if opts.on_handler_error then
+				opts.on_handler_error(app_id, tostring(err), tb or "")
+			end
+			-- Best-effort close on error. ws_conn may already be closed.
+			pcall(ws_conn.close, ws_conn, 1011, "internal error")
 		end
 	end
 
@@ -1582,12 +1727,15 @@ end
 
 	return {
 		handle = handle,
+		ws_accept = daemon_ws_accept,
+		ws = daemon_ws_handler,
 		register_app = register_app,
 		sessions = sessions,
 		launch_tokens = launch_tokens,
 		app_sessions = app_sessions,
 		loopback_id_to_ip = loopback_id_to_ip,
 		loopback_ip_to_id = loopback_ip_to_id,
+		ws_handlers = ws_handlers,
 		_host = host,
 		_library_app = library_app,
 	}

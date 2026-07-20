@@ -6,21 +6,26 @@
 --   daemon.make({ app_loader = ... }).
 --
 -- opts: {
---   index_db : index table with :get(app_id) returning { path, manifest, ... }
---   context  : { user_id, data_dir } — merged into per-call context with app_id
---   entry_key: string (default "server") — which manifest entry to run
---   app_url  : (app_id) -> string — URL advertised via caps.http_server.url
+--   index_db    : index table with :get(app_id) returning { path, manifest, ... }
+--   context     : { user_id, data_dir } — merged into per-call context with app_id
+--   entry_key   : string (default "server") — which manifest entry to run
+--   app_url     : (app_id) -> string — URL advertised via caps.http_server.url
+--   ws_on_serve : (app_id, handler_table) -> nil — daemon callback for WS handler
+--                 registration. Called as a side effect when the app calls
+--                 ws_server_cap:serve(handler_table). Optional; omit for non-daemon
+--                 contexts.
 -- }
 --
 -- Flow per app_id:
---   1. index_db:get(app_id) → row with .path
---   2. platform.load_app(path) → app
---   3. Build factory override for http_server in daemon mode; the app's call to
---      caps.http_server.serve(handler) feeds `handler` back via on_serve.
---   4. make_caps(app, entry caps, auto-grant, context, overrides) → caps
+--   1. index_db:get(app_id) -> row with .path
+--   2. platform.load_app(path) -> app
+--   3. Build factory overrides for http_server and ws_server in daemon mode;
+--      the app's calls to caps.http_server.serve(handler) and
+--      caps.ws_server.serve(handler_table) feed handlers back via on_serve.
+--   4. make_caps(app, entry caps, auto-grant, context, overrides) -> caps
 --   5. sandbox.env(sandbox.stdlib, { globals = { caps = caps }, modules = {} })
---   6. platform.run_entry(app, entry_key, env) — app registers its handler
---   7. Return the captured handler.
+--   6. platform.run_entry(app, entry_key, env) — app registers its handler(s)
+--   7. Return the captured HTTP handler (or a 404 fallback for WS-only apps).
 
 if not package.path:find("./?/init.lua", 1, true) then
 	package.path = "./?/init.lua;" .. package.path
@@ -29,6 +34,7 @@ end
 local platform     = require("lib.platform")
 local sandbox      = require("lib.sandbox")
 local http_srv_cap = require("lib.platform.caps.http_server")
+local ws_srv_cap   = require("lib.platform.caps.ws_server")
 
 local M = {}
 
@@ -41,6 +47,7 @@ local M = {}
 --::   write_fn: ((string, string) -> (true | nil, string | nil)) | nil,
 --::   time_fn: (() -> integer) | nil,
 --::   audit_log: { append: (unknown, string, unknown) -> unknown } | nil,
+--::   ws_on_serve: ((string, unknown) -> nil) | nil,
 --:: }
 
 -- Build the http_server factory override that captures the app's handler.
@@ -55,6 +62,29 @@ local function make_http_server_override(app_id, app_url)
 				daemon = true,
 				url = (app_url and app_url(app_id)) or "",
 				on_serve = function(h) captured = h end,
+			})
+		end,
+	}
+	return override, function() return captured end
+end
+
+-- Build the ws_server factory override that captures the app's WS handler table.
+-- Returns (override_table, get_handler_fn). get_handler_fn() returns whatever
+-- the app registered via ws_server_cap.serve(), or nil if it never called serve.
+-- ws_on_serve is an optional side-effect callback; when present, it is called
+-- with (app_id, handler_table) so the daemon can register the WS handlers in
+-- its routing table.
+--: (string, ((string, unknown) -> nil) | nil) -> (unknown, () -> unknown)
+local function make_ws_server_override(app_id, ws_on_serve)
+	local captured --: unknown
+	local override = {
+		build = function(_decl)
+			return ws_srv_cap.ws_server_cap({
+				daemon = true,
+				on_serve = function(ht)
+					captured = ht
+					if ws_on_serve then ws_on_serve(app_id, ht) end
+				end,
 			})
 		end,
 	}
@@ -130,6 +160,7 @@ function M.make(opts)
 	local write_fn = opts.write_fn
 	local time_fn = opts.time_fn
 	local audit_log = opts.audit_log
+	local ws_on_serve = opts.ws_on_serve
 
 	--: (string) -> (unknown, string | nil)
 	return function(app_id)
@@ -169,10 +200,12 @@ function M.make(opts)
 			daemon_ctx = ctx_base.daemon_ctx,
 		}
 
-		local override, get_captured = make_http_server_override(app_id, app_url)
+		local http_override, get_http_captured = make_http_server_override(app_id, app_url)
+		local ws_override, get_ws_captured = make_ws_server_override(app_id, ws_on_serve)
 		local app_full = (app --[[:! { _dir_mode: boolean | nil, chunks: { [integer]: { type: string, data: string } } | nil, entries: { [number]: { data: string, mode: number, mtime: number, name: string, size: number, typeflag: string } }, manifest: { caps: { [string]: { allow_write: boolean | nil, base_url: string | nil, binaries: unknown, host: string | nil, key_name: string | nil, methods: unknown, model: string | nil, path: string | nil, paths: unknown, port: integer | nil, provider: string | nil, provider_default: string | nil, required: boolean | nil, root: string | nil, scope: unknown, stderr: string | nil, tables: unknown, type: string | nil } | string } | nil, default_entry: string | nil, entry: { [string]: { caps: { [string]: { allow_write: boolean | nil, base_url: string | nil, binaries: unknown, host: string | nil, key_name: string | nil, methods: unknown, model: string | nil, path: string | nil, paths: unknown, port: integer | nil, provider: string | nil, provider_default: string | nil, required: boolean | nil, root: string | nil, scope: unknown, stderr: string | nil, tables: unknown, type: string | nil } | string } | nil, main: string | nil } | string } | nil, meta: { description: string | nil, tags: { [integer]: string } | nil } | nil, name: string | nil, version: string | nil } | nil, path: string }]])
 		local caps, caps_err = platform.make_caps(app_full, cap_decls, grants, context, {
-			http_server = override,
+			http_server = http_override,
+			ws_server = ws_override,
 		})
 		if not caps then
 			return nil, "make_caps failed: " .. tostring(caps_err)
@@ -183,15 +216,29 @@ function M.make(opts)
 		if not ok then
 			return nil, "run_entry failed: " .. tostring(run_err)
 		end
-		local handler = get_captured()
-		if not handler then
-			return nil, "app did not register an http_server handler"
+		local http_handler = get_http_captured()
+		local ws_handler = get_ws_captured()
+		if not http_handler and not ws_handler then
+			return nil, "app did not register any handler (http_server or ws_server)"
 		end
-		return handler
+		-- WS-only apps: provide a fallback HTTP handler that returns 404.
+		-- This keeps the loader's return contract (always non-nil on success)
+		-- so the daemon's handler cache never stores nil for a loaded app.
+		if not http_handler then
+			--: (unknown, unknown) -> nil
+			http_handler = function(_req, res)
+				if type(res) ~= "table" then return end
+				res.status = 404
+				res.headers["Content-Type"] = { "text/plain; charset=utf-8" }
+				res.body = "not found"
+			end
+		end
+		return http_handler
 	end
 end
 
 M._make_http_server_override = make_http_server_override
+M._make_ws_server_override = make_ws_server_override
 M._collect_entry_caps = collect_entry_caps
 M._auto_grants = auto_grants
 

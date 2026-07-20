@@ -185,6 +185,17 @@
 --::   serve: (handler: (req: HttpReq, res: HttpRes) -> nil) -> (true | nil, string | nil),
 --:: }
 
+-- ── WsServerCap ──────────────────────────────────────────────────────────────
+
+--:: require "lib.http.server_ws"
+
+--:: WsServerHandlerTable = { ws_accept: WsAcceptFn | nil, ws: WsHandlerFn }
+
+--:: WsServerCap = {
+--::   _type: "ws_server",
+--::   serve: (handler: WsServerHandlerTable) -> (true | nil, string | nil),
+--:: }
+
 -- ── LlmMessage ────────────────────────────────────────────────────────────────
 
 --:: LlmMessage = { role: "user" | "assistant" | "system", content: string }

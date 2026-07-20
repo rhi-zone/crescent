@@ -34,6 +34,7 @@ local compress = require("lib.compress")
 local tar      = require("lib.tar")
 local json     = require("lib.json")
 local path_util = require("lib.platform.path_util")
+local ws_srv_cap = require("lib.platform.caps.ws_server")
 
 local M = {}
 
@@ -480,6 +481,14 @@ local CAP_FACTORIES = {
 				return nil, "pty cap requires daemon_ctx (daemon-only)"
 			end
 			return require("lib.platform.caps.pty").pty_cap(daemon_ctx)
+		end,
+	},
+	ws_server = {
+		mod = "lib.platform.caps.ws_server",
+		build = function(decl)
+			return ws_srv_cap.ws_server_cap({
+				port = decl.port or 0,
+			})
 		end,
 	},
 }

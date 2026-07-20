@@ -28,7 +28,7 @@ end
 
 local daemon = require("lib.platform.daemon")
 local app_loader = require("lib.platform.daemon.app_loader")
-local http_server = require("lib.http.server")
+local server_ws = require("lib.http.server_ws")
 local app_index = require("lib.platform.index")
 local json = require("lib.format.json")
 local xdg = require("lib.platform.xdg")
@@ -190,6 +190,11 @@ local daemon_ctx = {
 	end,
 }
 
+-- Shared WS handler registry: populated as a side effect when an app calls
+-- ws_server_cap:serve(handler_table). The app_loader writes here via
+-- ws_on_serve; the daemon reads here for WS upgrade routing.
+local ws_handlers = {} --: { [string]: unknown }
+
 --: unknown
 local loader_fn
 if idx then
@@ -210,6 +215,9 @@ if idx then
 		end,
 		time_fn = os.time,
 		audit_log = nil,
+		ws_on_serve = function(app_id, handler_table)
+			ws_handlers[app_id] = handler_table
+		end,
 	})
 end
 
@@ -339,6 +347,7 @@ local d = daemon.make({
 	runtime_files = runtime_files or nil,
 	runtime_manifest = runtime_manifest,
 	session_db_path = db_dir .. "/session_store.db",
+	ws_handlers = ws_handlers,
 	on_handler_error = function(app_id, err, tb)
 		io.stderr:write("daemon: app " .. app_id .. " handler error: " .. err .. "\n" .. tb .. "\n")
 	end,
@@ -399,26 +408,30 @@ local server_opts = {
 	loop = loop,
 }
 
-http_server.server(function(raw_req, res, _sock)
-	local target = (raw_req.target or "/") --[[:! string]]
-	local q = target:find("?", 1, true)
-	local path, query
-	if q then
-		path = target:sub(1, q - 1)
-		query = target:sub(q + 1)
-	else
-		path = target
-	end
-	local req = {
-		method = raw_req.method --[[:! string | nil]],
-		path = path,
-		query = query --[[:! string | nil]],
-		headers = raw_req.headers --[[:! { [string]: { [number]: string } } | nil]],
-		body = raw_req.body --[[:! string | nil]],
-	}
-	res.status = 200 -- http.server initialises headers={} but not status
-	d.handle(req, res)
-end, opts.port, nil, server_opts)
+server_ws.server({
+	http = function(raw_req, res, _sock)
+		local target = (raw_req.target or "/") --[[:! string]]
+		local q = target:find("?", 1, true)
+		local path, query
+		if q then
+			path = target:sub(1, q - 1)
+			query = target:sub(q + 1)
+		else
+			path = target
+		end
+		local req = {
+			method = raw_req.method --[[:! string | nil]],
+			path = path,
+			query = query --[[:! string | nil]],
+			headers = raw_req.headers --[[:! { [string]: { [number]: string } } | nil]],
+			body = raw_req.body --[[:! string | nil]],
+		}
+		res.status = 200 -- http.server initialises headers={} but not status
+		d.handle(req, res)
+	end,
+	ws_accept = d.ws_accept,
+	ws = d.ws,
+}, opts.port, nil, server_opts)
 
 -- cli.lua owns the event loop. socket.server registered its accept fd on the
 -- shared poller but deferred driving to us (because we passed opts.loop).
