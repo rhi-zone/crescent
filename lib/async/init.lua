@@ -636,12 +636,16 @@ end
 
 -- ── Async / await ────────────────────────────────────────────────────────────
 
---- Wrap fn as an async function. Calling async_fn(...) returns a promise.
--- Inside fn, use M.await(promise) to suspend until the promise settles.
-function M.async(fn)
+--- Cancellation-aware async. Like M.async, but calling the returned function
+-- yields (promise, cancel_fn) instead of just promise.
+-- cancel_fn() immediately rejects the promise with "cancelled" and prevents
+-- any further resume of the coroutine. Calling cancel_fn on an already-settled
+-- promise is a no-op.
+function M.cancellable(fn)
   return function(...)
     local args = { ... }
     local p, resolve, reject = M.promise()
+    local cancelled = false
 
     -- co_box: wrap the coroutine so its type is known inside closures.
     local co_box = { co = coroutine.create(function()
@@ -655,6 +659,7 @@ function M.async(fn)
 
     -- Drive the coroutine forward.
     local function step(val, is_err)
+      if cancelled then return end
       local ok, yielded
       local co = co_box.co
       if is_err then
@@ -698,6 +703,25 @@ function M.async(fn)
     end
 
     step(nil, false)
+
+    --: () -> nil
+    local function cancel()
+      if cancelled then return end
+      cancelled = true
+      reject("cancelled")
+    end
+
+    return p, cancel
+  end
+end
+
+--- Wrap fn as an async function. Calling async_fn(...) returns a promise.
+-- Inside fn, use M.await(promise) to suspend until the promise settles.
+-- Delegates to M.cancellable; the cancel function is discarded.
+function M.async(fn)
+  local wrapped = M.cancellable(fn)
+  return function(...)
+    local p, _ = wrapped(...)
     return p
   end
 end
