@@ -34,7 +34,7 @@ local M = {}
 
 --:: loader_opts = {
 --::   index_db: unknown,
---::   context: { user_id: string | nil, data_dir: string | nil } | nil,
+--::   context: { user_id: string | nil, data_dir: string | nil, daemon_ctx: unknown | nil } | nil,
 --::   entry_key: string | nil,
 --::   app_url: ((string) -> string) | nil,
 --::   apps_dir: string | nil,
@@ -158,14 +158,15 @@ function M.make(opts)
 		end
 		local grants = resolve_grants(idx, app_id, cap_decls)
 		local context   = {
-			user_id   = ctx_base.user_id,
-			app_id    = app_id,
-			data_dir  = ctx_base.data_dir,
-			apps_dir  = apps_dir,
-			write_fn  = write_fn,
-			index_obj = index_db,
-			time_fn   = time_fn,
-			audit_log = audit_log,
+			user_id    = ctx_base.user_id,
+			app_id     = app_id,
+			data_dir   = ctx_base.data_dir,
+			apps_dir   = apps_dir,
+			write_fn   = write_fn,
+			index_obj  = index_db,
+			time_fn    = time_fn,
+			audit_log  = audit_log,
+			daemon_ctx = ctx_base.daemon_ctx,
 		}
 
 		local override, get_captured = make_http_server_override(app_id, app_url)

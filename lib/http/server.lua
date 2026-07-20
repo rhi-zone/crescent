@@ -238,9 +238,9 @@ end
 -- back to plaintext — it does not hard-fail.
 -- opts.idle_timeout (optional): ms idle between keep-alive requests (default 60000).
 -- opts.max_requests (optional): max requests per connection (default 0 = no limit).
---: (HttpHandlerFn, integer | nil, unknown | nil, { host: string | nil, tls_cert: string | nil, tls_key: string | nil, idle_timeout: number | nil, max_requests: integer | nil } | nil) -> unknown
+--: (HttpHandlerFn, integer | nil, unknown | nil, { host: string | nil, tls_cert: string | nil, tls_key: string | nil, idle_timeout: number | nil, max_requests: integer | nil, loop: unknown | nil } | nil) -> unknown
 mod.server = function(handler, port, epoll, opts)
-	local opts_ = opts or { host = nil, tls_cert = nil, tls_key = nil, idle_timeout = nil, max_requests = nil } --: { host: string | nil, tls_cert: string | nil, tls_key: string | nil, idle_timeout: number | nil, max_requests: integer | nil }
+	local opts_ = opts or { host = nil, tls_cert = nil, tls_key = nil, idle_timeout = nil, max_requests = nil, loop = nil } --: { host: string | nil, tls_cert: string | nil, tls_key: string | nil, idle_timeout: number | nil, max_requests: integer | nil, loop: unknown | nil }
 	local tls_ctx --: cdata | nil
 
 	local tls_cert = opts_.tls_cert
@@ -272,7 +272,7 @@ mod.server = function(handler, port, epoll, opts)
 
 	-- When TLS is active, inject an on_client hook that wraps each accepted
 	-- connection before the HTTP handler sees it.
-	local server_opts = { host = opts_.host }
+	local server_opts = { host = opts_.host, loop = opts_.loop }
 	if tls_ctx then
 		local tls_ctx_ = tls_ctx
 		server_opts.on_client = function(client)

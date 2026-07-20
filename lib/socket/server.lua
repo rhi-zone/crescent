@@ -4,7 +4,7 @@ local async = require("lib.async")
 
 local M = {}
 
---:: server_opts = { host: string | nil, on_client: ((unknown) -> nil) | nil, on_client_close: ((unknown) -> nil) | nil }
+--:: server_opts = { host: string | nil, on_client: ((unknown) -> nil) | nil, on_client_close: ((unknown) -> nil) | nil, loop: AsyncLoop | nil }
 
 --:: server_socket = { fd: integer, close: (self: server_socket) -> (boolean | nil, string | nil), accept: (self: server_socket) -> (server_client | nil, string | nil, integer | nil), listen: (self: server_socket, max: integer | nil) -> (boolean | nil, string | nil), set_blocking: (self: server_socket, boolean) -> (boolean | nil, string | nil, integer | nil), ... }
 
@@ -81,9 +81,10 @@ end
 --: (callback: (unknown) -> unknown, port: integer | string, epoll: unknown | nil, opts: server_opts | nil) -> unknown
 M.server = function(callback, port, epoll, opts)
 	local opts_ = opts or {}
-	local is_running = not epoll
-	local ep = (epoll or epoll_.new()) --[[: { add: (self: unknown, fd: integer, on_read: ((string) -> nil) | (() -> nil), close: (() -> nil) | nil, weak: boolean | nil) -> (((string) -> nil) | nil, (() -> nil) | nil, string | nil), wait: (self: unknown, integer | nil) -> nil, ... }]]
-	local loop = async.loop(ep) --[[: AsyncLoop]]
+	local external_loop = opts_.loop
+	local is_running = not epoll and not external_loop
+	local ep = (epoll or (external_loop and external_loop._poller) or epoll_.new()) --[[: { add: (self: unknown, fd: integer, on_read: ((string) -> nil) | (() -> nil), close: (() -> nil) | nil, weak: boolean | nil) -> (((string) -> nil) | nil, (() -> nil) | nil, string | nil), wait: (self: unknown, integer | nil) -> nil, ... }]]
+	local loop = external_loop or async.loop(ep) --[[: AsyncLoop]]
 
 	local server = assert(socket.bind(opts_.host or "*", port)) --[[: server_socket]]
 	assert(server:listen())

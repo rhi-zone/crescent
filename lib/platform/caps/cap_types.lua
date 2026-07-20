@@ -225,4 +225,16 @@
 --::   attenuate: (sub_decl: unknown) -> (ExecCap | nil, (() -> nil) | string | nil),
 --:: }
 
+-- ── DaemonCtx ────────────────────────────────────────────────────────────────
+-- Host-side wiring for async cap support. Created once at daemon startup,
+-- threaded through cap construction via context.daemon_ctx. Never exposed to
+-- apps — caps are the only side-effect surface apps see.
+
+--:: DaemonCtx = {
+--::   poller: { wait: (unknown, integer | nil) -> nil, add: (unknown, integer, (() -> nil) | ((string) -> nil), (() -> nil) | nil, boolean | nil) -> (((string) -> nil) | nil, (() -> nil) | nil, string | nil), watch_writable: (unknown, integer, () -> nil) -> (nil | string), unwatch_writable: (unknown, integer) -> (nil | string), count: integer, ... },
+--::   loop: { queue: (unknown, () -> unknown) -> nil, step: (unknown) -> nil, await_readable: (unknown, integer, unknown | nil) -> (unknown | nil, string | nil, (() -> nil) | nil), await_writable: (unknown, integer, unknown | nil) -> (unknown | nil, string | nil, (() -> nil) | nil), sleep: (unknown, number) -> unknown, ... },
+--::   register_fd: (fd: integer, on_readable: () -> nil) -> (() -> nil),
+--::   schedule: (fn: () -> nil) -> nil,
+--:: }
+
 return {}

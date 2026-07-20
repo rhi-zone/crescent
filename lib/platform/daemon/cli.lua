@@ -33,6 +33,8 @@ local app_index = require("lib.platform.index")
 local json = require("lib.format.json")
 local xdg = require("lib.platform.xdg")
 local pid_mod = require("lib.platform.daemon.pid")
+local io_poll = require("lib.io_poll")
+local async = require("lib.async")
 
 -- ── Arg parsing ────────────────────────────────────────────────────────────
 
@@ -161,12 +163,39 @@ local function app_url(app_id)
 	return "http://app-" .. app_id .. "." .. daemon_host
 end
 
+-- ── Shared event loop + DaemonCtx ───────────────────────────────────────────
+-- The poller and loop are shared between the HTTP server and DaemonCtx. cli.lua
+-- owns the top-level loop drive; socket.server receives the loop via opts and
+-- skips its own internal drive loop.
+local poller = io_poll.new()
+local loop = async.loop(poller)
+
+-- DaemonCtx: host-side wiring for async cap support. Passed through
+-- context.daemon_ctx to cap factories. Never exposed to apps.
+local daemon_ctx = {
+	poller = poller,
+	loop = loop,
+	--: (fd: integer, on_readable: () -> nil) -> (() -> nil)
+	register_fd = function(fd, on_readable)
+		local _, remove_fn, err = poller:add(fd, on_readable, nil, true)
+		if err then error("daemon_ctx.register_fd: " .. err) end
+		--: () -> nil
+		return function()
+			if remove_fn then remove_fn() end
+		end
+	end,
+	--: (fn: () -> nil) -> nil
+	schedule = function(fn)
+		loop:queue(fn)
+	end,
+}
+
 --: unknown
 local loader_fn
 if idx then
 	loader_fn = app_loader.make({
 		index_db = idx,
-		context = { data_dir = apps_dir, user_id = nil },
+		context = { data_dir = apps_dir, user_id = nil, daemon_ctx = daemon_ctx },
 		entry_key = "server",
 		app_url = app_url,
 		-- Threaded for the create_instance cap (lets an app install a new
@@ -367,6 +396,7 @@ local server_opts = {
 	host = opts.host,
 	tls_cert = opts.tls_cert,
 	tls_key = opts.tls_key,
+	loop = loop,
 }
 
 http_server.server(function(raw_req, res, _sock)
@@ -389,6 +419,10 @@ http_server.server(function(raw_req, res, _sock)
 	res.status = 200 -- http.server initialises headers={} but not status
 	d.handle(req, res)
 end, opts.port, nil, server_opts)
+
+-- cli.lua owns the event loop. socket.server registered its accept fd on the
+-- shared poller but deferred driving to us (because we passed opts.loop).
+while true do loop:step() end
 
 end
 
