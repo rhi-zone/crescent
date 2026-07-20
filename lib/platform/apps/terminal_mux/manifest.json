@@ -1,0 +1,17 @@
+{
+  "name": "terminal_mux",
+  "version": "0.1.0",
+  "meta": { "tags": ["terminal", "multiplexer", "pty"] },
+  "default_entry": "server",
+  "entry": {
+    "server": {
+      "main": "server.lua",
+      "caps": {
+        "http_server": { "type": "http_server", "reason": "Serve the browser terminal frontend at GET /" },
+        "ws_server": { "type": "ws_server", "reason": "WebSocket connections for terminal I/O" },
+        "pty": { "type": "pty", "reason": "Spawn PTY-backed shell sessions" },
+        "task": { "type": "task", "reason": "Background coroutines for PTY reader loops" }
+      }
+    }
+  }
+}

@@ -4406,3 +4406,18 @@ Open threads from a previous session. Treat as starting context, not instruction
   - Preserves: all existing features (routing, sessions, caps, apps, rate limiting, sandbox)
   - Blocked: terminal mux platform app depends on this
   - See also: docs/terminal-mux.md for the driving use case
+
+## Terminal mux app (2026-07-21)
+
+- [ ] WsAcceptFn/WsHandlerFn use `http_request` type but daemon mode passes `HttpReq` shape (with `.path`, `.query`)
+  - terminal_mux works around this by parsing `req.target` via `split_target()`
+  - The real fix is either: unify the types, or have the daemon construct a full `http_request` for WS handlers
+  - Affects: lib/http/server_ws.lua (WsAcceptFn, WsHandlerFn type declarations), lib/platform/daemon/init.lua (clean_req construction)
+
+- [ ] Vendor xterm.js in dep/ for proper terminal rendering (colors, cursor, alternate screen)
+  - Current frontend uses `<pre>` with ANSI stripping — proves the WS+PTY pipeline but no real terminal emulation
+  - xterm.js is the standard browser terminal emulator; needs to be vendored since CDN is blocked by CSP
+
+- [ ] Make terminal mux shell configurable via manifest cap config
+  - Currently hardcoded to `/bin/sh` in server.lua DEFAULT_SHELL
+  - Sandbox cannot read SHELL from the environment; needs cap config mechanism from manifest
