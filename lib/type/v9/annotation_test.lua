@@ -290,9 +290,9 @@ T.describe("v9 annotations — the two known real-code findings RESOLVE", functi
         end
     end)
 
-    T.it("server_ws shape: constructor field nil then string, under a record alias", function()
-        -- lib/http/server_ws.lua:34 + :56 — `body = nil` inside a
-        -- constructor ascribed `--: WsHttpResponse` where body: string | nil.
+    T.it("server shape: constructor field nil then string, under a record alias", function()
+        -- lib/http/server.lua — `body = nil` inside a constructor ascribed
+        -- `--: http_server_response` where body: string | nil.
         local src = "--:: Res = { status: number, headers: { [string]: string }, body: string | nil }\n"
             .. "local res = { status = 200, headers = {}, body = nil } --: Res\n"
             .. "res.status = 500\nres.body = '{\"error\":\"x\"}'\nreturn res\n"

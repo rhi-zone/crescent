@@ -1,11 +1,11 @@
--- Tests for WebSocket upgrade support in lib/http/server.lua.
+-- Tests for WebSocket upgrade support in lib/http/server_ws.lua.
 -- Unit tests for validation, frame sizing, accept key, and mock-socket recv/send.
 
 if not package.path:find("./?/init.lua", 1, true) then
 	package.path = "./?/init.lua;" .. package.path
 end
 
-local server = require("lib.http.server")
+local server = require("lib.http.server_ws")
 local ws_frame = require("lib.websocket.frame")
 local sha1_binary = require("lib.hash.sha1").binary
 local base64_encode = require("lib.encode.base64").encode
@@ -352,21 +352,9 @@ T.describe("make_ws_conn close", function()
 	end)
 end)
 
--- ── handler table normalization via make_connection_handler ──────────────────
+-- ── handler table via make_connection_handler ────────────────────────────────
 
 T.describe("make_connection_handler", function()
-	T.it("accepts a plain function (backward compat)", function()
-		local called = false
-		local handler = function(req, res, sock)
-			called = true
-			res.status = 200
-			res.body = "ok"
-		end
-		-- Should not error during construction.
-		local conn_handler = server.make_connection_handler(handler)
-		T.ok(conn_handler ~= nil, "returns a connection handler function")
-	end)
-
 	T.it("accepts a handler table", function()
 		local conn_handler = server.make_connection_handler({
 			http = function(req, res, sock) res.status = 200 end,
