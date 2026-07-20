@@ -26,6 +26,8 @@ local TCSANOW    = 0
 local F_GETFL    = 3
 local F_SETFL    = 4
 local O_NONBLOCK = is_linux and 0x800 or 0x4
+local EAGAIN     = is_linux and 11 or 35
+local EWOULDBLOCK = is_linux and 11 or 35
 
 -- ── C declarations ──────────────────────────────────────────────────────────
 
@@ -298,6 +300,10 @@ end
 function M.read(fd, n)
   local len = ffi.C.read(fd, buf, n or 65536)
   if len == -1 then
+    local e = ffi.errno()
+    if e == EAGAIN or e == EWOULDBLOCK then
+      return nil, "timeout"
+    end
     return nil, "pty_ffi: read: " .. last_error()
   end
   return ffi.string(buf, len)
@@ -307,6 +313,10 @@ end
 function M.write(fd, data)
   local len = ffi.C.write(fd, data, #data)
   if len == -1 then
+    local e = ffi.errno()
+    if e == EAGAIN or e == EWOULDBLOCK then
+      return nil, "timeout"
+    end
     return nil, "pty_ffi: write: " .. last_error()
   end
   return len --: integer
@@ -322,6 +332,13 @@ function M.set_nonblock(fd)
     return nil, "pty_ffi: fcntl F_SETFL: " .. last_error()
   end
   return true
+end
+
+-- Predicate: true when err is the sentinel returned on EAGAIN/EWOULDBLOCK.
+-- Decouples callers from knowing the sentinel string.
+--: (string | nil) -> boolean
+function M.is_eagain(err)
+  return err == "timeout"
 end
 
 return M

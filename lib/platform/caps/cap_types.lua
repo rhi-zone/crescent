@@ -225,6 +225,32 @@
 --::   attenuate: (sub_decl: unknown) -> (ExecCap | nil, (() -> nil) | string | nil),
 --:: }
 
+-- ── PtySpawnOpts ─────────────────────────────────────────────────────────────
+
+--:: PtySpawnOpts = {
+--::   args: string[] | nil,
+--::   env: { [string]: string } | nil,
+--::   rows: integer | nil,
+--::   cols: integer | nil,
+--:: }
+
+-- ── PtyHandle ────────────────────────────────────────────────────────────────
+
+--:: PtyHandle = {
+--::   pid: integer,
+--::   read: () -> (string | nil, string | nil),
+--::   write: (data: string) -> (integer | nil, string | nil),
+--::   resize: (rows: integer, cols: integer) -> (true | nil, string | nil),
+--::   close: () -> (true | nil, string | nil),
+--:: }
+
+-- ── PtyCap ───────────────────────────────────────────────────────────────────
+
+--:: PtyCap = {
+--::   _type: "pty",
+--::   spawn: (cmd: string, opts: PtySpawnOpts | nil) -> (PtyHandle | nil, string | nil),
+--:: }
+
 -- ── DaemonCtx ────────────────────────────────────────────────────────────────
 -- Host-side wiring for async cap support. Created once at daemon startup,
 -- threaded through cap construction via context.daemon_ctx. Never exposed to

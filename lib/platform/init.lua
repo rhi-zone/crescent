@@ -472,6 +472,16 @@ local CAP_FACTORIES = {
 			})
 		end,
 	},
+	pty = {
+		mod = "lib.platform.caps.pty",
+		build = function(_decl, _app, context)
+			local daemon_ctx = context and context.daemon_ctx
+			if not daemon_ctx then
+				return nil, "pty cap requires daemon_ctx (daemon-only)"
+			end
+			return require("lib.platform.caps.pty").pty_cap(daemon_ctx)
+		end,
+	},
 }
 
 -- ── Scope resolution ─────────────────────────────────────────────────────────
