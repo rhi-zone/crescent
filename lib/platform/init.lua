@@ -35,6 +35,7 @@ local tar      = require("lib.tar")
 local json     = require("lib.json")
 local path_util = require("lib.platform.path_util")
 local ws_srv_cap = require("lib.platform.caps.ws_server")
+local task_cap_mod = require("lib.platform.caps.task")
 
 local M = {}
 
@@ -489,6 +490,16 @@ local CAP_FACTORIES = {
 			return ws_srv_cap.ws_server_cap({
 				port = decl.port or 0,
 			})
+		end,
+	},
+	task = {
+		mod = "lib.platform.caps.task",
+		build = function(_decl, _app, context)
+			local daemon_ctx = context and context.daemon_ctx
+			if not daemon_ctx then
+				return nil, "task cap requires daemon_ctx (daemon-only)"
+			end
+			return task_cap_mod.task_cap(daemon_ctx)
 		end,
 	},
 }

@@ -262,6 +262,20 @@
 --::   spawn: (cmd: string, opts: PtySpawnOpts | nil) -> (PtyHandle | nil, string | nil),
 --:: }
 
+-- ── TaskHandle ────────────────────────────────────────────────────────────
+
+--:: TaskHandle = {
+--::   cancel: () -> (true | nil, string | nil),
+--::   done: () -> boolean,
+--:: }
+
+-- ── TaskCap ──────────────────────────────────────────────────────────────
+
+--:: TaskCap = {
+--::   _type: "task",
+--::   spawn: (fn: () -> nil) -> (TaskHandle | nil, string | nil),
+--:: }
+
 -- ── DaemonCtx ────────────────────────────────────────────────────────────────
 -- Host-side wiring for async cap support. Created once at daemon startup,
 -- threaded through cap construction via context.daemon_ctx. Never exposed to
