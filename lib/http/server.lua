@@ -34,8 +34,10 @@ end
 --:: HttpKeepAliveOpts = { idle_timeout: number | nil, max_requests: integer | nil }
 
 -- NOTE: cross-module named types are not yet supported; AsyncLoop is the
--- structural subset of lib/async LoopObj used here.
---:: AsyncLoop = { await_readable: (self: AsyncLoop, integer) -> (unknown, string | nil, (() -> nil) | nil), sleep: (self: AsyncLoop, number) -> { and_then: (self: unknown, (unknown) -> unknown) -> unknown, ... }, step: (self: AsyncLoop) -> nil, ... }
+-- structural subset of lib/async LoopObj used here. AsyncPromiseLike mirrors
+-- just enough of lib/async's PromiseP (and_then) for the idle-timeout race.
+--:: AsyncPromiseLike = { and_then: (self: AsyncPromiseLike, (unknown) -> unknown) -> AsyncPromiseLike, ... }
+--:: AsyncLoop = { await_readable: (self: AsyncLoop, integer) -> (AsyncPromiseLike | nil, string | nil, (() -> nil) | nil), sleep: (self: AsyncLoop, number) -> AsyncPromiseLike, step: (self: AsyncLoop) -> nil, ... }
 
 -- Determine whether to keep the connection alive based on HTTP version and
 -- Connection header value.
@@ -76,14 +78,34 @@ local function make_handler_core(http_handler, ka_opts)
 			if request_count > 1 and loop then
 				local p, _perr, cancel = loop:await_readable(client_.fd)
 				if not p then break end
-				local timed_out = false
 				local timer = loop:sleep(idle_timeout_ms)
-				timer:and_then(function(_v)
-					timed_out = true
-					if cancel then cancel() end
+
+				-- Race the readable notification against the idle timer via
+				-- async.race, recording which one settled *first* in `winner`.
+				-- Each subscription below is registered before async.race's own
+				-- internal subscriptions, so `winner` reflects true settle order
+				-- even if the loser (e.g. the timer coincidentally expiring the
+				-- same tick as a successful read) still fires its callback
+				-- afterward — the `if not winner` guard makes that late firing a
+				-- no-op instead of, as before, unconditionally treating it as a
+				-- timeout and closing a connection that had just been read
+				-- successfully.
+				local winner --: string | nil
+				p:and_then(function(v)
+					if not winner then winner = "readable" end
+					return v
 				end)
-				local await_ok = pcall(async.await, p)
-				if timed_out or not await_ok then break end
+				timer:and_then(function(v)
+					if not winner then
+						winner = "timeout"
+						if cancel then cancel() end
+					end
+					return v
+				end)
+
+				local raced = async.race({ p, timer })
+				local await_ok = pcall(async.await, raced)
+				if not await_ok or winner == "timeout" then break end
 			end
 
 			-- Read until we have complete headers (\r\n\r\n).
