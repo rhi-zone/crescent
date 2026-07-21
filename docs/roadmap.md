@@ -35,9 +35,16 @@ The "which apps" question is answered by three substrates, not by picking
 from a list. Most apps in the same-substrate group — todo, notes, bookmarks,
 contacts, habit tracker, CRM, recipe collection, and the like — are
 configurations over these substrates, not separate products. This is the
-thesis from `the-80-percent.md` made concrete. Which specific libraries to
-build first, and the exact boundaries between the three substrates at the
-library level, are still open.
+thesis from `the-80-percent.md` made concrete.
+
+`value-landscape.md` provides grounded research on where marginal value is
+highest for a solo developer — which categories have the largest gaps, which
+are tractable, and which are structurally out of reach. The value landscape
+informs which concrete applications are worth building first, and therefore
+which substrate work those applications will pull into existence.
+
+Which specific libraries to build first, and the exact boundaries between the
+three substrates at the library level, are still open.
 
 ## Three substrates
 
@@ -69,6 +76,11 @@ crescent as libraries; the project names don't follow.
    rendering needs deduplication — pick one of `lib/reactive/` vs
    `lib/signals/` before building on top.
 
+   Dusklight subsumption into crescent started in a May session but the
+   exact scope of what was completed is unverified. A terminal multiplexer
+   application has started (commits eacf0650, 36712c59) — this is an early
+   concrete consumer of display/control substrate.
+
 3. **Creation substrate** (prior art: scribble, `~/git/rhizone/scribble/`) —
    universal composition for internal creation. Pluggable, extensible,
    composable. Can scale to zero (mspaint-level). Key ideas: append-only
@@ -85,6 +97,10 @@ crescent as libraries; the project names don't follow.
    than expected; the hard part is making it feel like creation, which is
    display's job.
 
+   Reincarnate's IR is prior art that informs the creation substrate
+   design, but is not a dependency — crescent needs its own native
+   authoring substrate.
+
 Distinction between display and creation: dusklight is optimized for
 external data (what exists elsewhere); scribble is optimized for internal
 creation (what you're bringing into existence).
@@ -98,11 +114,16 @@ Library names for the imported ideas are not decided.
 
 ## Sequencing
 
-Substrate before surface. The libraries underneath can be built now; UI
-design for the actual interfaces people see is blocked on design time.
-Ordered by immediate/broad usefulness to a layman: capture and display have
-the broadest surface; creation is the most powerful but most optional for
-most people.
+The concrete thing drives the substrate. Building concrete applications
+surfaces what the substrate needs, rather than building substrate in the
+abstract. The value landscape research (`value-landscape.md`) informs which
+concrete things are worth building — and therefore which substrate work gets
+pulled forward first. The old heuristic ("ordered by broad usefulness:
+capture and display first, creation most optional") is superseded by whatever
+the value landscape's marginal-value x tractability analysis points to.
+
+Which substrate gets built first is now an open question informed by the
+value landscape, not a predetermined ordering.
 
 Browser targeting strategy (lua2ts) is an open question that affects all
 three substrates if they need browser UIs. Current status of lua2ts not
