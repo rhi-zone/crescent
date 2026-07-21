@@ -1,5 +1,7 @@
 # Roadmap
 
+> **This document is superseded by `docs/roadmap-v2.md`.** The roadmap below remains as historical context; for the current authoritative roadmap, read `docs/roadmap-v2.md`.
+
 Crescent's coverage of "the entire surface area of software" gets built by
 dogfooding, not by mapping the space in advance. This document is the seed of
 that plan — what the strategy is, what exists, what's missing, and what to
