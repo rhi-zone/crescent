@@ -199,13 +199,6 @@ is identity-addressed (mutability matters), display is address-agnostic.
   status. Pack iframe pipeline with capability bridge.
 
 **What's in progress (shared):**
-
-- **Typechecker v4** — greenfield rewrite. Core: simple-sub subtyping,
-  equi-recursive mu types, indexed access, complement with DNF emptiness,
-  match types, rank-N polymorphism, effects, content-addressed cache. Walker:
-  phases A-H complete (of A-J), covering literals through effect plumbing.
-  Driver: K1 (driver) + K2 (decoder) + K3 (stdlib types) + K5 (CLI +
-  compare) done (of K1-K6). See `docs/typechecker-v4-*-design.md`.
 - **`lib/lua2ts/`** (wip) — Lua-to-TypeScript transpiler. Handles core
   constructs (local, operators, method calls, require-to-ESM, for loops,
   ipairs/pairs, pcall try/catch, type annotations). 112 tests. Browser
@@ -275,12 +268,6 @@ dependency (what unblocks what), not by importance.
    substrate. Exercises: `lib/async`, `lib/websocket`, `lib/ansi`,
    `lib/platform` (app format).
 
-2. **Typechecker v4 walker** — phases A-H complete. Remaining: I and J (of
-   A-J). See `docs/typechecker-ast-walker-design.md`.
-
-3. **Typechecker v4 driver** — K1 + K2 + K3 + K5 done. Remaining: K4
-   (diagnostic rendering) and K6 (migration/rollout). See
-   `docs/typechecker-v4-driver-design.md`.
 
 ### Next: unblocking work
 
@@ -329,16 +316,31 @@ dependency (what unblocks what), not by importance.
     extract) is not implemented. Needed for ecosystem distribution beyond
     git-clone.
 
-### Ongoing: typechecker and tooling
+### Ongoing: developer tools
 
-- **Typechecker v4 completion** — walker phases I-J, driver phases K4 + K6,
-  then migration path from legacy typechecker. The typechecker is
-  foundational infrastructure; its completion is tracked separately in
-  `docs/typechecker-v4-*-design.md`.
-- **`lib/doc/`** (wip) — docgen from typed API source. Blocked on
-  typechecker stability.
+- **`lib/doc/`** (wip) — docgen from typed API source.
 - **`lib/type/search/`** (wip) — Hoogle-style type search. Useful once the
   library count makes manual discovery hard.
+
+### Parked: typechecker replacement
+
+The legacy typechecker (`lib/type/static/`, v2/v3 lineage, 53K lines) is the
+working tool and gates all commits via `.githooks/pre-commit`. Despite
+architectural issues (105+ ad-hoc instances documented), it remains in use.
+
+A replacement has been attempted 8 times (v4, v5, v6, v7, framework, v9,
+toy_checker, declc) without producing a viable successor. The last viable
+candidate (v9) measured ~3% hard-true precision — not acceptable. The
+follow-up (toy_checker) hit an unsolved hard problem: dynamic constraint-graph
+edge direction in the type inference engine.
+
+**Status:** Parked, not abandoned. Autonomous agent-directed development was
+declared dead by owner verdict as of 2026-07-08 (supervision cost exceeded
+value). Building applications and libraries can proceed without a new
+typechecker; applications simply typecheck against the legacy checker.
+
+**To resume:** Requires either (1) solving the hard problem, or (2) finding a
+fundamentally different approach that avoids it entirely.
 
 ## Duplicate clusters
 
