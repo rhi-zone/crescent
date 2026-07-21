@@ -125,6 +125,7 @@ These declare shared types and have no runtime code (or only declaration-side gl
 - `lib/multipart/` — RFC 2046 multipart encoder/decoder. Status: stable.
 - `lib/ndjson/` — NDJSON / JSON Lines. Status: stable.
 - `lib/netstring/` — DJB netstring framing. Status: stable.
+- `lib/pdf/` — PDF object model, cross-reference table (traditional + streams), and stream filter decoding (FlateDecode + PNG predictors). `object.lua` parses the 8 PDF object types + indirect objects; `xref.lua` builds the offset table (follows /Prev and /XRefStm chains); `filter.lua` decodes stream data; `init.lua` composes them into `string_to_document`/`resolve`/`document_root`/`stream_to_bytes`. Foundation only — no content stream (text/graphics operators), font, form-field, or PDF-writing support yet; objects packed in an Object Stream (xref entry type 2) are represented but not resolved. Roadmap-v2 §2a. Status: initial.
 - `lib/pem/` — PEM RFC 7468 parser/writer. Status: stable.
 - `lib/png/` — PNG chunk-level reader/writer. Status: stable.
 - `lib/proto/` — Protocol Buffers 3 wire format (schemas as Lua tables). Status: stable.

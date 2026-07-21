@@ -23,8 +23,7 @@ if not package.path:find("./?/init.lua", 1, true) then
 end
 
 local pdf_object = require("lib.pdf.object")
-
-local ok_compress, compress_mod = pcall(require, "lib.compress")
+local pdf_filter = require("lib.pdf.filter")
 
 local M = {}
 M._tier = "pure"
@@ -70,16 +69,6 @@ end
 --: (unknown) -> { [string]: unknown, [integer]: unknown } | nil
 local function as_table(v)
 	if type(v) == "table" then return v end
-	return nil
-end
-
---: (unknown) -> string | nil
-local function as_name(v)
-	local t = as_table(v)
-	if t == nil then return nil end
-	if t.kind ~= "name" then return nil end
-	local val = t.value
-	if type(val) == "string" then return val end
 	return nil
 end
 
@@ -212,85 +201,10 @@ function M.parse_traditional(bytes, pos)
 	}, nil
 end
 
--- ── PNG predictor un-filtering (used by /DecodeParms /Predictor 10-15) ──────
--- Same algorithm PNG scanline filtering uses (lib/png does not implement
--- this — it passes IDAT through opaquely — so this is not a duplicate of
--- existing code). Needed because FlateDecode+Predictor is the overwhelmingly
--- common encoding real-world PDF producers use for cross-reference streams;
--- without it, xref streams from those files would decode to structured
--- garbage instead of a clear error or correct data.
-
---: (integer | nil) -> integer
-local function or_zero(v)
-	if v == nil then return 0 end
-	return v
-end
-
---: (integer, integer, integer) -> integer
-local function paeth_predictor(a, b, c)
-	local p = a + b - c
-	local pa, pb, pc = math.abs(p - a), math.abs(p - b), math.abs(p - c)
-	if pa <= pb and pa <= pc then return a end
-	if pb <= pc then return b end
-	return c
-end
-
---: (string, integer, integer) -> (string | nil, string | nil)
-local function png_unfilter(data, row_bytes, bpp)
-	local out = {}
-	local prior = string.rep("\0", row_bytes)
-	local stride = row_bytes + 1
-	local n = #data
-	local pos = 1
-	while pos + stride - 1 <= n do
-		local filter_type = byte(data, pos)
-		local row = {} --[[: { [integer]: integer } ]]
-		for x = 1, row_bytes do
-			local raw = byte(data, pos + x)
-			if raw == nil then return nil, "truncated PNG-filtered row" end
-
-			local a = 0
-			if x > bpp then a = or_zero(row[x - bpp]) end
-			local b = or_zero(byte(prior, x))
-			local c = 0
-			if x > bpp then c = or_zero(byte(prior, x - bpp)) end
-
-			local recon
-			if filter_type == 0 then
-				recon = raw
-			elseif filter_type == 1 then
-				recon = raw + a
-			elseif filter_type == 2 then
-				recon = raw + b
-			elseif filter_type == 3 then
-				recon = raw + floor((a + b) / 2)
-			elseif filter_type == 4 then
-				recon = raw + paeth_predictor(a, b, c)
-			else
-				return nil, "unsupported PNG filter type byte: " .. tostring(filter_type)
-			end
-			row[x] = recon % 256
-		end
-		local row_str = string.char(unpack(row, 1, row_bytes))
-		out[#out + 1] = row_str
-		prior = row_str
-		pos = pos + stride
-	end
-	return table.concat(out), nil
-end
-
 -- ── Cross-reference streams (ISO 32000-1 §7.5.8) ────────────────────────────
-
---: (unknown) -> (integer, string | nil)
--- Reads /Predictor from a /DecodeParms dictionary (default 1, meaning "no
--- predictor" per ISO 32000-1 Table 8).
-local function read_predictor(decode_parms)
-	local dp = as_table(decode_parms)
-	if dp == nil then return 1, nil end
-	local predictor = as_integer(dp.Predictor)
-	if predictor == nil then return 1, nil end
-	return predictor, nil
-end
+-- Filter/predictor decoding (FlateDecode, PNG predictors) lives in
+-- lib/pdf/filter.lua — shared with lib/pdf's top-level generic stream
+-- resolver, since a cross-reference stream is a PDF stream like any other.
 
 --: (unknown, XrefOpts | nil) -> ({ [integer]: XrefEntry } | nil, unknown, integer | nil, string | nil)
 function M.decode_xref_stream(stream, opts)
@@ -330,56 +244,8 @@ function M.decode_xref_stream(stream, opts)
 		return nil, nil, nil, "xref stream has neither /Index nor /Size"
 	end
 
-	-- Decompress per /Filter (only FlateDecode is supported — the
-	-- overwhelmingly common case for xref streams; other filters are a
-	-- documented gap rather than a silent pass-through of undecoded bytes).
-	local filter_name = as_name(dict.Filter)
-	if filter_name == nil then
-		local filter_arr = as_array(dict.Filter)
-		if filter_arr ~= nil and filter_arr[1] ~= nil and filter_arr[2] == nil then
-			filter_name = as_name(filter_arr[1])
-		end
-	end
-
-	local data = raw_data
-	if filter_name == "FlateDecode" then
-		if not ok_compress then
-			return nil, nil, nil, "xref stream uses FlateDecode but lib/compress is unavailable"
-		end
-		local inflated, ierr = compress_mod.inflate(raw_data)
-		if inflated == nil then return nil, nil, nil, "failed to inflate xref stream: " .. tostring(ierr) end
-		data = inflated
-	elseif filter_name ~= nil then
-		return nil, nil, nil, "unsupported xref stream filter: " .. filter_name
-	end
-
-	local decode_parms = dict.DecodeParms
-	if decode_parms == nil then decode_parms = dict.DP end
-	local predictor = read_predictor(decode_parms)
-	if predictor ~= 1 then
-		if predictor == 2 then
-			return nil, nil, nil, "TIFF predictor (/Predictor 2) for xref streams is not yet implemented"
-		elseif predictor >= 10 and predictor <= 15 then
-			local dp = as_table(decode_parms)
-			local columns = row_width
-			local colors = 1
-			local bpc = 8
-			if dp ~= nil then
-				local cols = as_integer(dp.Columns)
-				if cols ~= nil then columns = cols end
-				local c = as_integer(dp.Colors)
-				if c ~= nil then colors = c end
-				local b = as_integer(dp.BitsPerComponent)
-				if b ~= nil then bpc = b end
-			end
-			local bpp = math.max(1, math.ceil(colors * bpc / 8))
-			local unfiltered, uerr = png_unfilter(data, columns, bpp)
-			if unfiltered == nil then return nil, nil, nil, uerr end
-			data = unfiltered
-		else
-			return nil, nil, nil, "unsupported /Predictor value: " .. tostring(predictor)
-		end
-	end
+	local data, ferr = pdf_filter.decode_stream(dict, raw_data, row_width)
+	if data == nil then return nil, nil, nil, ferr end
 
 	local entries = {} --[[: { [integer]: XrefEntry } ]]
 	local data_pos = 1

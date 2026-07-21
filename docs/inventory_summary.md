@@ -15,7 +15,7 @@ Static typechecker at `lib/type/static/` (stable; cli + lsp + parser + constrain
 HTTP mature (server, client, routers, tested). Stable: WebSocket, SMTP, OAuth/OAuth2, GitHub, keyring, ljsocket, x509, wire framing. Wip: epoll, fuse, git, https, inotify, tls. Stub or broken: dns, imap, mud_cp, socket, tcp.
 
 ## Codecs / formats / serialization
-JSON (multiple impls — `lib/json/` and tiered `lib/format/json/`), CBOR, MessagePack, TOML, YAML, BSON, Protobuf (`proto` and `protocol_buffer` parallel), CSV (+ csv_query, csv_transform), Avro absent, ASN.1, BCD via decimal, INI, NDJSON, netstring, multipart, PEM, struct, tar, PNG, SVG, XML, XPath, iCalendar, base32/58/64, ascii85, hex_dump, sexp, url, uuid, mime/mimetype.
+JSON (multiple impls — `lib/json/` and tiered `lib/format/json/`), CBOR, MessagePack, TOML, YAML, BSON, Protobuf (`proto` and `protocol_buffer` parallel), CSV (+ csv_query, csv_transform), Avro absent, ASN.1, BCD via decimal, INI, NDJSON, netstring, multipart, PEM, struct, tar, PNG, SVG, XML, XPath, iCalendar, base32/58/64, ascii85, hex_dump, sexp, url, uuid, mime/mimetype. `lib/pdf/` (object model + xref + stream filters, foundation only — no content stream/font/forms/writing yet, roadmap-v2 §2a).
 
 ## Compression
 Brotli, tiered zlib/gzip (`lib/compress/`), Huffman, LZ4, LZ77 (raw), RLE, Snappy, Zstd. All stable.
