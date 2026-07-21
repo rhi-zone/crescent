@@ -32,6 +32,7 @@ local _index_types = require("lib.platform.index") -- for Index, AppRow type ali
 local _audit_types = require("lib.platform.audit") -- for AuditLog type alias
 
 --:: require "lib.http.server_ws"
+--:: require "lib.platform.caps.cap_types"
 
 local M = {}
 
@@ -72,7 +73,10 @@ local M = {}
 --:: session_record = { created_at: integer, last_seen: integer, csrf_token: string | nil }
 --:: launch_token_record = { app_id: string, session_id: string | nil, expires_at: integer }
 --:: app_session_record = { app_id: string, created_at: integer, last_seen: integer }
---:: ws_handler_entry = { ws_accept: ((http_req) -> (boolean | nil, string | nil)) | nil, ws: (unknown, http_req) -> nil }
+-- The app-facing WS handler table: the daemon normalizes the raw http_request
+-- into an HttpReq-shaped clean_req (see daemon_ws_accept below) before calling
+-- either function, matching WsServerHandlerTable in lib/platform/caps/cap_types.lua.
+--:: ws_handler_entry = WsServerHandlerTable
 --:: daemon = {
 --::   handle: (http_req, http_res) -> nil,
 --::   ws_accept: (http_request) -> (boolean | nil, string | nil),
@@ -637,17 +641,23 @@ function M.make(opts)
 		if type(entry_raw) ~= "table" then
 			return nil, "app does not accept WebSocket connections"
 		end
-		local entry = entry_raw --[[: { ws_accept: ((unknown) -> (boolean | nil, string | nil)) | nil, ws: (unknown, unknown) -> nil }]]
+		local entry = entry_raw --[[: ws_handler_entry]]
 
 		-- Build a clean request for the app (path/query split, no socket).
+		-- Matches HttpReq (lib/platform/caps/cap_types.lua) — the same shape
+		-- HttpServerCap.serve hands non-WS app handlers — so WsServerCap's
+		-- ws_accept/ws see one consistent request type across both caps.
+		-- last_event_id is always nil here; WS connections do not resume SSE streams.
 		local target = req.target or "/"
 		local path, query = split_target(target)
+		--: HttpReq
 		local clean_req = {
-			method  = req.method,
-			path    = path,
-			query   = query,
-			headers = req.headers,
-			body    = req.body,
+			method        = req.method,
+			path          = path,
+			query         = query,
+			headers       = req.headers,
+			body          = req.body,
+			last_event_id = nil,
 		}
 
 		-- Stash for daemon_ws_handler via weak-keyed tables.
@@ -673,12 +683,17 @@ function M.make(opts)
 
 		-- Clean up stashed state (connection is now established).
 		ws_req_app_ids[raw_req] = nil
-		local clean_req = ws_req_clean[raw_req] or raw_req
+		local clean_req_raw = ws_req_clean[raw_req]
 		ws_req_clean[raw_req] = nil
+		-- clean_req_raw is always set here: daemon_ws_accept stashes it
+		-- unconditionally before this handler can run (server_ws only calls
+		-- daemon_ws_handler after daemon_ws_accept has accepted the upgrade).
+		if not clean_req_raw then return end
+		local clean_req = clean_req_raw --[[: HttpReq]]
 
 		local entry_raw = ws_handlers[app_id]
 		if type(entry_raw) ~= "table" then return end
-		local entry = entry_raw --[[: { ws_accept: ((unknown) -> (boolean | nil, string | nil)) | nil, ws: (unknown, unknown) -> nil }]]
+		local entry = entry_raw --[[: ws_handler_entry]]
 
 		local tb --: string | nil
 		local function tb_handler(err)

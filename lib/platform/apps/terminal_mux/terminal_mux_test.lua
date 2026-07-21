@@ -166,39 +166,6 @@ describe("decode_control", function()
 	end)
 end)
 
-describe("split_target", function()
-	--: (string) -> (string, string | nil)
-	local function split_target(target)
-		local qpos = target:find("?", 1, true)
-		if not qpos then return target, nil end
-		return target:sub(1, qpos - 1), target:sub(qpos + 1)
-	end
-
-	it("splits path and query", function()
-		local path, qs = split_target("/terminal?session=42")
-		eq(path, "/terminal")
-		eq(qs, "session=42")
-	end)
-
-	it("returns path alone when no query", function()
-		local path, qs = split_target("/terminal")
-		eq(path, "/terminal")
-		eq(qs, nil)
-	end)
-
-	it("handles empty query after ?", function()
-		local path, qs = split_target("/foo?")
-		eq(path, "/foo")
-		eq(qs, "")
-	end)
-
-	it("handles multiple ? characters", function()
-		local path, qs = split_target("/foo?a=1?b=2")
-		eq(path, "/foo")
-		eq(qs, "a=1?b=2")
-	end)
-end)
-
 describe("query_param", function()
 	it("extracts single param", function()
 		eq(query_param("session=42", "session"), "42")

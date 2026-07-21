@@ -49,7 +49,7 @@ local function unpack_tarball(tardata)
 end
 
 --:: TarEntry = { name: string, mode: number, size: number, mtime: number, data: string, typeflag: string }
---:: CapDecl = { type: string | nil, required: boolean | nil, host: string | nil, model: string | nil, path: string | nil, paths: unknown, allow_write: boolean | nil, scope: unknown, tables: unknown, provider: string | nil, key_name: string | nil, base_url: string | nil, provider_default: string | nil, root: string | nil, binaries: unknown, stderr: string | nil, methods: unknown, port: integer | nil, ... }
+--:: CapDecl = { type: string | nil, required: boolean | nil, host: string | nil, model: string | nil, path: string | nil, paths: unknown, allow_write: boolean | nil, scope: unknown, tables: unknown, provider: string | nil, key_name: string | nil, base_url: string | nil, provider_default: string | nil, root: string | nil, binaries: unknown, stderr: string | nil, methods: unknown, port: integer | nil, cmd: string | nil, ... }
 --:: EntryDef = { main: string | nil, caps: { [string]: CapDecl | string } | nil }
 --:: Manifest = { name: string | nil, version: string | nil, entry: { [string]: EntryDef | string } | nil, caps: { [string]: CapDecl | string } | nil, default_entry: string | nil, meta: { tags: { [integer]: string } | nil, description: string | nil, ... } | nil, ... }
 --:: AppRecord = { path: string, chunks: { [integer]: { type: string, data: string } } | nil, entries: { [number]: TarEntry }, manifest: Manifest | nil, _dir_mode: boolean | nil }
@@ -476,12 +476,12 @@ local CAP_FACTORIES = {
 	},
 	pty = {
 		mod = "lib.platform.caps.pty",
-		build = function(_decl, _app, context)
+		build = function(decl, _app, context)
 			local daemon_ctx = context and context.daemon_ctx
 			if not daemon_ctx then
 				return nil, "pty cap requires daemon_ctx (daemon-only)"
 			end
-			return require("lib.platform.caps.pty").pty_cap(daemon_ctx)
+			return require("lib.platform.caps.pty").pty_cap(daemon_ctx, decl.cmd)
 		end,
 	},
 	ws_server = {

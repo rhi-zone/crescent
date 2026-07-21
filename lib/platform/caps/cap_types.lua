@@ -186,10 +186,20 @@
 --:: }
 
 -- ── WsServerCap ──────────────────────────────────────────────────────────────
+-- Apps only ever see this cap through the daemon's ws_server routing (see
+-- lib/platform/daemon/init.lua daemon_ws_accept/daemon_ws_handler), which
+-- normalizes the raw HTTP-parser request into the same HttpReq shape used by
+-- HttpServerCap.serve before calling the app's handlers. lib/http/server_ws.lua's
+-- own WsAcceptFn/WsHandlerFn (typed over http_request) describe the lower-level,
+-- wire-facing contract of that module for direct/standalone callers — not what
+-- apps receive here.
 
 --:: require "lib.http.server_ws"
 
---:: WsServerHandlerTable = { ws_accept: WsAcceptFn | nil, ws: WsHandlerFn }
+--:: WsServerHandlerTable = {
+--::   ws_accept: ((req: HttpReq) -> (boolean | nil, string | nil)) | nil,
+--::   ws: (ws_conn: WsConn, req: HttpReq) -> nil,
+--:: }
 
 --:: WsServerCap = {
 --::   _type: "ws_server",
@@ -260,6 +270,7 @@
 --:: PtyCap = {
 --::   _type: "pty",
 --::   spawn: (cmd: string, opts: PtySpawnOpts | nil) -> (PtyHandle | nil, string | nil),
+--::   default_cmd: string,
 --:: }
 
 -- ── TaskHandle ────────────────────────────────────────────────────────────

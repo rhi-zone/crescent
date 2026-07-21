@@ -3,10 +3,16 @@
 -- on the daemon's shared event loop via DaemonCtx.
 --
 -- Factory:
---   M.pty_cap(daemon_ctx) -> cap, revoke_fn
+--   M.pty_cap(daemon_ctx, default_cmd?) -> cap, revoke_fn
+--   default_cmd comes from the app's manifest cap declaration (`cmd` field on
+--   the pty cap decl, see lib/platform/init.lua's pty build()); sandboxed apps
+--   cannot read $SHELL themselves (caps-first), so the manifest is the only
+--   configuration surface. Defaults to "/bin/sh" when the manifest omits it.
 --
 -- Cap API:
 --   cap.spawn(cmd, opts?) -> PtyHandle | nil, err
+--   cap.default_cmd       : string  -- manifest-configured shell, for apps
+--                                       that want a sensible default command
 --
 -- PtyHandle API:
 --   handle.read()              -> string | nil, err   (yields until data)
@@ -45,9 +51,9 @@ local M = {}
 
 --:: require "lib.platform.caps.cap_types"
 
--- pty_cap(daemon_ctx) -> (PtyCap, () -> nil) | (nil, string)
---: (DaemonCtx) -> (PtyCap | nil, (() -> nil) | string | nil)
-function M.pty_cap(daemon_ctx)
+-- pty_cap(daemon_ctx, default_cmd?) -> (PtyCap, () -> nil) | (nil, string)
+--: (DaemonCtx, string | nil) -> (PtyCap | nil, (() -> nil) | string | nil)
+function M.pty_cap(daemon_ctx, default_cmd)
 	if not daemon_ctx then
 		return nil, "pty cap requires daemon_ctx"
 	end
@@ -225,6 +231,7 @@ function M.pty_cap(daemon_ctx)
 	local cap = {
 		_type = "pty",
 		spawn = spawn,
+		default_cmd = default_cmd or "/bin/sh",
 	}
 
 	--: () -> nil

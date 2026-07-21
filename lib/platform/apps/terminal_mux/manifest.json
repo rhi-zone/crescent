@@ -8,8 +8,9 @@
       "main": "server.lua",
       "caps": {
         "http_server": { "type": "http_server", "reason": "Serve the browser terminal frontend at GET /" },
+        "self": { "type": "self", "reason": "Read vendored xterm.js static assets bundled in the app tarball's static/ directory" },
         "ws_server": { "type": "ws_server", "reason": "WebSocket connections for terminal I/O" },
-        "pty": { "type": "pty", "reason": "Spawn PTY-backed shell sessions" },
+        "pty": { "type": "pty", "reason": "Spawn PTY-backed shell sessions", "cmd": "/bin/sh", "configurable_fields": ["cmd"] },
         "task": { "type": "task", "reason": "Background coroutines for PTY reader loops" }
       }
     }

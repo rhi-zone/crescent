@@ -47,6 +47,7 @@ local vt = require("lib.vt")
 --::   ws_server: WsServerCap,
 --::   pty: PtyCap,
 --::   task: TaskCap,
+--::   self: SelfCap,
 --:: }
 
 -- Sandbox global — injected by the platform before the entry script runs.
@@ -68,9 +69,6 @@ local vt = require("lib.vt")
 
 local DEFAULT_ROWS = 24
 local DEFAULT_COLS = 80
--- TODO: make shell configurable via manifest cap config. The sandbox cannot
--- read SHELL from the environment; /bin/sh is the portable default.
-local DEFAULT_SHELL = "/bin/sh"
 
 local DATA_PREFIX = "\0"  -- 0x00
 local CTRL_PREFIX = "\1"  -- 0x01
@@ -150,16 +148,6 @@ local function decode_control(s)
 end
 
 -- ── URL helpers ──────────────────────────────────────────────────────────────
-
--- Split a request target into path and query string.
--- "/foo?bar=1" -> "/foo", "bar=1"
--- "/foo"       -> "/foo", nil
---: (string) -> (string, string | nil)
-local function split_target(target)
-	local qpos = target:find("?", 1, true)
-	if not qpos then return target, nil end
-	return target:sub(1, qpos - 1), target:sub(qpos + 1)
-end
 
 -- Extract a single query parameter value from a query string.
 -- Returns nil when the key is absent.
@@ -241,7 +229,7 @@ local function create_session(caps_t, rows, cols)
 		cols = c,
 		env = { TERM = "xterm-256color" },
 	}
-	local pty_handle, pty_err = caps_t.pty.spawn(DEFAULT_SHELL, spawn_opts)
+	local pty_handle, pty_err = caps_t.pty.spawn(caps_t.pty.default_cmd, spawn_opts)
 	if not pty_handle then
 		return nil, "pty spawn failed: " .. tostring(pty_err)
 	end
@@ -296,21 +284,19 @@ end
 -- ── WS handlers ───────────────────────────────────────────────────────────────
 
 -- Accept only connections to /terminal (with optional query params).
---: (http_request) -> (boolean | nil, string | nil)
+--: (HttpReq) -> (boolean | nil, string | nil)
 local function ws_accept(req)
-	local path = split_target(req.target)
-	if path == "/terminal" then return true end
+	if req.path == "/terminal" then return true end
 	return nil, "not a terminal endpoint"
 end
 
 -- Per-connection WebSocket handler. Runs as a coroutine on the daemon's
 -- event loop (one per connected client).
---: (TermMuxCaps) -> (ws_conn: WsConn, req: http_request) -> nil
+--: (TermMuxCaps) -> (ws_conn: WsConn, req: HttpReq) -> nil
 local function make_ws_handler(caps_t)
-	--: (WsConn, http_request) -> nil
+	--: (WsConn, HttpReq) -> nil
 	return function(ws_conn, req)
-		local _, qs = split_target(req.target)
-		local session_id = query_param(qs, "session")
+		local session_id = query_param(req.query, "session")
 		local session --: TermSession | nil
 
 		if session_id then
@@ -410,43 +396,42 @@ local function make_ws_handler(caps_t)
 end
 
 -- ── Frontend HTML ─────────────────────────────────────────────────────────────
--- Minimal inline terminal: <pre>-based with ANSI stripping.
--- TODO: vendor xterm.js in dep/ for proper terminal rendering (colors, cursor,
--- alternate screen). This fallback proves the WS+PTY pipeline end-to-end.
+-- Renders with xterm.js (vendored in dep/xterm-js/, symlinked into static/ —
+-- see dep/xterm-js/README.md) for full terminal emulation: colors, cursor,
+-- alternate screen. xterm.js parses PTY output itself, so the server sends
+-- raw bytes straight through — no ANSI stripping needed here.
 
 local FRONTEND_HTML = [==[<!doctype html>
 <title>terminal mux</title>
+<link rel="stylesheet" href="/xterm.css">
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
-html,body{height:100%;background:#1a1a2e;color:#e0e0e0;overflow:hidden}
-#term{
-  font-family:'Cascadia Code','Fira Code','SF Mono','Menlo','Consolas',monospace;
-  font-size:14px;line-height:1.3;
-  width:100%;height:100%;
-  padding:4px 8px;
-  white-space:pre;overflow:auto;outline:none;
-}
-#status{position:fixed;top:4px;right:8px;font-size:11px;color:#666;font-family:sans-serif}
+html,body{height:100%;background:#1a1a2e;overflow:hidden}
+#term{width:100%;height:100%;padding:4px 8px}
+#status{position:fixed;top:4px;right:8px;font-size:11px;color:#666;font-family:sans-serif;z-index:10}
 </style>
-<div id="term" tabindex="0"></div>
+<div id="term"></div>
 <div id="status">connecting...</div>
+<script src="/xterm.min.js"></script>
+<script src="/addon-fit.min.js"></script>
 <script>
 (function(){
   'use strict';
-  var term = document.getElementById('term');
   var status = document.getElementById('status');
   var sessionId = null;
   var ws = null;
   var reconnectTimer = null;
 
-  // Strip ANSI escape sequences for plain-text display.
-  // Handles CSI (ESC[...), OSC (ESC]..BEL/ST), and other ESC sequences.
-  function stripAnsi(s) {
-    return s.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '')
-            .replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '')
-            .replace(/\x1b[^[\]].?/g, '')
-            .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f]/g, '');
-  }
+  var term = new Terminal({
+    cursorBlink: true,
+    fontFamily: "'Cascadia Code','Fira Code','SF Mono','Menlo','Consolas',monospace",
+    fontSize: 14,
+    theme: { background: '#1a1a2e', foreground: '#e0e0e0' }
+  });
+  var fitAddon = new FitAddon.FitAddon();
+  term.loadAddon(fitAddon);
+  term.open(document.getElementById('term'));
+  fitAddon.fit();
 
   function setStatus(msg) { status.textContent = msg; }
 
@@ -473,11 +458,9 @@ html,body{height:100%;background:#1a1a2e;color:#e0e0e0;overflow:hidden}
       var typeByte = data[0];
       var payload = data.subarray(1);
       if (typeByte === 0x00) {
-        // PTY data.
-        var text = new TextDecoder().decode(payload);
-        term.textContent += stripAnsi(text);
-        // Auto-scroll to bottom.
-        term.scrollTop = term.scrollHeight;
+        // PTY data: xterm.js parses raw bytes (including ANSI/VT sequences)
+        // directly — no decoding or stripping needed.
+        term.write(payload);
       } else if (typeByte === 0x01) {
         // Control message.
         var json = new TextDecoder().decode(payload);
@@ -487,9 +470,10 @@ html,body{height:100%;background:#1a1a2e;color:#e0e0e0;overflow:hidden}
             sessionId = msg.id;
             setStatus('session ' + msg.id + ' (' + msg.cols + 'x' + msg.rows + ')');
           } else if (msg.type === 'snapshot') {
-            // On reconnect, replace terminal content with snapshot.
-            term.textContent = stripAnsi(msg.data);
-            term.scrollTop = term.scrollHeight;
+            // On reconnect, replace terminal content with the VT snapshot
+            // (an ANSI stream that reconstructs screen state + cursor pos).
+            term.reset();
+            term.write(msg.data);
           } else if (msg.type === 'error') {
             setStatus('error: ' + msg.message);
           } else if (msg.type === 'closed') {
@@ -510,8 +494,9 @@ html,body{height:100%;background:#1a1a2e;color:#e0e0e0;overflow:hidden}
     ws.onerror = function() { /* onclose will fire */ };
   }
 
-  // Send raw keystrokes as binary with 0x00 prefix.
-  function sendInput(str) {
+  // Send raw keystrokes (xterm.js already encodes special/control keys into
+  // the correct byte sequences) as binary with 0x00 prefix.
+  term.onData(function(str) {
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
     var enc = new TextEncoder();
     var payload = enc.encode(str);
@@ -519,7 +504,7 @@ html,body{height:100%;background:#1a1a2e;color:#e0e0e0;overflow:hidden}
     frame[0] = 0x00;
     frame.set(payload, 1);
     ws.send(frame.buffer);
-  }
+  });
 
   // Send a control message as text with 0x01 prefix.
   function sendControl(obj) {
@@ -528,71 +513,17 @@ html,body{height:100%;background:#1a1a2e;color:#e0e0e0;overflow:hidden}
     ws.send('\x01' + json);
   }
 
-  // Keyboard input.
-  term.addEventListener('keydown', function(ev) {
-    // Prevent browser defaults for keys we handle.
-    var dominated = true;
-    var key = ev.key;
-    if (ev.ctrlKey && key.length === 1) {
-      // Ctrl+letter: send as control character.
-      var code = key.toUpperCase().charCodeAt(0) - 64;
-      if (code >= 0 && code < 32) sendInput(String.fromCharCode(code));
-    } else if (key === 'Enter') {
-      sendInput('\r');
-    } else if (key === 'Backspace') {
-      sendInput('\x7f');
-    } else if (key === 'Tab') {
-      sendInput('\t');
-    } else if (key === 'Escape') {
-      sendInput('\x1b');
-    } else if (key === 'ArrowUp') {
-      sendInput('\x1b[A');
-    } else if (key === 'ArrowDown') {
-      sendInput('\x1b[B');
-    } else if (key === 'ArrowRight') {
-      sendInput('\x1b[C');
-    } else if (key === 'ArrowLeft') {
-      sendInput('\x1b[D');
-    } else if (key === 'Home') {
-      sendInput('\x1b[H');
-    } else if (key === 'End') {
-      sendInput('\x1b[F');
-    } else if (key === 'Delete') {
-      sendInput('\x1b[3~');
-    } else if (key === 'PageUp') {
-      sendInput('\x1b[5~');
-    } else if (key === 'PageDown') {
-      sendInput('\x1b[6~');
-    } else if (key.length === 1 && !ev.ctrlKey && !ev.altKey && !ev.metaKey) {
-      sendInput(key);
-    } else {
-      dominated = false;
-    }
-    if (dominated) ev.preventDefault();
+  // term.resize() (called internally by fitAddon.fit()) fires onResize;
+  // forward the new dimensions to the server.
+  term.onResize(function(size) {
+    sendControl({ type: 'resize', rows: size.rows, cols: size.cols });
   });
 
-  // Resize: measure visible character dimensions and notify server.
   var resizeTimer = null;
-  function sendResize() {
-    // Approximate character dimensions from the pre element.
-    var style = getComputedStyle(term);
-    var lineHeight = parseFloat(style.lineHeight) || 18.2;
-    var fontSize = parseFloat(style.fontSize) || 14;
-    var charWidth = fontSize * 0.6; // monospace approximation
-    var rows = Math.floor(term.clientHeight / lineHeight);
-    var cols = Math.floor(term.clientWidth / charWidth);
-    if (rows > 0 && cols > 0) {
-      sendControl({type: 'resize', rows: rows, cols: cols});
-    }
-  }
   window.addEventListener('resize', function() {
     if (resizeTimer) clearTimeout(resizeTimer);
-    resizeTimer = setTimeout(sendResize, 150);
+    resizeTimer = setTimeout(function() { fitAddon.fit(); }, 150);
   });
-
-  // Focus the terminal on load.
-  term.focus();
-  term.addEventListener('click', function() { term.focus(); });
 
   // Initial connect.
   connect();
@@ -601,18 +532,51 @@ html,body{height:100%;background:#1a1a2e;color:#e0e0e0;overflow:hidden}
 ]==]
 
 -- ── HTTP handler ──────────────────────────────────────────────────────────────
+-- Tarball-bundled static assets (vendored xterm.js/CSS, see dep/xterm-js/),
+-- served via caps.self.entry("static/<name>"). Unlike optional theming
+-- assets in other apps, these are required for the terminal UI to function
+-- at all, so a missing entry is a 500 (loud failure), not a silent fallback.
 
---: (HttpReq, HttpRes) -> nil
-local function http_handler(req, res)
-	if req.path == "/" or req.path == "/index.html" then
-		res.status = 200
-		res.headers["Content-Type"] = { "text/html; charset=utf-8" }
-		res.body = FRONTEND_HTML
-		return
+--:: StaticAsset = { entry: string, content_type: string }
+--:: StaticRoutes = { [string]: StaticAsset }
+
+--: StaticRoutes
+local STATIC_ROUTES = {
+	["/xterm.min.js"]    = { entry = "static/xterm.min.js",    content_type = "application/javascript; charset=utf-8" },
+	["/xterm.css"]       = { entry = "static/xterm.css",       content_type = "text/css; charset=utf-8" },
+	["/addon-fit.min.js"] = { entry = "static/addon-fit.min.js", content_type = "application/javascript; charset=utf-8" },
+}
+
+--: (TermMuxCaps) -> (req: HttpReq, res: HttpRes) -> nil
+local function make_http_handler(caps_t)
+	--: (HttpReq, HttpRes) -> nil
+	return function(req, res)
+		if req.path == "/" or req.path == "/index.html" then
+			res.status = 200
+			res.headers["Content-Type"] = { "text/html; charset=utf-8" }
+			res.body = FRONTEND_HTML
+			return
+		end
+
+		local asset = STATIC_ROUTES[req.path]
+		if asset then
+			local content, entry_err = caps_t.self.entry(asset.entry)
+			if not content then
+				res.status = 500
+				res.headers["Content-Type"] = { "text/plain; charset=utf-8" }
+				res.body = "static asset unavailable: " .. asset.entry .. " (" .. tostring(entry_err) .. ")"
+				return
+			end
+			res.status = 200
+			res.headers["Content-Type"] = { asset.content_type }
+			res.body = content
+			return
+		end
+
+		res.status = 404
+		res.headers["Content-Type"] = { "text/plain; charset=utf-8" }
+		res.body = "not found"
 	end
-	res.status = 404
-	res.headers["Content-Type"] = { "text/plain; charset=utf-8" }
-	res.body = "not found"
 end
 
 -- ── Register handlers ─────────────────────────────────────────────────────────
@@ -620,7 +584,7 @@ end
 --: TermMuxCaps
 local caps_t = caps
 
-caps_t.http_server.serve(http_handler)
+caps_t.http_server.serve(make_http_handler(caps_t))
 
 local ws_handler = make_ws_handler(caps_t)
 caps_t.ws_server.serve({

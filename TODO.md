@@ -4409,15 +4409,49 @@ Open threads from a previous session. Treat as starting context, not instruction
 
 ## Terminal mux app (2026-07-21)
 
-- [ ] WsAcceptFn/WsHandlerFn use `http_request` type but daemon mode passes `HttpReq` shape (with `.path`, `.query`)
+- [x] WsAcceptFn/WsHandlerFn use `http_request` type but daemon mode passes `HttpReq` shape (with `.path`, `.query`)
   - terminal_mux works around this by parsing `req.target` via `split_target()`
   - The real fix is either: unify the types, or have the daemon construct a full `http_request` for WS handlers
   - Affects: lib/http/server_ws.lua (WsAcceptFn, WsHandlerFn type declarations), lib/platform/daemon/init.lua (clean_req construction)
+  - Fixed: apps only ever see WsServerCap through the daemon's ws routing, which always
+    normalizes the raw http_request into an HttpReq-shaped clean_req before calling the
+    app's ws_accept/ws — so the app-facing contract (`WsServerHandlerTable` in
+    lib/platform/caps/cap_types.lua) is now typed over `HttpReq`, matching what actually
+    arrives. lib/http/server_ws.lua's own `WsAcceptFn`/`WsHandlerFn` (typed over
+    `http_request`) are unchanged — they describe that module's real wire-level contract
+    for direct/standalone callers, which is a different, correct thing.
+    lib/platform/daemon/init.lua's `ws_handler_entry` now aliases `WsServerHandlerTable`
+    instead of casting to `unknown`; `clean_req` is built to the full `HttpReq` shape
+    (including `last_event_id = nil`, since WS never resumes SSE streams).
+    terminal_mux/server.lua no longer needs `split_target()` — removed, along with its
+    mirrored test block in terminal_mux_test.lua.
 
-- [ ] Vendor xterm.js in dep/ for proper terminal rendering (colors, cursor, alternate screen)
+- [x] Vendor xterm.js in dep/ for proper terminal rendering (colors, cursor, alternate screen)
   - Current frontend uses `<pre>` with ANSI stripping — proves the WS+PTY pipeline but no real terminal emulation
   - xterm.js is the standard browser terminal emulator; needs to be vendored since CDN is blocked by CSP
+  - Fixed: `dep/xterm-js/` vendors `@xterm/xterm@6.0.0` (`xterm.min.js`, `xterm.css`) and
+    `@xterm/addon-fit@0.11.0` (`addon-fit.min.js`) as UMD builds, fetched via
+    `bun add` — see `dep/xterm-js/README.md` for the exact re-vendor steps. Symlinked into
+    `lib/platform/apps/terminal_mux/static/` (same convention as `lib/platform/apps/library/static/`),
+    served via `caps.self.entry("static/...")` (new `self` cap in the app's manifest).
+    Frontend now creates a real `Terminal` + `FitAddon`, writes raw PTY bytes straight to
+    `term.write()` (xterm.js parses ANSI/VT itself — no more manual stripping), wires
+    `term.onData` → binary WS frames and `term.onResize` (driven by `fitAddon.fit()` on
+    window resize) → the existing JSON resize control message. Reconnect logic unchanged.
+  - CAUTION for future vendoring in this environment: `bun add` without a local
+    `package.json` walks up the directory tree and can install into a shared ancestor
+    (e.g. `/tmp` if one has a `package.json` from an unrelated project) — always
+    `bun init -y` in the target scratch dir first. Hit this live while doing this vendor;
+    see `dep/xterm-js/README.md`.
 
-- [ ] Make terminal mux shell configurable via manifest cap config
+- [x] Make terminal mux shell configurable via manifest cap config
   - Currently hardcoded to `/bin/sh` in server.lua DEFAULT_SHELL
   - Sandbox cannot read SHELL from the environment; needs cap config mechanism from manifest
+  - Fixed: added `cmd` (+ `configurable_fields: ["cmd"]`) to the pty cap declaration in
+    terminal_mux/manifest.json, defaulting to `/bin/sh`. `PtyCap` now carries a
+    `default_cmd: string` field; `lib/platform/caps/pty.lua`'s `pty_cap(daemon_ctx, default_cmd)`
+    takes the manifest-configured value (falling back to `/bin/sh` if unset) and exposes it
+    as `cap.default_cmd`. `lib/platform/init.lua`'s pty cap factory passes `decl.cmd`
+    through. terminal_mux/server.lua calls `caps_t.pty.spawn(caps_t.pty.default_cmd, ...)`
+    instead of a hardcoded local constant. Operators can override per-app via
+    `crescent caps <app_id> pty cmd=<shell>` (existing cap-config CLI).
