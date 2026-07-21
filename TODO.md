@@ -2564,6 +2564,8 @@ Open items, ordered by priority:
 
 ## Documentation infrastructure
 
+- [ ] **Docs site violates zero-dependency principle** — The docs site depends on bun/node (vitepress) with a 255MB `node_modules` tree. Every other part of the project runs from a bare `git clone`; the docs site is the exception. Becomes precedent the longer it sits.
+
 - [ ] **Inventory drift risk** — `docs/inventory.md` and `docs/inventory_summary.md` (commits `fa7e83b`, `a6e5caa`) are now hand-maintained per the CLAUDE.md rule. First time someone adds a library without updating the inventory, the rule will need a stronger nudge. Possible follow-ups: a pre-commit hook that warns when `lib/<new_dir>/` is added without an `inventory.md` change; or generation of inventory from a directory walk + per-library frontmatter. Don't optimise prematurely — wait for the first miss.
 
 ## Binary distribution
