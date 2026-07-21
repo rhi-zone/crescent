@@ -93,7 +93,34 @@ ffi.cdef [[
 	void tls_config_clear_keys(struct tls_config*);
 ]]
 
-local tls_c = ffi.load("tls")
+local ffi_any = ffi
+
+local function load_tls()
+	-- Build vendored name first (platform-specific compiled libraries).
+	local function vendored_name()
+		local os, arch = ffi.os, ffi.arch
+		if os == "Linux" then
+			return arch == "x64" and "dep/libressl/linux-x86_64/libtls.so" or nil
+		end
+		return nil
+	end
+	local names = {}
+	local v = vendored_name()
+	if v ~= nil then names[#names + 1] = v end
+	names[#names + 1] = "tls"
+	names[#names + 1] = "libtls.so"
+	names[#names + 1] = "libtls.so.33"    -- Linux system (SONAME)
+	names[#names + 1] = "libtls.dylib"
+	names[#names + 1] = "/usr/lib/libtls.dylib" -- macOS system
+	for _, name in ipairs(names) do
+		local ok, lib = pcall(ffi_any.load, name)
+		if ok then
+			return lib, name
+		end
+	end
+	error("tls: no shared library found (tried: " .. table.concat(names, ", ") .. ")")
+end
+local tls_c = load_tls()
 
 --[[@class tls_config_c]]
 --[[@class tls_c]]
