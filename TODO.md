@@ -4459,3 +4459,21 @@ Open threads from a previous session. Treat as starting context, not instruction
     through. terminal_mux/server.lua calls `caps_t.pty.spawn(caps_t.pty.default_cmd, ...)`
     instead of a hardcoded local constant. Operators can override per-app via
     `crescent caps <app_id> pty cmd=<shell>` (existing cap-config CLI).
+
+## Roadmap, value landscape, and substrate architecture (2026-07-22)
+
+> *Open threads from a previous session. Treat as starting context, not instructions — verify relevance before acting.*
+
+Session committed research work on strategic roadmap and ecosystem value analysis. The outputs are four docs (two research artifacts, two authoritative): `docs/roadmap-v2.md` (cleanroom), `docs/value-landscape.md` (synthesis), `docs/marginal-value-landscape.md` (derived analysis), `docs/marginal-value-landscape-cleanroom.md` (cleanroom analysis). All represent speculative research — no decisions yet, owner review pending.
+
+- [ ] **Roadmap-v2 authorization and refinement.** `docs/roadmap-v2.md` is marked as the authoritative roadmap, sequencing library priorities informed by value landscape analysis. It phases: (1) production substrate (shipping infrastructure), (2) highest-value-category substrate (PDF, i18n, bookkeeping, document structure), (3) motivating applications, (4) speculative research. Typechecker correctly marked as parked, not in the ship roadmap. Owner has not yet fully reviewed details — may require adjustments before it serves as the effective strategic direction.
+
+- [ ] **Value landscape synthesis — three docs, one canonical.** `docs/value-landscape.md` is the canonical synthesis of two independent analyses: `docs/marginal-value-landscape.md` (derived margins via market-research heuristics) and `docs/marginal-value-landscape-cleanroom.md` (cleanroom derived from first principles). The synthesis resolved two contentious classifications: offline/non-English as cross-cutting properties (not separate categories), and legal-navigation liability reframed as decisive (low tractability for solo dev, surfaces as "not viable yet"). Both research streams are speculative.
+
+- [ ] **Self-expression/compression research — recorded, not acted on.** An exploratory conversation about self-expression as a civilizational structural absence (not a product gap) was written to `docs/self-compression-research.md`. Owner explicitly stated "sit with it, don't act on it yet" — no product implications derived, no downstream decisions made. Pure research.
+
+- [ ] **Scribble as one of three substrates (reconfirmed).** Prior session had established pad (capture) / dusklight (display+control) / scribble (create/author) as the three-substrate model driving ecosystem priorities. This session reconfirmed the framing in roadmap work. Scribble needs a crescent-native authoring substrate informed by reincarnate's IR but not dependent on it — "the concrete thing drives the substrate" is the sequencing philosophy (substrate before consumers).
+
+- [ ] **Dusklight subsumption scope — unverified.** Some folding/consolidation of features happened in a May session (`84df5cc5`), but the exact scope of what was subsumed was never verified against the current design intent. Worth auditing if/when dusklight work resumes.
+
+- [ ] **Terminal multiplexer implementation continuing.** Web-based terminal with PTY + WebSocket + VT state machine. Initial implementation in progress: WS frame format wired (commits `36712c59`, `eacf0650`), xterm.js vendored (`dep/xterm-js/`), shell configurable via manifest (`terminal_mux/manifest.json`), frontend rendering working. Next: streaming protocol hardening, connection state management, tab/tiling UX.
