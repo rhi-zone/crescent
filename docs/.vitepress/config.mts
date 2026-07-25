@@ -1,4 +1,5 @@
 import { defineConfig } from "vitepress";
+import { withMermaid } from "vitepress-plugin-mermaid";
 
 // Vitepress runs the Vue template compiler over rendered markdown. Anything
 // it sees as `{{ ... }}` (interpolation) or `<Foo>` (custom element) breaks
@@ -16,11 +17,12 @@ function vPreCode(html: string): string {
     .replace(/<pre(?![^>]*\bv-pre\b)([^>]*)>/g, "<pre$1 v-pre>");
 }
 
-export default defineConfig({
+export default withMermaid(defineConfig({
   title: "crescent",
   description: "An operating system in Lua. Zero-dependency, vendoring-first.",
   base: "/",
   cleanUrls: true,
+  srcExclude: ["**/CLAUDE.md"],
   markdown: {
     html: false,
     config: (md) => {
@@ -34,6 +36,7 @@ export default defineConfig({
       { text: "Inventory", link: "/inventory" },
       { text: "Conventions", link: "/conventions" },
       { text: "GitHub", link: "https://github.com/rhi-zone/crescent" },
+      { text: "rhi", link: "https://docs.rhi.zone/" },
     ],
     sidebar: [
       {
@@ -116,5 +119,9 @@ export default defineConfig({
     search: {
       provider: "local",
     },
+    editLink: {
+      pattern: "https://github.com/rhi-zone/crescent/edit/master/docs/:path",
+      text: "Edit this page on GitHub",
+    },
   },
-});
+}))
