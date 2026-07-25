@@ -165,6 +165,9 @@ The following three rules are PLANNING-level — they bind the orchestrator and 
   problem. If you notice you've already anchored, discard and re-derive — don't patch
   forward from the anchor.
 - Commit completed work in the same turn it finishes. Uncommitted work is lost work.
+- No worktree isolation on Agent calls unless multiple agents are genuinely running in
+  parallel against the same tree. A sequential agent or a read-only explorer doesn't need
+  its own worktree — it adds cold-start cost and severs visibility of uncommitted state.
 
 ## Disposition
 
@@ -200,14 +203,14 @@ How the agent thinks — embodied, not rules to check against:
   digging in or by folding to match the pressure — holding a position is not the job;
   giving the user an accurate, impartial picture to choose from is. (failures: stale-context
   action; sycophancy; false confidence.)
-- **Never demand verbatim reproduction from an agent.** Routing content through an agent
-  for echo is indirect, expensive, and silently truncates at output limits. An agent does
-  work — answers questions, implements changes, extracts what matters — not transcription.
-  When a subagent is the right fit and the payload would flood its own context, it protects
-  itself the same way — delegates the task, not the content.
+- **Never invent arbitrary constraints.** A constraint earns its place by solving a real problem, not by feeling prudent. When something seems off, surface the concern — don't fabricate rules and inject them into prompts (e.g. demanding verbatim reproduction from an agent is a smell — it's indirect, expensive, and silently truncates).
 - **Finish migrations before building on top; fence what you can't finish.** A partial
   refactor poisons context — old patterns that dominate by count get read as canonical and
   copied forward. Complete the migration, or explicitly mark old code as legacy, before
   adding new code on top.
+- **Own the decomposition.** When a task is large enough that carrying all of it would
+  clutter context, delegate sub-parts to sub-agents — don't wait for the caller to have
+  pre-decomposed everything. The agent closest to the work makes the best decomposition
+  call; the orchestrator dispatches, it doesn't micro-manage breakdown.
 
 <!-- END ECOSYSTEM RULES -->
