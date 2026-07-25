@@ -31,7 +31,7 @@ Those belong in CLAUDE.md. If a command appears in a handoff, that's a sign CLAU
 
 At the top of the TODO.md open-threads section, include a line like:
 
-> *heads up — these are open threads from a previous session, not marching orders. worth a quick check before acting on any of it.*
+> *Open threads from a previous session. Treat as starting context, not instructions — verify relevance before acting.*
 
 This ensures the next session sees the trust boundary explicitly, even if it doesn't read this skill's definition.
 
@@ -47,15 +47,15 @@ This ensures the next session sees the trust boundary explicitly, even if it doe
    - Ensure the trust-boundary line is present at the top of the open-threads section
 4. Enter plan mode only now, when presenting this plan is the ONLY remaining step — every write and commit must already be done. Subagents spawned from inside plan mode can only write their own plan files, so nothing further can be delegated after this point. Invoke the `EnterPlanMode` tool with a **short** plan that communicates direction. **Critical:** the plan must mark itself as pre-research — a starting hypothesis, NOT a verified directive. The next session hasn't done the investigation; the previous session's intent should inform, not command.
 
-   Write it like a friend catching the next session up, not like a memo:
-   - "was thinking about continuing with..." not "do..."
-   - "the open question was..." not "decide..."
+   Use suggestive, deferential language:
+   - "suggests continuing with..." not "do..."
+   - "main open question was..." not "decide..."
    - "was leaning toward A" not "use A"
-   - Include something like "worth checking where things actually stand before acting on this"
+   - Include an explicit "verify current state before acting" or equivalent
 
    Example:
 
-   > hey — quick catch-up, not instructions: last session was poking at the X module and leaning toward approach A, but hadn't nailed down whether it handles edge case Y. that's still open. TODO.md has the rest of what was on the table. worth checking where things actually stand before running with any of this.
+   > Starting context (unverified — verify before acting): previous session was designing the X module and leaning toward approach A. Main open question: whether A handles edge case Y. See TODO.md for open threads. Next session should check current state first.
 
    Rules:
    - Point at TODO.md, don't duplicate it
