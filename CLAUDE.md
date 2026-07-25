@@ -46,6 +46,10 @@ Pointers to conditional context — read on demand, not loaded by default.
 - `bin/cr` — platform dispatch into vendored LuaJIT (Linux: loader + `luajit-bin`; macOS: native binary; Windows: `cr.bat`/`cr.ps1`).
 - `flake.nix` — contributor dev shell only (bun for docs); not a runtime dependency.
 - `docs/conventions.md`, `docs/batteries.md`, `docs/inventory.md`, `docs/inventory_summary.md` — already referenced elsewhere in this file.
+- `docs/type-system.md`, `docs/typechecker-v3.md`, `docs/typechecker-v2.md` (historical), `docs/soundness-audit.md`, `docs/type-tag-matrix.md` — typechecker design. Grep these before answering type-system design questions; do not improvise from first principles.
+- `docs/pkg-design.md` — package manager design (vendor-first via `dep/`, `pkg.lua` manifest, `crescent.lock`).
+- `lib/test/` — test infrastructure: `assert.lua` (assertions), `gen.lua` + `prop.lua` (property testing), `fixture.lua` (fixture/snapshot, `UPDATE_SNAPSHOTS=1`), `fuzz.lua` (fuzz, `FUZZ_SEED` replay), `arb.lua` (integrated shrinking).
+- `lib/type/static/lsp.lua` — LSP daemon (stdio JSON-RPC 2.0); run via `luajit lib/type/static/lsp.lua`.
 
 ## Development
 
@@ -391,6 +395,10 @@ In both cases: never wrap one implementation around another. Each is a real, ind
 
 **Derive from values, not from precedent.** When designing interfaces or making architecture decisions, start from crescent's values (vendorable, pure, fast, hackable, composable). Don't reach for what Java/Go/Rust/TypeScript does — their designs embed assumptions that don't apply here. Other ecosystems are references, not templates.
 
+**No framework code in lib/.** Libraries provide functions callers invoke; they do not own the server, the serving strategy, or the application architecture. No HTTP servers, no cross-language code generation (Lua emitting JS strings), no generic dispatch/routing layers, no JSON-to-function-call adapters. If a "library" is wrapping something the caller could write in five lines, it does not belong in `lib/`.
+
+**`dep/` is the vendor namespace for third-party packages.** `require("dep.foo")` is the convention (see existing `dep.sha1` in websocket). New vendored deps go under `dep/`, not `lib/`.
+
 **Abstraction has a cost.** Wrappers, layers, and indirection reduce hackability and readability. Every abstraction needs justification beyond "it seems cleaner." A direct implementation that is longer is often better than an indirect one that is shorter.
 
 
@@ -482,6 +490,8 @@ When doing performance optimization:
 
 ## Lua Gotchas
 
+**LuaJIT is Lua 5.1 + extensions.** Use `unpack(t)`, not `table.unpack(t)`. Do not shadow the built-in `assert` — in test files, bind the assertion library to a local (e.g. `local T = require("lib.test.assert")`).
+
 **Table construction: all data fields go in the literal, methods go on a prototype.**
 
 LuaJIT shapes tables at construction time. Fields present in the literal become part of the hidden class; adding fields afterward transitions to a new hidden class and breaks JIT monomorphic dispatch. The correct pattern:
@@ -531,7 +541,6 @@ answers, conversation.
 ## Negative Constraints
 
 Do not:
-- Use Claude Code's auto-memory system (`~/.claude/projects/.*./memory/`) — it is unversioned, invisible to the user, and can't be diffed or backed up. Write behavioral changes directly to CLAUDE.md instead
 - Announce actions ("I will now...") - just do them
 - Leave work uncommitted
 - Use interactive git commands (`git add -p`, `git add -i`, `git rebase -i`) — these block on stdin and hang in non-interactive shells; stage files by name instead
