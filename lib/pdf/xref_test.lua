@@ -261,16 +261,28 @@ T.describe("xref: cross-reference streams", function()
 		T.ok(err ~= nil)
 	end)
 
-	T.it("errors clearly on the unimplemented TIFF predictor", function()
-		local data = build_rows({ { 1, 5, 0 } }, 1, 2, 1)
+	T.it("decodes a TIFF-predicted (/Predictor 2) xref stream", function()
+		-- Row for {1, 5, 0} (w1=1,w2=2,w3=1) is raw bytes [1,0,5,0]; TIFF
+		-- horizontal-differencing (/Colors 1) forward-encodes it to
+		-- [1, (0-1)%256, (5-0)%256, (0-5)%256] = [1, 255, 5, 251].
+		local raw_row = build_rows({ { 1, 5, 0 } }, 1, 2, 1)
+		local filtered = { [1] = 1 } --[[: { [integer]: integer } ]]
+		for x = 2, 4 do
+			local r = byte_at(raw_row, x)
+			local p = byte_at(raw_row, x - 1)
+			if r == nil or p == nil then error("fixture construction bug") end
+			filtered[x] = (r - p) % 256
+		end
+		local data = bytes_to_string(filtered, 4)
 		local dict_src = "<< /Type /XRef /W [1 2 1] /Size 1 /DecodeParms << /Predictor 2 >> /Length "
 			.. #data .. " >>"
 		local src = "1 0 obj\n" .. dict_src .. "\nstream\n" .. data .. "\nendstream\nendobj"
 		local pdf_object = require("lib.pdf.object")
 		local indirect = as_table(pdf_object.string_to_indirect_object(src))
 		local entries, _, _, err = xref.decode_xref_stream(indirect.value)
-		T.ok(entries == nil)
-		T.ok(err ~= nil)
+		T.eq(err, nil)
+		local e = entries --[[: { [integer]: unknown } ]]
+		T.eq(as_table(e[0]).offset, 5)
 	end)
 
 	T.it("errors when /W is missing", function()

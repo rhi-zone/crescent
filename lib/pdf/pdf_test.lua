@@ -240,6 +240,69 @@ T.describe("pdf: Object Stream resolution (xref type-2 entries)", function()
 	end)
 end)
 
+-- Same shape as build_objstm_pdf above, but the ObjStm (object 4) holds two
+-- objects (5 and 6) instead of one — needed to exercise cache reuse across
+-- more than one lookup into the same ObjStm.
+--: () -> string
+local function build_objstm_pdf_multi()
+	local header = "%PDF-1.5\n"
+
+	local body5 = "<< /Foo (Bar) >>"
+	local body6 = "<< /Baz (Qux) >>"
+	local objstm_header = "5 0\n6 " .. #body5 .. "\n" -- "objnum offset" pairs, offset relative to /First
+	local objstm_data = objstm_header .. body5 .. body6
+	local objstm_dict = "<< /Type /ObjStm /N 2 /First " .. #objstm_header .. " /Length " .. #objstm_data .. " >>"
+
+	local objs = {
+		"1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n",
+		"2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n",
+		"3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>\nendobj\n",
+		"4 0 obj\n" .. objstm_dict .. "\nstream\n" .. objstm_data .. "\nendstream\nendobj\n",
+	}
+	local offsets = {} --[[: { [integer]: integer } ]]
+	local body = ""
+	local pos = #header
+	for i = 1, #objs do
+		offsets[i] = pos
+		body = body .. objs[i]
+		pos = pos + #objs[i]
+	end
+	local xref_offset = #header + #body
+
+	local rows = be(1, 1) .. be(offsets[1], 2) .. be(0, 1)
+		.. be(1, 1) .. be(offsets[2], 2) .. be(0, 1)
+		.. be(1, 1) .. be(offsets[3], 2) .. be(0, 1)
+		.. be(1, 1) .. be(offsets[4], 2) .. be(0, 1)
+		.. be(2, 1) .. be(4, 2) .. be(0, 1) -- object 5: type 2, ObjStm 4, index 0
+		.. be(2, 1) .. be(4, 2) .. be(1, 1) -- object 6: type 2, ObjStm 4, index 1
+	local xref_dict = "<< /Type /XRef /W [1 2 1] /Index [1 6] /Size 7 /Root 1 0 R /Length " .. #rows .. " >>"
+	local xref_obj = "7 0 obj\n" .. xref_dict .. "\nstream\n" .. rows .. "\nendstream\nendobj"
+
+	return header .. body .. xref_obj .. "\nstartxref\n" .. xref_offset .. "\n%%EOF"
+end
+
+T.describe("pdf: Object Stream caching (doc.objstm_cache)", function()
+	T.it("resolves multiple objects out of the same ObjStm correctly", function()
+		local doc = as_table(pdf.string_to_document(build_objstm_pdf_multi()))
+		local v5 = as_table(pdf.resolve(doc, { kind = "reference", num = 5, gen = 0 }))
+		local v6 = as_table(pdf.resolve(doc, { kind = "reference", num = 6, gen = 0 }))
+		T.eq(v5.Foo, "Bar")
+		T.eq(v6.Baz, "Qux")
+	end)
+
+	T.it("reuses the same cached ObjStm entry across lookups instead of re-decoding", function()
+		local doc = as_table(pdf.string_to_document(build_objstm_pdf_multi()))
+		pdf.resolve(doc, { kind = "reference", num = 5, gen = 0 })
+		local cache = as_table(doc.objstm_cache)
+		local first_entry = cache[4]
+		T.ok(first_entry ~= nil)
+		pdf.resolve(doc, { kind = "reference", num = 6, gen = 0 })
+		-- Same table identity: the second lookup reused the cached decode
+		-- rather than resolving/decoding the ObjStm stream again.
+		T.eq(cache[4], first_entry)
+	end)
+end)
+
 T.describe("pdf: indirect /Length resolution end-to-end", function()
 	T.it("resolves a stream whose /Length is itself an indirect reference", function()
 		local header = "%PDF-1.4\n"

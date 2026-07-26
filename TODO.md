@@ -4578,6 +4578,40 @@ framing.
   filters (DCTDecode/CCITTFaxDecode/JBIG2Decode/JPXDecode), AcroForm
   appearance-stream regeneration.
 
+- [x] **2a follow-up 2: CJK/CID font edge cases + remaining perf/predictor
+  gaps closed (2026-07-26).** Three commits: `94792606`
+  `lib/pdf/font.lua` CID `/DW`+`/W` width parsing wired into
+  `code_to_width` for Identity-H/V Type0 fonts (code == CID needs no CMap
+  resolution there); Type0 `/Encoding` support widened beyond
+  Identity-H/V+ToUnicode to also cover the four predefined
+  `Uni*-UTF16-H/V` CMaps (GB/CNS/JIS/KS collections — codes are already
+  UTF-16BE code units by construction, no CID step needed for extraction)
+  and a custom embedded `/Encoding` CMap *stream* using bfchar/bfrange/
+  begincodespacerange syntax (the ToUnicode CMap parser, renamed
+  `parse_cmap` and now shared, also derives codespace byte width from
+  `begincodespacerange`); `/ToUnicode` now correctly takes priority over
+  `/Encoding` for Type0 fonts unconditionally (previously errored on a
+  non-Identity `/Encoding` even with `/ToUnicode` present). `0ad3f330`
+  TIFF predictor (`/Predictor` 2, ISO 32000-1 §7.4.4.4) implemented in
+  `lib/pdf/filter.lua` for 8-bit samples (sub-byte `/BitsPerComponent`
+  still errors clearly — documented gap, real-world usage is
+  overwhelmingly byte-granular; also fixed two stale xref_test.lua/
+  filter_test.lua tests that had asserted "not yet implemented", replacing
+  them with functional round-trip tests). Third commit: Object Stream
+  caching in `lib/pdf/init.lua` — `Document` gained an `objstm_cache`
+  field (self-healing: a hand-built Document literal lacking it still
+  works, `get_objstm_cache` lazily attaches an empty one);
+  `resolve_compressed_object` now decodes+parses each ObjStm once per
+  document and reuses the cached decode (identity-checked in a new
+  `pdf_test.lua` case) across further lookups into the same stream,
+  replacing the previous "not cached across calls" documented perf gap.
+  501 assertions total across `lib/pdf/*_test.lua` (up from 470). Still
+  out of scope, unchanged: Type0/CID composite
+  fonts under a predefined non-UTF16 CMap name or an embedded
+  CID-producing (begincidchar/begincidrange) CMap, CID `/W` widths for
+  any /Encoding other than Identity-H/V, sub-byte-sample TIFF prediction,
+  image-only filters, AcroForm appearance-stream regeneration.
+
 - [ ] **Terminal multiplexer implementation continuing.** Web-based terminal with PTY + WebSocket + VT state machine. Initial implementation in progress: WS frame format wired (commits `36712c59`, `eacf0650`), xterm.js vendored (`dep/xterm-js/`), shell configurable via manifest (`terminal_mux/manifest.json`), frontend rendering working. Next: streaming protocol hardening, connection state management, tab/tiling UX.
 
 ## lib/bidi bounded classification scope (2026-07-26)

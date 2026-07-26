@@ -43,7 +43,21 @@ M.xref = pdf_xref
 M.filter = pdf_filter
 M.null = pdf_object.null
 
---:: Document = { bytes: string, entries: unknown, trailer: unknown }
+-- `objstm_cache` (ISO 32000-1 §7.5.7) caches each Object Stream's decoded
+-- data + parsed "objnum offset" header, keyed by the ObjStm's object number,
+-- so resolving several objects out of the same ObjStm (the common case —
+-- Object Streams typically hold dozens to hundreds of objects) decodes and
+-- parses it once rather than on every type-2 xref-entry resolution. Typed
+-- `unknown` rather than a concrete table type (same reasoning as `entries`/
+-- `trailer` above): it's populated and read only through
+-- `get_objstm_cache`/`resolve_compressed_object` below, and a value built by
+-- `M.string_to_document` always carries it, but a hand-built Document
+-- literal (test fixtures constructing `{ bytes = ..., entries = ...,
+-- trailer = ... }` directly, several of which exist in lib/pdf/*_test.lua)
+-- may not — `get_objstm_cache` degrades gracefully (fresh empty table,
+-- self-heals onto `doc` for next time) rather than requiring every such
+-- fixture to be updated.
+--:: Document = { bytes: string, entries: unknown, trailer: unknown, objstm_cache: unknown }
 
 -- ── Narrowing helpers over `unknown` PDF values ──────────────────────────────
 -- Mirrors the pattern used throughout lib/pdf/xref.lua and lib/pdf/filter.lua.
@@ -117,42 +131,91 @@ local function parse_objstm_header(data, n_objects)
 	return pairs_out, nil
 end
 
+-- One ObjStm's cached decode: its already-inflated/filtered stream data,
+-- parsed header pairs, and /First (the byte offset of the first object
+-- within `data`) — everything `resolve_compressed_object` needs to look up
+-- any object inside it without re-touching the stream dictionary.
+--:: ObjStmCacheEntry = {
+--::   data: string,
+--::   header_pairs: { [integer]: { num: integer, offset: integer } },
+--::   first: integer,
+--:: }
+
+-- Narrows an `unknown` cache slot into the concrete ObjStmCacheEntry record.
+-- Same two-step (direct `type(v) == "table"` check, then a checked cast)
+-- idiom lib/pdf/text.lua's `as_font` and lib/pdf/font.lua use for the same
+-- reason: an index-signature-typed `as_table` result doesn't
+-- checked-cast-assign into a concrete record with named fields.
+--: (unknown) -> ObjStmCacheEntry | nil
+local function as_objstm_cache_entry(v)
+	if type(v) ~= "table" then return nil end
+	local t = v --[[: ObjStmCacheEntry]]
+	return t
+end
+
+-- Returns `doc`'s ObjStm cache, creating (and attaching to `doc`) an empty
+-- one if absent — see the `objstm_cache` field comment on `Document` above
+-- for why a Document value might not already carry one.
+--: (Document) -> { [integer]: unknown }
+local function get_objstm_cache(doc)
+	local cache = as_table(doc.objstm_cache)
+	if cache == nil then
+		cache = {}
+		doc.objstm_cache = cache
+	end
+	return cache
+end
+
 --- Resolve an object stored inside an Object Stream (xref entry type 2).
--- `stream_num`/`index` per ISO 32000-1 Table 18's type-2 row. Not cached
--- across calls: resolving several objects from the same ObjStm re-decodes
--- and re-parses its header each time. Documented performance gap, not a
--- silent one — correctness first; caching would need a decision about where
--- the cache lives relative to Document's shape, out of this task's scope.
+-- `stream_num`/`index` per ISO 32000-1 Table 18's type-2 row. Each ObjStm is
+-- decoded and its header parsed once per `doc` (cached on `doc.objstm_cache`,
+-- keyed by `stream_num`) — resolving further objects out of the same ObjStm
+-- reuses that cached decode instead of re-inflating/re-parsing it.
 --: (Document, integer, integer) -> (unknown, string | nil)
 local function resolve_compressed_object(doc, stream_num, index)
-	local stream_val, serr = M.resolve_reference(doc, { kind = "reference", num = stream_num, gen = 0 })
-	if stream_val == nil then
-		return nil, "failed to resolve Object Stream " .. stream_num .. ": " .. tostring(serr)
+	local cache = get_objstm_cache(doc)
+	local cached = as_objstm_cache_entry(cache[stream_num])
+
+	local data, header_pairs, first
+	if cached ~= nil then
+		data = cached.data
+		header_pairs = cached.header_pairs
+		first = cached.first
+	else
+		local stream_val, serr = M.resolve_reference(doc, { kind = "reference", num = stream_num, gen = 0 })
+		if stream_val == nil then
+			return nil, "failed to resolve Object Stream " .. stream_num .. ": " .. tostring(serr)
+		end
+		local st = as_table(stream_val)
+		if st == nil or st.kind ~= "stream" then
+			return nil, "object " .. stream_num .. " (named as containing Object Stream) is not a stream"
+		end
+		local dict = as_table(st.dict)
+		if dict == nil then return nil, "Object Stream " .. stream_num .. " has no dictionary" end
+
+		local n_objects = as_number(dict.N)
+		local first_raw = as_number(dict.First)
+		if n_objects == nil then return nil, "Object Stream " .. stream_num .. " is missing /N" end
+		if first_raw == nil then return nil, "Object Stream " .. stream_num .. " is missing /First" end
+
+		local decoded, derr = M.stream_to_bytes(st)
+		if decoded == nil then return nil, "failed to decode Object Stream " .. stream_num .. ": " .. tostring(derr) end
+
+		local pairs_parsed, herr = parse_objstm_header(decoded, floor(n_objects))
+		if pairs_parsed == nil then return nil, herr end
+
+		data = decoded
+		header_pairs = pairs_parsed
+		first = floor(first_raw)
+		cache[stream_num] = { data = data, header_pairs = header_pairs, first = first }
 	end
-	local st = as_table(stream_val)
-	if st == nil or st.kind ~= "stream" then
-		return nil, "object " .. stream_num .. " (named as containing Object Stream) is not a stream"
-	end
-	local dict = as_table(st.dict)
-	if dict == nil then return nil, "Object Stream " .. stream_num .. " has no dictionary" end
-
-	local n_objects = as_number(dict.N)
-	local first = as_number(dict.First)
-	if n_objects == nil then return nil, "Object Stream " .. stream_num .. " is missing /N" end
-	if first == nil then return nil, "Object Stream " .. stream_num .. " is missing /First" end
-
-	local data, derr = M.stream_to_bytes(st)
-	if data == nil then return nil, "failed to decode Object Stream " .. stream_num .. ": " .. tostring(derr) end
-
-	local header_pairs, herr = parse_objstm_header(data, floor(n_objects))
-	if header_pairs == nil then return nil, herr end
 
 	local entry = header_pairs[index + 1]
 	if entry == nil then
 		return nil, "Object Stream " .. stream_num .. " has no entry at index " .. index
 	end
 
-	local abs_pos = floor(first) + entry.offset + 1
+	local abs_pos = first + entry.offset + 1
 	local value, verr = pdf_object.string_to_object(data, abs_pos)
 	if value == nil then
 		return nil, "failed to parse object " .. entry.num .. " inside Object Stream " .. stream_num .. ": "
@@ -170,7 +233,7 @@ function M.string_to_document(bytes)
 	if xt == nil then return nil, err end
 	local xtt = as_table(xt)
 	if xtt == nil then return nil, "malformed xref table" end
-	return { bytes = bytes, entries = xtt.entries, trailer = xtt.trailer }, nil
+	return { bytes = bytes, entries = xtt.entries, trailer = xtt.trailer, objstm_cache = {} }, nil
 end
 
 --- Resolve an indirect reference `{ kind = "reference", num, gen }` to its
