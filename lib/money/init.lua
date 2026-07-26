@@ -239,56 +239,83 @@ end
 -- Instance arithmetic methods
 -- ---------------------------------------------------------------------------
 
---: money -> money
-money_mt.negate = function(self)
-  return make_money(-self.amount_minor, self.currency)
-end
+-- Module-level functions are the canonical implementations (matching
+-- lib/decimal's convention): the `money` type only declares
+-- { amount_minor, currency }, so a value typed `money` can only be checked
+-- against module-level function signatures, not metatable-only methods.
+-- Instance methods (`m:negate()`, `m:eq(other)`, etc.) below delegate to
+-- these for runtime convenience; both call the same logic exactly once.
 
 --: money -> money
-money_mt.abs = function(self)
-  local v = self.amount_minor
-  return make_money(v < 0 and -v or v, self.currency)
+M.negate = function(a)
+  return make_money(-a.amount_minor, a.currency)
 end
+money_mt.negate = function(self) return M.negate(self) end
+
+--: money -> money
+M.abs = function(a)
+  local v = a.amount_minor
+  return make_money(v < 0 and -v or v, a.currency)
+end
+money_mt.abs = function(self) return M.abs(self) end
 
 -- ---------------------------------------------------------------------------
 -- Comparison
 -- ---------------------------------------------------------------------------
 
-money_mt.eq = function(self, other)
-  return self.currency == other.currency and self.amount_minor == other.amount_minor
+--: (money, money) -> boolean
+M.eq = function(a, b)
+  return a.currency == b.currency and a.amount_minor == b.amount_minor
 end
+money_mt.eq = function(self, other) return M.eq(self, other) end
 
-money_mt.lt = function(self, other)
-  if self.currency ~= other.currency then
-    error("money: currency mismatch: " .. self.currency .. " vs " .. other.currency, 2)
+--: (money, money) -> boolean
+M.lt = function(a, b)
+  if a.currency ~= b.currency then
+    error("money: currency mismatch: " .. a.currency .. " vs " .. b.currency, 2)
   end
-  return self.amount_minor < other.amount_minor
+  return a.amount_minor < b.amount_minor
 end
+money_mt.lt = function(self, other) return M.lt(self, other) end
 
-money_mt.le = function(self, other)
-  if self.currency ~= other.currency then
-    error("money: currency mismatch: " .. self.currency .. " vs " .. other.currency, 2)
+--: (money, money) -> boolean
+M.le = function(a, b)
+  if a.currency ~= b.currency then
+    error("money: currency mismatch: " .. a.currency .. " vs " .. b.currency, 2)
   end
-  return self.amount_minor <= other.amount_minor
+  return a.amount_minor <= b.amount_minor
 end
+money_mt.le = function(self, other) return M.le(self, other) end
 
-money_mt.gt = function(self, other)
-  if self.currency ~= other.currency then
-    error("money: currency mismatch: " .. self.currency .. " vs " .. other.currency, 2)
+--: (money, money) -> boolean
+M.gt = function(a, b)
+  if a.currency ~= b.currency then
+    error("money: currency mismatch: " .. a.currency .. " vs " .. b.currency, 2)
   end
-  return self.amount_minor > other.amount_minor
+  return a.amount_minor > b.amount_minor
 end
+money_mt.gt = function(self, other) return M.gt(self, other) end
 
-money_mt.ge = function(self, other)
-  if self.currency ~= other.currency then
-    error("money: currency mismatch: " .. self.currency .. " vs " .. other.currency, 2)
+--: (money, money) -> boolean
+M.ge = function(a, b)
+  if a.currency ~= b.currency then
+    error("money: currency mismatch: " .. a.currency .. " vs " .. b.currency, 2)
   end
-  return self.amount_minor >= other.amount_minor
+  return a.amount_minor >= b.amount_minor
 end
+money_mt.ge = function(self, other) return M.ge(self, other) end
 
-money_mt.is_zero     = function(self) return self.amount_minor == 0 end
-money_mt.is_positive = function(self) return self.amount_minor > 0 end
-money_mt.is_negative = function(self) return self.amount_minor < 0 end
+--: money -> boolean
+M.is_zero = function(a) return a.amount_minor == 0 end
+money_mt.is_zero = function(self) return M.is_zero(self) end
+
+--: money -> boolean
+M.is_positive = function(a) return a.amount_minor > 0 end
+money_mt.is_positive = function(self) return M.is_positive(self) end
+
+--: money -> boolean
+M.is_negative = function(a) return a.amount_minor < 0 end
+money_mt.is_negative = function(self) return M.is_negative(self) end
 
 -- ---------------------------------------------------------------------------
 -- Allocation
@@ -358,16 +385,16 @@ local function add_thousands(s, sep)
   return result
 end
 
--- money:format(opts) -> string
+-- M.format(m, opts) -> string
 -- opts: { symbol=true, thousands=true, locale="en_US" }
 --: (money, { symbol?: boolean, thousands?: boolean } | nil) -> string
-money_mt.format = function(self, opts)
+M.format = function(a, opts)
   opts = opts or {}
-  local meta = M.CURRENCIES[self.currency]
+  local meta = M.CURRENCIES[a.currency]
   local decimals = meta.decimals
   local scale = pow10(decimals)
 
-  local amount = self.amount_minor
+  local amount = a.amount_minor
   local neg = amount < 0
   if neg then amount = -amount end
 
@@ -398,15 +425,16 @@ money_mt.format = function(self, opts)
   if neg then formatted = "-" .. formatted end
   return formatted
 end
+money_mt.format = function(self, opts) return M.format(self, opts) end
 
--- money:to_string() -> "12.34 USD"
+-- M.to_string(m) -> "12.34 USD"
 --: money -> string
-money_mt.to_string = function(self)
-  local meta = M.CURRENCIES[self.currency]
+M.to_string = function(a)
+  local meta = M.CURRENCIES[a.currency]
   local decimals = meta.decimals
   local scale = pow10(decimals)
 
-  local amount = self.amount_minor
+  local amount = a.amount_minor
   local neg = amount < 0
   if neg then amount = -amount end
 
@@ -421,23 +449,26 @@ money_mt.to_string = function(self)
   end
 
   if neg then s = "-" .. s end
-  return s .. " " .. self.currency
+  return s .. " " .. a.currency
 end
-
+money_mt.to_string = function(self) return M.to_string(self) end
 money_mt.__tostring = money_mt.to_string
 
--- money:to_float() -> number (lossy)
+-- M.to_float(m) -> number (lossy)
 --: money -> number
-money_mt.to_float = function(self)
-  local meta = M.CURRENCIES[self.currency]
+M.to_float = function(a)
+  local meta = M.CURRENCIES[a.currency]
   local scale = pow10(meta.decimals)
-  return self.amount_minor / scale
+  return a.amount_minor / scale
 end
+money_mt.to_float = function(self) return M.to_float(self) end
 
--- money:to_minor() -> integer
-money_mt.to_minor = function(self)
-  return self.amount_minor
+-- M.to_minor(m) -> integer
+--: money -> number
+M.to_minor = function(a)
+  return a.amount_minor
 end
+money_mt.to_minor = function(self) return M.to_minor(self) end
 
 -- ---------------------------------------------------------------------------
 -- Exchange
