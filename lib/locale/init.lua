@@ -15,36 +15,54 @@ M._tier = "pure"
 -- Internal data tables
 -- ---------------------------------------------------------------------------
 
--- Number format descriptors: { decimal, group, group_size }
---:: NumFmt = { decimal: string, group: string, group_size: integer }
+-- Number format descriptors: { decimal, group, group_size, group_sizes? }
+-- group_sizes, when present, overrides group_size for non-uniform digit
+-- grouping (e.g. Indian 12,34,567): group_sizes[1] is the size of the
+-- group nearest the decimal point, and group_sizes[#group_sizes] repeats
+-- for every group further left. group_size is still required as the
+-- threshold for "is this even worth grouping" and as the uniform-case
+-- fallback.
+--:: NumFmt = { decimal: string, group: string, group_size: integer, group_sizes: { [integer]: integer } | nil }
 local NUMBER_FORMATS = {
-  ["en"] = { decimal = ".", group = ",", group_size = 3 },
-  ["en-US"] = { decimal = ".", group = ",", group_size = 3 },
-  ["en-GB"] = { decimal = ".", group = ",", group_size = 3 },
-  ["de"] = { decimal = ",", group = ".", group_size = 3 },
-  ["de-DE"] = { decimal = ",", group = ".", group_size = 3 },
-  ["fr"] = { decimal = ",", group = "\xc2\xa0", group_size = 3 }, -- narrow no-break space U+202F approximated as nbsp
-  ["fr-FR"] = { decimal = ",", group = "\xc2\xa0", group_size = 3 },
-  ["ja"] = { decimal = ".", group = ",", group_size = 3 },
-  ["ja-JP"] = { decimal = ".", group = ",", group_size = 3 },
-  ["zh"] = { decimal = ".", group = ",", group_size = 3 },
-  ["zh-CN"] = { decimal = ".", group = ",", group_size = 3 },
-  ["ko"] = { decimal = ".", group = ",", group_size = 3 },
-  ["ko-KR"] = { decimal = ".", group = ",", group_size = 3 },
-  ["ar"] = { decimal = ".", group = ",", group_size = 3 },
-  ["ar-SA"] = { decimal = ".", group = ",", group_size = 3 },
-  ["ru"] = { decimal = ",", group = "\xc2\xa0", group_size = 3 },
-  ["ru-RU"] = { decimal = ",", group = "\xc2\xa0", group_size = 3 },
-  ["es"] = { decimal = ",", group = ".", group_size = 3 },
-  ["es-ES"] = { decimal = ",", group = ".", group_size = 3 },
-  ["pt"] = { decimal = ",", group = ".", group_size = 3 },
-  ["pt-BR"] = { decimal = ",", group = ".", group_size = 3 },
-  ["it"] = { decimal = ",", group = ".", group_size = 3 },
-  ["it-IT"] = { decimal = ",", group = ".", group_size = 3 },
-  ["pl"] = { decimal = ",", group = "\xc2\xa0", group_size = 3 },
-  ["pl-PL"] = { decimal = ",", group = "\xc2\xa0", group_size = 3 },
-  ["tr"] = { decimal = ",", group = ".", group_size = 3 },
-  ["tr-TR"] = { decimal = ",", group = ".", group_size = 3 },
+  ["en"] = { decimal = ".", group = ",", group_size = 3, group_sizes = nil },
+  ["en-US"] = { decimal = ".", group = ",", group_size = 3, group_sizes = nil },
+  ["en-GB"] = { decimal = ".", group = ",", group_size = 3, group_sizes = nil },
+  -- Indian digit grouping: 12,34,567 (first group of 3, then groups of 2).
+  ["en-IN"] = { decimal = ".", group = ",", group_size = 3, group_sizes = { 3, 2 } },
+  ["hi"] = { decimal = ".", group = ",", group_size = 3, group_sizes = { 3, 2 } },
+  ["hi-IN"] = { decimal = ".", group = ",", group_size = 3, group_sizes = { 3, 2 } },
+  -- Persian "momayyez" decimal separator (U+066B ARABIC DECIMAL
+  -- SEPARATOR) and thousands separator (U+066C ARABIC THOUSANDS
+  -- SEPARATOR). Digits are formatted as Western (0-9), not converted to
+  -- Extended Arabic-Indic digits (U+06F0-06F9) — digit-system
+  -- substitution is a distinct concern from separator convention and is
+  -- not implemented here.
+  ["fa"] = { decimal = "\xd9\xab", group = "\xd9\xac", group_size = 3, group_sizes = nil },
+  ["fa-IR"] = { decimal = "\xd9\xab", group = "\xd9\xac", group_size = 3, group_sizes = nil },
+  ["de"] = { decimal = ",", group = ".", group_size = 3, group_sizes = nil },
+  ["de-DE"] = { decimal = ",", group = ".", group_size = 3, group_sizes = nil },
+  ["fr"] = { decimal = ",", group = "\xc2\xa0", group_size = 3, group_sizes = nil }, -- narrow no-break space U+202F approximated as nbsp
+  ["fr-FR"] = { decimal = ",", group = "\xc2\xa0", group_size = 3, group_sizes = nil },
+  ["ja"] = { decimal = ".", group = ",", group_size = 3, group_sizes = nil },
+  ["ja-JP"] = { decimal = ".", group = ",", group_size = 3, group_sizes = nil },
+  ["zh"] = { decimal = ".", group = ",", group_size = 3, group_sizes = nil },
+  ["zh-CN"] = { decimal = ".", group = ",", group_size = 3, group_sizes = nil },
+  ["ko"] = { decimal = ".", group = ",", group_size = 3, group_sizes = nil },
+  ["ko-KR"] = { decimal = ".", group = ",", group_size = 3, group_sizes = nil },
+  ["ar"] = { decimal = ".", group = ",", group_size = 3, group_sizes = nil },
+  ["ar-SA"] = { decimal = ".", group = ",", group_size = 3, group_sizes = nil },
+  ["ru"] = { decimal = ",", group = "\xc2\xa0", group_size = 3, group_sizes = nil },
+  ["ru-RU"] = { decimal = ",", group = "\xc2\xa0", group_size = 3, group_sizes = nil },
+  ["es"] = { decimal = ",", group = ".", group_size = 3, group_sizes = nil },
+  ["es-ES"] = { decimal = ",", group = ".", group_size = 3, group_sizes = nil },
+  ["pt"] = { decimal = ",", group = ".", group_size = 3, group_sizes = nil },
+  ["pt-BR"] = { decimal = ",", group = ".", group_size = 3, group_sizes = nil },
+  ["it"] = { decimal = ",", group = ".", group_size = 3, group_sizes = nil },
+  ["it-IT"] = { decimal = ",", group = ".", group_size = 3, group_sizes = nil },
+  ["pl"] = { decimal = ",", group = "\xc2\xa0", group_size = 3, group_sizes = nil },
+  ["pl-PL"] = { decimal = ",", group = "\xc2\xa0", group_size = 3, group_sizes = nil },
+  ["tr"] = { decimal = ",", group = ".", group_size = 3, group_sizes = nil },
+  ["tr-TR"] = { decimal = ",", group = ".", group_size = 3, group_sizes = nil },
 }
 
 -- Currency data: { symbol, position } where position is "prefix" or "suffix"
@@ -230,20 +248,32 @@ local function get_number_format(locale_str)
 end
 
 -- Insert group separators into an integer string (left of decimal).
---: (int_str: string, sep: string, group_size: integer) -> string
-local function insert_groups(int_str, sep, group_size)
-  local result = {}
+-- Groups are taken from the right (nearest the decimal point) outward.
+-- With group_sizes present (non-uniform grouping, e.g. Indian
+-- 12,34,567), group_sizes[1] sizes the rightmost group and
+-- group_sizes[#group_sizes] repeats for every group further left.
+-- Without it, group_size sizes every group uniformly.
+--: (int_str: string, fmt: NumFmt) -> string
+local function insert_groups(int_str, fmt)
   local len = #int_str
-  local first_group = len % group_size
-  if first_group == 0 then first_group = group_size end
-  result[#result+1] = int_str:sub(1, first_group)
-  local pos = first_group + 1
-  while pos <= len do
-    result[#result+1] = sep
-    result[#result+1] = int_str:sub(pos, pos + group_size - 1)
-    pos = pos + group_size
+  local sizes = fmt.group_sizes
+  -- collected right-to-left
+  local groups = {} --: { [integer]: string }
+  local pos = len
+  local gi = 1
+  while pos > 0 do
+    local sz = fmt.group_size --: integer
+    if sizes then
+      sz = sizes[gi] or sizes[#sizes] or fmt.group_size
+      gi = gi + 1
+    end
+    local start = math.max(1, pos - sz + 1)
+    groups[#groups+1] = int_str:sub(start, pos)
+    pos = start - 1
   end
-  return table.concat(result)
+  local out = {} --: { [integer]: string }
+  for i = #groups, 1, -1 do out[#out+1] = groups[i] end
+  return table.concat(out, fmt.group)
 end
 
 -- Interpolate {name} placeholders in a template string.
@@ -435,17 +465,31 @@ end
 --: (int_str: string, fmt: NumFmt, use_group: boolean) -> string
 local function format_integer_part(int_str, fmt, use_group)
   if use_group and #int_str > fmt.group_size then
-    return insert_groups(int_str, fmt.group, fmt.group_size)
+    return insert_groups(int_str, fmt)
   end
   return int_str
 end
 
+--:: negative_style = "minus" | "parens" | "trailing_minus"
+
+-- Apply a negative-number display convention to an already-formatted
+-- (unsigned-looking) string. "minus" (default): leading "-". "parens":
+-- wrap the whole string in parentheses (common accounting convention).
+-- "trailing_minus": trailing "-" (used in some European conventions).
+--: (string, boolean, negative_style | nil) -> string
+local function apply_negative_style(formatted, neg, style)
+  if not neg then return formatted end
+  if style == "parens" then return "(" .. formatted .. ")" end
+  if style == "trailing_minus" then return formatted .. "-" end
+  return "-" .. formatted
+end
+
 -- M.format_number(n, locale, opts) -> string | (nil, errmsg)
--- opts: { decimals, min_decimals, max_decimals, group_sep }
---: (number, string | { language: string, region: string | nil, script: string | nil }, { decimals: number | nil, min_decimals: number | nil, max_decimals: number | nil, group_sep: boolean | nil } | nil) -> (string | nil, string)
+-- opts: { decimals, min_decimals, max_decimals, group_sep, negative_style }
+--: (number, string | { language: string, region: string | nil, script: string | nil }, { decimals: number | nil, min_decimals: number | nil, max_decimals: number | nil, group_sep: boolean | nil, negative_style: negative_style | nil } | nil) -> (string | nil, string)
 function M.format_number(n, locale, opts)
   if type(n) ~= "number" then return nil, "n must be a number" end
-  local o = opts or { decimals = nil, min_decimals = nil, max_decimals = nil, group_sep = nil }
+  local o = opts or { decimals = nil, min_decimals = nil, max_decimals = nil, group_sep = nil, negative_style = nil }
   local loc_tag = locale_tag(locale)
   local fmt = get_number_format(loc_tag)
   local use_group = o.group_sep ~= false -- default true
@@ -486,7 +530,7 @@ function M.format_number(n, locale, opts)
   if #frac_part > 0 then
     result = result .. fmt.decimal .. frac_part
   end
-  if neg then result = "-" .. result end
+  result = apply_negative_style(result, neg, o.negative_style)
   return result
 end
 
@@ -512,7 +556,15 @@ function M.parse_number(str, locale)
 end
 
 -- M.format_currency(n, currency, locale, opts) -> string | (nil, errmsg)
---: (number, string, string | { language: string, region: string | nil, script: string | nil }, { decimals: number | nil, group_sep: boolean | nil } | nil) -> (string | nil, string)
+-- opts: { decimals, group_sep, negative_style, space }
+-- opts.space overrides whether a (narrow no-break) space separates the
+-- symbol from the number; default is no space for a prefix symbol
+-- ("$1,234.56") and a space for a suffix symbol ("1 234,56 kr").
+-- opts.negative_style controls how a negative amount is displayed;
+-- unlike format_number, it wraps/marks the WHOLE composed string
+-- (symbol + number), matching the accounting convention of e.g.
+-- "($1,234.56)" rather than "$(1,234.56)".
+--: (number, string, string | { language: string, region: string | nil, script: string | nil }, { decimals: number | nil, group_sep: boolean | nil, negative_style: negative_style | nil, space: boolean | nil } | nil) -> (string | nil, string)
 function M.format_currency(n, currency, locale, opts)
   currency = currency:upper()
   local cd_table = CURRENCY_DATA --[[: { [string]: { symbol: string, position: string } }]]
@@ -520,14 +572,16 @@ function M.format_currency(n, currency, locale, opts)
   if not cd then return nil, "unknown currency: "..currency end
 
   local loc_tag = locale_tag(locale)
-  local num_opts --: { decimals: number | nil, min_decimals: number | nil, max_decimals: number | nil, group_sep: boolean | nil } | nil
+  local num_opts --: { decimals: number | nil, min_decimals: number | nil, max_decimals: number | nil, group_sep: boolean | nil, negative_style: negative_style | nil } | nil
   if opts then
-    num_opts = { decimals = opts.decimals or 2, group_sep = opts.group_sep, min_decimals = nil, max_decimals = nil }
+    num_opts = { decimals = opts.decimals or 2, group_sep = opts.group_sep, min_decimals = nil, max_decimals = nil, negative_style = nil }
   else
-    num_opts = { decimals = 2, group_sep = nil, min_decimals = nil, max_decimals = nil }
+    num_opts = { decimals = 2, group_sep = nil, min_decimals = nil, max_decimals = nil, negative_style = nil }
   end
 
-  local num_str, err = M.format_number(n, locale, num_opts)
+  local neg = n < 0
+  local abs_n = neg and -n or n
+  local num_str, err = M.format_number(abs_n, locale, num_opts)
   if not num_str then return nil, err end
 
   -- Determine position: check locale override first, then default
@@ -538,11 +592,17 @@ function M.format_currency(n, currency, locale, opts)
     position = overrides[currency]
   end
 
+  local default_space = position ~= "prefix"
+  local use_space = opts and opts.space
+  if use_space == nil then use_space = default_space end
+  local sep = use_space and "\xc2\xa0" or "" -- narrow no-break space
+
+  local composed = num_str .. sep .. cd.symbol --: string
   if position == "prefix" then
-    return cd.symbol .. num_str
-  else
-    return num_str .. "\xc2\xa0" .. cd.symbol -- narrow no-break before suffix symbol
+    composed = cd.symbol .. sep .. num_str
   end
+
+  return apply_negative_style(composed, neg, opts and opts.negative_style or nil)
 end
 
 -- ---------------------------------------------------------------------------
