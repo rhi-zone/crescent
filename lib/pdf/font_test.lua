@@ -97,6 +97,32 @@ T.describe("font: /Encoding as a dict with /BaseEncoding + /Differences", functi
 	end)
 end)
 
+T.describe("font: full Adobe Glyph List coverage", function()
+	T.it("maps a glyph name well outside the old core-encoding-tables subset", function()
+		-- "onethird" (U+2153) never appears in StandardEncoding, WinAnsiEncoding,
+		-- or MacRomanEncoding — only reachable via /Differences into the full AGL.
+		local encoding = { Differences = { 65, name("onethird") } }
+		local f = as_font(font.font_from_dict(NO_DOC, { Encoding = encoding }))
+		local c2u = f.code_to_unicode
+		T.eq(c2u(65), "\226\133\147") -- U+2153 in UTF-8
+	end)
+
+	T.it("maps a multi-codepoint AGL entry (Hebrew letter + point)", function()
+		local encoding = { Differences = { 65, name("dalethatafpatah") } }
+		local f = as_font(font.font_from_dict(NO_DOC, { Encoding = encoding }))
+		local c2u = f.code_to_unicode
+		-- dalet (U+05D3) + hataf patah (U+05B2), each in UTF-8.
+		T.eq(c2u(65), "\215\147\214\178")
+	end)
+
+	T.it("returns nil for a glyph name not in the AGL at all", function()
+		local encoding = { Differences = { 65, name("not_a_real_glyph_name") } }
+		local f = as_font(font.font_from_dict(NO_DOC, { Encoding = encoding }))
+		local c2u = f.code_to_unicode
+		T.eq(c2u(65), nil)
+	end)
+end)
+
 T.describe("font: /ToUnicode CMap takes priority over /Encoding", function()
 	T.it("bfchar entries override the base encoding mapping", function()
 		local cmap = [[
