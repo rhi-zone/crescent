@@ -7,12 +7,19 @@
 -- dictionary and raw (still-encoded) bytes, applies /Filter and any
 -- /DecodeParms /Predictor to recover the underlying data.
 --
--- Only FlateDecode is supported (the overwhelmingly common filter in
--- practice); other filters return a clear error rather than silently
--- passing through undecoded bytes. Only the PNG predictor family
+-- Implemented filters: FlateDecode, ASCII85Decode, ASCIIHexDecode,
+-- RunLengthDecode, LZWDecode. /Filter may be a single name or an array
+-- (a filter chain, ISO 32000-1 §7.4 Table 6 — applied in array order, each
+-- with its own /DecodeParms array element); both forms are supported.
+-- Unsupported filters (image-specific: DCTDecode, CCITTFaxDecode,
+-- JBIG2Decode, JPXDecode; and Crypt) return a clear error rather than
+-- silently passing through undecoded bytes. Only the PNG predictor family
 -- (/Predictor 10-15) is implemented; the TIFF predictor (/Predictor 2,
--- rare in practice) returns a clear "not yet implemented" error. Both are
--- documented gaps, not silent mishandling — see TODO.md.
+-- rare in practice) returns a clear "not yet implemented" error — a
+-- documented gap, not silent mishandling — see TODO.md. /Predictor is only
+-- meaningful for FlateDecode/LZWDecode (ISO 32000-1 §7.4.4.4) so it's
+-- applied only immediately after those two filters in a chain, never after
+-- ASCII85/ASCIIHex/RunLength.
 --
 -- Errors: `(nil, errmsg)`, per docs/conventions.md.
 
@@ -26,6 +33,7 @@ local M = {}
 M._tier = "pure"
 
 local floor = math.floor
+local char, sub, concat, rep = string.char, string.sub, table.concat, string.rep
 
 -- TYPECHECKER WORKAROUND: calling string.byte's overloaded (intersection)
 -- signature directly and using the result in a comparison inside a loop with
@@ -76,6 +84,213 @@ local function as_array(v)
 	-- spec-mandated to be arrays (when in array form), so there's no
 	-- separate discriminator to check here.
 	return as_table(v)
+end
+
+-- ── ASCII85Decode (ISO 32000-1 §7.4.3) ──────────────────────────────────────
+-- Base-85: groups of 5 ASCII bytes (each in '!'(33)..'u'(117)) decode to 4
+-- output bytes as a big-endian base-85 integer; the shorthand byte 'z' alone
+-- represents an all-zero 4-byte group. Terminated by the "~>" EOD marker (if
+-- present — a caller may already have stripped it via /Length); a partial
+-- final group of n (2-5) input bytes, padded with 'u' to 5, yields n-1
+-- output bytes. A lone trailing byte (group length 1) is invalid input.
+
+local WS = { [0] = true, [9] = true, [10] = true, [12] = true, [13] = true, [32] = true }
+
+--: (string) -> (string | nil, string | nil)
+local function ascii85_decode(data)
+	local s = data
+	if sub(s, 1, 2) == "<~" then s = sub(s, 3) end
+	local tilde = s:find("~>", 1, true)
+	if tilde ~= nil then s = sub(s, 1, tilde - 1) end
+
+	local out = {}
+	local group = {} --[[: { [integer]: integer } ]]
+	local n = #s
+	local i = 1
+	while i <= n do
+		local b = byte(s, i)
+		if b == nil then break end
+		if WS[b] then
+			i = i + 1
+		elseif b == 122 and #group == 0 then -- 'z' shorthand for an all-zero group
+			out[#out + 1] = "\0\0\0\0"
+			i = i + 1
+		else
+			if b < 33 or b > 117 then
+				return nil, "invalid ASCII85Decode byte " .. b .. " at offset " .. i
+			end
+			group[#group + 1] = b - 33
+			i = i + 1
+			if #group == 5 then
+				local v = ((group[1] * 85 + group[2]) * 85 + group[3]) * 85 + group[4]
+				v = v * 85 + group[5]
+				out[#out + 1] = char(floor(v / 16777216) % 256, floor(v / 65536) % 256, floor(v / 256) % 256, v % 256)
+				group = {}
+			end
+		end
+	end
+
+	if #group == 1 then
+		return nil, "invalid ASCII85Decode data: trailing single-byte group"
+	elseif #group > 0 then
+		local count = #group
+		for k = count + 1, 5 do group[k] = 84 end -- pad with 'u' - 33 = 84
+		local v = ((group[1] * 85 + group[2]) * 85 + group[3]) * 85 + group[4]
+		v = v * 85 + group[5]
+		local four = char(floor(v / 16777216) % 256, floor(v / 65536) % 256, floor(v / 256) % 256, v % 256)
+		out[#out + 1] = sub(four, 1, count - 1)
+	end
+	return concat(out), nil
+end
+
+-- ── ASCIIHexDecode (ISO 32000-1 §7.4.2) ─────────────────────────────────────
+-- Pairs of hex digits (whitespace ignored), terminated by '>'; an odd
+-- trailing digit is padded with an implicit 0 nibble (same rule as a PDF hex
+-- string, ISO 32000-1 §7.3.4.3).
+
+local HEX_VAL = {}
+do
+	for i = 0, 9 do HEX_VAL[48 + i] = i end       -- '0'-'9'
+	for i = 0, 5 do HEX_VAL[65 + i] = 10 + i end  -- 'A'-'F'
+	for i = 0, 5 do HEX_VAL[97 + i] = 10 + i end  -- 'a'-'f'
+end
+
+--: (string) -> (string | nil, string | nil)
+local function asciihex_decode(data)
+	local digits = {} --[[: { [integer]: integer } ]]
+	local n = #data
+	local i = 1
+	while i <= n do
+		local b = byte(data, i)
+		if b == nil then break end
+		if b == 62 then break end -- '>' EOD marker
+		if not WS[b] then
+			local v = HEX_VAL[b]
+			if v == nil then return nil, "invalid hex digit in ASCIIHexDecode stream at offset " .. i end
+			digits[#digits + 1] = v
+		end
+		i = i + 1
+	end
+	if #digits % 2 == 1 then digits[#digits + 1] = 0 end
+	local out = {}
+	for k = 1, #digits, 2 do
+		out[#out + 1] = char(digits[k] * 16 + digits[k + 1])
+	end
+	return concat(out), nil
+end
+
+-- ── RunLengthDecode (ISO 32000-1 §7.4.5) ────────────────────────────────────
+-- A length byte 0-127 means "copy the next (length+1) bytes literally";
+-- 129-255 means "repeat the single following byte (257-length) times";
+-- 128 is the EOD marker.
+
+--: (string) -> (string | nil, string | nil)
+local function runlength_decode(data)
+	local out = {}
+	local n = #data
+	local i = 1
+	while i <= n do
+		local len = byte(data, i)
+		if len == nil then break end
+		i = i + 1
+		if len == 128 then
+			break
+		elseif len < 128 then
+			local count = len + 1
+			if i + count - 1 > n then return nil, "truncated RunLengthDecode literal run" end
+			out[#out + 1] = sub(data, i, i + count - 1)
+			i = i + count
+		else
+			local count = 257 - len
+			local b = byte(data, i)
+			if b == nil then return nil, "truncated RunLengthDecode repeat run" end
+			out[#out + 1] = rep(char(b), count)
+			i = i + 1
+		end
+	end
+	return concat(out), nil
+end
+
+-- ── LZWDecode (ISO 32000-1 §7.4.4) ──────────────────────────────────────────
+-- Variable-width (9-12 bit) LZW over a 256-entry literal-byte table plus
+-- codes 256 (Clear) and 257 (EOD). /DecodeParms /EarlyChange (default 1)
+-- controls whether the code width increases one code early (Adobe's
+-- historical convention, the PDF default) or exactly at the dictionary-full
+-- boundary (TIFF-style, EarlyChange 0).
+
+--: (integer, integer) -> integer
+-- Code width needed to write the NEXT code, given the dictionary's next
+-- free code number.
+local function lzw_code_width(next_code, early_change)
+	local n = next_code - 1
+	if early_change == 1 then n = n + 1 end
+	if n < 511 then return 9 end
+	if n < 1023 then return 10 end
+	if n < 2047 then return 11 end
+	return 12
+end
+
+--: (string, integer | nil) -> (string | nil, string | nil)
+local function lzw_decode(data, early_change)
+	if early_change == nil then early_change = 1 end
+	local CLEAR, EOD = 256, 257
+
+	local dict = {} --[[: { [integer]: string } ]]
+	local next_code = 258 --: integer
+	local code_width = 9 --: integer
+	--: () -> nil
+	local function reset_dict()
+		dict = {}
+		for i = 0, 255 do dict[i] = char(i) end
+		next_code = 258
+		code_width = 9
+	end
+	reset_dict()
+
+	local total_bits = #data * 8
+	local bitpos = 0
+	--: (integer) -> integer | nil
+	local function read_code(width)
+		if bitpos + width > total_bits then return nil end
+		local code = 0
+		for _ = 1, width do
+			local byte_idx = floor(bitpos / 8) + 1
+			local bit_idx = 7 - (bitpos % 8)
+			local byte_val = byte(data, byte_idx) or 0
+			local bit = floor(byte_val / (2 ^ bit_idx)) % 2
+			code = code * 2 + bit
+			bitpos = bitpos + 1
+		end
+		return code
+	end
+
+	local out = {}
+	local prev = nil --: string | nil
+	while true do
+		local code = read_code(code_width)
+		if code == nil or code == EOD then break end
+		if code == CLEAR then
+			reset_dict()
+			prev = nil
+		else
+			local entry
+			if dict[code] ~= nil then
+				entry = dict[code]
+			elseif code == next_code and prev ~= nil then
+				entry = prev .. sub(prev, 1, 1)
+			else
+				return nil, "invalid LZWDecode code sequence (code " .. code .. ")"
+			end
+			out[#out + 1] = entry
+			if prev ~= nil then
+				dict[next_code] = prev .. sub(entry, 1, 1)
+				next_code = next_code + 1
+				code_width = lzw_code_width(next_code, early_change)
+			end
+			prev = entry
+		end
+	end
+	return concat(out), nil
 end
 
 -- ── PNG predictor un-filtering (used by /DecodeParms /Predictor 10-15) ──────
@@ -187,9 +402,63 @@ local function apply_predictor(decode_parms, data, default_columns)
 	return png_unfilter(data, columns, bpp)
 end
 
+-- ── Filter-name and DecodeParms list resolution ─────────────────────────────
+-- /Filter is either a single name (one filter) or an array of names (a
+-- chain, applied in array order — ISO 32000-1 §7.4 "if there are multiple
+-- filters... they are applied in the order in which they appear"). Whichever
+-- form /Filter takes, /DecodeParms (or its PDF-1.2-era alias /DP) follows
+-- the same shape: a single dict (or null/absent) paired with a single
+-- filter, or a parallel array (each element a dict, or null for "no parms
+-- for this filter") paired with a filter-name array of the same length.
+
+--: ({ [string]: unknown, [integer]: unknown }) -> ({ [integer]: string } | nil, string | nil)
+local function resolve_filter_names(d)
+	if d.Filter == nil then return {}, nil end
+	local single = as_name(d.Filter)
+	if single ~= nil then return { single }, nil end
+	local arr = as_array(d.Filter)
+	if arr == nil then
+		return nil, "unsupported /Filter value (not a name, not an array — "
+			.. "possibly an unresolved indirect reference)"
+	end
+	local names = {} --[[: { [integer]: string } ]]
+	local i = 1
+	while arr[i] ~= nil do
+		local name = as_name(arr[i])
+		if name == nil then return nil, "/Filter array element " .. i .. " is not a name" end
+		names[i] = name
+		i = i + 1
+	end
+	return names, nil
+end
+
+--: ({ [string]: unknown, [integer]: unknown }, integer) -> { [integer]: unknown }
+-- Returns a 1-indexed list, length `count`, of each filter's DecodeParms
+-- entry (`unknown` — narrowed to a dict per-element by the caller, since a
+-- parallel-array slot may legitimately be `null`/absent for one filter).
+local function resolve_parms_list(d, count)
+	local decode_parms = d.DecodeParms
+	if decode_parms == nil then decode_parms = d.DP end
+	local list = {} --[[: { [integer]: unknown } ]]
+	if count <= 1 then
+		list[1] = decode_parms
+		return list
+	end
+	local arr = as_array(decode_parms)
+	for i = 1, count do
+		if arr ~= nil then
+			list[i] = arr[i]
+		else
+			list[i] = nil
+		end
+	end
+	return list
+end
+
 -- ── Public API ───────────────────────────────────────────────────────────────
 
---- Decode a stream's raw bytes per its dictionary's /Filter and /DecodeParms.
+--- Decode a stream's raw bytes per its dictionary's /Filter and /DecodeParms,
+-- applying a filter chain in order when /Filter is an array.
 -- `default_columns` (optional) sets the predictor row width to use when
 -- /DecodeParms /Columns is absent — callers that know the natural row width
 -- of their data (e.g. lib/pdf/xref.lua, whose rows are /W-width fixed
@@ -200,39 +469,69 @@ function M.decode_stream(dict, raw_data, default_columns)
 	local d = as_table(dict)
 	if d == nil then return nil, "stream dictionary is not a dictionary" end
 
-	local filter_name = as_name(d.Filter)
-	if filter_name == nil and d.Filter ~= nil then
-		local filter_arr = as_array(d.Filter)
-		if filter_arr ~= nil and filter_arr[1] ~= nil and filter_arr[2] == nil then
-			filter_name = as_name(filter_arr[1])
-		end
-		if filter_name == nil then
-			-- /Filter is present but isn't a name or a single-name array —
-			-- e.g. an unresolved indirect reference (rare but spec-legal;
-			-- resolving it needs xref access this module doesn't have) or a
-			-- multi-filter chain (not implemented). Either way, silently
-			-- treating the data as unfiltered would be a correctness bug,
-			-- not graceful degradation.
-			return nil, "unsupported /Filter value (not a name, not a single-name array — "
-				.. "possibly an unresolved indirect reference or an unsupported multi-filter chain)"
-		end
-	end
+	local filter_names, nerr = resolve_filter_names(d)
+	if filter_names == nil then return nil, nerr end
+	local parms_list = resolve_parms_list(d, #filter_names)
 
 	local data = raw_data
-	if filter_name == "FlateDecode" then
-		if not ok_compress then
-			return nil, "stream uses FlateDecode but lib/compress is unavailable"
-		end
-		local inflated, ierr = compress_mod.inflate(raw_data)
-		if inflated == nil then return nil, "failed to inflate stream: " .. tostring(ierr) end
-		data = inflated
-	elseif filter_name ~= nil then
-		return nil, "unsupported stream filter: " .. filter_name
+
+	if #filter_names == 0 then
+		-- No /Filter at all: predictor-only data (e.g. an xref stream with no
+		-- compression filter, just a /DecodeParms /Predictor). /Predictor is
+		-- spec-tied to FlateDecode/LZWDecode, but callers exercising a bare
+		-- /DecodeParms with no filter are relying on this pass-through — same
+		-- behavior as before filter chains were supported.
+		return apply_predictor(parms_list[1], data, default_columns or #data)
 	end
 
-	local decode_parms = d.DecodeParms
-	if decode_parms == nil then decode_parms = d.DP end
-	return apply_predictor(decode_parms, data, default_columns or #data)
+	local i = 1
+	while filter_names[i] ~= nil do
+		local filter_name = filter_names[i]
+		local parms = parms_list[i]
+
+		if filter_name == "FlateDecode" then
+			if not ok_compress then
+				return nil, "stream uses FlateDecode but lib/compress is unavailable"
+			end
+			local inflated, ierr = compress_mod.inflate(data)
+			if inflated == nil then return nil, "failed to inflate stream: " .. tostring(ierr) end
+			data = inflated
+			local predicted, perr = apply_predictor(parms, data, default_columns or #data)
+			if predicted == nil then return nil, perr end
+			data = predicted
+		elseif filter_name == "LZWDecode" then
+			local pd = as_table(parms)
+			local early_change = 1
+			if pd ~= nil then
+				local ec = as_integer(pd.EarlyChange)
+				if ec ~= nil then early_change = ec end
+			end
+			local decoded, lerr = lzw_decode(data, early_change)
+			if decoded == nil then return nil, lerr end
+			data = decoded
+			local predicted, perr = apply_predictor(parms, data, default_columns or #data)
+			if predicted == nil then return nil, perr end
+			data = predicted
+		elseif filter_name == "ASCII85Decode" then
+			local decoded, aerr = ascii85_decode(data)
+			if decoded == nil then return nil, aerr end
+			data = decoded
+		elseif filter_name == "ASCIIHexDecode" then
+			local decoded, aerr = asciihex_decode(data)
+			if decoded == nil then return nil, aerr end
+			data = decoded
+		elseif filter_name == "RunLengthDecode" then
+			local decoded, rerr = runlength_decode(data)
+			if decoded == nil then return nil, rerr end
+			data = decoded
+		else
+			return nil, "unsupported stream filter: " .. filter_name
+		end
+
+		i = i + 1
+	end
+
+	return data, nil
 end
 
 return M

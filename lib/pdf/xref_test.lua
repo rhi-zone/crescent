@@ -252,7 +252,7 @@ T.describe("xref: cross-reference streams", function()
 	end)
 
 	T.it("errors clearly on an unsupported filter", function()
-		local dict_src = "<< /Type /XRef /W [1 2 1] /Size 1 /Filter /RunLengthDecode /Length 4 >>"
+		local dict_src = "<< /Type /XRef /W [1 2 1] /Size 1 /Filter /DCTDecode /Length 4 >>"
 		local src = "1 0 obj\n" .. dict_src .. "\nstream\nabcd\nendstream\nendobj"
 		local pdf_object = require("lib.pdf.object")
 		local indirect = as_table(pdf_object.string_to_indirect_object(src))
