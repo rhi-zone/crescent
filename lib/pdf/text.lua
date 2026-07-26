@@ -24,42 +24,31 @@
 -- Tlm are NOT (they're "text object state", reset fresh at every BT and
 -- never touched by q/Q). Both halves of that split are implemented below.
 --
--- SCOPE DECISION — no per-glyph width-based advance. Precisely advancing
--- the text matrix between glyphs needs each glyph's width (a font's
--- /Widths array, keyed by code, with /MissingWidth and /FirstChar/
--- /LastChar bookkeeping — a distinct, nontrivial piece of font-metrics
--- substrate this task's brief explicitly permits scoping out: "decide
--- whether per-glyph width lookup is in scope... if out of scope,
--- positioning is per-Tj-call granularity, not per-glyph"). This module
--- takes that out: `w0` (the glyph-width term in the spec's advance
--- formula, §9.4.3) is treated as 0. What IS implemented, because it needs
--- no font metrics at all — it's either explicit in the content stream or
--- computable purely from the shown string's byte/code count:
---   - TJ array numeric adjustments (explicit kerning/spacing data in the
---     content stream itself, in thousandths of text space units) DO
---     move the text position between the string pieces of one TJ call.
---   - Tc (character spacing) and Tw (word spacing, single-byte code 32
---     only, never applied to multi-byte composite-font codes per spec)
---     DO contribute to the advance, computed from the shown string's
---     code count — no glyph metrics needed for that part of the formula.
--- Net effect: a span's recorded position is exact (computed from the
--- real Tm/CTM at the start of the operation); the text matrix's advance
--- to the NEXT operation is approximate whenever w0 would have been
--- nonzero (i.e. for any real glyph). Consecutive Tj/TJ/'/" calls that
--- aren't repositioned by an intervening Td/TD/Tm/T* will therefore be
--- recorded at positions that undercount how far right the previous call's
--- text actually extended. This is a documented approximation, not a bug:
--- most real content streams DO reposition via Td/Tm per line/run, which
--- this module tracks exactly.
+-- PER-GLYPH WIDTH-BASED ADVANCE — the text matrix's advance between glyphs
+-- uses each glyph's width (`w0` in the spec's advance formula, §9.4.3) when
+-- the current font's /Widths data is available (lib/pdf/font.lua's
+-- `Font.code_to_width`, built from /Widths + /FirstChar + /FontDescriptor
+-- /MissingWidth — see that file). `decode_shown_string` sums each shown
+-- code's width; `show_text` folds `(width_sum / 1000) * Tfs * Th` into the
+-- same advance accumulation TJ adjustments and Tc/Tw already used. When a
+-- font has no /Widths array at all (`code_to_width == nil` — legitimate,
+-- e.g. a non-embedded standard-14 font relying on built-in metrics, or a
+-- Type0/CID font, whose /DW+/W widths are a distinct out-of-scope
+-- structure — see lib/pdf/font.lua), `width_sum` is 0 and the advance
+-- degrades exactly to the previous w0-treated-as-0 approximation: a span's
+-- recorded position is always exact (computed from the real Tm/CTM at the
+-- start of the operation); only the advance to the NEXT untracked-width
+-- operation can undercount. Most real content streams reposition via
+-- Td/Tm per line/run anyway, which this module tracks exactly regardless.
 --
 -- READING-ORDER RECONSTRUCTION — M.spans_to_reading_order groups spans
--- into lines using a fixed, documented Y-tolerance (Y_LINE_TOLERANCE
--- below), not one adaptive to font size (spans don't carry a size — see
--- their documented shape). This is a deliberate simplicity/robustness
--- trade-off: adaptive tolerance needs a per-span font size threaded
--- through, and a fixed tolerance already works for the overwhelming
--- majority of real page layouts (line heights are essentially always
--- larger than a few PDF user-space units, i.e. a few 1/72-inch steps).
+-- into lines using a Y-tolerance scaled to each span's font size
+-- (`Y_LINE_TOLERANCE_RATIO` below), not a fixed constant — a span now
+-- carries its `font_size` (see `Span` below) since Tf's size argument is
+-- already threaded through `show_text`. A ratio-of-font-size tolerance
+-- scales correctly across documents mixing e.g. 8pt footnotes and 24pt
+-- headings, where a single fixed tolerance tuned for one would be too
+-- tight or too loose for the other.
 --
 -- SCOPE GAP — a page's coordinate system here is exactly its content
 -- stream's default user space (CTM starts at identity at the top of each
@@ -195,7 +184,11 @@ end
 
 -- Mirrors lib/pdf/font.lua's Font shape (same-shape local redeclaration —
 -- see this file's Document note above for why).
---:: Font = { code_width: integer, code_to_unicode: (integer) -> (string | nil) }
+--:: Font = {
+--::   code_width: integer,
+--::   code_to_unicode: (integer) -> (string | nil),
+--::   code_to_width: ((integer) -> number) | nil,
+--:: }
 
 --: (unknown) -> Font | nil
 -- Narrows an `unknown` value (as returned by requiring lib.pdf.font, whose
@@ -215,17 +208,25 @@ end
 
 -- ── Decoding a shown string through the current font ─────────────────────
 
---: (Font, string) -> (string, integer, integer)
+--: (Font, string) -> (string, integer, integer, number)
 -- Returns (decoded unicode text, number of character codes shown, number
--- of those codes eligible for word spacing — single-byte code 32 only,
--- per spec's word-spacing exception for multi-byte codes).
+-- of those codes eligible for word spacing — single-byte code 32 only, per
+-- spec's word-spacing exception for multi-byte codes — and the sum of each
+-- shown code's glyph width in glyph space / thousandths, ISO 32000-1
+-- §9.4.3's w0 term, summed rather than per-glyph since the caller applies
+-- one Tfs/Th scale to the whole run). The width sum is 0 when the font has
+-- no /Widths data (font_obj.code_to_width == nil) — same as before /Widths
+-- parsing existed, since the caller's advance formula then degrades
+-- exactly to the old w0-treated-as-0 approximation.
 local function decode_shown_string(font_obj, bytes)
 	local width = font_obj.code_width
 	local code_to_unicode = font_obj.code_to_unicode
+	local code_to_width = font_obj.code_to_width
 	local parts = {}
 	local n = #bytes
 	local n_units = 0
 	local n_space_units = 0
+	local width_sum = 0 --: number
 	if width == 2 then
 		local i = 1
 		while i + 1 <= n do
@@ -234,6 +235,7 @@ local function decode_shown_string(font_obj, bytes)
 			local code = b1 * 256 + b2
 			local decoded = code_to_unicode(code)
 			if decoded ~= nil then parts[#parts + 1] = decoded end
+			if code_to_width ~= nil then width_sum = width_sum + code_to_width(code) end
 			n_units = n_units + 1
 			i = i + 2
 		end
@@ -242,26 +244,37 @@ local function decode_shown_string(font_obj, bytes)
 			local code = byte(bytes, i) or 0
 			local decoded = code_to_unicode(code)
 			if decoded ~= nil then parts[#parts + 1] = decoded end
+			if code_to_width ~= nil then width_sum = width_sum + code_to_width(code) end
 			n_units = n_units + 1
 			if code == 32 then n_space_units = n_space_units + 1 end
 		end
 	end
-	return table.concat(parts), n_units, n_space_units
+	return table.concat(parts), n_units, n_space_units, width_sum
 end
 
 -- ── Page-level content-stream interpretation ─────────────────────────────
 
---:: Span = { text: string, x: number, y: number, font_name: string | nil }
+--:: Span = { text: string, x: number, y: number, font_name: string | nil, font_size: number }
 
 -- ── Reading-order reconstruction ─────────────────────────────────────────
 -- Placed before page_to_text (which calls M.spans_to_reading_order) so its
 -- concrete signature is visible at that call site rather than inferred
 -- from a forward reference.
 
--- Fixed Y-proximity tolerance (PDF user-space units, i.e. 1/72 inch at
--- unscaled 1-unit-per-point) for "same line" grouping — see file header
--- for why this is a fixed constant rather than adaptive to font size.
-local Y_LINE_TOLERANCE = 3
+-- Font-size-adaptive Y-proximity tolerance for "same line" grouping — see
+-- file header. Ratio is heuristic (not a spec value: nothing in ISO
+-- 32000-1 defines "same line" — it's a reading-order reconstruction this
+-- module performs on top of positioned spans, same as pdf.js/pdfplumber
+-- unofficial-heuristic prior art for the same problem). 0.3x font size
+-- comfortably covers normal baseline jitter (subscript/superscript Ts,
+-- rounding) without merging adjacent same-size text lines, whose baselines
+-- are normally a full line-height (~1.0-1.5x font size) apart.
+-- MIN_Y_LINE_TOLERANCE floors it for degenerate/zero-font-size spans
+-- (e.g. a font never set via Tf) at the old fixed constant's value, so
+-- that pre-existing case doesn't regress to zero-tolerance (every span on
+-- its own line).
+local Y_LINE_TOLERANCE_RATIO = 0.3
+local MIN_Y_LINE_TOLERANCE = 3
 
 -- table.sort's declared signature takes a comparator of `(unknown, unknown)
 -- -> boolean | nil` (it must accept any array's element type); a
@@ -287,13 +300,16 @@ local function span_y_greater(a, b)
 	return a_.y > b_.y
 end
 
---:: Line = { y: number, spans: { [integer]: Span } }
+--:: Line = { y: number, font_size: number, spans: { [integer]: Span } }
 
 --- Groups spans into lines by Y-proximity (PDF y increases upward, so
 -- lines come out top-of-page first) and sorts each line's spans by X
 -- ascending (left to right). Returns an array of `Line` records, `y`
 -- being the first (topmost) span's y in that line — a representative
--- value for the line, not every span's exact y.
+-- value for the line, not every span's exact y. The Y-tolerance used to
+-- decide "same line" is `max(line's representative font_size, this span's
+-- font_size) * Y_LINE_TOLERANCE_RATIO`, floored at MIN_Y_LINE_TOLERANCE —
+-- see those constants' comments above.
 --: ({ [integer]: Span }) -> { [integer]: Line }
 function M.spans_to_reading_order(spans)
 	local sorted = {} --[[: { [integer]: Span } ]]
@@ -310,11 +326,13 @@ function M.spans_to_reading_order(spans)
 	while sorted[j] ~= nil do
 		local span = sorted[j]
 		local same_line = false
-		if current ~= nil and math.abs(span.y - current.y) <= Y_LINE_TOLERANCE then
-			same_line = true
+		if current ~= nil then
+			local tolerance = math.max(current.font_size, span.font_size) * Y_LINE_TOLERANCE_RATIO
+			if tolerance < MIN_Y_LINE_TOLERANCE then tolerance = MIN_Y_LINE_TOLERANCE end
+			if math.abs(span.y - current.y) <= tolerance then same_line = true end
 		end
 		if not same_line then
-			current = { y = span.y, spans = {} }
+			current = { y = span.y, font_size = span.font_size, spans = {} }
 			lines[#lines + 1] = current
 		end
 		local line = current
@@ -460,9 +478,11 @@ function M.page_to_text(doc, page_dict)
 			local el = elements[i]
 			local s = as_string(el)
 			if s ~= nil then
-				local decoded, n_units, n_space = decode_shown_string(font_obj, s)
+				local decoded, n_units, n_space, width_sum = decode_shown_string(font_obj, s)
 				text_parts[#text_parts + 1] = decoded
-				total_tx = total_tx + (n_units * gs.char_spacing + n_space * gs.word_spacing) * th
+				total_tx = total_tx
+					+ (n_units * gs.char_spacing + n_space * gs.word_spacing) * th
+					+ (width_sum / 1000) * gs.font_size * th
 			else
 				local adj = as_number(el)
 				if adj ~= nil then
@@ -474,7 +494,8 @@ function M.page_to_text(doc, page_dict)
 
 		local combined = table.concat(text_parts)
 		if combined ~= "" then
-			spans[#spans + 1] = { text = combined, x = span_x, y = span_y, font_name = gs.font_name }
+			spans[#spans + 1] =
+				{ text = combined, x = span_x, y = span_y, font_name = gs.font_name, font_size = gs.font_size }
 		end
 		tm = multiply(translation_matrix(total_tx, 0), tm)
 	end

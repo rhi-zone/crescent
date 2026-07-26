@@ -194,6 +194,85 @@ T.describe("text: page_to_text over a multi-font, multi-line page", function()
 	end)
 end)
 
+T.describe("text: /Widths-based glyph advance", function()
+	T.it("advances the text position between consecutive Tj calls using /Widths", function()
+		-- Font 10: /Widths [500 600 700 800] for codes 65-68 (A-D).
+		local content = "BT /F5 12 Tf 100 700 Td (AB) Tj (CD) Tj ET\n"
+		local objs = {
+			[1] = "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n",
+			[2] = "2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n",
+			[3] = "3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
+				.. "/Resources << /Font << /F5 5 0 R >> >> /Contents 4 0 R >>\nendobj\n",
+			[4] = stream_obj(4, content),
+			[5] = "5 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica "
+				.. "/FirstChar 65 /LastChar 68 /Widths [500 600 700 800] >>\nendobj\n",
+		}
+		local doc = as_document(pdf.string_to_document(build_pdf(objs)))
+		local page = pdf.resolve_reference(doc, { kind = "reference", num = 3, gen = 0 })
+		local result, err = text.page_to_text(doc, page)
+		T.eq(err, nil)
+		if result == nil then error("expected a result") end
+
+		local ab = as_table(find_span_with_text(result.spans, "AB"))
+		local cd = as_table(find_span_with_text(result.spans, "CD"))
+		T.eq(ab.x, 100)
+		-- Advance = (width(A) + width(B)) / 1000 * Tfs = (500 + 600) / 1000 * 12 = 13.2.
+		T.eq(cd.x, 113.2)
+		T.eq(cd.y, ab.y)
+	end)
+
+	T.it("falls back to zero advance (old approximation) when the font has no /Widths", function()
+		local content = "BT /F1 12 Tf 100 700 Td (AB) Tj (CD) Tj ET\n"
+		local objs = {
+			[1] = "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n",
+			[2] = "2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n",
+			[3] = "3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
+				.. "/Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>\nendobj\n",
+			[4] = stream_obj(4, content),
+			[5] = "5 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n",
+		}
+		local doc = as_document(pdf.string_to_document(build_pdf(objs)))
+		local page = pdf.resolve_reference(doc, { kind = "reference", num = 3, gen = 0 })
+		local result = text.page_to_text(doc, page)
+		if result == nil then error("expected a result") end
+
+		local ab = as_table(find_span_with_text(result.spans, "AB"))
+		local cd = as_table(find_span_with_text(result.spans, "CD"))
+		T.eq(ab.x, 100)
+		T.eq(cd.x, 100) -- no /Widths data: same documented w0-as-0 approximation as before
+	end)
+end)
+
+T.describe("text: font-size-adaptive line grouping", function()
+	T.it("groups a large-font-size gap that a fixed 3-unit tolerance would have split", function()
+		local spans = {
+			{ text = "top", x = 0, y = 700, font_name = nil, font_size = 20 },
+			{ text = "bottom", x = 50, y = 696, font_name = nil, font_size = 20 }, -- gap 4 > old fixed 3
+		}
+		local lines = text.spans_to_reading_order(spans)
+		T.eq(#lines, 1) -- tolerance = 20 * 0.3 = 6 >= 4: same line
+	end)
+
+	T.it("still separates a gap larger than the font-size-scaled tolerance", function()
+		local spans = {
+			{ text = "top", x = 0, y = 700, font_name = nil, font_size = 20 },
+			{ text = "bottom", x = 0, y = 685, font_name = nil, font_size = 20 }, -- gap 15 > 20*0.3=6
+		}
+		local lines = text.spans_to_reading_order(spans)
+		T.eq(#lines, 2)
+	end)
+
+	T.it("floors the tolerance at MIN_Y_LINE_TOLERANCE for small/zero font sizes", function()
+		local spans = {
+			{ text = "top", x = 0, y = 700, font_name = nil, font_size = 2 },
+			-- gap 2.5: 2 * 0.3 = 0.6 would split, but the floor (3) keeps it together.
+			{ text = "bottom", x = 0, y = 697.5, font_name = nil, font_size = 2 },
+		}
+		local lines = text.spans_to_reading_order(spans)
+		T.eq(#lines, 1)
+	end)
+end)
+
 T.describe("text: document_to_text", function()
 	T.it("extracts every page in document order", function()
 		local doc = fixture_doc()
@@ -210,9 +289,9 @@ end)
 T.describe("text: spans_to_reading_order (independent of page extraction)", function()
 	T.it("groups spans within Y tolerance into one line, sorted by x", function()
 		local spans = {
-			{ text = "b", x = 50, y = 100.4, font_name = nil },
-			{ text = "a", x = 10, y = 100, font_name = nil },
-			{ text = "c", x = 90, y = 99.8, font_name = nil },
+			{ text = "b", x = 50, y = 100.4, font_name = nil, font_size = 12 },
+			{ text = "a", x = 10, y = 100, font_name = nil, font_size = 12 },
+			{ text = "c", x = 90, y = 99.8, font_name = nil, font_size = 12 },
 		}
 		local lines = text.spans_to_reading_order(spans)
 		T.eq(#lines, 1)
@@ -225,9 +304,9 @@ T.describe("text: spans_to_reading_order (independent of page extraction)", func
 
 	T.it("separates spans beyond the Y tolerance into distinct lines, top to bottom", function()
 		local spans = {
-			{ text = "bottom", x = 0, y = 100, font_name = nil },
-			{ text = "top", x = 0, y = 700, font_name = nil },
-			{ text = "middle", x = 0, y = 400, font_name = nil },
+			{ text = "bottom", x = 0, y = 100, font_name = nil, font_size = 12 },
+			{ text = "top", x = 0, y = 700, font_name = nil, font_size = 12 },
+			{ text = "middle", x = 0, y = 400, font_name = nil, font_size = 12 },
 		}
 		local lines = text.spans_to_reading_order(spans)
 		T.eq(#lines, 3)
@@ -241,10 +320,10 @@ T.describe("text: spans_to_reading_order (independent of page extraction)", func
 
 	T.it("reconstructs multi-column reading order (two columns, two rows)", function()
 		local spans = {
-			{ text = "col2row1", x = 300, y = 700, font_name = nil },
-			{ text = "col1row1", x = 50, y = 700, font_name = nil },
-			{ text = "col1row2", x = 50, y = 650, font_name = nil },
-			{ text = "col2row2", x = 300, y = 650, font_name = nil },
+			{ text = "col2row1", x = 300, y = 700, font_name = nil, font_size = 12 },
+			{ text = "col1row1", x = 50, y = 700, font_name = nil, font_size = 12 },
+			{ text = "col1row2", x = 50, y = 650, font_name = nil, font_size = 12 },
+			{ text = "col2row2", x = 300, y = 650, font_name = nil, font_size = 12 },
 		}
 		local lines = text.spans_to_reading_order(spans)
 		T.eq(#lines, 2)

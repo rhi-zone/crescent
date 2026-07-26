@@ -11,7 +11,7 @@ local font = require("lib.pdf.font")
 -- Mirrors lib/pdf/font.lua's Font shape (same-shape local redeclaration —
 -- type declarations don't cross `require` boundaries in this typechecker,
 -- same pattern lib/pdf/xref.lua uses for ParseOpts/XrefOpts).
---:: Font = { code_width: integer, code_to_unicode: (integer) -> (string | nil) }
+--:: Font = { code_width: integer, code_to_unicode: (integer) -> (string | nil), code_to_width: ((integer) -> number) | nil }
 
 --: (unknown) -> Font
 local function as_font(v)
@@ -203,5 +203,54 @@ endbfchar
 		local f, err = font.font_from_dict(NO_DOC, dict)
 		T.ok(f == nil)
 		T.ok(err ~= nil)
+	end)
+end)
+
+T.describe("font: /Widths parsing", function()
+	T.it("returns each in-range code's /Widths entry", function()
+		local dict = { FirstChar = 65, LastChar = 67, Widths = { 500, 600, 700 } }
+		local f = as_font(font.font_from_dict(NO_DOC, dict))
+		local c2w = f.code_to_width
+		if c2w == nil then error("expected code_to_width to be present") end
+		T.eq(c2w(65), 500)
+		T.eq(c2w(66), 600)
+		T.eq(c2w(67), 700)
+	end)
+
+	T.it("falls back to /FontDescriptor /MissingWidth for an out-of-range code", function()
+		local dict = {
+			FirstChar = 65,
+			LastChar = 65,
+			Widths = { 500 },
+			FontDescriptor = { MissingWidth = 250 },
+		}
+		local f = as_font(font.font_from_dict(NO_DOC, dict))
+		local c2w = f.code_to_width
+		if c2w == nil then error("expected code_to_width to be present") end
+		T.eq(c2w(65), 500)
+		T.eq(c2w(90), 250) -- out of [FirstChar, LastChar]: /MissingWidth
+	end)
+
+	T.it("defaults /MissingWidth to 0 when /FontDescriptor is absent", function()
+		local dict = { FirstChar = 65, LastChar = 65, Widths = { 500 } }
+		local f = as_font(font.font_from_dict(NO_DOC, dict))
+		local c2w = f.code_to_width
+		if c2w == nil then error("expected code_to_width to be present") end
+		T.eq(c2w(90), 0)
+	end)
+
+	T.it("code_to_width is nil when the font has no /Widths array at all", function()
+		local f = as_font(font.font_from_dict(NO_DOC, {}))
+		T.eq(f.code_to_width, nil)
+	end)
+
+	T.it("code_to_width is nil for a Type0 font (CID /W widths are out of scope)", function()
+		local dict = {
+			Subtype = name("Type0"),
+			Encoding = name("Identity-H"),
+			ToUnicode = raw_stream("1 beginbfchar\n<0041> <0041>\nendbfchar\n"),
+		}
+		local f = as_font(font.font_from_dict(NO_DOC, dict))
+		T.eq(f.code_to_width, nil)
 	end)
 end)

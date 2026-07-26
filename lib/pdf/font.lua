@@ -109,7 +109,24 @@ local function byte(s, pos)
 	return string.byte(s, pos)
 end
 
---:: Font = { code_width: integer, code_to_unicode: (integer) -> (string | nil) }
+-- `code_to_width` (ISO 32000-1 §9.6.3, Table 111 /Widths, /FirstChar,
+-- /LastChar, plus /FontDescriptor /MissingWidth) is `nil` when the font
+-- dictionary carries no /Widths array at all — callers (lib/pdf/text.lua)
+-- fall back to treating the glyph-width advance term as 0 in that case,
+-- the same documented approximation this module used universally before
+-- /Widths parsing existed. When present, it is total over codes: any code
+-- (in range or not) returns a number, since an out-of-[FirstChar,LastChar]
+-- code still resolves to /MissingWidth (default 0) per spec, not "no data".
+-- Units are glyph space (thousandths of a text space unit at the font's
+-- default 0.001 /FontMatrix) — the same units TJ array adjustments and
+-- Type3 /FontMatrix already use elsewhere in this codebase, so callers
+-- divide by 1000 themselves rather than this module doing it once and
+-- callers needing to know that already happened.
+--:: Font = {
+--::   code_width: integer,
+--::   code_to_unicode: (integer) -> (string | nil),
+--::   code_to_width: ((integer) -> number) | nil,
+--:: }
 
 -- Mirrors lib/pdf/init.lua's Document shape (same-shape local
 -- redeclaration, not an import — type declarations don't cross `require`
@@ -1463,6 +1480,50 @@ local GLYPH_TO_UTF8 = {
 
 } --[[: { [string]: string } ]]
 
+-- ── /Widths resolution: build a code -> glyph-width function ─────────────
+-- ISO 32000-1 §9.6.3, Table 111. A simple font's /Widths array is indexed
+-- 0..(LastChar-FirstChar), each entry the glyph width (glyph space units,
+-- i.e. thousandths of a text space unit) for code (FirstChar + index).
+-- /MissingWidth (in /FontDescriptor, default 0 per Table 122) covers any
+-- code outside [FirstChar, LastChar]. Returns `nil` (not an error) when
+-- /Widths is entirely absent — a legitimate, common case (e.g. a
+-- non-embedded standard-14 font relying on its built-in metrics), not a
+-- malformed font; the caller (`code_to_width` on the returned `Font`)
+-- stays `nil` in that case, and lib/pdf/text.lua's documented
+-- w0-treated-as-0 approximation applies exactly as it did before /Widths
+-- parsing existed.
+
+--: (Document, { [string]: unknown, [integer]: unknown }) -> (((integer) -> number) | nil)
+local function build_code_to_width(doc, dict)
+	local widths_arr = as_array(pdf.resolve(doc, dict.Widths))
+	if widths_arr == nil then return nil end
+	local first_char = as_integer(pdf.resolve(doc, dict.FirstChar))
+	if first_char == nil then return nil end
+
+	local missing_width = 0 --: number
+	local descriptor = as_table(pdf.resolve(doc, dict.FontDescriptor))
+	if descriptor ~= nil then
+		local mw = as_number(pdf.resolve(doc, descriptor.MissingWidth))
+		if mw ~= nil then missing_width = mw end
+	end
+
+	local widths = {} --[[: { [integer]: number } ]]
+	local i = 1
+	while widths_arr[i] ~= nil do
+		local w = as_number(widths_arr[i])
+		if w ~= nil then widths[first_char + i - 1] = w end
+		i = i + 1
+	end
+
+	--: (integer) -> number
+	local function code_to_width(code)
+		local w = widths[code]
+		if w ~= nil then return w end
+		return missing_width
+	end
+	return code_to_width
+end
+
 -- ── /Encoding resolution: build a code -> glyph-name table ──────────────
 
 --: (Document, unknown) -> ({ [integer]: string } | nil, string | nil)
@@ -1779,9 +1840,16 @@ function M.font_from_dict(doc, font_dict)
 		end
 		--: (integer) -> string | nil
 		local function code_to_unicode_type0(code) return tounicode_map[code] end
+		-- Type0/CID glyph widths (/DW default width + /W per-CID array,
+		-- ISO 32000-1 §9.7.4.3) are a distinct, more complex structure than
+		-- simple fonts' flat /Widths array (CID *ranges*, not one width per
+		-- code) — out of scope here, consistent with this module's existing
+		-- Type0 CID-resolution scope limit (see file header). `code_to_width`
+		-- stays nil; lib/pdf/text.lua's w0-as-0 approximation applies.
 		return {
 			code_width = 2,
 			code_to_unicode = code_to_unicode_type0,
+			code_to_width = nil,
 		}, nil
 	end
 
@@ -1803,7 +1871,9 @@ function M.font_from_dict(doc, font_dict)
 		return GLYPH_TO_UTF8[glyph_name]
 	end
 
-	return { code_width = 1, code_to_unicode = code_to_unicode }, nil
+	local code_to_width = build_code_to_width(doc, dict)
+
+	return { code_width = 1, code_to_unicode = code_to_unicode, code_to_width = code_to_width }, nil
 end
 
 return M
