@@ -86,6 +86,28 @@ lib/foo/
 - Tests are named `<lib>_test.lua` and live in the library directory.
 - No `src/`, no `test/`, no `lib/` subdirectory inside a library.
 
+## Canonical parser per format
+
+Each document/data format has exactly one canonical parser and AST in
+crescent. Every other consumer of that format — importers, exporters,
+linters, transforms — reads and writes that canonical AST rather than
+hand-rolling its own parser or a parallel tree shape.
+
+- When a format gains a second parser (independently, before this rule is
+  noticed, or via a vendored/ported library), consolidate onto the parser
+  with the richer AST — the one that models more of the format's structure
+  (e.g. `lib/unified/mdast` over a hand-rolled `lib/markdown` tree, if
+  `mdast` covers strictly more of the CommonMark/GFM surface).
+- Consolidation means the weaker implementation is deleted or rewritten to
+  produce/consume the canonical AST — not wrapped, not left in place as an
+  alternate path callers might reach for.
+- Before writing a new parser for a format, grep `lib/` (see
+  `docs/inventory.md`) for an existing one. If one exists, extend it; do not
+  add a second.
+- This is the rule that prevents parser fragmentation as more format
+  libraries get ported or vendored in (see `docs/roadmap-v2.md`'s rescribe
+  porting strategy).
+
 ## Browser-side library prefix
 
 Libraries whose contents target the browser realm (JS type declarations,

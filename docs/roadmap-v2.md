@@ -389,6 +389,49 @@ Crescent's format libraries (PDF, DOCX, SVG, image codecs, and others) should ev
 
 **Status: high-value work but not immediately urgent.** Rescribe's own format crates and fixture suite are still in progress. Rather than a dedicated alignment project, pick this up per-format as specific format work comes up in crescent — when a new format codec is implemented or when an existing one is substantially enhanced, run it against rescribe's fixtures for that format (if available) as part of validation.
 
+## Strategic direction: Format library porting strategy
+
+Rescribe's format libraries (~/git/rhizone/rescribe/) are the reference
+implementations for crescent's format libraries. When crescent needs a format
+library that rescribe already has (or is building), the default path is to
+port from rescribe rather than write from scratch — the spec is already
+worked out, edge cases are already found, and rescribe's fixture suite
+already exists to verify the port against.
+
+Two conditions gate when to port a specific format:
+
+1. Rescribe's implementation for that format is mature enough. Maturity is
+   an owner judgment call, made per-format when the porting work comes up —
+   not a fixed threshold defined here.
+2. Or: proceed cautiously without waiting for (1), and report quality gaps
+   found during the port back to rescribe via its local repo, so rescribe's
+   reference implementation improves rather than crescent silently working
+   around a gap in its own copy.
+
+This is a porting strategy, not a dependency — crescent's ported libraries
+remain zero-dependency Lua per this roadmap's design principles; rescribe is
+consulted as source material at port time, not linked at runtime.
+
+## Strategic direction: Fractal projection pattern
+
+Fractal's projection machinery (~/git/rhizone/fractal/) will be ported to Lua
+as `lib/fractal/`. The pattern: define data/API once as a tree, then walk
+that same tree with independent projectors per output format — each
+projector reads the metadata it cares about and ignores the rest, rather
+than each output format maintaining its own parallel definition of the same
+data/API.
+
+This serves two motivating-application tracks directly:
+
+- **3a (personal finance):** a chart of accounts / report structure defined
+  once, projected to CLI output, web UI, and export formats independently.
+- **3b (developer tools):** an API/schema defined once, projected to docs,
+  type declarations, client bindings, etc.
+
+Like the rescribe porting strategy above, this is a port of proven
+architecture (fractal's `packages/api-tree` and `packages/type-ir`), not a
+runtime dependency — `lib/fractal/` is pure Lua once ported.
+
 ---
 
 ## Phase 3: Motivating applications
