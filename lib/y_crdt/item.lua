@@ -33,13 +33,26 @@ local M = {}
 -- definitions" rule targets), so restating the shape is not a divergence
 -- risk: the typechecker unifies structurally, and content.lua/
 -- shared_type.lua remain the sole source of the *values*.
---:: Content = { kind: "deleted", ref: integer, len: integer } | { kind: "string", ref: integer, str: string } | { kind: "json", ref: integer, arr: unknown[] } | { kind: "any", ref: integer, arr: unknown[] } | { kind: "format", ref: integer, key: string, value: unknown } | { kind: "type", ref: integer, shared_type: unknown } | { kind: "doc", ref: integer, guid: string, opts: unknown } | { kind: "binary", ref: integer, bytes: string }
---:: SharedType = { type_name: string, start: Item | nil, map: { [string]: Item }, length: number, item: Item | nil }
+--:: Content = { kind: "deleted", ref: integer, len: integer } | { kind: "string", ref: integer, str: string } | { kind: "json", ref: integer, arr: unknown[] } | { kind: "embed", ref: integer, embed: unknown } | { kind: "any", ref: integer, arr: unknown[] } | { kind: "format", ref: integer, key: string, value: unknown } | { kind: "type", ref: integer, shared_type: unknown } | { kind: "doc", ref: integer, guid: string, opts: unknown } | { kind: "binary", ref: integer, bytes: string }
+--:: SharedType = { kind: "shared_type", type_name: string, start: Item | nil, map: { [string]: Item }, length: number, item: Item | nil }
 
--- `parent` is the SharedType this item is inserted into, or nil (see
+-- A wire-decoded item can name its parent by the id of another Item whose
+-- content is a nested Type (yjs writes `writeLeftID(parentItem.id)` when
+-- the parent isn't a root type -- see structs/Item.js `write`), instead of
+-- the Item's own SharedType. This is a transient placeholder: only
+-- integrate.lua's parent-resolution step (mirroring yjs's
+-- `Item.prototype.getMissing`) ever sees it, and it resolves to a concrete
+-- SharedType (or nil, if that parent item turns out to be GC'd) before the
+-- normal conflict-search/reconnect logic runs. lib/y_crdt/update.lua (the
+-- wire decoder) is the only producer of this shape.
+--:: ParentPendingId = { kind: "pending_parent_id", client: integer, clock: integer }
+
+-- `parent` is the SharedType this item is inserted into, nil (see
 -- integrate.lua's GC branch, for an item whose parent was garbage
--- collected before it arrived). `parent_sub` is the Map key, or nil for
--- sequence types. `keep`, if true, means never garbage-collect this item.
+-- collected before it arrived), or -- only ever transiently, before
+-- integrate.lua resolves it -- a ParentPendingId. `parent_sub` is the Map
+-- key, or nil for sequence types. `keep`, if true, means never
+-- garbage-collect this item.
 --:: Item = {
 --::   kind: "item",
 --::   id: Id,
@@ -47,7 +60,7 @@ local M = {}
 --::   origin_right: Id | nil,
 --::   left: Item | nil,
 --::   right: Item | nil,
---::   parent: SharedType | nil,
+--::   parent: SharedType | ParentPendingId | nil,
 --::   parent_sub: string | nil,
 --::   content: Content,
 --::   length: integer,
@@ -78,6 +91,13 @@ M.id_new = id_new
 function M.last_id(it)
   if it.length == 1 then return it.id end
   return id_new(it.id.client, it.id.clock + it.length - 1)
+end
+
+-- TYPECHECKER WORKAROUND: see the call site in `M.delete` for why this
+-- exists (a field-read narrowing loss, not a cast).
+--: (v: SharedType | ParentPendingId | nil) -> SharedType | ParentPendingId | nil
+local function identity_parent(v)
+  return v
 end
 
 --: (iid: Id, origin: Id | nil, origin_right: Id | nil, parent: SharedType | nil, parent_sub: string | nil, c: Content) -> Item
@@ -179,9 +199,34 @@ end
 --: (txn: Transaction, it: Item) -> nil
 function M.delete(txn, it)
   if not it.deleted then
-    local parent = it.parent
-    if it.parent_sub == nil and content.is_countable(it.content) and parent ~= nil then
-      parent.length = parent.length - it.length
+    -- `it.parent`'s declared type includes ParentPendingId so
+    -- integrate.lua's parent-resolution step can hold an unresolved wire
+    -- parent-id transiently, but that value never survives past
+    -- resolution -- integrate.lua always replaces it with a concrete
+    -- SharedType (or nil) before the item is considered integrated, and
+    -- `delete` only ever runs on already-integrated items. Narrow by
+    -- SharedType's `kind: "shared_type"` discriminant (field-discriminant
+    -- narrowing, not a cast) rather than assuming the shape.
+    --
+    -- TYPECHECKER WORKAROUND: a union-typed value read directly off a
+    -- struct field (`it.parent`) does not narrow by kind-discriminant even
+    -- after being copied into a local first (`local parent0 = it.parent;
+    -- if parent0 ~= nil then if parent0.kind == "shared_type" then
+    -- parent0.length ... end end` -- `parent0.length` still infers `number
+    -- | nil` inside the innermost branch, even though the exact same
+    -- nested-if narrowing works when the union comes from a plain function
+    -- parameter instead of a field read). Routing the field read through
+    -- this identity function first (an ordinary call, not a cast) resets
+    -- whatever provenance tag causes that -- the same trick struct_store.lua's
+    -- `as_structs` uses for an analogous field-read narrowing loss. The
+    -- natural code would read `it.parent` directly with no indirection.
+    -- TODO.md tracks removing this once field-read narrowing is fixed
+    -- upstream.
+    local parent0 = identity_parent(it.parent)
+    if it.parent_sub == nil and content.is_countable(it.content) and parent0 ~= nil then
+      if parent0.kind == "shared_type" then
+        parent0.length = parent0.length - it.length
+      end
     end
     it.deleted = true
     table.insert(txn.deleted_items, it)

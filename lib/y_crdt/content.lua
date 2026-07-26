@@ -28,17 +28,27 @@ local M = {}
 --:: ContentDeleted = { kind: "deleted", ref: integer, len: integer }
 --:: ContentString = { kind: "string", ref: integer, str: string }
 --:: ContentJson = { kind: "json", ref: integer, arr: unknown[] }
+--:: ContentEmbed = { kind: "embed", ref: integer, embed: unknown }
 --:: ContentAny = { kind: "any", ref: integer, arr: unknown[] }
 --:: ContentFormat = { kind: "format", ref: integer, key: string, value: unknown }
 --:: ContentType = { kind: "type", ref: integer, shared_type: unknown }
 --:: ContentDoc = { kind: "doc", ref: integer, guid: string, opts: unknown }
 --:: ContentBinary = { kind: "binary", ref: integer, bytes: string }
---:: Content = ContentDeleted | ContentString | ContentJson | ContentAny | ContentFormat | ContentType | ContentDoc | ContentBinary
+--:: Content = ContentDeleted | ContentString | ContentJson | ContentEmbed | ContentAny | ContentFormat | ContentType | ContentDoc | ContentBinary
 
+-- Numeric wire tags verified against yjs upstream (github.com/yjs/yjs, tag
+-- v13.6.31 -- the actual npm `latest` release; the `main` branch is an
+-- unreleased 14.0.0-rc rewrite with a different struct architecture and is
+-- NOT the wire format anything deployed speaks) -- src/structs/Item.js's
+-- `contentRefs` lookup array, cross-checked against each Content*.js's own
+-- `getRef()`. Ref 5 (embed) exists on the wire even though this module went
+-- without it until lib/y_crdt/update.lua (the wire codec) needed to decode
+-- it.
 local REF_DELETED = 1
 local REF_JSON = 2
 local REF_BINARY = 3
 local REF_STRING = 4
+local REF_EMBED = 5
 local REF_FORMAT = 6
 local REF_TYPE = 7
 local REF_ANY = 8
@@ -57,6 +67,16 @@ end
 --: (arr: unknown[]) -> Content
 function M.json(arr)
   return { kind = "json", ref = REF_JSON, arr = arr } --[[: Content]]
+end
+
+-- A single opaque richtext-embed value (yjs ContentEmbed): unlike
+-- ContentAny, this holds exactly one value (getLength() == 1 in yjs), not
+-- an array -- and unlike ContentJSON's per-element JSON.stringify, yjs
+-- writes/reads the whole value in one JSON.stringify/parse round trip
+-- (`encoder.writeJSON(this.embed)`).
+--: (value: unknown) -> Content
+function M.embed(value)
+  return { kind = "embed", ref = REF_EMBED, embed = value } --[[: Content]]
 end
 
 --: (arr: unknown[]) -> Content
@@ -123,6 +143,7 @@ function M.copy(c)
   if c.kind == "format" then return { kind = "format", ref = c.ref, key = c.key, value = c.value } end
   if c.kind == "type" then return { kind = "type", ref = c.ref, shared_type = c.shared_type } end
   if c.kind == "doc" then return { kind = "doc", ref = c.ref, guid = c.guid, opts = c.opts } end
+  if c.kind == "embed" then return { kind = "embed", ref = c.ref, embed = c.embed } end
   return { kind = "binary", ref = c.ref, bytes = c.bytes }
 end
 
