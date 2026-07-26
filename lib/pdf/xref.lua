@@ -9,12 +9,12 @@
 -- (the most recently written section is processed first; an object number
 -- already resolved by a newer section is never overwritten by an older one).
 --
--- Does not resolve objects — lib/pdf's top-level module does that by
--- combining this table's offsets with lib/pdf/object.lua's parser. Objects
--- stored inside an Object Stream (xref entry type 2) are represented but not
--- resolved: resolving them requires parsing the Object Stream container
--- (ISO 32000-1 §7.5.7), which is a distinct, not-yet-built piece of substrate
--- (see TODO.md).
+-- Does not resolve objects — lib/pdf's top-level module (lib/pdf/init.lua)
+-- does that by combining this table's offsets with lib/pdf/object.lua's
+-- parser. This module only represents Object Stream entries (xref entry
+-- type 2, `XrefEntryCompressed`); lib/pdf/init.lua's `resolve_reference`
+-- is what parses the Object Stream container (ISO 32000-1 §7.5.7) to
+-- resolve them.
 --
 -- Errors: `(nil, errmsg)`, per docs/conventions.md.
 

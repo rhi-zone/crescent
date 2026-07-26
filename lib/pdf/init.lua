@@ -22,6 +22,20 @@ local pdf_filter = require("lib.pdf.filter")
 local M = {}
 M._tier = "pure"
 
+local floor = math.floor
+local byte_raw = string.byte
+
+-- TYPECHECKER WORKAROUND: calling string.byte's overloaded (intersection)
+-- signature directly and using the result in a comparison inside a loop with
+-- `break` spuriously narrows the result to `never` instead of `integer | nil`
+-- — same substrate gap recorded in TODO.md for lib/pdf/{object,xref,filter,
+-- font}.lua. Wrapping it in a local single-signature function avoids the
+-- overload resolver entirely, matching those files' workaround.
+--: (string, integer) -> integer | nil
+local function byte(s, pos)
+	return byte_raw(s, pos)
+end
+
 -- Re-export the pieces this module composes, so a caller only needs
 -- `require("lib.pdf")` for the common case.
 M.object = pdf_object
@@ -44,6 +58,107 @@ end
 local function as_number(v)
 	if type(v) == "number" then return v end
 	return nil
+end
+
+-- ── Object Streams (ISO 32000-1 §7.5.7) ──────────────────────────────────────
+-- A compressed-object xref entry (type 2) names a containing ObjStm object
+-- and this object's index within it. The ObjStm's decoded stream data
+-- begins with N whitespace-separated "objnum offset" integer pairs (offset
+-- relative to /First), followed by the N objects themselves back-to-back,
+-- each plain PDF object syntax (no "N G obj ... endobj" wrapper — that
+-- wrapper only exists for objects stored directly in the file body).
+
+local WS = { [0] = true, [9] = true, [10] = true, [12] = true, [13] = true, [32] = true }
+
+--: (string, integer) -> integer
+local function skip_ws(s, pos)
+	local n = #s
+	while pos <= n and WS[byte(s, pos)] do pos = pos + 1 end
+	return pos
+end
+
+--: (string, integer) -> (integer | nil, integer | nil)
+local function read_uint(s, pos)
+	local start = pos
+	local n = #s
+	while pos <= n do
+		local b = byte(s, pos)
+		if b == nil then break end
+		if b < 48 or b > 57 then break end
+		pos = pos + 1
+	end
+	if pos == start then return nil, nil end
+	local v = tonumber(string.sub(s, start, pos - 1))
+	if v == nil then return nil, nil end
+	return floor(v), pos
+end
+
+--- Parses an already-decoded ObjStm's data into its object-number ->
+-- (offset-into-data) header pairs, in header order (1-based array, so
+-- `pairs_out[index + 1]` is the pair at the spec's 0-based `index`).
+--: (string, integer) -> ({ [integer]: { num: integer, offset: integer } } | nil, string | nil)
+local function parse_objstm_header(data, n_objects)
+	local pairs_out = {} --[[: { [integer]: { num: integer, offset: integer } } ]]
+	local pos = 1
+	for i = 1, n_objects do
+		pos = skip_ws(data, pos)
+		local objnum, after_num = read_uint(data, pos)
+		if objnum == nil or after_num == nil then
+			return nil, "malformed Object Stream header: expected object number at offset " .. pos
+		end
+		pos = skip_ws(data, after_num)
+		local offset, after_offset = read_uint(data, pos)
+		if offset == nil or after_offset == nil then
+			return nil, "malformed Object Stream header: expected object offset at offset " .. pos
+		end
+		pos = after_offset
+		pairs_out[i] = { num = objnum, offset = offset }
+	end
+	return pairs_out, nil
+end
+
+--- Resolve an object stored inside an Object Stream (xref entry type 2).
+-- `stream_num`/`index` per ISO 32000-1 Table 18's type-2 row. Not cached
+-- across calls: resolving several objects from the same ObjStm re-decodes
+-- and re-parses its header each time. Documented performance gap, not a
+-- silent one — correctness first; caching would need a decision about where
+-- the cache lives relative to Document's shape, out of this task's scope.
+--: (Document, integer, integer) -> (unknown, string | nil)
+local function resolve_compressed_object(doc, stream_num, index)
+	local stream_val, serr = M.resolve_reference(doc, { kind = "reference", num = stream_num, gen = 0 })
+	if stream_val == nil then
+		return nil, "failed to resolve Object Stream " .. stream_num .. ": " .. tostring(serr)
+	end
+	local st = as_table(stream_val)
+	if st == nil or st.kind ~= "stream" then
+		return nil, "object " .. stream_num .. " (named as containing Object Stream) is not a stream"
+	end
+	local dict = as_table(st.dict)
+	if dict == nil then return nil, "Object Stream " .. stream_num .. " has no dictionary" end
+
+	local n_objects = as_number(dict.N)
+	local first = as_number(dict.First)
+	if n_objects == nil then return nil, "Object Stream " .. stream_num .. " is missing /N" end
+	if first == nil then return nil, "Object Stream " .. stream_num .. " is missing /First" end
+
+	local data, derr = M.stream_to_bytes(st)
+	if data == nil then return nil, "failed to decode Object Stream " .. stream_num .. ": " .. tostring(derr) end
+
+	local header_pairs, herr = parse_objstm_header(data, floor(n_objects))
+	if header_pairs == nil then return nil, herr end
+
+	local entry = header_pairs[index + 1]
+	if entry == nil then
+		return nil, "Object Stream " .. stream_num .. " has no entry at index " .. index
+	end
+
+	local abs_pos = floor(first) + entry.offset + 1
+	local value, verr = pdf_object.string_to_object(data, abs_pos)
+	if value == nil then
+		return nil, "failed to parse object " .. entry.num .. " inside Object Stream " .. stream_num .. ": "
+			.. tostring(verr)
+	end
+	return value, nil
 end
 
 --- Load a PDF file's bytes: locate and parse its cross-reference table
@@ -81,8 +196,12 @@ function M.resolve_reference(doc, ref)
 	if entry.kind == "free" then
 		return nil, "object " .. num .. " is marked free (does not exist)"
 	elseif entry.kind == "compressed" then
-		return nil, "object " .. num .. " is stored in an Object Stream (ObjStm); "
-			.. "resolving compressed objects is not yet implemented"
+		local stream_num = as_number(entry.stream_num)
+		local index = as_number(entry.index)
+		if stream_num == nil or index == nil then
+			return nil, "object " .. num .. "'s compressed xref entry has no stream_num/index"
+		end
+		return resolve_compressed_object(doc, floor(stream_num), floor(index))
 	elseif entry.kind ~= "in_use" then
 		return nil, "object " .. num .. " has an unrecognized xref entry kind"
 	end

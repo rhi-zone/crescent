@@ -148,6 +148,98 @@ T.describe("pdf: stream_to_bytes", function()
 	end)
 end)
 
+-- ── Object Streams (xref type-2 entries, ISO 32000-1 §7.5.7) ────────────────
+-- Builds a document whose xref is a cross-reference *stream* (the only xref
+-- form that can represent a type-2 "compressed" entry at all — a traditional
+-- `xref` table's entries are only ever 'n'/'f'). Object 4 is a plain,
+-- unfiltered ObjStm holding object 5's value packed inside it; object 5 has
+-- no xref entry of its own in the file body — its only representation is
+-- the type-2 row in the xref stream, so resolving it end-to-end is the
+-- thing under test. Offsets are computed from the actual concatenated
+-- bytes, same discipline `build_minimal_pdf` above uses.
+
+--: (integer, integer) -> string
+-- Big-endian fixed-width encoding of `v` in `width` bytes (mirrors
+-- lib/pdf/xref_test.lua's identically-named local helper).
+local function be(v, width)
+	local out = {}
+	for i = width, 1, -1 do
+		out[i] = v % 256
+		v = math.floor(v / 256)
+	end
+	return string.char(unpack(out, 1, width))
+end
+
+--: (integer | nil) -> string
+-- `compressed_stream_num` (default 4, the real ObjStm) lets a test point
+-- object 5's type-2 xref entry at a different object number, to exercise
+-- the "named container isn't actually an ObjStm" error path.
+local function build_objstm_pdf(compressed_stream_num)
+	local stream_num = compressed_stream_num or 4
+	local header = "%PDF-1.5\n"
+
+	local objstm_header = "5 0\n" -- "objnum offset" pairs; object 5 at offset 0 from /First
+	local objstm_body = "<< /Foo (Bar) >>"
+	local objstm_data = objstm_header .. objstm_body
+	local objstm_dict = "<< /Type /ObjStm /N 1 /First " .. #objstm_header .. " /Length " .. #objstm_data .. " >>"
+
+	local objs = {
+		"1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n",
+		"2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n",
+		"3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>\nendobj\n",
+		"4 0 obj\n" .. objstm_dict .. "\nstream\n" .. objstm_data .. "\nendstream\nendobj\n",
+	}
+	local offsets = {} --[[: { [integer]: integer } ]]
+	local body = ""
+	local pos = #header
+	for i = 1, #objs do
+		offsets[i] = pos
+		body = body .. objs[i]
+		pos = pos + #objs[i]
+	end
+	local xref_offset = #header + #body
+
+	-- Rows for objects 1..5 (/Index [1 5]): 1-3 and the ObjStm itself (4) are
+	-- ordinary in-use objects; 5 is compressed inside ObjStm 4 at index 0.
+	local rows = be(1, 1) .. be(offsets[1], 2) .. be(0, 1)
+		.. be(1, 1) .. be(offsets[2], 2) .. be(0, 1)
+		.. be(1, 1) .. be(offsets[3], 2) .. be(0, 1)
+		.. be(1, 1) .. be(offsets[4], 2) .. be(0, 1)
+		.. be(2, 1) .. be(stream_num, 2) .. be(0, 1) -- type 2: stream_num, index=0
+	local xref_dict = "<< /Type /XRef /W [1 2 1] /Index [1 5] /Size 6 /Root 1 0 R /Length " .. #rows .. " >>"
+	local xref_obj = "6 0 obj\n" .. xref_dict .. "\nstream\n" .. rows .. "\nendstream\nendobj"
+
+	return header .. body .. xref_obj .. "\nstartxref\n" .. xref_offset .. "\n%%EOF"
+end
+
+T.describe("pdf: Object Stream resolution (xref type-2 entries)", function()
+	T.it("resolves an object stored inside an ObjStm via an xref stream", function()
+		local doc = as_table(pdf.string_to_document(build_objstm_pdf()))
+		local entries = as_table(doc.entries)
+		T.eq(as_table(entries[5]).kind, "compressed")
+
+		local value, err = pdf.resolve_reference(doc, { kind = "reference", num = 5, gen = 0 })
+		T.eq(err, nil)
+		local v = as_table(value)
+		T.eq(v.Foo, "Bar")
+	end)
+
+	T.it("resolve() transparently follows a reference into an ObjStm", function()
+		local doc = as_table(pdf.string_to_document(build_objstm_pdf()))
+		local v = as_table(pdf.resolve(doc, { kind = "reference", num = 5, gen = 0 }))
+		T.eq(v.Foo, "Bar")
+	end)
+
+	T.it("errors clearly when the named containing stream isn't actually an ObjStm", function()
+		-- Point object 5's type-2 entry at object 3 (the Page) — a real
+		-- object, but not a stream.
+		local doc = as_table(pdf.string_to_document(build_objstm_pdf(3)))
+		local value, err = pdf.resolve_reference(doc, { kind = "reference", num = 5, gen = 0 })
+		T.ok(value == nil)
+		T.ok(err ~= nil)
+	end)
+end)
+
 T.describe("pdf: indirect /Length resolution end-to-end", function()
 	T.it("resolves a stream whose /Length is itself an indirect reference", function()
 		local header = "%PDF-1.4\n"
