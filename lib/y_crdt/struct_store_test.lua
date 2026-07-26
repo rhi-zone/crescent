@@ -27,7 +27,7 @@ end
 -- parameter type at each call site instead. TODO.md tracks unifying this
 -- once cross-module recursive-type references are supported.
 local function new_parent(type_name)
-  return { type_name = type_name, start = nil, map = {}, length = 0, item = nil }
+  return { kind = "shared_type", type_name = type_name, start = nil, map = {}, length = 0, item = nil }
 end
 
 local function new_txn(store)

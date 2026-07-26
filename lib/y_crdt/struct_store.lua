@@ -282,4 +282,56 @@ function M.get_item_clean_end(store, iid)
   return nil, "struct store: struct at " .. iid.client .. "#" .. iid.clock .. " is not an item"
 end
 
+-- Same splitting behavior as `get_item_clean_start`, but returns whatever
+-- struct kind actually covers `iid.clock` instead of requiring an Item.
+-- Needed for wire-decoded origin/origin_right/parent resolution
+-- (lib/y_crdt/integrate.lua's parent-resolution step, mirroring yjs's
+-- `Item.prototype.getMissing`): a real update's origin can legitimately
+-- point into an already garbage-collected range (matches yjs
+-- `getItemCleanStart`/`getItemCleanEnd`, which are typed `-> Item` in their
+-- JSDoc but in practice return `Item | GC` -- the `struct.constructor !==
+-- GC` guard on the split step is the tell). A Skip covering `iid.clock`
+-- means the content at that clock hasn't arrived yet -- a genuine missing
+-- causal dependency, not a struct-kind mismatch -- so that case still
+-- returns (nil, errmsg), distinguishable by message from the "unknown
+-- client" case.
+--: (store: StructStore, iid: Id) -> Struct | (nil, string)
+function M.get_clean_start(store, iid)
+  local structs0 = store.clients[iid.client]
+  if structs0 == nil then return nil, "struct store: unknown client " .. iid.client end
+  local structs = as_structs(structs0)
+  local idx = find_index(structs, iid.clock)
+  local s = structs[idx]
+  local common = s --[[: StructCommon]]
+  if common.id.clock < iid.clock and common.kind == "item" then
+    split_struct_at(structs, idx, iid.clock - common.id.clock)
+    idx = idx + 1
+  end
+  local result = structs[idx]
+  local result_common = result --[[: StructCommon]]
+  if result_common.kind == "skip" then
+    return nil, "struct store: missing dependency at " .. iid.client .. "#" .. iid.clock
+  end
+  return result
+end
+
+--: (store: StructStore, iid: Id) -> Struct | (nil, string)
+function M.get_clean_end(store, iid)
+  local structs0 = store.clients[iid.client]
+  if structs0 == nil then return nil, "struct store: unknown client " .. iid.client end
+  local structs = as_structs(structs0)
+  local idx = find_index(structs, iid.clock)
+  local s = structs[idx]
+  local common = s --[[: StructCommon]]
+  if common.id.clock + common.length - 1 ~= iid.clock and common.kind == "item" then
+    split_struct_at(structs, idx, iid.clock - common.id.clock + 1)
+  end
+  local result = structs[idx]
+  local result_common = result --[[: StructCommon]]
+  if result_common.kind == "skip" then
+    return nil, "struct store: missing dependency at " .. iid.client .. "#" .. iid.clock
+  end
+  return result
+end
+
 return M
