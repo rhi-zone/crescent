@@ -4555,6 +4555,29 @@ framing.
   "Typechecker substrate gaps (found while implementing lib/pdf/...)" sections
   near the top of this file.
 
+- [x] **2a follow-up: real-world-PDF gaps closed (2026-07-26).** Four
+  commits: `98118941` ASCII85Decode/ASCIIHexDecode/RunLengthDecode/LZWDecode
+  (+/EarlyChange) plus `/Filter`-array filter chains (chain order verified
+  against pdf.js's `Parser#filter`, not assumed); `48c8138d` Object Stream
+  (xref type-2) resolution — `lib/pdf/init.lua` now parses an ObjStm's
+  "objnum offset" header and resolves compressed objects, not cached across
+  calls (documented perf gap); `ff71d78f` `lib/pdf/font.lua`'s glyph table
+  expanded from the ~246-entry subset to the full 4281-entry Adobe Glyph
+  List (fetched at implementation time, machine-generated through
+  `lib/encode/utf8` rather than hand-transcribed; values are pre-encoded
+  UTF-8 strings so the 81 multi-codepoint AGL entries are representable);
+  `71767c87` `/Widths` + `/FirstChar`/`/LastChar`/`/MissingWidth` parsing
+  drives real per-glyph advance in `lib/pdf/text.lua` (falls back to the old
+  w0-as-0 approximation when a font has no `/Widths`, and for Type0/CID
+  fonts whose `/DW`+`/W` widths are a distinct range-based structure, still
+  out of scope), and `spans_to_reading_order`'s line-grouping Y-tolerance is
+  now font-size-adaptive instead of a fixed 3-unit constant. 470 assertions
+  total across `lib/pdf/*_test.lua` (up from 388). Still out of scope,
+  unchanged: Type0/CID composite fonts beyond Identity-H/V + ToUnicode
+  (including CID `/W` widths), TIFF predictor (`/Predictor` 2), image-only
+  filters (DCTDecode/CCITTFaxDecode/JBIG2Decode/JPXDecode), AcroForm
+  appearance-stream regeneration.
+
 - [ ] **Terminal multiplexer implementation continuing.** Web-based terminal with PTY + WebSocket + VT state machine. Initial implementation in progress: WS frame format wired (commits `36712c59`, `eacf0650`), xterm.js vendored (`dep/xterm-js/`), shell configurable via manifest (`terminal_mux/manifest.json`), frontend rendering working. Next: streaming protocol hardening, connection state management, tab/tiling UX.
 
 ## lib/bidi bounded classification scope (2026-07-26)
@@ -4562,6 +4585,11 @@ framing.
 - [ ] **`lib/bidi/init.lua` classification table covers a bounded subset of Unicode 17.0 `DerivedBidiClass.txt`, not the full 1.1M-codepoint file.** Covered ranges: ASCII + Latin-1 Supplement (U+0000-U+00FF), Hebrew (U+0590-U+05FF), Arabic (U+0600-U+06FF), Arabic Supplement (U+0750-U+077F), General Punctuation (U+2000-U+206F), Currency Symbols (U+20A0-U+20CF), Mathematical Operators (U+2200-U+22FF), Hebrew Presentation Forms (U+FB1D-U+FB4F), Arabic Presentation Forms-A (U+FB50-U+FDFF), Arabic Presentation Forms-B (U+FE70-U+FEFF). Codepoints outside these ranges default to L (the UCD `@missing` default for 0000..10FFFF). This means scripts like Thaana (U+0780-U+07BF, R), Syriac (U+0700-U+074F, AL), N'Ko (U+07C0-U+07FF, R), and others will be misclassified as L. Extending coverage: add ranges to the `RANGES` table following the existing pattern, sourcing from `DerivedBidiClass.txt` and cross-checking `@missing` block defaults.
 
 - [ ] **N0 (paired bracket resolution, UAX #9 rule N0) is not implemented.** Brackets in mixed-direction text are resolved by N1-N2 (surrounding strong type or embedding direction), which is correct for most cases but may produce visually awkward bracket directionality in edge cases involving parentheses/brackets between opposite-direction runs. N0 requires `BidiBrackets.txt` data and a stack-based pairing algorithm.
+
+## lib/bookkeeping persistence/import/report layer (2026-07-26)
+
+- [x] **`lib/sqlite` bug: NULL in a non-trailing SELECT column truncated every column after it.** Found while building `lib/bookkeeping/store.lua` (round-tripping an account with a NULL `code`/`description` followed by a non-NULL `parent_id` silently dropped `parent_id`). Root cause: `sqlite.query`'s and `stmt_mt.rows`'s iterators built a `columns` table via `columns[i+1] = ...` for each of `col_count` columns, then did `return unpack(columns)` with no explicit range. Assigning `nil` to a table key never creates that key, so once any column but the last is NULL, `#columns` (which `unpack` falls back to) finds a shorter border than the true column count, truncating the return — including any non-NULL columns after the NULL one. Fixed in `lib/sqlite/init.lua` by passing the already-known `col_count` explicitly: `unpack(columns, 1, col_count)`. Regression tests in `lib/sqlite/sqlite_test.lua` ("NULL in a non-trailing column does not truncate..." for both `db:query()` and a prepared statement's `:rows()`).
+- [x] **Typechecker substrate gap surfaced while fixing the above: narrowing of a captured upvalue does not survive closure capture.** `local col_count = sqlite_ffi.sqlite3_column_count(stmt) or 0` narrows `col_count` from `integer | nil` to `integer` in straight-line code, but the narrowing is lost inside the closure `sqlite.query`/`stmt_mt.rows` return (which captures `col_count` as an upvalue) — the closure body sees `integer | nil` again and fails arithmetic (`col_count - 1`) even though the exact same expression narrows fine outside the closure. Worked around with an explicit checked cast at the declaration site (`--[[: integer]]`), which fixes the variable's declared type before capture instead of relying on transient narrowing (see `-- TYPECHECKER WORKAROUND:` comments in `lib/sqlite/init.lua`). Revert to plain `or 0` once narrowing survives capture by a nested closure.
 
 ## Ideas & Speculative Future Work
 
