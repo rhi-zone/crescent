@@ -332,6 +332,14 @@ This is a larger effort than bookkeeping but serves two top-5 categories.
 
 ---
 
+## Strategic direction: Rescribe fixture alignment
+
+Crescent's format libraries (PDF, DOCX, SVG, image codecs, and others) should eventually align with rescribe's cross-language fixture suite for conformance testing. Rescribe (~/git/rhizone/rescribe/) is not a document converter — its primary deliverable is a language-agnostic conformance suite (`fixtures/`) paired with standalone format libraries across multiple languages. Since crescent aims to cover the full software ecosystem, aligning with rescribe's fixtures avoids rediscovering format edge cases independently.
+
+**Status: high-value work but not immediately urgent.** Rescribe's own format crates and fixture suite are still in progress. Rather than a dedicated alignment project, pick this up per-format as specific format work comes up in crescent — when a new format codec is implemented or when an existing one is substantially enhanced, run it against rescribe's fixtures for that format (if available) as part of validation.
+
+---
+
 ## Phase 3: Motivating applications
 
 Each application exercises the substrate end-to-end and delivers direct value

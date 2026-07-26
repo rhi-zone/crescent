@@ -6,6 +6,10 @@
 
 See `docs/roadmap-v2.md` for the authoritative project roadmap and sequencing. The roadmap provides the current strategic direction informed by the value landscape analysis.
 
+## Strategic decisions
+
+- **Rescribe fixture alignment (2026-07-26):** Crescent's format libraries will eventually be tested against rescribe's cross-language fixture suite. This is high-value for conformance but not immediately urgent — rescribe's format crates are still in progress. Approach: pick this up per-format as format work comes up in crescent, rather than as a dedicated alignment project. Documented in `docs/roadmap-v2.md`, "Strategic direction: Rescribe fixture alignment" section.
+
 ## Fixed bugs
 
 - [x] **`.crescentcache` manifest keyed diagnostics only by content hash, ignoring file path** (2026-07-10). `check.lua`'s disk-cache path computed `src_hash = cache_mod.hash_file(filename)` — content only — and used it as the manifest key for both lookup and store. Cached diagnostics (`errors.lua` `DiagEntry.filename`) bake in the path of whichever invocation first populated the cache entry, so two different paths with identical content collided in the manifest and the second path's check returned diagnostics carrying the *first* path's filename. Fixed by adding `cache.lua` `M.entry_key(filename, content_hash)` (hashes `path .. "\0" .. content_hash`) and using it as the manifest key in `check.lua` instead of the bare content hash; `M.hash_file` / `M.hash_source` are unchanged and still used path-independently for dependency change-detection. Verified with a manual repro (two files, identical content, different paths, same `.crescentcache`): each now gets its own manifest entry and reports its own path on both cold and warm-cache runs.
