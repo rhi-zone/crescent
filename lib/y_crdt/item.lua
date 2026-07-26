@@ -100,7 +100,12 @@ local function identity_parent(v)
   return v
 end
 
---: (iid: Id, origin: Id | nil, origin_right: Id | nil, parent: SharedType | nil, parent_sub: string | nil, c: Content) -> Item
+-- `parent` accepts ParentPendingId (not just `SharedType | nil`) so
+-- lib/y_crdt/update.lua (the wire decoder) can construct an Item whose
+-- parent is "another item's id, not yet resolved" directly through this
+-- constructor -- integrate.lua's parent-resolution step is what actually
+-- resolves it, before the item is considered integrated.
+--: (iid: Id, origin: Id | nil, origin_right: Id | nil, parent: SharedType | ParentPendingId | nil, parent_sub: string | nil, c: Content) -> Item
 function M.new(iid, origin, origin_right, parent, parent_sub, c)
   return {
     kind = "item",

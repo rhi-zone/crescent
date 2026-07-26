@@ -10,6 +10,104 @@ See `docs/roadmap-v2.md` for the authoritative project roadmap and sequencing. T
 
 - **Rescribe fixture alignment (2026-07-26):** Crescent's format libraries will eventually be tested against rescribe's cross-language fixture suite. This is high-value for conformance but not immediately urgent — rescribe's format crates are still in progress. Approach: pick this up per-format as format work comes up in crescent, rather than as a dedicated alignment project. Documented in `docs/roadmap-v2.md`, "Strategic direction: Rescribe fixture alignment" section.
 
+## lib/y_crdt/update.lua: yjs update v1 wire codec (2026-07-27)
+
+Implemented `lib/y_crdt/update.lua` (encode_v1/apply_v1/encode_diff_v1/
+encode_state_vector[_from_table]/decode_state_vector/merge_updates_v1) plus
+`lib/y_crdt/update_test.lua` (38 assertions: simple round trip, root-not-
+declared error, state vector round trip, delete set, diff encoding, two
+multi-client convergence scenarios, merge_updates_v1). Verified against real
+yjs upstream (github.com/yjs/yjs, tag v13.6.31 -- the actual npm `latest`;
+`main` is an unreleased 14.0.0-rc rewrite with a different struct
+architecture and is NOT the deployed wire format). Corrected one spec error
+in the original task brief: delete-set clocks are NOT delta-encoded in v1
+(confirmed against `DSEncoderV1.writeDsClock`/`writeDsLen`, both plain
+`writeVarUint`).
+
+Documented scope cuts (not silent gaps):
+- [ ] **No resumable cross-update dependency streaming.** `apply_v1` uses a
+  worklist retry loop (handles out-of-order same-update cross-client
+  dependencies) but assumes every dependency is present somewhere in the
+  update or the target doc when called -- unlike yjs's stack-based
+  `integrateStructs`, which can hold a partial update pending a future
+  arrival. A genuinely missing dependency is a caller-facing `(nil,
+  errmsg)`. Build the resumable path if cross-update/streaming sync is ever
+  needed.
+- [ ] **ContentType (ref 7) only supports Array/Map/Text (type refs 0/1/2).**
+  XmlElement/XmlFragment/XmlHook/XmlText (3-6) aren't representable at all
+  in this codebase (shared_type.lua/doc.lua have no XML concept) -- decoding
+  one returns `(nil, errmsg)`.
+- [ ] **JSON content (ref 2)/Embed (ref 5)/Format (ref 6) collapse JS's
+  null/undefined distinction into `encoding.lua`'s single `M.null`
+  sentinel.** A decoded JSON-content array element whose wire value was the
+  literal string `"undefined"` (yjs's per-element JSON.stringify special
+  case for JS `undefined`) decodes to `encoding.null`, same as a real JSON
+  `null` -- Lua tables can't hold a genuine "hole" as an array element the
+  way a JS array can, so there's no second sentinel to distinguish them.
+  Encoding never emits the `"undefined"` marker for this reason (always
+  round-trips through `encoding.null` -> JSON `null`).
+- [ ] **Root-type parent references require the caller to pre-declare that
+  root** (via `doc.get_text`/`get_array`/`get_map`) before applying an
+  update that references it by name. The wire format's root-parent
+  reference carries only the name, never a type tag, so there's no way to
+  auto-vivify the right kind of root from the update bytes alone (real
+  yjs's own `doc.get(name)` without a type constructor creates a type-less
+  `AbstractType`; this codebase's `SharedType` always carries a concrete
+  `type_name` and has no equivalent). `merge_updates_v1` takes an optional
+  `roots: { [name]: "text"|"array"|"map" }` parameter for exactly this
+  reason (its scratch doc has no caller-established root context of its
+  own).
+
+Typechecker substrate gaps found (all with minimal repros, documented
+in-place as `TYPECHECKER WORKAROUND` comments in `lib/y_crdt/{item,
+integrate,struct_store,update}.lua`):
+- [ ] **A checked cast (`--[[: T]]`) from a precisely-typed `unknown` value
+  is rejected outright**, even behind a `type(v) == "table"` runtime guard
+  -- unlike casting from a value whose static type has already collapsed to
+  `any` through some unrelated inference gap. Narrowing `unknown` requires
+  capturing it into a bare local first, then guarding *that* local (not a
+  repeated field read) with `type()`/a discriminant check.
+- [ ] **A union-typed local reassigned across sibling `if`/`elseif`
+  branches loses kind-discriminant narrowing at several distinct points
+  downstream**, each needing a different fix: (a) the very next line inside
+  an `elseif` branch that itself set the discriminant -- fixed by routing
+  the initial read through an identity function; (b) final use after the
+  whole `if`/`elseif` chain -- an identity function does NOT fix this one;
+  what works is moving the final nil-check + narrow into a *separate
+  top-level function* taking the union as a plain parameter, with two
+  *sequential* `if`-early-return statements (not one combined `and`-chain
+  condition -- combined conditions have their own separate, already-
+  documented narrowing gap). See integrate.lua's `identity_parent` /
+  `require_resolved_parent`.
+- [ ] **`T[]` sugar in a `--::`/`--:` annotation desugars to an index
+  signature (`{ [number]: T }`), not the `{ [integer]: T }` shape
+  `table.sort`'s stdlib declaration expects.** A value retrieved by
+  indexing (or `pairs`-iterating the values of) a table whose declared type
+  uses `T[]` sugar carries the same incompatibility onward even once copied
+  into a fresh, unannotated local. The reliable pattern: sort a single flat
+  array built directly from a clean, non-index-signature source (a function
+  parameter, not a map lookup) *before* any map-grouping happens, using
+  manual insertion sort instead of `table.sort` (which also has its own
+  separate, already-documented "generic V conflict" bug across call sites
+  in the same file -- see `lib/type/search/init.lua`'s comment). Every
+  `table.sort` call in `lib/y_crdt/update.lua` was replaced with inline
+  manual insertion sort for this reason.
+- [ ] **A function declared to return a union with the error case embedded
+  as a tuple (`T | (nil, string)`) never lets a caller's `if v == nil then
+  return ... end` guard narrow `v` away from nilable for any subsequent use
+  beyond a single field read or an immediate `return`** -- confirmed with
+  a minimal repro reproducing this exact return-type shape; declaring the
+  same function `(T | nil, string | nil)` (two separate optional return
+  values, functionally identical since both branches already return two
+  values at runtime) fixes it completely. Applied to
+  `struct_store.get_clean_start`/`get_clean_end`/`add` and
+  `integrate.integrate` (pure annotation changes, no behavior change) --
+  `struct_store.get_item_clean_start`/`get_item_clean_end` were LEFT with
+  the old shape since their existing callers never hit the bug (they only
+  ever do a single field/kind check on the result) and changing them wasn't
+  needed for this task. Reconcile the two shapes project-wide once this is
+  fixed upstream.
+
 ## Grammar-induction prototype for tiered-dispatcher init.lua files (2026-07-27)
 
 See `docs/design/codebase-as-grammar.md` and `tooling/grammar_gen/` (not `lib/` —

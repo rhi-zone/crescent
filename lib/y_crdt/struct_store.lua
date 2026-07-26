@@ -116,7 +116,21 @@ M._find_index = find_index
 -- expected clock for its client -- UNLESS it lands inside an existing Skip
 -- placeholder, in which case the skip is split around it (matches yjs
 -- `StructStore.prototype.add`, the "replaces an integrated skip" branch).
---: (store: StructStore, s: Struct) -> true | (nil, string)
+--
+-- TYPECHECKER WORKAROUND: declared `(true | nil, string | nil)` -- two
+-- separate optional return values -- rather than `true | (nil, string)` (a
+-- union with the error case embedded as a tuple), matching the same fix
+-- applied to `get_clean_start`/`get_clean_end` above (see that comment for
+-- the minimal repro): the tuple-embedded shape never narrows a caller's
+-- `ok == nil` guard, so any subsequent use of a value derived from the
+-- OTHER destructured local past that guard stays spuriously nilable
+-- indefinitely. A caller that only checks `ok == nil` and returns
+-- immediately (this file's own callers, before this change) doesn't hit
+-- the bug; lib/y_crdt/update.lua's caller (which OR's the error message
+-- against a fallback across loop iterations) does. Purely a type
+-- annotation change -- both branches already return two values at
+-- runtime, so no behavioral change for any existing caller.
+--: (store: StructStore, s: Struct) -> (true | nil, string | nil)
 function M.add(store, s)
   local common = s --[[: StructCommon]]
   local sid = common.id
@@ -295,7 +309,27 @@ end
 -- causal dependency, not a struct-kind mismatch -- so that case still
 -- returns (nil, errmsg), distinguishable by message from the "unknown
 -- client" case.
---: (store: StructStore, iid: Id) -> Struct | (nil, string)
+--
+-- TYPECHECKER WORKAROUND: declared `(Struct | nil, string | nil)` -- two
+-- separate optional return values -- rather than this file's other
+-- error-returning functions' usual `Struct | (nil, string)` shape (a union
+-- with the error case embedded as a tuple). Confirmed by minimal repro:
+-- a caller that destructures `local s, err = get_clean_start(...)`, guards
+-- `if s == nil then return nil, err end`, and then does anything beyond a
+-- single field read or `return` with `s` (e.g. `s.length` used in a
+-- comparison or arithmetic) never actually narrows `s` away from nilable
+-- with the `Struct | (nil, string)` shape -- every subsequent read of a
+-- plain field stays `T | nil` indefinitely, with no cast (checked or
+-- forced -- force casts are hard-rejected by this project's typechecker)
+-- able to fix it. The plain-two-return-values shape narrows correctly on
+-- the exact same guard. This is a real behavioral difference from
+-- `get_item_clean_start`/`get_item_clean_end` above (which keep the older
+-- shape and work fine for their callers, which only ever do a single
+-- field/kind check on the result) -- callers here (lib/y_crdt/
+-- integrate.lua, lib/y_crdt/update.lua) need to do more with the result.
+-- TODO.md tracks reconciling the two shapes project-wide once this
+-- narrowing bug is fixed upstream.
+--: (store: StructStore, iid: Id) -> (Struct | nil, string | nil)
 function M.get_clean_start(store, iid)
   local structs0 = store.clients[iid.client]
   if structs0 == nil then return nil, "struct store: unknown client " .. iid.client end
@@ -315,7 +349,7 @@ function M.get_clean_start(store, iid)
   return result
 end
 
---: (store: StructStore, iid: Id) -> Struct | (nil, string)
+--: (store: StructStore, iid: Id) -> (Struct | nil, string | nil)
 function M.get_clean_end(store, iid)
   local structs0 = store.clients[iid.client]
   if structs0 == nil then return nil, "struct store: unknown client " .. iid.client end

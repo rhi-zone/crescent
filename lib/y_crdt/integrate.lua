@@ -149,7 +149,13 @@ end
 -- shared_type.lua) via txn.doc.store. `offset` re-enters integration
 -- partway through `it` (used when a Skip placeholder for `it` was already
 -- partially superseded); pass 0 (or omit) for a freshly created item.
---: (txn: Transaction, i: Item, offset: integer | nil) -> true | (nil, string)
+--
+-- TYPECHECKER WORKAROUND: declared `(true | nil, string | nil)` -- two
+-- separate optional return values -- rather than `true | (nil, string)`
+-- (matches the same fix on struct_store.lua's `get_clean_start`/
+-- `get_clean_end`/`add` -- see their comments for the minimal repro). Pure
+-- annotation change: both branches already return two values at runtime.
+--: (txn: Transaction, i: Item, offset: integer | nil) -> (true | nil, string | nil)
 function M.integrate(txn, i, offset)
   offset = offset or 0
   local store = txn.doc.store
