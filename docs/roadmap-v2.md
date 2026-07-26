@@ -58,7 +58,23 @@ These are substrate gaps that block nearly every application category, not just
 one. They are already partially built; the work is completion and adoption, not
 greenfield.
 
-### 1a. Async I/O adoption
+### 1a. Async I/O adoption -- done (2026-07-22)
+
+**Status: closed as cleanup, not adoption.** Auditing this item found
+`lib/http/server.lua` was already a coroutine-per-connection server wired
+through the `lib/async` + `lib/io_poll` integration (from earlier work,
+predating this roadmap's 1a framing) -- the "no existing server uses the
+integrated loop yet" premise below was stale by the time it was checked. What
+actually remained was cleanup: commit `8e161785` fixed an idle-timeout race
+(the keep-alive timer could still fire and close a connection that had just
+read data successfully in the same poller tick; replaced with `async.race()`
+over the readable promise and the sleep timer, keeping only the first
+settler), added `lib/http/server_concurrency_test.lua` (proves concurrent
+handlers interleave rather than serialize), and removed the dead fork()-based
+`lib/http/server_fork.lua`.
+
+<details>
+<summary>Original framing (superseded)</summary>
 
 `lib/async` is integrated with `lib/io_poll` and tested (133 assertions). No
 existing server or multiplexed connection code uses the integrated loop yet.
@@ -71,7 +87,37 @@ network-bound application -- web dashboards, sync servers, API backends.
 single-connection. The motivating applications below all need a web interface
 (crescent's browser story is Lua HTTP server + `lib/web/reactive_dom`).
 
-### 1b. TLS completion
+</details>
+
+### 1b. TLS completion -- architecture decided, Linux x86_64 shipped (2026-07-22)
+
+**Decision: FFI-first, vendor libtls, pure-Lua fallback stays in scope but low
+priority.** Commit `6ec2a858` vendors LibreSSL 4.3.2 portable source in full
+under `dep/libressl/` (checksum-verified against the OpenBSD-published
+SHA256, rebuildable offline with no network access) plus musl-linked Linux
+x86_64 binaries (`libcrypto.so.57`, `libssl.so.60`, `libtls.so.33`,
+`$ORIGIN`-rpathed so the three resolve each other's SONAMEs wherever the
+directory ends up) under `dep/libressl/linux-x86_64/`. `build-vendored.yml`
+gained a matching build job. `lib/tls/init.lua`'s loader tries the vendored
+path first, then falls through to system library search -- the same tier
+pattern `lib/sqlite` already uses.
+
+This resolves the open question below in favor of the system-tier path: it
+ships faster and LibreSSL is a mature, audited implementation, which matters
+more for a security-critical protocol than the zero-dependency purity of a
+from-scratch pure-Lua stack. The pure-Lua crypto primitives (AES-GCM,
+ChaCha20-Poly1305, X25519, HKDF, X.509 parsing) that already exist remain
+in scope as a genuine fallback tier -- per CLAUDE.md's "no library may
+hard-depend on a system lib" pure-Lua-baseline rule -- but are now explicitly
+low priority given the FFI tier works for the common platform.
+
+**What remains:** Only Linux x86_64 has a vendored libtls; macOS, Linux
+aarch64, and Windows fall through to an unguaranteed system library search
+(tracked in `TODO.md`, "Vendoring gaps"). The pure-Lua TLS state machine and
+record-layer framing (the fallback tier) are not built.
+
+<details>
+<summary>Original framing (superseded)</summary>
 
 `lib/tls` is wip. `lib/https` is wip. Production HTTP requires TLS. Without
 it, crescent applications can only serve localhost or sit behind a reverse
@@ -88,6 +134,8 @@ pure-Lua path is more aligned with crescent's zero-dependency principle but
 significantly harder to get right (TLS is a security-critical protocol where
 implementation bugs have real consequences). The system-tier path is faster to
 ship but adds an optional system dependency.
+
+</details>
 
 ### 1c. Package manager install algorithm
 
@@ -112,7 +160,40 @@ These are gaps in `lib/` that block specific high-value application categories
 identified by the value landscape. Ordered by how many top-ranked categories
 they unblock.
 
-### 2a. PDF codec
+### 2a. PDF codec -- foundation + forms path + text-extraction path shipped (2026-07-22)
+
+**Status: substantial progress, not complete.** A four-commit sequence built
+the shared foundation and both entry points the "open question" below asked
+about, instead of choosing one first:
+
+- Foundation: object-model lexer/parser for all 8 PDF object types plus the
+  indirect-object wrapper (`c6ec40ff`), cross-reference table parser
+  covering both traditional xref tables and xref streams with PNG-predictor
+  un-filtering (`32d69333`), and a filter-decoding module (FlateDecode +
+  PNG predictors) wired into a top-level `lib/pdf/init.lua` document loader
+  (`b68305d5`).
+- Forms path: AcroForm field extraction/filling plus incremental-update
+  writing (`70c78a57`) -- serves value-landscape categories #1 and #2.
+- Text-extraction path: content-stream operator parsing, font/encoding
+  mapping (3 base encodings + `/ToUnicode` CMaps), text positioning, and
+  reading-order reconstruction (`6824d63d`) -- serves categories #3 and #5.
+
+388 assertions total across `lib/pdf/*_test.lua`, 0 typecheck errors.
+
+**What remains, documented as explicit out-of-scope rather than silently
+half-done:** Type0/CID composite fonts beyond Identity-H/V + `/ToUnicode`,
+per-glyph-width text advance (no `/Widths` array parsing), non-FlateDecode
+stream filters, Object Streams (xref entry type 2 -- entries are represented
+but not resolved), and AcroForm appearance-stream regeneration (needs
+font/text layout, a parallel effort). No PDF generation-from-scratch path
+(only incremental updates to an existing document) and no image extraction
+yet -- both still open against the value-landscape categories this library
+targets. System-tier FFI to MuPDF/Poppler for the long tail (scanned
+documents, complex rendering) is untouched.
+
+Five typechecker substrate gaps were found and worked around during this
+work; see `TODO.md`'s "Typechecker substrate gaps (found while implementing
+lib/pdf/...)" sections for repros and revert conditions.
 
 A PDF parser and writer is the single largest substrate gap when measured
 against the value landscape. It blocks:
@@ -419,21 +500,21 @@ spent.
 
 ## Ordering summary
 
-| Priority | Item | Depends on | Unblocks |
-|----------|------|------------|----------|
-| 1a | Async I/O adoption | -- | Every networked app |
-| 1b | TLS audit + completion | -- | Production HTTPS |
-| 1c | Package manager install | -- | Adoption |
-| 2a | PDF codec | -- | Finance, forms, a11y, conversion |
-| 2b | i18n depth (RTL, locale) | -- | Non-English applications |
-| 2c | Bookkeeping library | 2a (for PDF import) | Finance app |
-| 2d | Document structure lib | 2a | Forms app, a11y tooling |
-| 3a | Finance/bookkeeping app | 1a, 2a, 2b, 2c | Proves substrate for #1 value category |
-| 3b | Developer tools | 1c, 1d | Ongoing |
-| 3c | Format conversion tool | 2a (optional) | Proves substrate for #5 value category |
-| 4a | Accessibility tooling | 2a, 2d | #3 value category |
-| 4b | Structured data tool | 1a | #8 value category |
-| 4c | Caregiver coordination | 1a | #7 value category (design-risk) |
+| Priority | Item | Depends on | Unblocks | Status |
+|----------|------|------------|----------|--------|
+| 1a | Async I/O adoption | -- | Every networked app | Done (2026-07-22) |
+| 1b | TLS audit + completion | -- | Production HTTPS | Linux x86_64 done (2026-07-22); other platforms + pure-Lua fallback open |
+| 1c | Package manager install | -- | Adoption | Not started |
+| 2a | PDF codec | -- | Finance, forms, a11y, conversion | Foundation + forms + text extraction done (2026-07-22); see scope gaps above |
+| 2b | i18n depth (RTL, locale) | -- | Non-English applications | Not started |
+| 2c | Bookkeeping library | 2a (for PDF import) | Finance app | Not started |
+| 2d | Document structure lib | 2a | Forms app, a11y tooling | Not started |
+| 3a | Finance/bookkeeping app | 1a, 2a, 2b, 2c | Proves substrate for #1 value category | Not started |
+| 3b | Developer tools | 1c, 1d | Ongoing | Ongoing |
+| 3c | Format conversion tool | 2a (optional) | Proves substrate for #5 value category | Not started |
+| 4a | Accessibility tooling | 2a, 2d | #3 value category | Not started |
+| 4b | Structured data tool | 1a | #8 value category | Not started |
+| 4c | Caregiver coordination | 1a | #7 value category (design-risk) | Not started |
 
 Phase 1 items are independent and can be worked in parallel.
 Phase 2 items are mostly independent (2c and 2d both depend on 2a).

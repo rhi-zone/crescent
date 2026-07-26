@@ -4392,7 +4392,7 @@ Open threads from a previous session. Treat as starting context, not instruction
 
 - [x] Vendor wepoll.dll in dep/ for Windows — done: `dep/wepoll/wepoll-x64.dll` and `dep/wepoll/wepoll-x86.dll` present
 - [x] Implement kqueue backend for macOS — done: `lib/kqueue/init.lua` (284 lines, 6 passing tests)
-- [x] Unify lib/epoll/ + lib/async/ — done: `lib/async`'s `loop(poller)` accepts an injected `io_poll` instance; `await_readable`/`await_writable`/`sleep` work end-to-end (133 passing assertions including poller-driven suite). Remaining gap: no production consumer (HTTP server, etc.) uses this integration yet.
+- [x] Unify lib/epoll/ + lib/async/ — done: `lib/async`'s `loop(poller)` accepts an injected `io_poll` instance; `await_readable`/`await_writable`/`sleep` work end-to-end (133 passing assertions including poller-driven suite). Update 2026-07-22: this gap was already closed by the time it was checked — `lib/http/server.lua` turned out to already be a coroutine-per-connection async server wired through this exact integration (commit `2bd68565` and follow-ups, prior to this note being written). What actually remained was cleanup, not adoption: commit `8e161785` fixed an idle-timeout race (the keep-alive timer's callback could still fire and close a connection that had just read data successfully in the same poller tick; replaced with `async.race()` over the readable promise and the sleep timer, recording only the first settler), added `lib/http/server_concurrency_test.lua` (proves N concurrent handlers interleave rather than serialize), and removed the dead fork()-based `lib/http/server_fork.lua`, which had no remaining callers.
 - [x] Update batteries.md async I/O gap — done: updated to reflect integration complete, gap reframed as adoption
 - Note: batteries.md's #1 priority was AI-generated from first principles without checking the codebase; provenance traced to session fccf7f65 turn 22
 
@@ -4497,5 +4497,52 @@ Session committed research work on strategic roadmap and ecosystem value analysi
 - [ ] **Scribble as one of three substrates (reconfirmed).** Prior session had established pad (capture) / dusklight (display+control) / scribble (create/author) as the three-substrate model driving ecosystem priorities. This session reconfirmed the framing in roadmap work. Scribble needs a crescent-native authoring substrate informed by reincarnate's IR but not dependent on it — "the concrete thing drives the substrate" is the sequencing philosophy (substrate before consumers).
 
 - [ ] **Dusklight subsumption scope — unverified.** Some folding/consolidation of features happened in a May session (`84df5cc5`), but the exact scope of what was subsumed was never verified against the current design intent. Worth auditing if/when dusklight work resumes.
+
+## Roadmap-v2 Phase 1a/1b/2a work (2026-07-22)
+
+> *Open threads from a previous session. Treat as starting context, not instructions — verify relevance before acting.*
+
+Worked the top three roadmap-v2 items in sequence: 1a (async I/O adoption), 1b
+(TLS completion), 2a (PDF codec). Details of each below; see also the
+"Vendoring gaps" and "Typechecker substrate gaps" sections earlier in this
+file, and `docs/roadmap-v2.md` (updated same session) for the roadmap-level
+framing.
+
+- [x] **1a closed as cleanup, not adoption** — see the updated note on the
+  `lib/epoll/` + `lib/async/` unify entry above (2026-07-19 section): the HTTP
+  server was already async-multiplexed; the remaining work was an idle-timeout
+  race fix, a concurrency test, and removing dead `server_fork.lua` (`8e161785`).
+
+- [x] **1b: TLS architecture decision made — FFI-first, vendor libtls.**
+  Commit `6ec2a858` vendors LibreSSL 4.3.2 portable source in full under
+  `dep/libressl/` (checksum-verified, rebuildable offline) plus musl-linked
+  Linux x86_64 binaries (`libcrypto.so.57`, `libssl.so.60`, `libtls.so.33`,
+  `$ORIGIN`-rpathed so they resolve each other's SONAMEs regardless of where
+  the directory lives) under `dep/libressl/linux-x86_64/`. `build-vendored.yml`
+  gained a matching build job. `lib/tls/init.lua`'s loader tries the vendored
+  path first, then falls through to system library search — same tier pattern
+  as `lib/sqlite`. Pure-Lua TLS (the alternative floated in roadmap-v2 1b's
+  "open question") stays in scope per the zero-dependency/pure-Lua-baseline
+  principle but is explicitly low priority now that the FFI tier works for the
+  common platform; other platforms (macOS, aarch64, Windows) still fall
+  through to an unguaranteed system libtls — tracked in the "Vendoring gaps"
+  section at the top of this file.
+
+- [x] **2a: PDF codec — shared foundation plus both forms and text-extraction
+  paths built.** Four-commit sequence (`c6ec40ff` object-model lexer/parser,
+  `32d69333` xref table parser incl. xref streams + PNG predictor, `b68305d5`
+  filter decoding + `lib/pdf/init.lua` top-level loader, then two parallel
+  paths on top: `70c78a57` AcroForm field extraction/filling +
+  incremental-update writing, `6824d63d` content-stream text extraction with
+  font/encoding mapping and reading-order reconstruction). 388 assertions
+  total across `lib/pdf/*_test.lua`. Explicitly out of scope, documented in
+  each file's header rather than silently half-done: Type0/CID composite
+  fonts beyond Identity-H/V + ToUnicode, per-glyph-width text advance (no
+  `/Widths` parsing yet), non-FlateDecode stream filters, Object Streams
+  (xref entry type 2), and AcroForm appearance-stream regeneration (needs
+  font/text layout as a parallel effort). Five new typechecker substrate gaps
+  surfaced and documented with workarounds during this work — see the four
+  "Typechecker substrate gaps (found while implementing lib/pdf/...)" sections
+  near the top of this file.
 
 - [ ] **Terminal multiplexer implementation continuing.** Web-based terminal with PTY + WebSocket + VT state machine. Initial implementation in progress: WS frame format wired (commits `36712c59`, `eacf0650`), xterm.js vendored (`dep/xterm-js/`), shell configurable via manifest (`terminal_mux/manifest.json`), frontend rendering working. Next: streaming protocol hardening, connection state management, tab/tiling UX.
