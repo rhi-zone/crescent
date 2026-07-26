@@ -193,6 +193,45 @@ T.describe("sqlite: query row iteration", function()
 		T.fail(iter)
 		T.ok(err)
 	end)
+
+	-- Regression: db:query()'s iterator used to `return unpack(columns)` with
+	-- no explicit range, relying on `#columns`. Assigning nil to a table key
+	-- removes it rather than leaving a real "hole with a nil value", so once
+	-- any column but the last is NULL, `#columns` finds a shorter border than
+	-- the true column count and every column from the first NULL onward is
+	-- silently dropped from the iterator's return values — even non-NULL
+	-- columns after it. Fixed by passing the known column count explicitly:
+	-- `unpack(columns, 1, col_count)`.
+	T.it("NULL in a non-trailing column does not truncate later non-NULL columns", function()
+		local db = mem()
+		db:execute("CREATE TABLE t (a TEXT, b TEXT, c TEXT, d TEXT)")
+		db:execute("INSERT INTO t VALUES (?, ?, ?, ?)", "first", nil, nil, "last")
+
+		local iter, err = db:query("SELECT a, b, c, d FROM t")
+		T.ok(iter, err)
+		local a, b, c, d = iter()
+		T.eq(a, "first")
+		T.eq(b, nil)
+		T.eq(c, nil)
+		T.eq(d, "last")
+	end)
+
+	T.it("NULL in a non-trailing column does not truncate a prepared statement's rows()", function()
+		local db = mem()
+		db:execute("CREATE TABLE t (a TEXT, b TEXT, c TEXT, d TEXT)")
+		local stmt, serr = db:prepare("INSERT INTO t VALUES (?, ?, ?, ?)")
+		T.ok(stmt, serr)
+		stmt:exec("first", nil, nil, "last")
+
+		local sel, selerr = db:prepare("SELECT a, b, c, d FROM t")
+		T.ok(sel, selerr)
+		local iter = sel:rows()
+		local a, b, c, d = iter()
+		T.eq(a, "first")
+		T.eq(b, nil)
+		T.eq(c, nil)
+		T.eq(d, "last")
+	end)
 end)
 
 -- ── parameter binding ────────────────────────────────────────────────────────

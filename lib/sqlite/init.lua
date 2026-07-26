@@ -228,7 +228,18 @@ sqlite.query = function(self, sql, ...)
 	end
 	local stmt = stmt_ptr[0]
 	bind(stmt, { ... }, select("#", ...))
-	local col_count = sqlite_ffi.sqlite3_column_count(stmt) -- once, before any rows
+	-- TYPECHECKER WORKAROUND: sqlite3_column_count's FFI-declared return type
+	-- is `integer | nil`; the natural code is `local col_count = ...(stmt)`
+	-- with no cast, relying on plain narrowing. Confirmed by minimal repro
+	-- that narrowing via `or 0` is not retained for a local captured as an
+	-- upvalue by the closure returned just below — the closure body sees the
+	-- pre-narrowing `integer | nil` type again and fails arithmetic
+	-- (`col_count - 1`) even though the exact same expression narrows fine
+	-- in straight-line code. Worked around with an explicit checked cast at
+	-- the declaration site, which fixes the variable's declared type before
+	-- capture instead of relying on transient narrowing. See TODO.md; revert
+	-- to plain `or 0` once narrowing survives capture by a nested closure.
+	local col_count = (sqlite_ffi.sqlite3_column_count(stmt) or 0) --[[: integer]] -- once, before any rows
 	return function()
 		local code = sqlite_ffi.sqlite3_step(stmt)
 		if code == 100 then -- SQLITE_ROW
@@ -237,7 +248,13 @@ sqlite.query = function(self, sql, ...)
 			for i = 0, col_count - 1 do
 				columns[i + 1] = col_read[sqlite_ffi.sqlite3_column_type(stmt, i)](stmt, i)
 			end
-			return unpack(columns)
+			-- BUG FIX: `unpack(columns)` (no explicit range) relies on `#columns`,
+			-- which is unreliable once any column value is NULL (nil) — a nil
+			-- assignment leaves no key at that index, so the table is sparse and
+			-- `#` may find a shorter "border" than col_count, silently truncating
+			-- every column from the first NULL onward. `col_count` is already
+			-- known from sqlite3_column_count, so pass it explicitly.
+			return unpack(columns, 1, col_count)
 		elseif code == 101 then -- SQLITE_DONE
 			sqlite_ffi.sqlite3_finalize(stmt)
 			return nil, "sqlite: done"
@@ -283,7 +300,9 @@ stmt_mt.rows = function(self, ...)
 	local stmt = self._stmt
 	sqlite_ffi.sqlite3_reset(stmt)
 	bind(stmt, { ... }, select("#", ...))
-	local col_count = sqlite_ffi.sqlite3_column_count(stmt)
+	-- TYPECHECKER WORKAROUND: see the matching comment in sqlite.query above
+	-- (same closure-capture narrowing gap).
+	local col_count = (sqlite_ffi.sqlite3_column_count(stmt) or 0) --[[: integer]]
 	return function()
 		local code = sqlite_ffi.sqlite3_step(stmt)
 		if code == 100 then -- SQLITE_ROW
@@ -292,7 +311,13 @@ stmt_mt.rows = function(self, ...)
 			for i = 0, col_count - 1 do
 				columns[i + 1] = col_read[sqlite_ffi.sqlite3_column_type(stmt, i)](stmt, i)
 			end
-			return unpack(columns)
+			-- BUG FIX: `unpack(columns)` (no explicit range) relies on `#columns`,
+			-- which is unreliable once any column value is NULL (nil) — a nil
+			-- assignment leaves no key at that index, so the table is sparse and
+			-- `#` may find a shorter "border" than col_count, silently truncating
+			-- every column from the first NULL onward. `col_count` is already
+			-- known from sqlite3_column_count, so pass it explicitly.
+			return unpack(columns, 1, col_count)
 		elseif code == 101 then -- SQLITE_DONE
 			return nil, "sqlite: done"
 		else

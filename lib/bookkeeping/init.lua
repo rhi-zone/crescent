@@ -4,15 +4,14 @@ end
 
 -- lib/bookkeeping: double-entry bookkeeping domain model.
 --
--- In-memory only — no persistence (see lib/sqlite for a future storage
--- layer), no bank-statement import (see lib/csv), no reporting beyond the
--- trial balance (P&L / balance sheet are a future layer on top of this).
---
 -- Submodules:
---   account.lua       chart of accounts (types, hierarchy, metadata)
+--   account.lua        chart of accounts (types, hierarchy, metadata)
 --   journal.lua        double-entry journal entries (post + validate)
---   ledger.lua          per-account, per-currency transaction history
+--   ledger.lua         per-account, per-currency transaction history
 --   trial_balance.lua  book-currency summary + accounting-equation check
+--   store.lua          SQLite persistence (save/load the model above)
+--   import.lua         CSV bank-statement import into journal entries
+--   report.lua         income statement (P&L) and balance sheet
 --
 -- See each submodule's header comment for the design decisions baked into
 -- its API: signed amounts (positive = debit, negative = credit), lines may
@@ -28,5 +27,8 @@ M.account       = require("lib.bookkeeping.account")
 M.journal       = require("lib.bookkeeping.journal")
 M.ledger        = require("lib.bookkeeping.ledger")
 M.trial_balance = require("lib.bookkeeping.trial_balance")
+M.store         = require("lib.bookkeeping.store")
+M.import        = require("lib.bookkeeping.import")
+M.report        = require("lib.bookkeeping.report")
 
 return M
