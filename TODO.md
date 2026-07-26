@@ -10,6 +10,61 @@ See `docs/roadmap-v2.md` for the authoritative project roadmap and sequencing. T
 
 - **Rescribe fixture alignment (2026-07-26):** Crescent's format libraries will eventually be tested against rescribe's cross-language fixture suite. This is high-value for conformance but not immediately urgent — rescribe's format crates are still in progress. Approach: pick this up per-format as format work comes up in crescent, rather than as a dedicated alignment project. Documented in `docs/roadmap-v2.md`, "Strategic direction: Rescribe fixture alignment" section.
 
+## Grammar-induction prototype for tiered-dispatcher init.lua files (2026-07-27)
+
+See `docs/design/codebase-as-grammar.md` and `tooling/grammar_gen/` (not `lib/` —
+throwaway analysis tooling). Byte-for-byte reproduction of 5 real files verified
+(`bin/luajit tooling/grammar_gen/generate.lua --all --diff`). Open items:
+
+- [ ] **Not proven at scale.** Only 5 files induced by hand; whether the same
+  one-flat-grammar model holds for more of crescent, or fragments into many
+  small unrelated grammars, is untested. See the doc's "What's proven vs.
+  aspirational" section.
+- [ ] **`lib/keyring/init.lua` and `lib/stb/init.lua` are real tier-selecting
+  files that don't fit this grammar** (keyring: lazy per-call dispatch with
+  full tier implementations inline, no thin re-export layer; stb: mutates the
+  module table per-tier rather than building one narrowed literal). Whether
+  they warrant their own induced grammar, an extension of this one, or
+  neither is open — do not fold them into this grammar without inducing
+  their own slots first.
+- [ ] **Derivation format is not yet compact.** At n=5, `tooling/grammar_gen/derivations.lua`'s
+  derivation source (15770 bytes total) is *larger* than the 5 generated
+  files combined (13418 bytes) — see the doc's measured compression section.
+  Two concrete, fixable causes: (1) each file's free-text doc header is
+  stored as a raw terminal in full, and (2) field lists (name + type per
+  exported function) are repeated 2–3 times per derivation (alias block,
+  struct type, M-table) instead of named once and referenced three times.
+  Fixing (2) is a real refactor of the derivation format, not the mechanism;
+  worth doing before drawing scale conclusions from byte ratios.
+- [ ] **No automated grammar induction.** Slots were found by a person
+  hand-diffing 5 files. A RePair/SEQUITUR-style induction pass over a larger
+  corpus, to check whether it finds the same slots (including the
+  file-level "indent style" slot, which is easy to miss if you look
+  production-by-production instead of file-by-file), is unbuilt.
+
+## Typechecker substrate gaps (found while building tooling/grammar_gen, 2026-07-27)
+
+- [ ] **`bin/cr check` currently rejects the force-cast (`--[[:! T]]`) pattern
+  that `lib/encode/base64/init.lua` and `lib/format/json/init.lua` use at
+  their own tier-selection `pcall` boundary** — i.e. two files already in
+  `lib/` do not pass `bin/cr check` with zero errors today. Repro: `timeout
+  30 bin/cr check lib/encode/base64/init.lua lib/format/json/init.lua`
+  reports 4 errors, all "force cast — fix the upstream type annotation
+  instead; see CLAUDE.md" at the `impl = ffi_impl --[[:! Base64Impl]]` /
+  `impl = simd_result --[[:! JsonImpl]]` lines (and the JsonImpl equivalents).
+  This predates this session — not introduced here, found while building
+  `tooling/grammar_gen` and hitting the identical pattern. Framed as
+  substrate, not a result deficit: **narrowing an `unknown`-returning
+  `require()` result (or a `pcall(require, ...)` result) for a local
+  (non-stdlib) module surface has no established non-force-cast path
+  today.** The two `lib/` files either need their own upstream fix (whatever
+  "fix the upstream type annotation instead" means concretely for a
+  `pcall(require, ...)` boundary — unclear, needs typechecker-side
+  investigation) or the force-cast-rejection rule needs a documented
+  exception for exactly this boundary shape. Do not silently re-permit
+  force casts broadly to unblock this — that's the general case CLAUDE.md's
+  "almost never correct" rule is protecting.
+
 ## Fixed bugs
 
 - [x] **`.crescentcache` manifest keyed diagnostics only by content hash, ignoring file path** (2026-07-10). `check.lua`'s disk-cache path computed `src_hash = cache_mod.hash_file(filename)` — content only — and used it as the manifest key for both lookup and store. Cached diagnostics (`errors.lua` `DiagEntry.filename`) bake in the path of whichever invocation first populated the cache entry, so two different paths with identical content collided in the manifest and the second path's check returned diagnostics carrying the *first* path's filename. Fixed by adding `cache.lua` `M.entry_key(filename, content_hash)` (hashes `path .. "\0" .. content_hash`) and using it as the manifest key in `check.lua` instead of the bare content hash; `M.hash_file` / `M.hash_source` are unchanged and still used path-independently for dependency change-detection. Verified with a manual repro (two files, identical content, different paths, same `.crescentcache`): each now gets its own manifest entry and reports its own path on both cold and warm-cache runs.
