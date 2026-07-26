@@ -64,23 +64,34 @@
 -- CMap, which — per its priority above — overrides this fallback entirely
 -- whenever present. See TODO.md.
 --
--- SCOPE DECISION — Type0 (composite) fonts. Full CID-keyed text extraction
--- requires resolving a CIDFont's CIDToGIDMap and either a predefined
--- CJK CMap or an embedded CMap stream describing the code space and
--- code->CID mapping — a substantial parser this task's scope ("map codes
--- to Unicode for text extraction," not "implement CID font resolution")
--- doesn't justify building. This module supports the common, spec-legal
--- shortcut real-world PDF producers already rely on: a Type0 font whose
--- /Encoding is the predefined identity CMap name `Identity-H` or
--- `Identity-V` (2-byte codes, code == CID, no code-space ambiguity to
--- resolve) *and* that carries a /ToUnicode CMap (the mechanism the task
--- brief itself identifies as "explicitly the hint PDF producers leave for
--- cases /Encoding can't express, e.g. Type0/CID fonts") is fully
--- supported: code_width is 2 and code_to_unicode is driven entirely by
--- /ToUnicode. A Type0 font using any other /Encoding (a predefined CJK
--- CMap name, or an embedded CMap stream), or one with no /ToUnicode, is a
--- documented gap: `font_from_dict` returns a clear `(nil, errmsg)` rather
--- than silently producing wrong or empty text.
+-- SCOPE DECISION — Type0 (composite) fonts. Full CID-keyed glyph rendering
+-- requires resolving a CIDFont's CIDToGIDMap and a code->CID CMap (either
+-- the real Adobe CID-collection resource tables for a predefined CJK CMap,
+-- or a begincidchar/begincidrange embedded CMap) — that's out of scope
+-- here, consistent with this module's "map codes to Unicode for text
+-- extraction," not "implement CID font resolution." What IS supported,
+-- covering real-world CJK PDFs broadly: (1) any Type0 font carrying a
+-- /ToUnicode CMap, regardless of /Encoding — highest priority per this
+-- file's stated priority order, since it's the producer's own text-
+-- extraction hint; (2) absent that, a Type0 font whose /Encoding is one of
+-- the predefined `Uni*-UTF16-H`/`Uni*-UTF16-V` CMaps (GB/CNS/JIS/KS
+-- collections) — those CMaps' codes are already the UTF-16BE code units of
+-- the Unicode value by construction, so no CID step is needed for
+-- extraction; (3) absent that, a Type0 font whose /Encoding is an embedded
+-- CMap *stream* using bfchar/bfrange destination-Unicode syntax (the same
+-- syntax /ToUnicode CMaps use) rather than the CID-producing
+-- begincidchar/begincidrange syntax real code->CID CMaps normally use —
+-- narrower than general embedded-CMap support, but exactly the shape a
+-- producer choosing to make /Encoding double as its own Unicode hint
+-- produces. A Type0 font using any other /Encoding (Identity-H/V with no
+-- /ToUnicode, some other predefined non-UTF16 CMap name, or an embedded
+-- CID-producing CMap) is a documented gap: `font_from_dict` returns a clear
+-- `(nil, errmsg)` rather than silently producing wrong or empty text.
+-- CID glyph WIDTHS (/DW + /W, ISO 32000-1 §9.7.4.3) are wired only for
+-- Identity-H/V, the one case where code == CID needs no CMap resolution at
+-- all — see `build_code_to_cid_width`'s comment below for why the other
+-- /Encoding branches above (which resolve Unicode without ever resolving a
+-- CID) can't also drive width lookup.
 --
 -- Errors: `(nil, errmsg)`, per docs/conventions.md. Pure Lua only.
 
@@ -1700,10 +1711,26 @@ local function units_to_utf8(units)
 	return utf8_encode.char(unpack(codepoints))
 end
 
---: (string) -> ({ [integer]: string } | nil, string | nil)
-local function parse_tounicode_cmap(bytes)
+-- Shared by /ToUnicode CMaps and (per the Type0 handling below) a Type0
+-- font's own /Encoding when it is an embedded CMap stream using the same
+-- bfchar/bfrange destination-Unicode syntax — real CID-mapping CMaps
+-- normally use begincidchar/begincidrange instead (out of scope: those
+-- produce CIDs, not Unicode text), but a producer embedding a
+-- Unicode-producing CMap directly at /Encoding is handled identically to
+-- /ToUnicode here. Also tracks the first begincodespacerange/
+-- endcodespacerange block's low-bound byte length as `codespace_width` (nil
+-- if the CMap has none) — /ToUnicode's caller ignores this (ToUnicode's
+-- byte width is fixed by the font's own code_width, not by the CMap), but a
+-- Type0 /Encoding CMap stream needs it to know its own code byte width.
+-- A codespace with multiple ranges of differing byte width (rare,
+-- variable-width mixed encodings) is not fully supported: only the first
+-- range's width is used, a documented scope limit consistent with this
+-- module's existing CID-resolution boundaries.
+--: (string) -> ({ [integer]: string } | nil, integer | nil, string | nil)
+local function parse_cmap(bytes)
 	local r = pdf_object.new_reader(bytes)
 	local map = {} --[[: { [integer]: string } ]]
+	local codespace_width = nil --: integer | nil
 
 	while true do
 		skip_ws_and_comments(r)
@@ -1717,11 +1744,11 @@ local function parse_tounicode_cmap(bytes)
 			-- def` this module doesn't need); ignore and continue.
 		else
 			if r.pos ~= before_pos then
-				return nil, "malformed ToUnicode CMap: " .. tostring(oerr)
+				return nil, nil, "malformed CMap: " .. tostring(oerr)
 			end
 			local token = read_token(r)
 			if token == nil then
-				return nil, "unexpected byte in ToUnicode CMap at offset " .. r.pos
+				return nil, nil, "unexpected byte in CMap at offset " .. r.pos
 			end
 
 			if token == "beginbfchar" then
@@ -1730,19 +1757,19 @@ local function parse_tounicode_cmap(bytes)
 					if find(r.src, "endbfchar", r.pos, true) == r.pos then break end
 					local src, src_err = pdf_object.parse_object(r)
 					if src == nil then
-						return nil, "malformed bfchar entry: " .. tostring(src_err)
+						return nil, nil, "malformed bfchar entry: " .. tostring(src_err)
 					end
 					local src_str = as_string(src)
-					if src_str == nil then return nil, "bfchar source is not a hex string" end
+					if src_str == nil then return nil, nil, "bfchar source is not a hex string" end
 					skip_ws_and_comments(r)
 					local dst, dst_err = pdf_object.parse_object(r)
-					if dst == nil then return nil, "malformed bfchar destination: " .. tostring(dst_err) end
+					if dst == nil then return nil, nil, "malformed bfchar destination: " .. tostring(dst_err) end
 					local dst_str = as_string(dst)
-					if dst_str == nil then return nil, "bfchar destination is not a hex string" end
+					if dst_str == nil then return nil, nil, "bfchar destination is not a hex string" end
 					map[bytes_to_uint(src_str)] = units_to_utf8(utf16be_units(dst_str))
 				end
 				skip_ws_and_comments(r)
-				if not read_token(r) then return nil, "expected 'endbfchar'" end -- consumes "endbfchar"
+				if not read_token(r) then return nil, nil, "expected 'endbfchar'" end -- consumes "endbfchar"
 
 			elseif token == "beginbfrange" then
 				while true do
@@ -1754,15 +1781,15 @@ local function parse_tounicode_cmap(bytes)
 						break
 					end
 					local lo_str = as_string(lo)
-					if lo_str == nil then return nil, "malformed bfrange entry: " .. tostring(lo_err) end
+					if lo_str == nil then return nil, nil, "malformed bfrange entry: " .. tostring(lo_err) end
 					skip_ws_and_comments(r)
 					local hi, hi_err = pdf_object.parse_object(r)
-					if hi == nil then return nil, "malformed bfrange hi: " .. tostring(hi_err) end
+					if hi == nil then return nil, nil, "malformed bfrange hi: " .. tostring(hi_err) end
 					local hi_str = as_string(hi)
-					if hi_str == nil then return nil, "bfrange hi is not a hex string" end
+					if hi_str == nil then return nil, nil, "bfrange hi is not a hex string" end
 					skip_ws_and_comments(r)
 					local dst, dst_err = pdf_object.parse_object(r)
-					if dst == nil then return nil, "malformed bfrange destination: " .. tostring(dst_err) end
+					if dst == nil then return nil, nil, "malformed bfrange destination: " .. tostring(dst_err) end
 
 					local lo_code = bytes_to_uint(lo_str)
 					local hi_code = bytes_to_uint(hi_str)
@@ -1776,7 +1803,7 @@ local function parse_tounicode_cmap(bytes)
 						end
 					else
 						local dst_str = as_string(dst)
-						if dst_str == nil then return nil, "bfrange destination is neither a hex string nor an array" end
+						if dst_str == nil then return nil, nil, "bfrange destination is neither a hex string nor an array" end
 						local template = utf16be_units(dst_str)
 						for k = 0, hi_code - lo_code do
 							local units = {} --[[: { [integer]: integer } ]]
@@ -1789,6 +1816,25 @@ local function parse_tounicode_cmap(bytes)
 				skip_ws_and_comments(r)
 				read_token(r) -- consumes "endbfrange"
 
+			elseif token == "begincodespacerange" then
+				while true do
+					skip_ws_and_comments(r)
+					if find(r.src, "endcodespacerange", r.pos, true) == r.pos then break end
+					local lo, lo_err = pdf_object.parse_object(r)
+					if lo == nil then
+						return nil, nil, "malformed codespacerange entry: " .. tostring(lo_err)
+					end
+					local lo_str = as_string(lo)
+					if lo_str == nil then return nil, nil, "codespacerange lo is not a hex string" end
+					skip_ws_and_comments(r)
+					local hi, hi_err = pdf_object.parse_object(r)
+					if hi == nil then return nil, nil, "malformed codespacerange hi: " .. tostring(hi_err) end
+					if as_string(hi) == nil then return nil, nil, "codespacerange hi is not a hex string" end
+					if codespace_width == nil then codespace_width = #lo_str end
+				end
+				skip_ws_and_comments(r)
+				if not read_token(r) then return nil, nil, "expected 'endcodespacerange'" end -- consumes it
+
 			else
 				-- Other CMap keywords (usecmap, def, findresource, etc.) are
 				-- setup operators this module doesn't need to interpret;
@@ -1797,7 +1843,104 @@ local function parse_tounicode_cmap(bytes)
 		end
 	end
 
-	return map, nil
+	return map, codespace_width, nil
+end
+
+-- ── Type0/CID font support (ISO 32000-1 §9.7) ────────────────────────────
+-- A Type0 (composite) font's character codes select a CID (character
+-- identifier) via its /Encoding CMap; the CID then selects a glyph in the
+-- /DescendantFonts CIDFont (via CIDToGIDMap for CIDFontType2, or directly
+-- for CIDFontType0) and a width via the CIDFont's /DW + /W (ISO 32000-1
+-- §9.7.4.3, Table 117/120). Full code->CID resolution for an arbitrary
+-- CMap would need either the real Adobe CID-collection resource tables
+-- (predefined CMaps like UniGB-UTF16-H) or a begincidchar/begincidrange
+-- parser (embedded CMaps) — neither is built here (documented gap, see
+-- `M.font_from_dict`'s Type0 branch). What IS in scope: the Identity-H/V
+-- predefined CMaps, where code == CID *by definition* ("Identity" is
+-- exactly that mapping), so /DW+/W can be looked up directly by code with
+-- no CMap resolution at all. `code_to_width` therefore stays nil for any
+-- other Type0 /Encoding (predefined Uni*-UTF16-* CMaps, or a custom
+-- embedded CMap) even though `code_to_unicode` is supported for those via
+-- the paths below — CID and Unicode are looked up through entirely
+-- different mechanisms, and only the code==CID case has both.
+
+local PREDEFINED_UTF16_CMAPS = {
+	-- Adobe's four CJK character collections (GB/CNS/JIS/KS), UTF-16-H/V
+	-- variants only. Per the CMap's own name: its codes ARE the UTF-16BE
+	-- code units of the Unicode value directly — the CMap's job in a full
+	-- rendering pipeline is converting those units to CIDs of the named
+	-- collection for glyph lookup, but for text EXTRACTION the code is
+	-- already the answer, no CID step needed. -H/-V (horizontal/vertical
+	-- writing mode) decode identically; only layout direction differs,
+	-- which is irrelevant here (mirrors this file's existing Identity-H/
+	-- Identity-V precedent, which also decodes both the same way).
+	["UniGB-UTF16-H"] = true, ["UniGB-UTF16-V"] = true,
+	["UniCNS-UTF16-H"] = true, ["UniCNS-UTF16-V"] = true,
+	["UniJIS-UTF16-H"] = true, ["UniJIS-UTF16-V"] = true,
+	["UniKS-UTF16-H"] = true, ["UniKS-UTF16-V"] = true,
+} --[[: { [string]: boolean } ]]
+
+-- ISO 32000-1 §9.7.4.3, Table 117/120: /W is `[ c [w1 w2 ... wn]  cFirst cLast w  ... ]`,
+-- an array mixing two entry shapes freely: `cid [w1 w2 ...]` (consecutive
+-- CIDs starting at cid, one width per array element) and `cidFirst cidLast
+-- w` (every CID in the inclusive range gets the same width w). /DW (default
+-- width, Table 117) covers any CID /W doesn't mention; absent, its spec
+-- default is 1000 (Table 117, not 0 — distinct from simple fonts'
+-- /MissingWidth, which defaults to 0).
+--: (Document, { [string]: unknown, [integer]: unknown }) -> ((integer) -> number)
+local function build_code_to_cid_width(doc, cidfont_dict)
+	local dw = as_number(pdf.resolve(doc, cidfont_dict.DW))
+	if dw == nil then dw = 1000 end
+
+	local widths = {} --[[: { [integer]: number } ]]
+	local w_arr = as_array(pdf.resolve(doc, cidfont_dict.W))
+	if w_arr ~= nil then
+		local i = 1
+		while w_arr[i] ~= nil do
+			local first = as_integer(pdf.resolve(doc, w_arr[i]))
+			i = i + 1
+			if first == nil then break end -- malformed entry: stop, don't misread the rest
+			local second_raw = pdf.resolve(doc, w_arr[i])
+			local second_arr = as_array(second_raw)
+			if second_arr ~= nil then
+				-- `cid [w1 w2 ...]` form.
+				local j = 1
+				while second_arr[j] ~= nil do
+					local w = as_number(second_arr[j])
+					if w ~= nil then widths[first + j - 1] = w end
+					j = j + 1
+				end
+				i = i + 1
+			else
+				-- `cidFirst cidLast w` form.
+				local last = as_integer(second_raw)
+				i = i + 1
+				local w = as_number(pdf.resolve(doc, w_arr[i]))
+				i = i + 1
+				if last ~= nil and w ~= nil then
+					for cid = first, last do widths[cid] = w end
+				end
+			end
+		end
+	end
+
+	--: (integer) -> number
+	local function code_to_width(code)
+		local w = widths[code]
+		if w ~= nil then return w end
+		return dw
+	end
+	return code_to_width
+end
+
+-- /DescendantFonts (ISO 32000-1 §9.7.3) is a one-element array (the spec
+-- allows only exactly one) naming the CIDFont carrying /DW, /W,
+-- /CIDToGIDMap, etc.
+--: (Document, { [string]: unknown, [integer]: unknown }) -> ({ [string]: unknown, [integer]: unknown } | nil)
+local function descendant_cidfont_dict(doc, type0_dict)
+	local descendants = as_array(pdf.resolve(doc, type0_dict.DescendantFonts))
+	if descendants == nil then return nil end
+	return as_table(pdf.resolve(doc, descendants[1]))
 end
 
 -- ── Public API ────────────────────────────────────────────────────────────
@@ -1820,36 +1963,89 @@ function M.font_from_dict(doc, font_dict)
 		if tu == nil then return nil, nil end
 		local tu_bytes, tu_err = pdf.stream_to_bytes(tu)
 		if tu_bytes == nil then return nil, "failed to decode /ToUnicode stream: " .. tostring(tu_err) end
-		return parse_tounicode_cmap(tu_bytes)
+		local map, _, perr = parse_cmap(tu_bytes)
+		return map, perr
 	end
 
 	if subtype == "Type0" then
-		local encoding_name = as_name(pdf.resolve(doc, dict.Encoding))
-		if encoding_name ~= "Identity-H" and encoding_name ~= "Identity-V" then
-			return nil, "Type0 font uses /Encoding "
-				.. tostring(encoding_name or "(non-name value)")
-				.. "; only the Identity-H/Identity-V predefined identity encodings are "
-				.. "supported (documented gap: general CID CMap resolution is out of scope, see file header)"
-		end
+		local encoding_val = pdf.resolve(doc, dict.Encoding)
+		local encoding_name = as_name(encoding_val)
+		local encoding_stream = as_stream(encoding_val)
+
 		local tounicode_map, tu_err = load_tounicode_map()
-		if tounicode_map == nil then
-			if tu_err ~= nil then return nil, tu_err end
+		if tu_err ~= nil then return nil, tu_err end
+
+		-- Priority order per file header: /ToUnicode always wins when
+		-- present, regardless of /Encoding. Only when it's absent do the
+		-- /Encoding-driven fallbacks below apply — mirrors the simple-font
+		-- branch's ToUnicode-then-/Encoding priority further down.
+		local code_width = 2 --: integer
+		--: (integer) -> string | nil
+		local function no_mapping_yet(_) return nil end
+		local code_to_unicode_type0 = no_mapping_yet --: (integer) -> (string | nil)
+
+		if tounicode_map ~= nil then
+			local map = tounicode_map
+			--: (integer) -> string | nil
+			local function f(code) return map[code] end
+			code_to_unicode_type0 = f
+		elseif encoding_name ~= nil and PREDEFINED_UTF16_CMAPS[encoding_name] then
+			-- The code IS the UTF-16BE code unit already — see
+			-- PREDEFINED_UTF16_CMAPS' comment. A lone surrogate code (i.e. a
+			-- character outside the BMP, split across two consecutive
+			-- 2-byte codes) can't be recombined here: this module decodes
+			-- one code at a time with no lookahead across codes (unlike a
+			-- /ToUnicode bfrange destination, which declares its multi-unit
+			-- destination explicitly per source code). Documented gap, rare
+			-- for these four collections' repertoires.
+			--: (integer) -> string | nil
+			local function f(code) return units_to_utf8({ code }) end
+			code_to_unicode_type0 = f
+		elseif encoding_stream ~= nil then
+			local enc_bytes, enc_err = pdf.stream_to_bytes(encoding_stream)
+			if enc_bytes == nil then
+				return nil, "failed to decode Type0 /Encoding CMap stream: " .. tostring(enc_err)
+			end
+			local enc_map, enc_width, enc_perr = parse_cmap(enc_bytes)
+			if enc_map == nil then
+				return nil, "malformed Type0 /Encoding CMap stream: " .. tostring(enc_perr)
+			end
+			if enc_width ~= nil then code_width = enc_width end
+			local map = enc_map
+			--: (integer) -> string | nil
+			local function f(code) return map[code] end
+			code_to_unicode_type0 = f
+		elseif encoding_name == "Identity-H" or encoding_name == "Identity-V" then
 			return nil, "Type0 font has no /ToUnicode CMap; mapping composite-font codes to "
 				.. "Unicode without one requires full CID font resolution, which is out of "
 				.. "scope (documented gap, see file header)"
+		else
+			return nil, "Type0 font uses /Encoding "
+				.. tostring(encoding_name or "(non-name, non-stream value)")
+				.. "; only Identity-H/Identity-V, the predefined Uni*-UTF16-H/V CMaps, an "
+				.. "embedded CMap stream, or a /ToUnicode CMap are supported "
+				.. "(documented gap: general CID-collection CMap resolution is out of scope, "
+				.. "see file header)"
 		end
-		--: (integer) -> string | nil
-		local function code_to_unicode_type0(code) return tounicode_map[code] end
-		-- Type0/CID glyph widths (/DW default width + /W per-CID array,
-		-- ISO 32000-1 §9.7.4.3) are a distinct, more complex structure than
-		-- simple fonts' flat /Widths array (CID *ranges*, not one width per
-		-- code) — out of scope here, consistent with this module's existing
-		-- Type0 CID-resolution scope limit (see file header). `code_to_width`
-		-- stays nil; lib/pdf/text.lua's w0-as-0 approximation applies.
+
+		-- CID /DW+/W widths (see build_code_to_cid_width's comment above)
+		-- are only wired for Identity-H/V, where code == CID by
+		-- definition — every other /Encoding branch above needs a real
+		-- code->CID CMap this module doesn't resolve, so code_to_width
+		-- stays nil there (lib/pdf/text.lua's w0-as-0 approximation
+		-- applies, same as before this existed).
+		local code_to_width = nil --: ((integer) -> number) | nil
+		if encoding_name == "Identity-H" or encoding_name == "Identity-V" then
+			local cidfont_dict = descendant_cidfont_dict(doc, dict)
+			if cidfont_dict ~= nil then
+				code_to_width = build_code_to_cid_width(doc, cidfont_dict)
+			end
+		end
+
 		return {
-			code_width = 2,
+			code_width = code_width,
 			code_to_unicode = code_to_unicode_type0,
-			code_to_width = nil,
+			code_to_width = code_to_width,
 		}, nil
 	end
 

@@ -198,11 +198,93 @@ endbfchar
 		T.ok(err ~= nil)
 	end)
 
-	T.it("errors clearly on a non-Identity /Encoding (documented CID gap)", function()
+	T.it("errors clearly on a non-Identity, non-UTF16, non-embedded /Encoding (documented CID gap)", function()
+		-- UniGB-UCS2-H is a real predefined CMap name but NOT one of the
+		-- four UTF16 variants this module special-cases (see
+		-- PREDEFINED_UTF16_CMAPS) — still a documented gap.
 		local dict = { Subtype = name("Type0"), Encoding = name("UniGB-UCS2-H") }
 		local f, err = font.font_from_dict(NO_DOC, dict)
 		T.ok(f == nil)
 		T.ok(err ~= nil)
+	end)
+
+	T.it("/ToUnicode takes priority even when /Encoding is a non-Identity name", function()
+		-- Priority order (file header): /ToUnicode always wins when present,
+		-- regardless of /Encoding — this used to error unconditionally on a
+		-- non-Identity /Encoding even with /ToUnicode present; no longer.
+		local cmap = "1 beginbfchar\n<0041> <0048>\nendbfchar\n"
+		local dict = {
+			Subtype = name("Type0"),
+			Encoding = name("UniGB-UCS2-H"),
+			ToUnicode = raw_stream(cmap),
+		}
+		local f, err = font.font_from_dict(NO_DOC, dict)
+		T.eq(err, nil)
+		local ft = as_font(f)
+		T.eq(ft.code_to_unicode(0x0041), "H")
+	end)
+end)
+
+T.describe("font: Type0 predefined Uni*-UTF16-* CMaps", function()
+	T.it("decodes codes directly as UTF-16BE when /Encoding is UniGB-UTF16-H and there's no /ToUnicode", function()
+		local dict = { Subtype = name("Type0"), Encoding = name("UniGB-UTF16-H") }
+		local f, err = font.font_from_dict(NO_DOC, dict)
+		T.eq(err, nil)
+		local ft = as_font(f)
+		T.eq(ft.code_width, 2)
+		-- U+4E2D (中) as a UTF-16BE code unit.
+		T.eq(ft.code_to_unicode(0x4E2D), "\228\184\173")
+	end)
+
+	T.it("supports the -V (vertical) variant identically to -H", function()
+		local dict = { Subtype = name("Type0"), Encoding = name("UniJIS-UTF16-V") }
+		local f = as_font(font.font_from_dict(NO_DOC, dict))
+		T.eq(f.code_to_unicode(0x3042), "\227\129\130") -- U+3042 あ
+	end)
+
+	T.it("/ToUnicode still overrides a predefined UTF16 CMap when present", function()
+		local cmap = "1 beginbfchar\n<0041> <005A>\nendbfchar\n"
+		local dict = {
+			Subtype = name("Type0"),
+			Encoding = name("UniGB-UTF16-H"),
+			ToUnicode = raw_stream(cmap),
+		}
+		local f = as_font(font.font_from_dict(NO_DOC, dict))
+		T.eq(f.code_to_unicode(0x0041), "Z") -- from ToUnicode, not direct UTF-16BE ("A")
+	end)
+end)
+
+T.describe("font: Type0 embedded /Encoding CMap stream (bfchar/bfrange syntax)", function()
+	T.it("parses begincodespacerange + beginbfchar from an embedded /Encoding CMap", function()
+		local cmap = [[
+1 begincodespacerange
+<0000> <FFFF>
+endcodespacerange
+1 beginbfchar
+<0001> <0041>
+endbfchar
+]]
+		local dict = { Subtype = name("Type0"), Encoding = raw_stream(cmap) }
+		local f, err = font.font_from_dict(NO_DOC, dict)
+		T.eq(err, nil)
+		local ft = as_font(f)
+		T.eq(ft.code_width, 2) -- derived from the 2-byte codespacerange
+		T.eq(ft.code_to_unicode(1), "A")
+	end)
+
+	T.it("derives a 1-byte code_width from a 1-byte codespacerange", function()
+		local cmap = [[
+1 begincodespacerange
+<00> <FF>
+endcodespacerange
+1 beginbfchar
+<41> <0058>
+endbfchar
+]]
+		local dict = { Subtype = name("Type0"), Encoding = raw_stream(cmap) }
+		local f = as_font(font.font_from_dict(NO_DOC, dict))
+		T.eq(f.code_width, 1)
+		T.eq(f.code_to_unicode(0x41), "X")
 	end)
 end)
 
@@ -244,7 +326,7 @@ T.describe("font: /Widths parsing", function()
 		T.eq(f.code_to_width, nil)
 	end)
 
-	T.it("code_to_width is nil for a Type0 font (CID /W widths are out of scope)", function()
+	T.it("code_to_width is nil for an Identity-H Type0 font with no /DescendantFonts", function()
 		local dict = {
 			Subtype = name("Type0"),
 			Encoding = name("Identity-H"),
@@ -252,5 +334,63 @@ T.describe("font: /Widths parsing", function()
 		}
 		local f = as_font(font.font_from_dict(NO_DOC, dict))
 		T.eq(f.code_to_width, nil)
+	end)
+end)
+
+T.describe("font: CID /DW + /W width parsing (Identity-H/V Type0 fonts)", function()
+	--: (unknown) -> unknown
+	local function cidfont_type0(descendant)
+		return {
+			Subtype = name("Type0"),
+			Encoding = name("Identity-H"),
+			ToUnicode = raw_stream("1 beginbfchar\n<0041> <0041>\nendbfchar\n"),
+			DescendantFonts = { descendant },
+		}
+	end
+
+	T.it("looks up a CID's width from the 'cid [w1 w2 ...]' /W form", function()
+		local dict = cidfont_type0({ Subtype = name("CIDFontType2"), DW = 1000, W = { 3, { 500, 600, 700 } } })
+		local f = as_font(font.font_from_dict(NO_DOC, dict))
+		local c2w = f.code_to_width
+		if c2w == nil then error("expected code_to_width to be present") end
+		T.eq(c2w(3), 500)
+		T.eq(c2w(4), 600)
+		T.eq(c2w(5), 700)
+	end)
+
+	T.it("looks up a CID's width from the 'cidFirst cidLast w' /W form", function()
+		local dict = cidfont_type0({ Subtype = name("CIDFontType2"), W = { 10, 20, 850 } })
+		local f = as_font(font.font_from_dict(NO_DOC, dict))
+		local c2w = f.code_to_width
+		if c2w == nil then error("expected code_to_width to be present") end
+		T.eq(c2w(10), 850)
+		T.eq(c2w(15), 850)
+		T.eq(c2w(20), 850)
+	end)
+
+	T.it("mixes both /W forms in one array", function()
+		local dict = cidfont_type0({ Subtype = name("CIDFontType2"), W = { 3, { 500, 600 }, 10, 20, 850 } })
+		local f = as_font(font.font_from_dict(NO_DOC, dict))
+		local c2w = f.code_to_width
+		if c2w == nil then error("expected code_to_width to be present") end
+		T.eq(c2w(3), 500)
+		T.eq(c2w(4), 600)
+		T.eq(c2w(15), 850)
+	end)
+
+	T.it("falls back to /DW for a CID not covered by /W", function()
+		local dict = cidfont_type0({ Subtype = name("CIDFontType2"), DW = 750, W = { 3, { 500 } } })
+		local f = as_font(font.font_from_dict(NO_DOC, dict))
+		local c2w = f.code_to_width
+		if c2w == nil then error("expected code_to_width to be present") end
+		T.eq(c2w(999), 750)
+	end)
+
+	T.it("defaults /DW to 1000 (spec default) when absent", function()
+		local dict = cidfont_type0({ Subtype = name("CIDFontType2") })
+		local f = as_font(font.font_from_dict(NO_DOC, dict))
+		local c2w = f.code_to_width
+		if c2w == nil then error("expected code_to_width to be present") end
+		T.eq(c2w(999), 1000)
 	end)
 end)

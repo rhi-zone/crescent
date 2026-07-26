@@ -33,8 +33,11 @@
 -- same advance accumulation TJ adjustments and Tc/Tw already used. When a
 -- font has no /Widths array at all (`code_to_width == nil` — legitimate,
 -- e.g. a non-embedded standard-14 font relying on built-in metrics, or a
--- Type0/CID font, whose /DW+/W widths are a distinct out-of-scope
--- structure — see lib/pdf/font.lua), `width_sum` is 0 and the advance
+-- Type0/CID font whose /Encoding isn't Identity-H/V, where /DW+/W lookup
+-- would need a code->CID CMap this codebase doesn't resolve — see
+-- lib/pdf/font.lua's `build_code_to_cid_width` comment; Identity-H/V CID
+-- fonts DO get real /DW+/W-driven widths here, code==CID needing no CMap),
+-- `width_sum` is 0 and the advance
 -- degrades exactly to the previous w0-treated-as-0 approximation: a span's
 -- recorded position is always exact (computed from the real Tm/CTM at the
 -- start of the operation); only the advance to the NEXT untracked-width
