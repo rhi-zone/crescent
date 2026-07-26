@@ -8,6 +8,8 @@ end
 --
 -- All pure Lua — no external dependencies, vendorable.
 
+local utf8 = require("lib.encode.utf8")
+
 local M = {}
 M._tier = "pure"
 
@@ -35,8 +37,9 @@ local NUMBER_FORMATS = {
   -- SEPARATOR) and thousands separator (U+066C ARABIC THOUSANDS
   -- SEPARATOR). Digits are formatted as Western (0-9), not converted to
   -- Extended Arabic-Indic digits (U+06F0-06F9) — digit-system
-  -- substitution is a distinct concern from separator convention and is
-  -- not implemented here.
+  -- substitution is a distinct concern from separator convention;
+  -- callers who want Extended Arabic-Indic digits can pipe the result
+  -- of M.format_number through M.digits_to_system(str, "extended_arabic_indic").
   ["fa"] = { decimal = "\xd9\xab", group = "\xd9\xac", group_size = 3, group_sizes = nil },
   ["fa-IR"] = { decimal = "\xd9\xab", group = "\xd9\xac", group_size = 3, group_sizes = nil },
   ["de"] = { decimal = ",", group = ".", group_size = 3, group_sizes = nil },
@@ -63,6 +66,19 @@ local NUMBER_FORMATS = {
   ["pl-PL"] = { decimal = ",", group = "\xc2\xa0", group_size = 3, group_sizes = nil },
   ["tr"] = { decimal = ",", group = ".", group_size = 3, group_sizes = nil },
   ["tr-TR"] = { decimal = ",", group = ".", group_size = 3, group_sizes = nil },
+}
+
+-- Digit system substitution: codepoint of digit 0 for each supported
+-- decimal numbering system. Every system in this table is a contiguous
+-- block of 10 codepoints (digit d = base + d), matching the Unicode
+-- block classifications already used in lib/bidi/init.lua.
+--:: digit_system = "arabic_indic" | "extended_arabic_indic" | "devanagari" | "bengali" | "thai"
+local DIGIT_SYSTEM_BASE = { --: { [string]: integer }
+  arabic_indic           = 0x0660, -- U+0660-U+0669: Arabic-Indic digits (Arabic block; AN in bidi)
+  extended_arabic_indic  = 0x06F0, -- U+06F0-U+06F9: Extended Arabic-Indic digits (Persian/Urdu; EN in bidi)
+  devanagari             = 0x0966, -- U+0966-U+096F
+  bengali                = 0x09E6, -- U+09E6-U+09EF
+  thai                   = 0x0E50, -- U+0E50-U+0E59
 }
 
 -- Currency data: { symbol, position } where position is "prefix" or "suffix"
@@ -553,6 +569,39 @@ function M.parse_number(str, locale)
   end
   local n = tonumber(s)
   return n
+end
+
+-- M.digits_to_system(text, system) -> string | (nil, errmsg)
+-- Replaces every ASCII digit (0-9) in `text` with the corresponding
+-- digit from another decimal numbering system (see DIGIT_SYSTEM_BASE for
+-- the supported systems). A simple codepoint-offset substitution — every
+-- other byte, including any non-ASCII UTF-8 already in `text`, passes
+-- through unchanged. Safe without decoding: ASCII digit bytes
+-- (0x30-0x39) never occur as continuation bytes in valid UTF-8, so a raw
+-- byte-pattern scan cannot straddle or corrupt a multi-byte sequence.
+--: (string, digit_system) -> (string | nil, string | nil)
+function M.digits_to_system(text, system)
+  if type(text) ~= "string" then return nil, "text must be a string" end
+  local bases = DIGIT_SYSTEM_BASE
+  local base = bases[system]
+  if not base then return nil, "unknown digit system: "..tostring(system) end
+  --: (string) -> string
+  local function substitute_digit(d)
+    local b = string.byte(d)
+    if not b then return d end -- unreachable: %d always matches exactly one digit byte
+    -- TYPECHECKER WORKAROUND: `b` is already narrowed to non-nil by the
+    -- guard above, but string.byte's overloaded return type doesn't
+    -- survive the narrow into arithmetic (spuriously becomes `never` —
+    -- same family as the string.byte narrowing gaps logged in TODO.md
+    -- under "Typechecker substrate gaps (found while implementing
+    -- lib/pdf/object.lua, 2026-07-22)"). Checked (non-force) cast back
+    -- to the type already established. Revert once string.byte's
+    -- narrowing is fixed.
+    local bi = b --[[: integer]]
+    return utf8.char(base + (bi - 0x30))
+  end
+  local result = text:gsub("%d", substitute_digit)
+  return result
 end
 
 -- M.format_currency(n, currency, locale, opts) -> string | (nil, errmsg)

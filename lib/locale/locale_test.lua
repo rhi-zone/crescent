@@ -4,6 +4,7 @@ end
 
 local T = require("lib.test.assert")
 local L = require("lib.locale")
+local utf8 = require("lib.encode.utf8")
 
 T.describe("locale: locale()", function()
   T.it("parses language-region", function()
@@ -445,6 +446,56 @@ T.describe("locale: format_date", function()
   T.it("de style short has dots", function()
     local s = L.format_date(os.time(), "de", { style = "short", date_fn = os.date })
     T.ok(s:find("%.") ~= nil, "de short date should have dots, got: "..s)
+  end)
+end)
+
+T.describe("locale: digits_to_system", function()
+  T.it("converts ASCII digits to Arabic-Indic (U+0660-U+0669)", function()
+    local s, err = L.digits_to_system("0123456789", "arabic_indic")
+    T.ok(s, err)
+    T.eq(s, utf8.char(0x0660, 0x0661, 0x0662, 0x0663, 0x0664, 0x0665, 0x0666, 0x0667, 0x0668, 0x0669))
+  end)
+
+  T.it("converts ASCII digits to Extended Arabic-Indic (U+06F0-U+06F9)", function()
+    local s, err = L.digits_to_system("42", "extended_arabic_indic")
+    T.ok(s, err)
+    T.eq(s, utf8.char(0x06F4, 0x06F2))
+  end)
+
+  T.it("converts ASCII digits to Devanagari (U+0966-U+096F)", function()
+    local s, err = L.digits_to_system("7", "devanagari")
+    T.ok(s, err)
+    T.eq(s, utf8.char(0x0967 + 6)) -- U+096D
+  end)
+
+  T.it("converts ASCII digits to Bengali (U+09E6-U+09EF)", function()
+    local s, err = L.digits_to_system("9", "bengali")
+    T.ok(s, err)
+    T.eq(s, utf8.char(0x09EF))
+  end)
+
+  T.it("converts ASCII digits to Thai (U+0E50-U+0E59)", function()
+    local s, err = L.digits_to_system("0", "thai")
+    T.ok(s, err)
+    T.eq(s, utf8.char(0x0E50))
+  end)
+
+  T.it("leaves non-digit characters (including existing non-ASCII text) untouched", function()
+    local s, err = L.digits_to_system("Room 12" .. utf8.char(0x0623) .. "3!", "arabic_indic") -- trailing ARABIC LETTER ALEF WITH HAMZA ABOVE
+    T.ok(s, err)
+    T.eq(s, "Room " .. utf8.char(0x0661, 0x0662) .. utf8.char(0x0623) .. utf8.char(0x0663) .. "!")
+  end)
+
+  T.it("empty string round-trips to empty string", function()
+    local s, err = L.digits_to_system("", "thai")
+    T.ok(s, err)
+    T.eq(s, "")
+  end)
+
+  T.it("rejects an unknown digit system", function()
+    local s, err = L.digits_to_system("5", "klingon")
+    T.eq(s, nil)
+    T.ok(err)
   end)
 end)
 
