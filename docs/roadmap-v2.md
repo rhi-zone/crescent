@@ -223,7 +223,7 @@ and #2 directly. A text-extraction-first approach serves #3 and #5. These are
 different entry points into the same library. Which to start with depends on
 which motivating application comes first.
 
-### 2b. Internationalization depth
+### 2b. Internationalization depth -- bidi implemented and integrated (2026-07-26)
 
 The value landscape's strongest cross-cutting finding: "The single strongest
 predictor of underserved populations is whether a tool can function offline in
@@ -233,17 +233,21 @@ Crescent has `lib/i18n` (translation lookup, pluralization for 15+ languages,
 locale switching) and `lib/locale` (number/currency/date formatting, CLDR
 plural rules). These cover the basics.
 
-**What's missing for real non-English applications:**
+**Status: RTL text layout done.** `lib/bidi` implements the Unicode
+Bidirectional Algorithm (commit `1fe14493`, classification data and
+`visual_runs` API expanded in `6ef53d89`) and is wired into `lib/word_wrap`
+and `lib/text_justify`, so those utilities no longer assume left-to-right.
+This closes the RTL bullet below for Arabic and Hebrew.
 
-- **Right-to-left text layout.** Arabic and Hebrew are among the largest
-  underserved language communities. `lib/layout`, `lib/word_wrap`,
-  `lib/text_justify` all assume left-to-right.
+**What's still missing for real non-English applications:**
+
 - **Complex script shaping.** Hindi (1B+ internet users, <0.1% of web
   content) and other Indic scripts use conjunct consonants, vowel signs, and
   reordering rules that basic Unicode rendering does not handle. This is a
   hard problem -- HarfBuzz exists because it's hard -- but crescent's text
   utilities need at least awareness of script directionality and cluster
-  boundaries.
+  boundaries. Bidi (above) covers directionality; cluster-boundary awareness
+  and shaping itself remain open.
 - **Input method support.** CJK input methods, Indic transliteration. This
   matters for any text-input application.
 - **Locale-specific financial formats.** `lib/money` has 22 ISO 4217
@@ -251,43 +255,71 @@ plural rules). These cover the basics.
   (comma vs period as decimal separator), date formats, and tax period
   conventions.
 
-**Open question:** How deep to go. Full complex script shaping is a
+**Open question:** How deep to go on shaping. Full complex script shaping is a
 multi-year effort (HarfBuzz is 200K+ lines of C). The pragmatic path might
-be: ensure all text utilities handle UTF-8 correctly, add RTL awareness to
-layout, and provide locale-aware formatting -- then let system-tier font
-rendering handle the shaping. But this depends on what rendering surface
-crescent applications target (terminal? browser? native?).
+be: keep bidi as the directionality layer (done), add cluster-boundary
+awareness, and provide locale-aware formatting -- then let system-tier font
+rendering handle the shaping itself. But this depends on what rendering
+surface crescent applications target (terminal? browser? native?).
 
-### 2c. Double-entry bookkeeping library
+### 2c. Double-entry bookkeeping library -- domain model done (2026-07-26)
 
 The value landscape ranks personal finance / micro-business bookkeeping #1.
 Crescent has the arithmetic primitives (`lib/decimal`, `lib/money`,
-`lib/finance`) and storage (`lib/sqlite`), but no library models the domain.
+`lib/finance`) and storage (`lib/sqlite`); `lib/bookkeeping` now models the
+domain (commit `6105015f`).
 
-**What a `lib/bookkeeping` (or similar) would provide:**
+**Status: core domain model implemented.** `lib/bookkeeping/` has
+`account.lua` (chart of accounts), `journal.lua` (double-entry journal
+entries, debits/credits), `ledger.lua` (derived ledger), and
+`trial_balance.lua` (trial balance), each with its own test file.
 
-- Chart of accounts (asset, liability, equity, revenue, expense).
-- Journal entries (double-entry: debits and credits must balance).
-- Ledger (derived from journal entries).
-- Trial balance, income statement, balance sheet (derived from ledger).
-- Multi-currency with exchange rate tracking.
-- Cash-basis and accrual-basis views.
-- Import from common formats: OFX, QIF, CSV bank statements.
+**What remains:** Income statement / balance sheet reports built on top of
+the trial balance, multi-currency exchange-rate tracking, cash-basis vs.
+accrual-basis views, and import from OFX/QIF/CSV bank statements are not yet
+covered by the current `lib/bookkeeping` files -- these were listed as
+target capabilities and haven't been individually confirmed done or
+outstanding in this pass; check `lib/bookkeeping/init.lua` and the test
+files directly before assuming any one of them is missing or present.
 
-**Why a library, not an application:** Per crescent's philosophy, the library
-provides the domain logic. Applications (CLI tool, TUI dashboard, web app)
-are separate consumers. The library is the reusable piece; the application
-is the motivating target.
+**Resolved:** The original open question (standalone `lib/bookkeeping` vs. a
+pattern on top of `lib/ecs`) was decided in favor of the standalone library.
 
-**Open question:** Whether to model this as a standalone `lib/bookkeeping` or
-as a pattern on top of `lib/ecs` (entities = accounts, transactions;
-components = amounts, dates, categories). The ECS approach is more general
-but may over-abstract a well-understood domain.
-
-### 2d. Form/document structure library
+### 2d. Form/document structure library -- substantially built via lib/unified
 
 For bureaucratic forms (#2) and accessibility (#3): a library that models
 document structure independent of format.
+
+**Status: largely done, not greenfield.** The original open question below
+(new library vs. extend `lib/unified`) is resolved in favor of `lib/unified`:
+it's no longer "wip with many empty shells" -- mdast, hast, and remark_gfm
+are at 59/61 rows implemented, and the broader `lib/unified/` tree now
+spans ~60 plugin/util directories (remark/rehype/retext/unist/xast families:
+frontmatter, footnotes, math, directives, sanitize, highlight, slug,
+autolink-headings, external-links, accessible-emojis, and more -- see
+`lib/unified/` for the full list). What's described below as forward-looking
+scope is now largely present as `lib/unified` node kinds and plugins;
+remaining work is incremental extension (new importers/exporters, WCAG
+validation logic) on an existing foundation, not building the AST layer from
+scratch.
+
+**rescribe evaluated as prior art, not adopted as canonical.** `rescribe`
+(a Rust document-IR project) was audited in detail as a candidate for this
+role -- see `docs/rescribe-gaps.md`. Conclusion: `rescribe::Document` does
+not become crescent's canonical document/PDF representation. There is no
+`pdf-fmt` crate in rescribe and PDF is not queued in rescribe's own vertical
+order, so waiting on it would mean waiting on a vertical that doesn't exist.
+Instead: `rescribe::Document` is an optional interchange target for
+non-PDF-specific parts of a pipeline (e.g. a Markdown/HTML/DOCX conversion
+step); it is not something crescent's own document/PDF models route through.
+**crescent's PDF models stay native and authoritative** --
+`lib/pdf/text.lua`'s `Span` and `lib/pdf/form.lua`'s `FormField` remain the
+source of truth for PDF structure, including for the field/widget
+shared-identity problem that `rescribe::Document`'s pure tree model can't
+express structurally (crescent already solves it by flattening). Two small
+fixes worth raising with rescribe's maintainers directly (RTF `lang`
+namespacing bug; documenting the ResourceId-style ID/reference convention)
+are non-blocking drive-by items, not part of this roadmap item.
 
 - Headings, paragraphs, lists, tables, form fields, reading order.
 - Importers from HTML (already have `lib/xml`, `lib/css_parser`), PDF (needs
@@ -297,11 +329,6 @@ document structure independent of format.
   contrast -- `lib/color` already has WCAG contrast ratio).
 
 This is a larger effort than bookkeeping but serves two top-5 categories.
-
-**Open question:** Whether to build this as a new library or extend
-`lib/unified` (the unified.js-style pipeline, currently wip with many empty
-shells). The unified pipeline already models document ASTs (mdast, hast); a
-"document structure" abstraction could be another node type in that system.
 
 ---
 
@@ -506,9 +533,9 @@ spent.
 | 1b | TLS audit + completion | -- | Production HTTPS | Linux x86_64 done (2026-07-22); other platforms + pure-Lua fallback open |
 | 1c | Package manager install | -- | Adoption | Not started |
 | 2a | PDF codec | -- | Finance, forms, a11y, conversion | Foundation + forms + text extraction done (2026-07-22); see scope gaps above |
-| 2b | i18n depth (RTL, locale) | -- | Non-English applications | Not started |
-| 2c | Bookkeeping library | 2a (for PDF import) | Finance app | Not started |
-| 2d | Document structure lib | 2a | Forms app, a11y tooling | Not started |
+| 2b | i18n depth (RTL, locale) | -- | Non-English applications | Bidi implemented + integrated with word_wrap/text_justify (2026-07-26); shaping, input methods, locale-aware financial formats open |
+| 2c | Bookkeeping library | 2a (for PDF import) | Finance app | Domain model done (account/journal/ledger/trial_balance, 2026-07-26); reports, multi-currency, bank-format import not yet confirmed |
+| 2d | Document structure lib | 2a | Forms app, a11y tooling | Substantially built via `lib/unified` (mdast/hast/remark_gfm 59/61 rows); rescribe evaluated as prior art, not adopted as canonical -- see `docs/rescribe-gaps.md` |
 | 3a | Finance/bookkeeping app | 1a, 2a, 2b, 2c | Proves substrate for #1 value category | Not started |
 | 3b | Developer tools | 1c, 1d | Ongoing | Ongoing |
 | 3c | Format conversion tool | 2a (optional) | Proves substrate for #5 value category | Not started |
