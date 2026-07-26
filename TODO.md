@@ -4669,3 +4669,28 @@ framing.
   - **Arithmetic semantics:** Pascal fixed-width integer and real arithmetic with specific overflow behavior must be handled deliberately so it doesn't silently diverge under Lua's number semantics. 
   - **Scale and effort:** tex.web is ~26,000 lines / ~1,300 numbered sections — a large mechanical effort, not a quick prototyping project.
   - **Project scope:** undecided whether this would live as a crescent `lib/` or `dep/` candidate, or as a standalone/personal project entirely separate. If pursued inside crescent, would need to reconcile with crescent's zero-dependency + pure-Lua-baseline rules (e.g., the memory-model question is exactly the kind of semantic tradeoff those rules are designed to surface).
+
+---
+
+## Session handoff (2026-07-26)
+
+**Phase 1 complete (async I/O + TLS Linux x86_64).** Phase 2 substantially complete (PDF codec + i18n + bookkeeping). Phase 3 substrate ready.
+
+**This session (Phase 2 closeout):**
+- 2a PDF: Real-world robustness — ASCII85/ASCIIHex/RunLength/LZW filters, Object Stream caching, TIFF predictor, CID font widths, Type0 CMap support (Uni*-UTF16-H/V + embedded CMaps). 501 assertions (up from 388).
+- 2b i18n: Bidi complete (including UAX#9 N0 paired brackets), Arabic joining/shaping, digit-system substitution. Total: 212 bidi assertions, 135 locale assertions.
+- 2c bookkeeping: Multi-format import (CSV/OFX/QIF) completed. Unified CSV conversion path prevents import-format duplication. Fixed real `lib/sqlite` NULL-truncation bug. 305 assertions total.
+- 2d (already done): `lib/unified` mdast/hast/remark_gfm substantially built. Rescribe evaluated as prior art, not adopted as canonical.
+- Phase 3 substrate: Fractal projection pattern ported to `lib/fractal/` (op, api, merge_meta, TypeRef). Conventions documented in `docs/roadmap-v2.md` "Strategic direction: Fractal projection pattern" and "Format library porting strategy" sections.
+
+**Next session (Phase 3 work):**
+- 3a: Personal finance app using fractal projection pattern. Start by defining the chart-of-accounts and report-structure tree once, then project to CLI output, web UI, export formats (CSV, PDF).
+- 3b: Developer tools (MCP server, type search, pkg manager polish) using fractal projectors.
+- 3c: Format conversion tool (optional; many conversions work today without Phase 2c PDF, but PDF completes the high-value set).
+- Markdown consolidation: `lib/markdown` onto `lib/unified/mdast` as first test of canonical-parser-per-format convention.
+
+**Typechecker is parked.** Per earlier verdict: autonomous agent-directed development discontinued. Existing legacy checker (v2/v3) gates all commits, working reliably. Resuming typechecker work requires either solving hard-problem in v9 lineage or finding fundamentally different approach — outside Phase 3 scope.
+
+**Unresolved design questions (from prior sessions, no product implications yet):**
+- Self-expression as civilizational absence (`docs/self-compression-research.md`) — owner said sit with it, no decision needed for roadmap.
+

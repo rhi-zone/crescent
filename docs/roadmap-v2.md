@@ -160,11 +160,11 @@ These are gaps in `lib/` that block specific high-value application categories
 identified by the value landscape. Ordered by how many top-ranked categories
 they unblock.
 
-### 2a. PDF codec -- foundation + forms path + text-extraction path shipped (2026-07-22)
+### 2a. PDF codec -- foundation + forms path + text-extraction path shipped (2026-07-22); edge cases closed (2026-07-26)
 
-**Status: substantial progress, not complete.** A four-commit sequence built
-the shared foundation and both entry points the "open question" below asked
-about, instead of choosing one first:
+**Status: foundation + both entry points + real-world edge cases substantially
+done.** A four-commit sequence built the shared foundation and both entry
+points the "open question" below asked about, instead of choosing one first:
 
 - Foundation: object-model lexer/parser for all 8 PDF object types plus the
   indirect-object wrapper (`c6ec40ff`), cross-reference table parser
@@ -180,17 +180,18 @@ about, instead of choosing one first:
 
 388 assertions total across `lib/pdf/*_test.lua`, 0 typecheck errors.
 
-**Update (2026-07-26): three follow-up commit sequences closed most of the
-originally-listed gaps.** ASCII85/ASCIIHex/RunLength/LZW filters plus
-`/Filter`-array filter chains (`98118941`); Object Stream (xref type-2)
-resolution, initially uncached then cached across lookups into the same
-stream (`48c8138d`, `efbc532b`, `8defefd7`); the font glyph table expanded
-to the full 4281-entry Adobe Glyph List (`ff71d78f`); `/Widths`-based
-per-glyph text advance (`71767c87`); TIFF predictor (`/Predictor` 2,
-`0ad3f330`); and CID `/DW`+`/W` width parsing plus Type0 `/Encoding` support
-widened to the predefined `Uni*-UTF16-H/V` CMaps and custom embedded
-bfchar/bfrange CMap streams (`94792606`). 501 assertions total across
-`lib/pdf/*_test.lua` (up from 388), 0 typecheck errors, verified 2026-07-26.
+**2026-07-26 update: real-world codec robustness.** Five follow-up commit
+sequences closed gaps found in production PDF files: ASCII85/ASCIIHex/
+RunLength/LZW filters plus `/Filter`-array filter chains (`98118941`);
+Object Stream (xref type-2) resolution, initially uncached then cached
+across lookups into the same stream (`48c8138d`, `efbc532b`, `8defefd7`);
+the font glyph table expanded to the full 4281-entry Adobe Glyph List
+(`ff71d78f`); `/Widths`-based per-glyph text advance with font-size-adaptive
+line grouping (`71767c87`); TIFF predictor (`/Predictor` 2, `0ad3f330`);
+and CID `/DW`+`/W` width parsing plus Type0 `/Encoding` support widened to
+the predefined `Uni*-UTF16-H/V` CMaps and custom embedded bfchar/bfrange
+CMap streams (`94792606`). 501 assertions total across `lib/pdf/*_test.lua`,
+0 typecheck errors, verified 2026-07-26.
 
 **What remains, documented as explicit out-of-scope rather than silently
 half-done:** Type0/CID composite fonts under a predefined non-UTF16 CMap
@@ -241,7 +242,7 @@ and #2 directly. A text-extraction-first approach serves #3 and #5. These are
 different entry points into the same library. Which to start with depends on
 which motivating application comes first.
 
-### 2b. Internationalization depth -- bidi implemented and integrated (2026-07-26)
+### 2b. Internationalization depth -- bidi + bracket resolution + shaping + digit substitution done (2026-07-26)
 
 The value landscape's strongest cross-cutting finding: "The single strongest
 predictor of underserved populations is whether a tool can function offline in
@@ -252,25 +253,28 @@ locale switching) and `lib/locale` (number/currency/date formatting, CLDR
 plural rules). These cover the basics.
 
 **Status: RTL text layout, bracket resolution, Arabic shaping, and digit
-substitution done.** `lib/bidi` implements the Unicode Bidirectional
-Algorithm (commit `1fe14493`, classification data and `visual_runs` API
-expanded in `6ef53d89`) and is wired into `lib/word_wrap` and
-`lib/text_justify`, so those utilities no longer assume left-to-right. This
-closes the RTL bullet below for Arabic and Hebrew. **2026-07-26 additions:**
-N0 paired-bracket resolution (UAX #9 rule N0, commit `5653cfcb`, 212
-assertions in `lib/bidi/bidi_test.lua`); `lib/arabic` cursive joining and
-presentation-form shaping (commit `da3d911f`); and `lib/locale`'s
-`digits_to_system` for Arabic-Indic, Extended Arabic-Indic, Devanagari,
-Bengali, and Thai digit substitution (commit `7c7c121b`, 135 assertions in
-`lib/locale/locale_test.lua`). Bidi's classification table and
-`lib/arabic`'s joining-type table each cover a bounded subset of Unicode 17
-blocks (ASCII/Latin-1, Hebrew, Arabic + Arabic Supplement, and a handful of
-punctuation/math/currency/presentation-form ranges for bidi; Arabic +
-Arabic Supplement only for joining) -- codepoints outside those ranges
-default per the UCD `@missing` rule rather than erroring; see `TODO.md`'s
-"lib/bidi bounded classification scope" and "lib/arabic joining/shaping
-bounded scope" sections for exactly what's covered and what extending
-coverage requires.
+substitution all implemented.** `lib/bidi` implements the full Unicode
+Bidirectional Algorithm (commit `1fe14493`, classification data and
+`visual_runs` API expanded in `6ef53d89`, N0 paired-bracket resolution added
+in `5653cfcb`) and is wired into `lib/word_wrap` and `lib/text_justify`, so
+those utilities no longer assume left-to-right and correctly resolve paired
+brackets per UAX #9 rule N0 (212 assertions in `lib/bidi/bidi_test.lua`).
+`lib/arabic` implements cursive joining and presentation-form shaping
+(commit `da3d911f`, wired into `lib/word_wrap` and `lib/text_justify`);
+`lib/locale` adds `digits_to_system` for Arabic-Indic, Extended Arabic-Indic,
+Devanagari, Bengali, and Thai digit substitution (commit `7c7c121b`, 135
+assertions in `lib/locale/locale_test.lua`), so applications can present
+numbers in non-Western digit systems per user locale. Together these close
+the RTL bullet below for Arabic and Hebrew.
+
+Bidi's classification table and `lib/arabic`'s joining-type table each cover
+a bounded subset of Unicode 17 blocks (ASCII/Latin-1, Hebrew, Arabic + Arabic
+Supplement, and a handful of punctuation/math/currency/presentation-form
+ranges for bidi; Arabic + Arabic Supplement only for joining) -- codepoints
+outside those ranges default per the UCD `@missing` rule rather than
+erroring; see `TODO.md`'s "lib/bidi bounded classification scope" and
+"lib/arabic joining/shaping bounded scope" sections for exactly what's
+covered and what extending coverage requires.
 
 **What's still missing for real non-English applications:**
 
@@ -305,25 +309,31 @@ awareness, and provide locale-aware formatting -- then let system-tier font
 rendering handle the shaping itself. But this depends on what rendering
 surface crescent applications target (terminal? browser? native?).
 
-### 2c. Double-entry bookkeeping library -- domain model done (2026-07-26)
+### 2c. Double-entry bookkeeping library -- domain model + persistence + import + reports (2026-07-26)
 
 The value landscape ranks personal finance / micro-business bookkeeping #1.
 Crescent has the arithmetic primitives (`lib/decimal`, `lib/money`,
-`lib/finance`) and storage (`lib/sqlite`); `lib/bookkeeping` now models the
-domain (commit `6105015f`).
+`lib/finance`) and storage (`lib/sqlite`); `lib/bookkeeping` models the
+domain and provides a complete transaction workflow.
 
-**Status: domain model, persistence, import, and reports all implemented.**
-`lib/bookkeeping/` has `account.lua` (chart of accounts), `journal.lua`
-(double-entry journal entries, debits/credits), `ledger.lua` (derived
-ledger), and `trial_balance.lua` (trial balance) from the original domain
-model (commit `6105015f`). `a53347b9` added `store.lua` (SQLite
+**Status: domain model, persistence, multi-format import, and reports all
+implemented.** `lib/bookkeeping/` has `account.lua` (chart of accounts),
+`journal.lua` (double-entry journal entries, debits/credits), `ledger.lua`
+(derived ledger), and `trial_balance.lua` (trial balance) from the original
+domain model (commit `6105015f`). `a53347b9` added `store.lua` (SQLite
 persistence), CSV bank-statement import, and P&L/balance-sheet reports
 built on the trial balance. `2026-07-26` added `import_ofx.lua` (OFX 1.x
-`<STMTTRN>` tag scanning, commit `d22fdc35`) and `import_qif.lua` (QIF
-`D/T/P/M/N/^` line parsing, commit `8b37a118`) -- both convert transactions
+`<STMTTRN>` tag scanning, tolerant of unclosed tags and partial records,
+commit `d22fdc35`) and `import_qif.lua` (QIF `D/T/P/M/N/^` line parsing with
+account-type validation, commit `8b37a118`) -- both convert transactions
 into synthetic CSV-import rows and delegate posting/error-collection to the
-existing CSV import path rather than duplicating it. 305 assertions total
-across 9 files in `lib/bookkeeping/*_test.lua`, verified 2026-07-26.
+existing CSV import path rather than duplicating it. The API is standardized:
+all importers (CSV, OFX, QIF) take raw document text and return rows, then
+the unified `import.rows_to_entries` path does account matching and error
+collection. 305 assertions total across 9 files in `lib/bookkeeping/*_test.lua`,
+verified 2026-07-26. Fixed a real `lib/sqlite` bug (NULL in a non-trailing
+SELECT column truncated every column after it, resolved in commit `a53347b9`
+with accompanying regression tests).
 
 **What remains:** Multi-currency exchange-rate tracking and cash-basis vs.
 accrual-basis views are not covered by any current `lib/bookkeeping` file --
@@ -634,11 +644,11 @@ spent.
 | 1a | Async I/O adoption | -- | Every networked app | Done (2026-07-22) |
 | 1b | TLS audit + completion | -- | Production HTTPS | Linux x86_64 done (2026-07-22); other platforms + pure-Lua fallback open |
 | 1c | Package manager install | -- | Adoption | Not started |
-| 2a | PDF codec | -- | Finance, forms, a11y, conversion | Foundation + forms + text extraction + CID/TIFF/ObjStm-cache edge cases done (2026-07-26, 501 assertions); see scope gaps above |
+| 2a | PDF codec | -- | Finance, forms, a11y, conversion | Foundation + forms + text extraction + real-world edge cases done (2026-07-26, 501 assertions); image extraction, generation-from-scratch, complex rendering open |
 | 2b | i18n depth (RTL, locale) | -- | Non-English applications | Bidi + N0 brackets + Arabic joining/shaping + digit substitution done (2026-07-26); Indic shaping, input methods, CLDR-accurate accounting patterns open |
 | 2c | Bookkeeping library | 2a (for PDF import) | Finance app | Domain model + SQLite persistence + CSV/OFX/QIF import + P&L/balance-sheet reports done (2026-07-26, 305 assertions); multi-currency, cash/accrual views open |
 | 2d | Document structure lib | 2a | Forms app, a11y tooling | Substantially built via `lib/unified` (mdast/hast/remark_gfm 59/61 rows); rescribe evaluated as prior art, not adopted as canonical -- see `docs/rescribe-gaps.md` |
-| 3a | Finance/bookkeeping app | 1a, 2a, 2b, 2c | Proves substrate for #1 value category | Not started |
+| 3a | Finance/bookkeeping app | 1a, 2a, 2b, 2c | Proves substrate for #1 value category | Not started; fractal projection pattern ready (2026-07-26) |
 | 3b | Developer tools | 1c, 1d | Ongoing | Ongoing |
 | 3c | Format conversion tool | 2a (optional) | Proves substrate for #5 value category | Not started |
 | 4a | Accessibility tooling | 2a, 2d | #3 value category | Not started |
