@@ -4553,6 +4553,12 @@ framing.
 
 - [ ] **Terminal multiplexer implementation continuing.** Web-based terminal with PTY + WebSocket + VT state machine. Initial implementation in progress: WS frame format wired (commits `36712c59`, `eacf0650`), xterm.js vendored (`dep/xterm-js/`), shell configurable via manifest (`terminal_mux/manifest.json`), frontend rendering working. Next: streaming protocol hardening, connection state management, tab/tiling UX.
 
+## lib/bidi bounded classification scope (2026-07-26)
+
+- [ ] **`lib/bidi/init.lua` classification table covers a bounded subset of Unicode 17.0 `DerivedBidiClass.txt`, not the full 1.1M-codepoint file.** Covered ranges: ASCII + Latin-1 Supplement (U+0000-U+00FF), Hebrew (U+0590-U+05FF), Arabic (U+0600-U+06FF), Arabic Supplement (U+0750-U+077F), General Punctuation (U+2000-U+206F), Currency Symbols (U+20A0-U+20CF), Mathematical Operators (U+2200-U+22FF), Hebrew Presentation Forms (U+FB1D-U+FB4F), Arabic Presentation Forms-A (U+FB50-U+FDFF), Arabic Presentation Forms-B (U+FE70-U+FEFF). Codepoints outside these ranges default to L (the UCD `@missing` default for 0000..10FFFF). This means scripts like Thaana (U+0780-U+07BF, R), Syriac (U+0700-U+074F, AL), N'Ko (U+07C0-U+07FF, R), and others will be misclassified as L. Extending coverage: add ranges to the `RANGES` table following the existing pattern, sourcing from `DerivedBidiClass.txt` and cross-checking `@missing` block defaults.
+
+- [ ] **N0 (paired bracket resolution, UAX #9 rule N0) is not implemented.** Brackets in mixed-direction text are resolved by N1-N2 (surrounding strong type or embedding direction), which is correct for most cases but may produce visually awkward bracket directionality in edge cases involving parentheses/brackets between opposite-direction runs. N0 requires `BidiBrackets.txt` data and a stack-based pairing algorithm.
+
 ## Ideas & Speculative Future Work
 
 *Backlog entries that are not yet scoped or committed. Included for context preservation and to avoid re-deriving open questions.*
