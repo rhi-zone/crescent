@@ -296,4 +296,30 @@ function M.wrap(text, width, opts)
   return table.concat(lines, "\n")
 end
 
+-- ── Bidi visual reordering ──────────────────────────────────────────────────
+
+local bidi_ok, bidi = pcall(require, "lib.bidi")
+
+--- Reorder each line in `lines` from logical to visual order using the
+-- Unicode Bidirectional Algorithm. Returns a new array of reordered strings.
+-- Requires lib/bidi; returns (nil, errmsg) if it is not available or if
+-- reordering fails on any line.
+-- opts.base_direction: "auto" (default) | "ltr" | "rtl" — forwarded to
+--   bidi.reorder_to_visual for each line.
+--: ({ [integer]: string }, { base_direction?: string } | nil) -> ({ [integer]: string } | nil, string | nil)
+function M.visual_reorder(lines, opts)
+  if not bidi_ok then return nil, "lib/bidi is not available" end
+  local bidi_opts = nil --: { base_direction?: string } | nil
+  if opts and opts.base_direction then
+    bidi_opts = { base_direction = opts.base_direction }
+  end
+  local result = {} --: { [integer]: string }
+  for i = 1, #lines do
+    local reordered, err = bidi.reorder_to_visual(lines[i], bidi_opts)
+    if not reordered then return nil, err end
+    result[i] = reordered
+  end
+  return result
+end
+
 return M

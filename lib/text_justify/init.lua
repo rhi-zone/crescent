@@ -423,4 +423,35 @@ function M.dedent(text)
   return table.concat(lines, "\n")
 end
 
+-- ── Bidi visual reordering ──────────────────────────────────────────────────
+
+local bidi_ok, bidi = pcall(require, "lib.bidi")
+
+--- Reorder a single line from logical to visual order using the
+-- Unicode Bidirectional Algorithm. Returns the reordered string.
+-- Requires lib/bidi; returns (nil, errmsg) if it is not available or if
+-- reordering fails.
+-- opts.base_direction: "auto" (default) | "ltr" | "rtl" -- forwarded to
+--   bidi.reorder_to_visual.
+--: (string, { base_direction?: string } | nil) -> (string | nil, string | nil)
+function M.visual_reorder(text, opts)
+  if not bidi_ok then return nil, "lib/bidi is not available" end
+  local bidi_opts = nil --: { base_direction?: string } | nil
+  if opts and opts.base_direction then
+    bidi_opts = { base_direction = opts.base_direction }
+  end
+  return bidi.reorder_to_visual(text, bidi_opts)
+end
+
+--- Detect the paragraph direction of text using the first strong
+-- directional character (UAX #9 P2-P3). Returns "ltr" or "rtl".
+-- Requires lib/bidi; returns (nil, errmsg) if it is not available.
+--: (string) -> (string | nil, string | nil)
+function M.detect_direction(text)
+  if not bidi_ok then return nil, "lib/bidi is not available" end
+  local result, err = bidi.resolve_levels(text)
+  if not result then return nil, err end
+  return result.paragraph_level == 1 and "rtl" or "ltr"
+end
+
 return M

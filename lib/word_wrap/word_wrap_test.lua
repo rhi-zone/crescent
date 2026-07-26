@@ -448,6 +448,58 @@ T.describe("wrap", function()
 end)
 
 -- ────────────────────────────────────────────────
+-- visual_reorder (bidi integration)
+-- ────────────────────────────────────────────────
+
+T.describe("visual_reorder", function()
+  local utf8_ok, utf8 = pcall(require, "lib.encode.utf8")
+
+  T.it("returns lines unchanged for pure LTR text", function()
+    local lines = wrap.greedy("hello world foo bar", 10)
+    local reordered, err = wrap.visual_reorder(lines)
+    T.ok(reordered, err)
+    for i = 1, #lines do
+      T.eq(reordered[i], lines[i])
+    end
+  end)
+
+  if utf8_ok then
+    T.it("reverses Hebrew text within each wrapped line", function()
+      -- Two Hebrew words, each 3 codepoints (6 bytes each).
+      -- Wrap at width 20 (wide enough for both on one line).
+      local alef, bet, gimel = 0x05D0, 0x05D1, 0x05D2
+      local dalet, he, vav = 0x05D3, 0x05D4, 0x05D5
+      local text = utf8.char(alef, bet, gimel) .. " " .. utf8.char(dalet, he, vav)
+      local lines = { text }
+      local reordered, err = wrap.visual_reorder(lines)
+      T.ok(reordered, err)
+      -- Visual order should reverse the Hebrew characters.
+      -- The space stays between the two words but the words swap sides
+      -- (RTL paragraph: second word appears first visually).
+      T.ok(reordered[1] ~= text, "reordered should differ from logical order")
+    end)
+
+    T.it("respects base_direction option", function()
+      local alef = 0x05D0
+      local text = "hello " .. utf8.char(alef)
+      local lines = { text }
+      local r_auto = wrap.visual_reorder(lines)
+      local r_rtl = wrap.visual_reorder(lines, { base_direction = "rtl" })
+      T.ok(r_auto)
+      T.ok(r_rtl)
+      -- Forced RTL should differ from auto (which detects LTR from 'h')
+      T.ok(r_auto[1] ~= r_rtl[1], "RTL forced direction should differ from auto")
+    end)
+  end
+
+  T.it("handles empty lines array", function()
+    local reordered, err = wrap.visual_reorder({})
+    T.ok(reordered, err)
+    T.eq(#reordered, 0)
+  end)
+end)
+
+-- ────────────────────────────────────────────────
 -- _tier
 -- ────────────────────────────────────────────────
 

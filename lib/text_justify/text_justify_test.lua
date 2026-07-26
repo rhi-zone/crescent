@@ -423,6 +423,74 @@ T.describe("pad_center", function()
   end)
 end)
 
+-- ── visual_reorder / detect_direction (bidi integration) ─────────────────────
+
+T.describe("visual_reorder", function()
+  local utf8_ok, utf8 = pcall(require, "lib.encode.utf8")
+
+  T.it("returns LTR text unchanged", function()
+    local result, err = J.visual_reorder("hello world")
+    T.ok(result, err)
+    T.eq(result, "hello world")
+  end)
+
+  if utf8_ok then
+    T.it("reorders Hebrew text to visual order", function()
+      local alef, bet, gimel = 0x05D0, 0x05D1, 0x05D2
+      local text = utf8.char(alef, bet, gimel)
+      local result, err = J.visual_reorder(text)
+      T.ok(result, err)
+      -- Visual order reverses the codepoints
+      T.eq(result, utf8.char(gimel, bet, alef))
+    end)
+
+    T.it("respects base_direction option", function()
+      local alef = 0x05D0
+      local text = "abc" .. utf8.char(alef)
+      local r_auto = J.visual_reorder(text)
+      local r_rtl = J.visual_reorder(text, { base_direction = "rtl" })
+      T.ok(r_auto)
+      T.ok(r_rtl)
+      T.ok(r_auto ~= r_rtl, "RTL forced direction should differ from auto")
+    end)
+  end
+
+  T.it("handles empty string", function()
+    local result, err = J.visual_reorder("")
+    T.ok(result, err)
+    T.eq(result, "")
+  end)
+end)
+
+T.describe("detect_direction", function()
+  local utf8_ok, utf8 = pcall(require, "lib.encode.utf8")
+
+  T.it("detects LTR for ASCII text", function()
+    local dir, err = J.detect_direction("hello world")
+    T.ok(dir, err)
+    T.eq(dir, "ltr")
+  end)
+
+  if utf8_ok then
+    T.it("detects RTL for Hebrew text", function()
+      local dir, err = J.detect_direction(utf8.char(0x05D0, 0x05D1))
+      T.ok(dir, err)
+      T.eq(dir, "rtl")
+    end)
+
+    T.it("detects direction from first strong character", function()
+      -- Digits are not strong; first strong is Hebrew
+      local dir = J.detect_direction("123" .. utf8.char(0x05D0))
+      T.eq(dir, "rtl")
+    end)
+  end
+
+  T.it("defaults to LTR for empty string", function()
+    local dir = J.detect_direction("")
+    T.eq(dir, "ltr")
+  end)
+end)
+
 -- ── indent ───────────────────────────────────────────────────────────────────
 
 T.describe("indent", function()
