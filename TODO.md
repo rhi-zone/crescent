@@ -4546,3 +4546,15 @@ framing.
   near the top of this file.
 
 - [ ] **Terminal multiplexer implementation continuing.** Web-based terminal with PTY + WebSocket + VT state machine. Initial implementation in progress: WS frame format wired (commits `36712c59`, `eacf0650`), xterm.js vendored (`dep/xterm-js/`), shell configurable via manifest (`terminal_mux/manifest.json`), frontend rendering working. Next: streaming protocol hardening, connection state management, tab/tiling UX.
+
+## Ideas & Speculative Future Work
+
+*Backlog entries that are not yet scoped or committed. Included for context preservation and to avoid re-deriving open questions.*
+
+- [ ] **Direct port of tex.web (Knuth's TeX) to Lua** — Speculative idea: transliterate from the WEB/Pascal source directly rather than write a fresh TeX-like engine from scratch. The goal of direct-transliteration is to avoid behavioral drift from Knuth's many edge-case decisions — TeX's 40-year value proposition is byte-identical output across implementations, and the TRIP test is the real bar for "is this TeX," not algorithm descriptions or partial reimplementations. Known open design questions (none yet decided):
+  - **Source representation:** port from tangled Pascal output (closer to executable source) or from the WEB source directly, keeping Knuth's numbered section structure and inline commentary as documentation (valuable because all TeX literature cross-references by section number)?
+  - **Memory model:** tex.web's memory is a manually-managed simulated heap (`mem` array with its own allocator). Porting that as-is vs letting Lua's GC handle allocation is a semantic-risk decision, not a free simplification — divergence in allocation order or collection timing could alter output.
+  - **Control flow:** Pascal's `goto` and labeled-block-heavy control flow needs a principled translation strategy into Lua; converting to structured loops or emulating with explicit state machines both have correctness hazards.
+  - **Arithmetic semantics:** Pascal fixed-width integer and real arithmetic with specific overflow behavior must be handled deliberately so it doesn't silently diverge under Lua's number semantics. 
+  - **Scale and effort:** tex.web is ~26,000 lines / ~1,300 numbered sections — a large mechanical effort, not a quick prototyping project.
+  - **Project scope:** undecided whether this would live as a crescent `lib/` or `dep/` candidate, or as a standalone/personal project entirely separate. If pursued inside crescent, would need to reconcile with crescent's zero-dependency + pure-Lua-baseline rules (e.g., the memory-model question is exactly the kind of semantic tradeoff those rules are designed to surface).
