@@ -121,13 +121,6 @@ T.describe("filter: PNG predictor", function()
 		T.eq(data, raw)
 	end)
 
-	T.it("errors clearly on the unimplemented TIFF predictor", function()
-		local dict = { DecodeParms = { Predictor = 2 } }
-		local data, err = filter.decode_stream(dict, "abcd")
-		T.ok(data == nil)
-		T.ok(err ~= nil)
-	end)
-
 	T.it("errors clearly on an unrecognized predictor value", function()
 		local dict = { DecodeParms = { Predictor = 99 } }
 		local data, err = filter.decode_stream(dict, "abcd")
@@ -148,6 +141,74 @@ T.describe("filter: PNG predictor", function()
 		local data, err = filter.decode_stream(dict, compressed)
 		T.eq(err, nil)
 		T.eq(data, raw)
+	end)
+end)
+
+T.describe("filter: TIFF predictor", function()
+	--: (integer, integer, string, integer) -> string
+	-- Forward TIFF horizontal-differencing filter: each row's byte at
+	-- position x becomes (raw[x] - raw[x - colors]) mod 256 (0 for
+	-- positions with no earlier same-component sample in the row).
+	local function tiff_filter_rows(row_bytes, colors, raw_rows_concat, row_count)
+		local out_rows = {}
+		for i = 1, row_count do
+			local raw = raw_rows_concat:sub((i - 1) * row_bytes + 1, i * row_bytes)
+			local out = {} --[[: { [integer]: integer } ]]
+			for x = 1, row_bytes do
+				local r = byte_at(raw, x)
+				if r == nil then error("fixture construction bug") end
+				local left = 0
+				if x > colors then
+					local l = byte_at(raw, x - colors)
+					if l == nil then error("fixture construction bug") end
+					left = l
+				end
+				out[x] = (r - left) % 256
+			end
+			out_rows[i] = bytes_to_string(out, row_bytes)
+		end
+		return table.concat(out_rows)
+	end
+
+	T.it("un-filters single-component (/Colors 1) TIFF-predicted data", function()
+		local row_bytes = 4
+		local raw = string.char(10, 12, 15, 20) .. string.char(1, 1, 2, 3)
+		local filtered = tiff_filter_rows(row_bytes, 1, raw, 2)
+		local compressed, cerr = compress.deflate(filtered)
+		if compressed == nil then error(cerr) end
+		local dict = {
+			Filter = { kind = "name", value = "FlateDecode" },
+			DecodeParms = { Predictor = 2, Columns = row_bytes },
+		}
+		local data, err = filter.decode_stream(dict, compressed)
+		T.eq(err, nil)
+		T.eq(data, raw)
+	end)
+
+	T.it("un-filters multi-component (/Colors 3, e.g. RGB) TIFF-predicted data", function()
+		-- Columns is in samples-per-component (pixels), not raw bytes;
+		-- row_bytes = Columns * Colors.
+		local columns = 2
+		local colors = 3
+		local row_bytes = columns * colors
+		local raw = string.char(100, 150, 200, 110, 140, 210)
+		local filtered = tiff_filter_rows(row_bytes, colors, raw, 1)
+		local compressed, cerr = compress.deflate(filtered)
+		if compressed == nil then error(cerr) end
+		local dict = {
+			Filter = { kind = "name", value = "FlateDecode" },
+			DecodeParms = { Predictor = 2, Columns = columns, Colors = colors },
+		}
+		local data, err = filter.decode_stream(dict, compressed)
+		T.eq(err, nil)
+		T.eq(data, raw)
+	end)
+
+	T.it("errors clearly on a sub-byte /BitsPerComponent (documented gap)", function()
+		local dict = { DecodeParms = { Predictor = 2, BitsPerComponent = 4 } }
+		local data, err = filter.decode_stream(dict, "abcd")
+		T.ok(data == nil)
+		T.ok(err ~= nil)
 	end)
 end)
 

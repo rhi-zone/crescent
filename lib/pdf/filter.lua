@@ -13,13 +13,13 @@
 -- with its own /DecodeParms array element); both forms are supported.
 -- Unsupported filters (image-specific: DCTDecode, CCITTFaxDecode,
 -- JBIG2Decode, JPXDecode; and Crypt) return a clear error rather than
--- silently passing through undecoded bytes. Only the PNG predictor family
--- (/Predictor 10-15) is implemented; the TIFF predictor (/Predictor 2,
--- rare in practice) returns a clear "not yet implemented" error — a
--- documented gap, not silent mishandling — see TODO.md. /Predictor is only
--- meaningful for FlateDecode/LZWDecode (ISO 32000-1 §7.4.4.4) so it's
--- applied only immediately after those two filters in a chain, never after
--- ASCII85/ASCIIHex/RunLength.
+-- silently passing through undecoded bytes. Both predictor families are
+-- implemented: PNG (/Predictor 10-15) and TIFF (/Predictor 2, §7.4.4.4),
+-- the latter for 8-bit samples only — a documented gap for sub-byte
+-- /BitsPerComponent, not silent mishandling; see `tiff_unfilter`'s comment.
+-- /Predictor is only meaningful for FlateDecode/LZWDecode (ISO 32000-1
+-- §7.4.4.4) so it's applied only immediately after those two filters in a
+-- chain, never after ASCII85/ASCIIHex/RunLength.
 --
 -- Errors: `(nil, errmsg)`, per docs/conventions.md.
 
@@ -359,6 +359,39 @@ local function png_unfilter(data, row_bytes, bpp)
 	return table.concat(out), nil
 end
 
+-- ── TIFF predictor un-filtering (used by /DecodeParms /Predictor 2) ─────────
+-- ISO 32000-1 §7.4.4.4 / TIFF 6.0 §14: horizontal differencing. Simpler than
+-- the PNG predictor family — one fixed transform (no per-row filter-type
+-- byte to switch on), applied per-sample within each row: each sample is
+-- the difference from the sample `colors` positions before it in the same
+-- row (the previous pixel's same-component sample), wrapping mod 256, with
+-- no "previous row" term at all (unlike PNG's Up/Average/Paeth filters).
+-- Only 8-bit samples are implemented: real-world /Predictor 2 usage is
+-- overwhelmingly byte-granular data (same byte-granularity assumption the
+-- existing PNG-predictor `bpp` calculation above already makes for
+-- `/BitsPerComponent` generally). Sub-byte sample widths (1/2/4-bit, legal
+-- per spec for TIFF predictor) would need per-bit-not-per-byte
+-- differencing — a documented gap, not silently wrong output.
+--: (string, integer, integer) -> (string | nil, string | nil)
+local function tiff_unfilter(data, row_bytes, colors)
+	local out = {}
+	local n = #data
+	local pos = 1
+	while pos + row_bytes - 1 <= n do
+		local row = {} --[[: { [integer]: integer } ]]
+		for x = 1, row_bytes do
+			local raw = byte(data, pos + x - 1)
+			if raw == nil then return nil, "truncated TIFF-predicted row" end
+			local left = 0
+			if x > colors then left = row[x - colors] end
+			row[x] = (raw + left) % 256
+		end
+		out[#out + 1] = string.char(unpack(row, 1, row_bytes))
+		pos = pos + row_bytes
+	end
+	return concat(out), nil
+end
+
 -- ── Predictor dispatch ───────────────────────────────────────────────────────
 
 --: (unknown) -> integer
@@ -379,10 +412,7 @@ end
 local function apply_predictor(decode_parms, data, default_columns)
 	local predictor = read_predictor(decode_parms)
 	if predictor == 1 then return data, nil end
-	if predictor == 2 then
-		return nil, "TIFF predictor (/Predictor 2) is not yet implemented"
-	end
-	if predictor < 10 or predictor > 15 then
+	if predictor ~= 2 and (predictor < 10 or predictor > 15) then
 		return nil, "unsupported /Predictor value: " .. tostring(predictor)
 	end
 
@@ -398,6 +428,16 @@ local function apply_predictor(decode_parms, data, default_columns)
 		local b = as_integer(dp.BitsPerComponent)
 		if b ~= nil then bpc = b end
 	end
+	colors = math.max(1, colors)
+
+	if predictor == 2 then
+		if bpc ~= 8 then
+			return nil, "TIFF predictor (/Predictor 2) is only implemented for 8-bit "
+				.. "samples (/BitsPerComponent " .. bpc .. " not supported)"
+		end
+		return tiff_unfilter(data, columns * colors, colors)
+	end
+
 	local bpp = math.max(1, math.ceil(colors * bpc / 8))
 	return png_unfilter(data, columns, bpp)
 end
