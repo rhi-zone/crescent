@@ -123,7 +123,7 @@ end
 -- Mirrors lib/pdf/init.lua's Document shape (same-shape local
 -- redeclaration — type declarations don't cross `require` boundaries in
 -- this typechecker; see lib/pdf/font.lua's identical note).
---:: Document = { bytes: string, entries: unknown, trailer: unknown }
+--:: Document = { bytes: string, entries: unknown, trailer: unknown, objstm_cache: unknown }
 
 -- ── 2D affine matrices (ISO 32000-1 §8.3.4, §9.4.2, §9.4.4) ──────────────
 

@@ -248,7 +248,7 @@ end
 
 -- ── Incremental update (ISO 32000-1 §7.5.6) ─────────────────────────────────
 
---:: WriteDocument = { bytes: string, entries: unknown, trailer: unknown }
+--:: WriteDocument = { bytes: string, entries: unknown, trailer: unknown, objstm_cache: unknown }
 --:: NewObject = { num: number, gen: number, value: unknown }
 
 --: (unknown) -> { [string]: unknown, [integer]: unknown } | nil

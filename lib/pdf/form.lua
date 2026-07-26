@@ -90,7 +90,7 @@ local function is_reference(v)
 	return t ~= nil and t.kind == "reference"
 end
 
---:: FormDocument = { bytes: string, entries: unknown, trailer: unknown }
+--:: FormDocument = { bytes: string, entries: unknown, trailer: unknown, objstm_cache: unknown }
 
 -- ── Field type mapping (ISO 32000-1 §12.7.4, Table 220 /FT values) ─────────
 

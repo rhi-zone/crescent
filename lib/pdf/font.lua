@@ -142,7 +142,7 @@ end
 -- Mirrors lib/pdf/init.lua's Document shape (same-shape local
 -- redeclaration, not an import — type declarations don't cross `require`
 -- boundaries in this typechecker, same as XrefOpts in lib/pdf/xref.lua).
---:: Document = { bytes: string, entries: unknown, trailer: unknown }
+--:: Document = { bytes: string, entries: unknown, trailer: unknown, objstm_cache: unknown }
 
 -- ── Narrowing helpers over `unknown` PDF values ──────────────────────────
 -- Mirrors the pattern used throughout lib/pdf/{object,xref,filter,content}.lua.

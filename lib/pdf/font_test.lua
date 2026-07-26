@@ -23,7 +23,7 @@ end
 -- font_from_dict's `doc` parameter is only used to resolve indirect
 -- references; none of these tests use indirect references inside a font
 -- dictionary, so an empty placeholder document is sufficient.
-local NO_DOC = { bytes = "", entries = {}, trailer = {} }
+local NO_DOC = { bytes = "", entries = {}, trailer = {}, objstm_cache = {} }
 
 --: (string) -> unknown
 local function name(n) return { kind = "name", value = n } end

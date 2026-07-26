@@ -12,7 +12,7 @@ local text = require("lib.pdf.text")
 
 -- Mirrors lib/pdf/init.lua's Document shape (same-shape local
 -- redeclaration, per the pattern lib/pdf/{font,text}.lua already use).
---:: Document = { bytes: string, entries: unknown, trailer: unknown }
+--:: Document = { bytes: string, entries: unknown, trailer: unknown, objstm_cache: unknown }
 
 --: (unknown) -> Document
 -- NOTE: deliberately narrows via a direct `type(v) == "table"` check

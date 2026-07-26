@@ -28,7 +28,7 @@ end
 -- "missing field 'bytes'", even though the same pattern happens to pass
 -- when calling `lib/pdf`'s own `resolve_reference`/`document_root` — an
 -- inconsistency between the two, not something to rely on either way).
---: (string) -> { bytes: string, entries: unknown, trailer: unknown }
+--: (string) -> { bytes: string, entries: unknown, trailer: unknown, objstm_cache: unknown }
 local function load_doc(bytes)
 	local doc, err = pdf.string_to_document(bytes)
 	if doc == nil then error(err) end
