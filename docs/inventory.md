@@ -190,7 +190,7 @@ These declare shared types and have no runtime code (or only declaration-side gl
 - `lib/grammar/`, `lib/peg/` — PEG (parser combinator) impls. **`lib/peg/` is parallel to `lib/grammar/`.**
 - `lib/lex/` — see `lib/tokenizer/`.
 - `lib/log_parser/` — log line parsing. Status: stable.
-- `lib/markdown/` — Markdown → HTML / plaintext. Status: stable.
+- `lib/markdown/` — Markdown → HTML / plaintext (not full CommonMark; see `lib/unified/` for that). Status: stable.
 - `lib/markdown_it/` — high-level Markdown via mdast + hast. Status: stable.
 - `lib/merge3/` — three-way text merge. Status: stable.
 - `lib/parse/` — generic parser primitives. Status: stable.
