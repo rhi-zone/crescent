@@ -22,12 +22,13 @@
 --     - Extended Arabic-Indic digits (U+06F0-U+06F9): EN (per UCD; NOT AN)
 --   Default for uncovered codepoints: L (UCD @missing: 0000..10FFFF; Left_To_Right)
 --
--- N0 (paired bracket resolution) is NOT implemented. Brackets in
--- mixed-direction text are resolved by N1-N2 (surrounding strong type or
--- embedding direction), which is correct for most cases but may produce
--- visually awkward bracket directionality in edge cases. N0 requires
--- BidiBrackets.txt data and a stack-based pairing algorithm — meaningful
--- additional scope.
+-- N0 (paired bracket resolution, BD16) is implemented against a bounded
+-- bracket-pair table rather than the full BidiBrackets.txt: (), [], {},
+-- ⟨⟩ (U+27E8/U+27E9 MATHEMATICAL ANGLE BRACKET), «» (U+00AB/U+00BB), ‹›
+-- (U+2039/U+203A), and the CJK brackets 「」『』【】〔〕〖〗〘〙〚〛
+-- (U+300C-U+301B range). BD16's 63-element stack bound is enforced;
+-- brackets outside this table are not paired and fall through to N1/N2
+-- as ON, same as before this was added.
 --
 -- The algorithm itself is fully general UAX #9 (P2-P3, X1-X8, X9,
 -- BD13/X10 isolating run sequences, W1-W7, N1-N2, I1-I2, L1-L2).
@@ -512,8 +513,105 @@ end
 
 local NI = { B = true, S = true, WS = true, ON = true, FSI = true, LRI = true, RLI = true, PDI = true } --: { [string]: boolean }
 
---: (run_sequence, filtered_item[], bidi_type[]) -> nil
-local function resolve_sequence(seq, filtered, types)
+-- ============================================================
+-- N0: BD16 BRACKET PAIRING (bounded bracket-pair table; see file header)
+-- ============================================================
+
+local BRACKET_OPEN_TO_CLOSE = { --: { [integer]: integer }
+  [0x0028] = 0x0029, -- ( )
+  [0x005B] = 0x005D, -- [ ]
+  [0x007B] = 0x007D, -- { }
+  [0x27E8] = 0x27E9, -- ⟨ ⟩ MATHEMATICAL ANGLE BRACKET
+  [0x00AB] = 0x00BB, -- « »
+  [0x2039] = 0x203A, -- ‹ ›
+  [0x300C] = 0x300D, -- 「 」
+  [0x300E] = 0x300F, -- 『 』
+  [0x3010] = 0x3011, -- 【 】
+  [0x3014] = 0x3015, -- 〔 〕
+  [0x3016] = 0x3017, -- 〖 〗
+  [0x3018] = 0x3019, -- 〘 〙
+  [0x301A] = 0x301B, -- 〚 〛
+}
+local BRACKET_CLOSE_TO_OPEN = {} --: { [integer]: integer }
+for o, c in pairs(BRACKET_OPEN_TO_CLOSE) do BRACKET_CLOSE_TO_OPEN[c] = o end
+
+local BD16_MAX_STACK = 63 -- per UAX #9 BD16
+
+-- bracket_pair: { open_k, close_k } -- positions into the sequence's flat index space
+
+-- BD16: identify bracket pairs within a single isolating run sequence.
+-- k ranges over the sequence's flat 1..m index space (see resolve_sequence).
+-- get(k) must return the CURRENT (post-W-rule) type; only positions
+-- still typed ON are eligible, per BD14/BD15.
+--: (integer, (integer) -> integer, (integer) -> bidi_type) -> { [integer]: { integer, integer } }
+local function find_bracket_pairs(m, cp_at, get)
+  local found = {} --: { [integer]: { integer, integer } }
+  local bstack = {} --: { [integer]: { cp: integer, k: integer } | nil }
+  local bstack_len = 0
+  for k = 1, m do
+    if get(k) == "ON" then
+      local cp = cp_at(k)
+      if BRACKET_OPEN_TO_CLOSE[cp] then
+        if bstack_len >= BD16_MAX_STACK then
+          -- BD16: stack overflow — stop processing for the remainder of
+          -- the isolating run sequence; pairs already found stand.
+          break
+        end
+        bstack_len = bstack_len + 1
+        bstack[bstack_len] = { cp = cp, k = k }
+      elseif BRACKET_CLOSE_TO_OPEN[cp] then
+        local open_cp = BRACKET_CLOSE_TO_OPEN[cp]
+        local si = bstack_len
+        while si >= 1 do
+          local entry = bstack[si]
+          if entry and entry.cp == open_cp then
+            found[#found + 1] = { entry.k, k }
+            -- TYPECHECKER WORKAROUND: natural code is
+            -- `for _ = si, bstack_len do table.remove(bstack) end`, but
+            -- a call to table.remove elsewhere in this file
+            -- (resolve_explicit's stack) pins its generic element type
+            -- to that shape, so this call (a different shape) is
+            -- rejected. See TODO.md, "Typechecker substrate gaps" ->
+            -- third occurrence of the table.remove/table.sort
+            -- shape-pinning bug.
+            for idx = si, bstack_len do bstack[idx] = nil end
+            bstack_len = si - 1
+            break
+          end
+          si = si - 1
+        end
+      end
+    end
+  end
+  -- TYPECHECKER WORKAROUND: natural code is
+  -- `table.sort(found, function(a, b) return a[1] < b[1] end)`, but an
+  -- earlier table.sort call in this file (RANGES, a different shape)
+  -- pins the generic and rejects this one. See TODO.md, same entry as
+  -- above. (found is small — bounded by BD16_MAX_STACK / 2 pairs per
+  -- sequence — so this O(n^2) insertion sort is fine.)
+  for i = 2, #found do
+    local key = found[i]
+    local j = i - 1
+    while j >= 1 and found[j][1] > key[1] do
+      found[j + 1] = found[j]
+      j = j - 1
+    end
+    found[j + 1] = key
+  end
+  return found
+end
+
+-- N0: strong-type classification for bracket resolution — EN and AN are
+-- treated as R within this scope. Returns nil for non-strong types.
+--: (bidi_type) -> "L" | "R" | nil
+local function n0_strong_of(t)
+  if t == "L" then return "L" end
+  if t == "R" or t == "EN" or t == "AN" then return "R" end
+  return nil
+end
+
+--: (run_sequence, filtered_item[], bidi_type[], { [integer]: integer }) -> nil
+local function resolve_sequence(seq, filtered, types, cps)
   -- Materialize the sequence as a flat list of filtered-array positions.
   local positions = {} --: { [integer]: integer }
   for _, r in ipairs(seq.runs) do
@@ -529,6 +627,8 @@ local function resolve_sequence(seq, filtered, types)
   end
   --: (integer, bidi_type) -> nil
   local function set(k, t) types[filtered[positions[k]].orig] = t end
+  --: (integer) -> integer
+  local function cp_at(k) return cps[filtered[positions[k]].orig] end
 
   -- W1: NSM -> type of previous char; ON if previous is isolate
   -- initiator/PDI; sos if at the start of the sequence.
@@ -612,6 +712,49 @@ local function resolve_sequence(seq, filtered, types)
       elseif t == "EN" and strong == "L" then
         set(k, "L")
       end
+    end
+  end
+
+  -- N0: paired bracket resolution (BD16). Runs before N1/N2, on the
+  -- current (post-W-rule) types. Unresolved brackets (case d: no strong
+  -- type enclosed) fall through unchanged and are picked up by N1/N2
+  -- like any other ON, exactly as before N0 existed.
+  do
+    local e = (seq.level % 2 == 1) and "R" or "L"
+    local opp = (e == "L") and "R" or "L"
+    local pairs_found = find_bracket_pairs(m, cp_at, get)
+    for _, pr in ipairs(pairs_found) do
+      local ok, ck = pr[1], pr[2]
+      local found_e, found_o = false, false
+      for p = ok + 1, ck - 1 do
+        local s = n0_strong_of(get(p))
+        if s == e then
+          found_e = true
+          break
+        elseif s == opp then
+          found_o = true
+        end
+      end
+      if found_e then
+        set(ok, e); set(ck, e)
+      elseif found_o then
+        -- N0c: strong type inside is opposite the embedding direction —
+        -- check backwards before the opening bracket for established
+        -- context (first strong type, or sos if none).
+        local before = seq.sos
+        local p = ok - 1
+        while p >= 1 do
+          local s = n0_strong_of(get(p))
+          if s then before = s; break end
+          p = p - 1
+        end
+        if before == opp then
+          set(ok, opp); set(ck, opp)
+        else
+          set(ok, e); set(ck, e)
+        end
+      end
+      -- else (N0d): no strong type enclosed — leave both brackets as ON.
     end
   end
 
@@ -765,7 +908,7 @@ local function resolve_impl(input, opts)
     local runs = level_runs(filtered, n_filtered)
     local sequences = isolating_run_sequences(filtered, n_filtered, runs, expl, types, para_lvl)
     for _, seq in ipairs(sequences) do
-      resolve_sequence(seq, filtered, types)
+      resolve_sequence(seq, filtered, types, cps)
     end
   end
 

@@ -561,6 +561,96 @@ T.describe("base_direction option", function()
 end)
 
 -- ================================================================
+-- N0: paired bracket resolution (BD16)
+-- ================================================================
+
+T.describe("N0: paired bracket resolution", function()
+  T.it("case b: content matching embedding direction sets both brackets to it", function()
+    -- Forced RTL paragraph (e=R). "(" HEBREW ")" between Latin: the
+    -- enclosed Hebrew is R, matching e, so N0 case (b) sets both
+    -- brackets to R. 'a'/'b' (L) bump by I1 at the odd seq level;
+    -- brackets (now R) and the Hebrew letters stay at level 1.
+    local text = "a(" .. utf8.char(ALEF, BET) .. ")b"
+    local result = bidi.resolve_levels(text, { base_direction = "rtl" })
+    T.eq(result.paragraph_level, 1)
+    T.eq(result.levels[1], 2) -- 'a'
+    T.eq(result.levels[2], 1) -- '(' -> R via N0(b)
+    T.eq(result.levels[3], 1) -- ALEF
+    T.eq(result.levels[4], 1) -- BET
+    T.eq(result.levels[5], 1) -- ')' -> R via N0(b)
+    T.eq(result.levels[6], 2) -- 'b'
+  end)
+
+  T.it("case c2: opposite content with matching preceding context falls back to embedding direction", function()
+    -- LTR paragraph (e=L). "x(" HEBREW ")y": enclosed Hebrew is R,
+    -- opposite of e. The nearest preceding strong before "(" is 'x'
+    -- (L), which matches e (not opposite) -> N0 case (c2): both
+    -- brackets resolve to e (L), hugging the surrounding LTR text.
+    local text = "x(" .. utf8.char(ALEF, BET) .. ")y"
+    local result = bidi.resolve_levels(text, { base_direction = "ltr" })
+    T.eq(result.paragraph_level, 0)
+    T.eq(result.levels[1], 0) -- 'x'
+    T.eq(result.levels[2], 0) -- '(' -> L via N0(c2)
+    T.eq(result.levels[3], 1) -- ALEF (R, bumps at even seq level)
+    T.eq(result.levels[4], 1) -- BET
+    T.eq(result.levels[5], 0) -- ')' -> L via N0(c2)
+    T.eq(result.levels[6], 0) -- 'y'
+  end)
+
+  T.it("case c1: established opposite context forces both brackets opposite embedding, symmetrically", function()
+    -- Forced LTR paragraph (e=L) but starting with Hebrew: HEBREW " ("
+    -- HEBREW ") z". Enclosed content (BET) is R, opposite of e.
+    -- Scanning backward from the opening bracket past the WS finds
+    -- ALEF (R) as the established context -- also opposite of e -- so
+    -- N0 case (c1) sets BOTH brackets to R.
+    --
+    -- This is the case that N0 actually adds over plain N1/N2: without
+    -- pairing, N1 would resolve the neutral run "<WS>(" (bounded by
+    -- ALEF=R before and BET=R after) to R, but the neutral run ")<WS>"
+    -- (bounded by BET=R before and 'z'=L after) would mismatch and fall
+    -- to N2's embedding direction L -- giving the two brackets of the
+    -- SAME pair different resolved directions. N0 forces them to agree.
+    local text = utf8.char(ALEF) .. " (" .. utf8.char(BET) .. ") z"
+    local result = bidi.resolve_levels(text, { base_direction = "ltr" })
+    T.eq(result.paragraph_level, 0)
+    T.eq(result.levels[1], 1) -- ALEF (R)
+    T.eq(result.levels[2], 1) -- ' ' -> R via N1 (bounded by R...R)
+    T.eq(result.levels[3], 1) -- '(' -> R via N0(c1)
+    T.eq(result.levels[4], 1) -- BET (R)
+    T.eq(result.levels[5], 1) -- ')' -> R via N0(c1)
+    T.eq(result.levels[6], 0) -- ' ' -> L via N2 (mismatch, embedding L)
+    T.eq(result.levels[7], 0) -- 'z'
+  end)
+
+  T.it("case d: no strong type enclosed leaves brackets unresolved by N0 (N1/N2 still apply)", function()
+    -- "a( )b": nothing but WS between the brackets -> N0 does not set
+    -- them; the whole neutral run "( )" (ON, WS, ON) is bounded by
+    -- L...L and resolves to L via plain N1, same as if N0 didn't exist.
+    local text = "a( )b"
+    local result = bidi.resolve_levels(text)
+    T.eq(result.paragraph_level, 0)
+    for i = 1, 5 do T.eq(result.levels[i], 0) end
+  end)
+
+  T.it("unmatched brackets are unaffected by N0 and still resolve via N1/N2", function()
+    local text = "a)b"
+    local result = bidi.resolve_levels(text)
+    T.eq(result.paragraph_level, 0)
+    T.eq(result.levels[1], 0)
+    T.eq(result.levels[2], 0)
+    T.eq(result.levels[3], 0)
+  end)
+
+  T.it("nested bracket pairs both resolve correctly (BD16 stack pairing)", function()
+    -- "((a))" in LTR: all content is L, matches e -> both pairs
+    -- resolve to L (case b), same as their surrounding context.
+    local text = "((a))"
+    local result = bidi.resolve_levels(text)
+    for i = 1, 5 do T.eq(result.levels[i], 0) end
+  end)
+end)
+
+-- ================================================================
 -- Error handling
 -- ================================================================
 
