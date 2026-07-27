@@ -249,12 +249,19 @@ before the derivation node's conclusion exists at all.
 ## Explicitly open (flagged, not settled — do not present as decided)
 
 - Side conditions in rule schemas (task-4 fork B) — UNDESIGNED, owner
-  deliberately deferred. Requirement recorded for whatever design
-  eventually lands: side conditions must not pollute the core and must
-  scale to zero (zero cost and zero footprint when unused). Until
-  resolved, rules requiring side conditions are inexpressible — such a
-  rule halts to the owner rather than being worked around. None of the
-  three candidate approaches discussed (none-in-v1 /
-  mechanism-now-empty-vocabulary / starter set) has been chosen.
+  deliberately deferred. Owner-stated requirement, clarified: side-condition
+  forms must be REMOVABLE — never hardcoded into the trusted core such that
+  removal breaks the kernel. Forms, if any, must be declared registry
+  objects (deletable, versionable, outside the trust boundary). This is NOT
+  a zero-footprint-when-unused requirement: a generic kernel hook/slot is
+  admissible under this constraint. The owner is explicitly unsure whether
+  the removability/zero-footprint distinction is ultimately load-bearing;
+  both readings were surfaced and the distinction itself is recorded here
+  so a future design round evaluates candidates against the intended
+  (removability) reading. Until resolved, rules requiring side conditions
+  are inexpressible — such a rule halts to the owner rather than being
+  worked around. The fork remains deferred; no approach is chosen (none of
+  the three candidates discussed — none-in-v1 / mechanism-now-empty-
+  vocabulary / starter set — has been chosen).
 - Everything downstream per the charter (taint, discharge format, prefix,
   corroboration).
