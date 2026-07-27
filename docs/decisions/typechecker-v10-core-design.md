@@ -39,6 +39,25 @@ construction).
 as the contained future upgrade path, should quantified alias schemas ever
 be needed. **Full HOL-style terms are excluded.**
 
+### Refinement: intrinsically-sorted variables (owner-ratified this session)
+
+**Variable nodes carry their sort, symmetric with metavariables:**
+`var(k, sort)`. This reconciles three previously-ratified properties that
+were jointly unsatisfiable as written — O(1) total `sort_of`, ill-sortedness
+unrepresentable, and no deep validation walks. Every node additionally
+caches at build a free-variable context (map: live de Bruijn index → sort;
+`var(k,s)` carries `{k→s}`; closed terms carry empty); see the primitive
+set specification section for how `build` uses this cache. The rejected
+alternative, recorded: sortless vars with context-relative sorting — would
+have made `sort_of` partial and build's guarantee context-relative,
+weakening two ratified properties.
+
+Credit: this refinement, and the non-linear-metavariable shift-adjust
+refinement recorded in the primitive set specification section below, both
+surfaced because an implementation agent halted on a genuine gap rather
+than guessing — the halt discipline working as intended, not a deviation
+to patch around silently.
+
 ### Rationale
 
 Recorded compactly, attributed to the session's analysis:
@@ -150,10 +169,25 @@ Working names throughout; final names to be checked against
 
 **Term grammar — exactly three node forms:**
 
-- `var(k)` — de Bruijn index.
+- `var(k, sort)` — de Bruijn index; intrinsically sorted, symmetric with
+  `meta(id, sort)` (refinement — see term algebra section above).
 - `op(op_id, a1..an)` — operator node; each argument is `(bound_count,
   term)` matching the operator's declared valence.
 - `meta(id, sort)` — metavariable node; legal in pattern positions only.
+
+**Cached per node at build (refinement, owner-ratified this session):**
+sort (`sort_of`, O(1)) and a free-variable context — a map from live de
+Bruijn index to sort (`var(k,s)` carries `{k→s}`; closed terms carry
+empty). `build` validates binder sorts from these caches with no deep walk:
+for an argument with `binds = {s1..sn}`, indices `0..n-1` of that
+argument's context must match where present; matched entries discharge,
+the remainder shifts down by `n`, and contexts merge across arguments with
+a same-index-same-sort consistency check. Node context = the merge; node
+sort = `decl.result`. Cost named at ratification: one small per-node map,
+dedup'd under hash-consing. Falls out and ratified with it: `subst` is
+sort-safe (`sort_of(replacement)` must equal the target var's sort — error
+otherwise), and closedness is O(1) (empty context) — replay's conclusions
+are required ground AND closed.
 
 **Declarations (registry-side; the kernel validates against them, stores
 none of their meaning):**
@@ -181,6 +215,16 @@ convention):
   each later occurrence is checked with `equal` at bind time — rules like
   W-App need shared-metavariable premises, and moving that equality outside
   the primitive into per-rule convention was rejected.
+  **Refinement, owner-ratified this session — non-linear metavariables
+  across binder depths (shift-adjust):** a match binding stores `(term,
+  binding depth of first occurrence)`; a later occurrence at depth `d'` is
+  checked via `equal(candidate, shift(stored, d'-d))` rather than plain
+  `equal`. Match and `instantiate` remain exact inverses. Candidates
+  referencing binders strictly between the two depths fail naturally —
+  correct, since no consistent binding exists. The rejected alternative,
+  recorded: outright rejection of depth-mismatched recurrence — would
+  silently narrow expressible rules and diverge from `instantiate`'s shift
+  semantics.
 - `instantiate(pattern, bindings)` — applies shifts per binding depth;
   unbound metavariable is an error.
 - `is_ground(t)` — no metavariable nodes; the kernel refuses any concluded
