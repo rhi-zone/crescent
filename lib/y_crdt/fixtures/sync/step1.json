@@ -1,0 +1,9 @@
+{
+  "description": "SyncStep1 message from client 1 (state vector after inserting 'hello')",
+  "client_id": 1,
+  "message_type": 0,
+  "state_vector": {
+    "1": 5
+  },
+  "hex": "0003010105"
+}

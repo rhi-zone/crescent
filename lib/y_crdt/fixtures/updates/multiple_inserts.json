@@ -1,0 +1,9 @@
+{
+  "description": "insert(0,'hello') then insert(5,' world')",
+  "client_id": 1,
+  "content": "hello world",
+  "state_vector": {
+    "1": 11
+  },
+  "update_hex": "01010100040107636f6e74656e740b68656c6c6f20776f726c6400"
+}

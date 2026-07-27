@@ -1,0 +1,10 @@
+{
+  "description": "insert(0,'hello world') then delete(3,5) removing 'lo wo'",
+  "client_id": 1,
+  "content": "helrld",
+  "expected_content": "helrld",
+  "state_vector": {
+    "1": 11
+  },
+  "update_hex": "01030100040107636f6e74656e740368656c8101020584010703726c640101010305"
+}

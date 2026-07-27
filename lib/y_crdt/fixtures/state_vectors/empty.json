@@ -1,0 +1,6 @@
+{
+  "description": "state vector of a doc with no ops",
+  "client_id": 1,
+  "state_vector": {},
+  "hex": "00"
+}

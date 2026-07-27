@@ -1,0 +1,13 @@
+{
+  "name": "y_crdt-fixtures",
+  "private": true,
+  "description": "Fixture generator for lib/y_crdt parity tests -- uses real yjs to produce binary fixtures the Lua implementation is checked against. Not a runtime dependency of crescent itself (see docs/conventions.md zero-dependency principle); this package.json exists solely to pin yjs/y-protocols for `bun run generate.js` during development.",
+  "type": "module",
+  "scripts": {
+    "generate": "bun run generate.js"
+  },
+  "dependencies": {
+    "yjs": "^13.6.31",
+    "y-protocols": "^1.0.6"
+  }
+}

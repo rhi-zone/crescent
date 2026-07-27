@@ -1,0 +1,21 @@
+{
+  "description": "client 1 and client 2 both start from 'hello' (base update), then concurrently insert at index 5 without seeing each other first",
+  "client_a_id": 1,
+  "client_b_id": 2,
+  "base_content": "hello",
+  "client_a_insert": " A-side",
+  "client_b_insert": " B-side",
+  "client_a_final_content": "hello A-side",
+  "client_b_final_content": "hello B-side",
+  "converged_content": "hello A-side B-side",
+  "base_update_hex": "01010100040107636f6e74656e740568656c6c6f00",
+  "a_diff_update_hex": "010101058401040720412d7369646500",
+  "b_diff_update_hex": "010102008401040720422d7369646500",
+  "state_vector_a": {
+    "1": 12
+  },
+  "state_vector_b": {
+    "1": 5,
+    "2": 7
+  }
+}

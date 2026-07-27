@@ -1,0 +1,23 @@
+{
+  "description": "insert 'hello world', format [0,5) bold, format [6,5) italic",
+  "client_id": 1,
+  "content": "hello world",
+  "delta": [
+    {
+      "insert": "hello",
+      "attributes": {
+        "bold": true
+      }
+    },
+    {
+      "insert": " "
+    },
+    {
+      "insert": "world",
+      "attributes": {
+        "italic": true
+      }
+    }
+  ],
+  "update_hex": "01070100040107636f6e74656e740568656c6c6f840104012084010505776f726c6446010004626f6c640474727565c60104010504626f6c64046e756c6cc601050106066974616c6963047472756586010a066974616c6963046e756c6c00"
+}

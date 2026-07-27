@@ -1,0 +1,10 @@
+{
+  "description": "Y.Doc(clientID=1).getText('content').insert(0, 'hello')",
+  "client_id": 1,
+  "content": "hello",
+  "state_vector": {
+    "1": 5
+  },
+  "update_hex": "01010100040107636f6e74656e740568656c6c6f00",
+  "state_vector_hex": "010105"
+}

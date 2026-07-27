@@ -1,0 +1,7 @@
+{
+  "description": "Update broadcast message wrapping client 1's encodeStateAsUpdate() after inserting 'x'",
+  "client_id": 1,
+  "message_type": 2,
+  "update_hex": "01010100040107636f6e74656e74017800",
+  "hex": "021101010100040107636f6e74656e74017800"
+}

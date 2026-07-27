@@ -1,0 +1,9 @@
+{
+  "description": "set(a,1) set(b,'two') set(c,true) delete(b) set(a,100) [overwrite]",
+  "client_id": 1,
+  "content": {
+    "a": 100,
+    "c": true
+  },
+  "update_hex": "01040100210107636f6e74656e74016101210107636f6e74656e74016201280107636f6e74656e7401630178a80100017da4010101010002"
+}

@@ -1,0 +1,17 @@
+{
+  "description": "Y.Array.insert(0, [1, 'two', true, false, null, [1,2,3]])",
+  "client_id": 1,
+  "content": [
+    1,
+    "two",
+    true,
+    false,
+    null,
+    [
+      1,
+      2,
+      3
+    ]
+  ],
+  "update_hex": "01010100080107636f6e74656e74067d01770374776f78797e75037d017d027d0300"
+}

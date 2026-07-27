@@ -1,0 +1,8 @@
+{
+  "description": "state vector of a doc holding client 1's 'hello' and client 2's 'world'",
+  "state_vector": {
+    "1": 5,
+    "2": 5
+  },
+  "hex": "0202050105"
+}

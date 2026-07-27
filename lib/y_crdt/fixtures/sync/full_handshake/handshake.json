@@ -1,0 +1,14 @@
+{
+  "description": "Ordered messages of a full two-peer sync driven through y-protocols' readSyncMessage: A starts with 'hello from A', B starts empty. 01: A->B step1 (A's SV). 02: B->A step2 (diff, everything since B is empty). 03: B->A step1 (B's SV, still nothing new). 04: A->B step2 (empty diff, A has nothing new from B). 05: A->B update (broadcast of A's further local edit appending '!!').",
+  "client_a_id": 1,
+  "client_b_id": 2,
+  "messages": [
+    "01_a_to_b_step1.bin",
+    "02_b_to_a_step2.bin",
+    "03_b_to_a_step1.bin",
+    "04_a_to_b_step2.bin",
+    "05_a_to_b_update.bin"
+  ],
+  "final_content_a": "hello from A!!",
+  "final_content_b": "hello from A!!"
+}

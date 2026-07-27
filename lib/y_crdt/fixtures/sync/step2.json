@@ -1,0 +1,7 @@
+{
+  "description": "SyncStep2 response from client 1, replying to an empty state vector (so it carries everything)",
+  "client_id": 1,
+  "message_type": 1,
+  "content": "hello",
+  "hex": "011501010100040107636f6e74656e740568656c6c6f00"
+}

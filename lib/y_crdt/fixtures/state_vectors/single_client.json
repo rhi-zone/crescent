@@ -1,0 +1,8 @@
+{
+  "description": "state vector after client 1 inserts 'hello'",
+  "client_id": 1,
+  "state_vector": {
+    "1": 5
+  },
+  "hex": "010105"
+}

@@ -1,0 +1,13 @@
+{
+  "description": "Y.Map containing a nested Y.Text ('nested hello') and nested Y.Array ([1,2,3])",
+  "client_id": 1,
+  "content": {
+    "text": "nested hello",
+    "array": [
+      1,
+      2,
+      3
+    ]
+  },
+  "update_hex": "01040100270107636f6e74656e74047465787402040001000c6e65737465642068656c6c6f270107636f6e74656e74056172726179000800010d037d017d027d0300"
+}
