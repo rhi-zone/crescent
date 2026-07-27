@@ -969,6 +969,14 @@ function M.apply_v1(doc, bytes)
   return txn
 end
 
+-- BUG FIX (found via lib/y_crdt/parity_test.lua against real yjs fixtures):
+-- client order was previously sorted ASCENDING. Verified against upstream
+-- (`node_modules/yjs/dist/yjs.cjs`'s `writeStateVector`:
+-- `array.from(sv.entries()).sort((a, b) => b[0] - a[0])`, fetched from the
+-- fixtures/ yjs install, 2026-07-27) -- it sorts DESCENDING by client id.
+-- Decoding is order-independent (read_delete_set/decode_state_vector just
+-- read whatever order is given), so this had no effect on correctness, only
+-- on byte-for-byte comparison against real yjs output.
 --: (sv: StateVector) -> string
 function M.encode_state_vector_from_table(sv)
   local enc = encoding.encoder()
@@ -977,7 +985,7 @@ function M.encode_state_vector_from_table(sv)
   for i = 2, #clients do
     local key = clients[i]
     local j = i - 1
-    while j >= 1 and clients[j] > key do
+    while j >= 1 and clients[j] < key do
       clients[j + 1] = clients[j]
       j = j - 1
     end

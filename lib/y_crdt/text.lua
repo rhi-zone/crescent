@@ -29,6 +29,7 @@ local item = require("lib.y_crdt.item")
 local shared_type = require("lib.y_crdt.shared_type")
 local struct_store = require("lib.y_crdt.struct_store")
 local integrate = require("lib.y_crdt.integrate")
+local encoding = require("lib.y_crdt.encoding")
 
 local M = {}
 
@@ -355,12 +356,28 @@ function M.to_delta(t)
   local buf = {} --[[: string[] ]]
   local buf_attrs = nil --[[: { [string]: unknown } | nil]]
 
+  -- BUG FIX (found via lib/y_crdt/parity_test.lua against a real yjs
+  -- fixture): a format "close" marker's value is the attribute's prior
+  -- value at that position, which for "was never set" is the wire-null
+  -- sentinel (`encoding.null`) rather than absence -- confirmed against
+  -- real yjs, whose own decoded `ContentFormat.value` for such a marker is
+  -- JS `null`, not `undefined` (verified with a bun script applying
+  -- fixtures/updates/text_format.bin and inspecting the decoded struct
+  -- store directly). Real yjs's `YText.prototype.toDelta`, though, treats a
+  -- null-valued attribute as "formatting removed" and omits that key from
+  -- the emitted run's `attributes` object entirely -- this is a
+  -- presentation-layer convention on top of the (correctly decoded) null
+  -- value, not a change to what's stored. `snapshot_attrs` matches that
+  -- convention here: it skips any key currently holding `encoding.null`
+  -- rather than copying it forward into the delta run's attributes.
   --: () -> ({ [string]: unknown } | nil)
   local function snapshot_attrs()
     local copy = nil --[[: { [string]: unknown } | nil]]
     for k, v in pairs(attrs) do
-      if copy == nil then copy = {} end
-      copy[k] = v
+      if v ~= encoding.null then
+        if copy == nil then copy = {} end
+        copy[k] = v
+      end
     end
     return copy
   end

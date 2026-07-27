@@ -276,6 +276,23 @@ function M.integrate(txn, i, offset)
     end
   end
 
+  -- BUG FIX (found via lib/y_crdt/parity_test.lua against real yjs
+  -- fixtures): `parent0` above was previously only a local -- the result of
+  -- resolving `i.parent` (inherited from a neighbor, resolved from a
+  -- pending-parent-id, or nulled by a GC neighbor) was never written back
+  -- onto `i.parent` itself. Matches yjs's actual `Item.prototype.getMissing`,
+  -- which assigns `this.parent = ...` as a side effect in every one of these
+  -- branches (not just locally). Without this, a THIRD item chaining off a
+  -- second item that itself inherited its parent this way would find
+  -- `resolved_left.parent` still `nil` and be wrongly discarded as GC --
+  -- confirmed with a 3-item repro (string item, then a same-transaction
+  -- insert+delete collapsed to ContentDeleted, then another string item):
+  -- the third item's content silently vanished. This one-line write-back
+  -- restores parity; every branch above already computes the exact value
+  -- yjs would assign, including the intentional `nil` from the GC-neighbor
+  -- case.
+  i.parent = parent0
+
   -- Parent's fate is now known: commit the resolved neighbors into
   -- `i.left`/`i.right` (only reached when parent0 is non-nil -- the
   -- GC-discard path below returns before touching them again).
