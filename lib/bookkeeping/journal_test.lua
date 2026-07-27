@@ -284,4 +284,150 @@ T.describe("lib.bookkeeping.journal", function()
       T.eq(#journal.list(j), 0)
     end)
   end)
+
+  T.describe("void_entry", function()
+    T.it("posts a reversing entry with negated amounts, keeping the original", function()
+      local j = journal.new("USD")
+      local chart = usd_chart()
+      local orig = journal.post(j, chart, {
+        date = "2026-07-26", description = "Client payment", id = "e1",
+        lines = {
+          { account = "cash",    amount = money.new("100.00", "USD") },
+          { account = "revenue", amount = money.new("-100.00", "USD") },
+        },
+      })
+      T.ok(orig ~= nil)
+
+      local reversal, err = journal.void_entry(j, chart, "e1", "2026-08-01")
+      T.ok(reversal ~= nil, err)
+      T.eq(reversal.date, "2026-08-01")
+      T.eq(reversal.lines[1].account, "cash")
+      T.eq(reversal.lines[1].amount.amount_minor, -10000)
+      T.eq(reversal.lines[2].account, "revenue")
+      T.eq(reversal.lines[2].amount.amount_minor, 10000)
+
+      T.eq(#journal.list(j), 2)
+      T.ok(journal.get(j, "e1") ~= nil)
+    end)
+
+    T.it("preserves the original line's rate on a multi-currency reversal", function()
+      local j = journal.new("USD")
+      local chart = account.new()
+      account.add_account(chart, { id = "cash-usd", name = "Cash USD", type = "asset" })
+      account.add_account(chart, { id = "cash-eur", name = "Cash EUR", type = "asset" })
+      journal.post(j, chart, {
+        date = "2026-07-26", description = "FX", id = "e1",
+        lines = {
+          { account = "cash-usd", amount = money.new("-100.00", "USD") },
+          { account = "cash-eur", amount = money.new("92.00", "EUR"), rate = 1.0870 },
+        },
+      })
+
+      local reversal, err = journal.void_entry(j, chart, "e1", "2026-08-01")
+      T.ok(reversal ~= nil, err)
+      T.eq(reversal.lines[2].amount.currency, "EUR")
+      T.eq(reversal.lines[2].amount.amount_minor, -9200)
+      T.eq(reversal.lines[2].rate, 1.0870)
+    end)
+
+    T.it("fails for an unknown entry id", function()
+      local j = journal.new("USD")
+      local chart = usd_chart()
+      local reversal, err = journal.void_entry(j, chart, "nope", "2026-08-01")
+      T.eq(reversal, nil)
+      T.ok(type(err) == "string")
+    end)
+  end)
+
+  T.describe("delete_entry", function()
+    T.it("removes the entry entirely", function()
+      local j = journal.new("USD")
+      local chart = usd_chart()
+      journal.post(j, chart, {
+        date = "2026-07-26", description = "x", id = "e1",
+        lines = {
+          { account = "cash",    amount = money.new("1.00", "USD") },
+          { account = "revenue", amount = money.new("-1.00", "USD") },
+        },
+      })
+      T.eq(#journal.list(j), 1)
+
+      local ok, err = journal.delete_entry(j, "e1")
+      T.ok(ok, err)
+      T.eq(#journal.list(j), 0)
+      T.eq(journal.get(j, "e1"), nil)
+    end)
+
+    T.it("preserves order of remaining entries", function()
+      local j = journal.new("USD")
+      local chart = usd_chart()
+      local opts = function(id)
+        return {
+          date = "2026-07-26", description = id, id = id,
+          lines = {
+            { account = "cash",    amount = money.new("1.00", "USD") },
+            { account = "revenue", amount = money.new("-1.00", "USD") },
+          },
+        }
+      end
+      journal.post(j, chart, opts("a"))
+      journal.post(j, chart, opts("b"))
+      journal.post(j, chart, opts("c"))
+
+      journal.delete_entry(j, "b")
+      local list = journal.list(j)
+      T.eq(#list, 2)
+      T.eq(list[1].id, "a")
+      T.eq(list[2].id, "c")
+    end)
+
+    T.it("fails for an unknown entry id", function()
+      local j = journal.new("USD")
+      local ok, err = journal.delete_entry(j, "nope")
+      T.eq(ok, nil)
+      T.ok(type(err) == "string")
+    end)
+  end)
+
+  T.describe("update_entry_description", function()
+    T.it("updates the description without touching lines/amounts", function()
+      local j = journal.new("USD")
+      local chart = usd_chart()
+      journal.post(j, chart, {
+        date = "2026-07-26", description = "old", id = "e1",
+        lines = {
+          { account = "cash",    amount = money.new("1.00", "USD") },
+          { account = "revenue", amount = money.new("-1.00", "USD") },
+        },
+      })
+
+      local entry, err = journal.update_entry_description(j, "e1", "new description")
+      T.ok(entry ~= nil, err)
+      T.eq(entry.description, "new description")
+      T.eq(journal.get(j, "e1").description, "new description")
+      T.eq(#journal.get(j, "e1").lines, 2)
+    end)
+
+    T.it("fails for an unknown entry id", function()
+      local j = journal.new("USD")
+      local entry, err = journal.update_entry_description(j, "nope", "x")
+      T.eq(entry, nil)
+      T.ok(type(err) == "string")
+    end)
+
+    T.it("rejects a non-string description", function()
+      local j = journal.new("USD")
+      local chart = usd_chart()
+      journal.post(j, chart, {
+        date = "2026-07-26", description = "old", id = "e1",
+        lines = {
+          { account = "cash",    amount = money.new("1.00", "USD") },
+          { account = "revenue", amount = money.new("-1.00", "USD") },
+        },
+      })
+      local entry, err = journal.update_entry_description(j, "e1", 42 --[[: unknown ]])
+      T.eq(entry, nil)
+      T.ok(type(err) == "string")
+    end)
+  end)
 end)

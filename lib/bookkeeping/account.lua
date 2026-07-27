@@ -147,6 +147,133 @@ M.list = function(chart)
   return out
 end
 
+-- Sentinel marking "explicitly clear this field" in an M.update_account
+-- `changes` table. A plain Lua table cannot distinguish "field absent" from
+-- "field explicitly set to nil" (both read back as nil), so omitting a
+-- field and wanting to clear it are otherwise indistinguishable. Pass
+-- `account.CLEAR` as the value to force a nilable field (code, description)
+-- back to nil; omit the field entirely to leave it untouched. Identity
+-- (`==`), not shape, is what's checked, so this must be the same table
+-- reference `M.CLEAR` always is — never construct your own `{}`.
+M.CLEAR = {}
+
+--- Update an existing account's mutable fields (name, code, description,
+-- type). `changes` is a partial record; only fields present are applied.
+-- `parent` cannot be changed this way — reparenting would break the
+-- parent-before-child ordering invariant `chart.order` and `add_account`
+-- rely on — so `changes.parent` being non-nil is rejected outright.
+--
+-- To clear `code` or `description` back to nil, pass `M.CLEAR` (see above)
+-- rather than nil/omitting the field.
+--
+-- Journal-reference and children checks are not this function's job — see
+-- delete_account below; the same caps-first boundary applies here in spirit
+-- (this module has no dependency on journal.lua), though update doesn't
+-- remove anything so there is nothing to check against the journal.
+-- Resolve one "clearable" field (code, description) from `changes`: absent
+-- (nil) means "leave unchanged", `M.CLEAR` means "set to nil", anything else
+-- must be a string. Returns (touched, value, err) — `touched` tells the
+-- caller whether to assign `value` at all, since `value` alone can't
+-- distinguish "leave unchanged" from "set to nil".
+--
+-- TYPECHECKER WORKAROUND: the natural code narrows `v` (typed `unknown`,
+-- since it may be a string, nil, or the M.CLEAR sentinel table) once and
+-- reuses the narrowed value across the "clear" and "keep string" branches.
+-- Same class of bug documented in lib/bookkeeping/journal.lua's build_line
+-- and lib/bookkeeping/store.lua's opt_string/opt_number (the "unknown ->
+-- optional T" merge does not survive past a guarding `if`). Isolated into
+-- this single-purpose helper (one guarded return per branch) so
+-- M.update_account itself never threads an `unknown -> T | nil` narrow
+-- through its own branches. See TODO.md; delete this indirection once
+-- guard-based narrowing survives a shared optional-typed local.
+--: (unknown, string) -> (boolean, string | nil, string | nil)
+local function resolve_clearable(v, err_msg)
+  if v == nil then return false, nil, nil end
+  if v == M.CLEAR then return true, nil, nil end
+  if type(v) ~= "string" then return false, nil, err_msg end
+  return true, v, nil
+end
+
+--: (chart, string, { name: string | nil, code: unknown, description: unknown, type: string | nil, parent: string | nil }) -> (account | nil, string | nil)
+M.update_account = function(chart, account_id, changes)
+  local acct = chart.by_id[account_id]
+  if not acct then
+    return nil, "account.update_account: unknown account id: " .. tostring(account_id)
+  end
+  if changes.parent ~= nil then
+    return nil, "account.update_account: cannot change parent (would break hierarchy invariants)"
+  end
+  local name = changes.name
+  if name ~= nil then
+    if type(name) ~= "string" or name == "" then
+      return nil, "account.update_account: name must be a non-empty string"
+    end
+  end
+  local acct_type = changes.type
+  if acct_type ~= nil then
+    if not is_account_type(acct_type) then
+      return nil, "account.update_account: unknown account type: " .. tostring(acct_type)
+    end
+  end
+  local set_code, code_val, code_err = resolve_clearable(changes.code, "account.update_account: code must be a string")
+  if code_err then return nil, code_err end
+  local set_description, description_val, description_err =
+    resolve_clearable(changes.description, "account.update_account: description must be a string")
+  if description_err then return nil, description_err end
+
+  if name ~= nil then acct.name = name end
+  if acct_type ~= nil then acct.type = acct_type end
+  if set_code then acct.code = code_val end
+  if set_description then acct.description = description_val end
+
+  return acct
+end
+
+--- Delete an account from the chart. Fails if the account has children
+-- (would orphan them). Does NOT check whether the account is referenced by
+-- any journal line — this module has no dependency on lib.bookkeeping.journal
+-- by design (journal depends on account, not the reverse), so a
+-- journal-reference check cannot live here. Callers that need that guarantee
+-- (e.g. a higher-level orchestration/bridge layer that holds both the chart
+-- and the journal) must check journal references themselves before calling
+-- this.
+--: (chart, string) -> (true | nil, string | nil)
+M.delete_account = function(chart, account_id)
+  local acct = chart.by_id[account_id]
+  if not acct then
+    return nil, "account.delete_account: unknown account id: " .. tostring(account_id)
+  end
+  local kids = M.children(chart, account_id)
+  if #kids > 0 then
+    return nil, "account.delete_account: account " .. account_id .. " has " .. #kids .. " child account(s)"
+  end
+
+  chart.by_id[account_id] = nil
+  -- TYPECHECKER WORKAROUND: the natural code is `table.remove(chart.order, i)`.
+  -- Confirmed via minimal repro that `table.remove` rejects a `{ [number]: V }`-typed
+  -- array (chart.order's declared shape) with "missing indexer for integer", even
+  -- though `{ [number]: V }` should structurally satisfy `{ [integer]: V }` (every
+  -- integer is a number, so a table indexed by any number already guarantees the
+  -- narrower integer-keyed guarantee `table.remove` asks for). This looks like a
+  -- distinct root cause from the three table.remove/table.sort "generic pinned by
+  -- an earlier call in the same file" entries already in TODO.md (this file makes
+  -- no other table.remove/table.sort call), so logged as a separate entry. Worked
+  -- around with a hand-written shift-left removal instead of `table.remove`. See
+  -- TODO.md; revert to `table.remove(chart.order, i)` once `{ [number]: V }` is
+  -- accepted where `{ [integer]: V }` is expected.
+  for i = 1, #chart.order do
+    if chart.order[i] == account_id then
+      local n = #chart.order
+      for j = i, n - 1 do
+        chart.order[j] = chart.order[j + 1]
+      end
+      chart.order[n] = nil
+      break
+    end
+  end
+  return true
+end
+
 --- Direct children of `parent_id`, in the order they were added.
 --: (chart, string) -> { [number]: account }
 M.children = function(chart, parent_id)

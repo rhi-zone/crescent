@@ -253,4 +253,84 @@ M.get = function(journal, id)
   return journal._by_id[id]
 end
 
+--- Void a posted entry: posts a new reversing entry (same lines, each
+-- amount negated) dated `void_date`, rather than mutating or removing the
+-- original — the traditional double-entry treatment, so the original entry
+-- remains in the journal for audit purposes. Requires `chart` because
+-- posting the reversal goes through the normal M.post validation path (same
+-- account-existence and balance checks any other posted entry gets).
+-- Reversal lines carry the original line's `rate` unchanged, so a
+-- multi-currency line reverses using the same exchange rate it was
+-- originally posted at (not a rate looked up fresh for `void_date`).
+--: (journal, chart, string, string) -> (entry | nil, string | nil)
+M.void_entry = function(journal, chart, entry_id, void_date)
+  local orig = journal._by_id[entry_id]
+  if not orig then
+    return nil, "journal.void_entry: unknown entry id: " .. tostring(entry_id)
+  end
+
+  local reversing_lines = {} --: { [number]: line_input }
+  local orig_lines = orig.lines
+  for i = 1, #orig_lines do
+    local line = orig_lines[i]
+    reversing_lines[i] = { account = line.account, amount = money.negate(line.amount), rate = line.rate }
+  end
+
+  return M.post(journal, chart, {
+    id          = nil,
+    date        = void_date,
+    description = "Void of entry " .. entry_id .. ": " .. orig.description,
+    lines       = reversing_lines,
+  })
+end
+
+--- Remove a posted entry from the journal entirely (no reversing entry, no
+-- audit trail) — violates conventional double-entry bookkeeping norms
+-- (M.void_entry above is the traditional operation), but is needed for CRDT
+-- sync conflict resolution, where a genuinely-deleted remote entry must be
+-- able to disappear locally too.
+--: (journal, string) -> (true | nil, string | nil)
+M.delete_entry = function(journal, entry_id)
+  if not journal._by_id[entry_id] then
+    return nil, "journal.delete_entry: unknown entry id: " .. tostring(entry_id)
+  end
+  journal._by_id[entry_id] = nil
+
+  -- TYPECHECKER WORKAROUND: the natural code is `table.remove(journal.entries, i)`.
+  -- Same substrate gap logged in TODO.md for lib/bookkeeping/account.lua's
+  -- delete_account: `table.remove` rejects a `{ [number]: V }`-typed array
+  -- ("missing indexer for integer") even though `{ [number]: V }` should
+  -- structurally satisfy `{ [integer]: V }`. Worked around with a hand-written
+  -- shift-left removal. Revert once `{ [number]: V }` is accepted where
+  -- `{ [integer]: V }` is expected.
+  local entries = journal.entries
+  for i = 1, #entries do
+    if entries[i].id == entry_id then
+      local n = #entries
+      for j = i, n - 1 do
+        entries[j] = entries[j + 1]
+      end
+      entries[n] = nil
+      break
+    end
+  end
+  return true
+end
+
+--- Update a posted entry's description in place. Metadata-only: does not
+-- touch lines, amounts, or the balance invariant, so no re-validation
+-- against `chart` is needed.
+--: (journal, string, string) -> (entry | nil, string | nil)
+M.update_entry_description = function(journal, entry_id, new_description)
+  local entry = journal._by_id[entry_id]
+  if not entry then
+    return nil, "journal.update_entry_description: unknown entry id: " .. tostring(entry_id)
+  end
+  if type(new_description) ~= "string" then
+    return nil, "journal.update_entry_description: new_description must be a string"
+  end
+  entry.description = new_description
+  return entry
+end
+
 return M
