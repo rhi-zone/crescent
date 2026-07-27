@@ -147,6 +147,57 @@ silently avoided):
   (drop the `--[[: T]]` re-casts) once cross-module field types survive
   `..` the same way same-module field types already do.
 
+## v10 typechecker: PAUSED pending design sync with external collaborator (2026-07-27)
+
+**Stated explicitly by the project owner this session: no further
+implementation on `lib/type/v10_kernel/` until the conceptual/architectural
+model is fully synced with an external collaborator referred to as
+"fable."** This gates everything in the section above — treat that section's
+prototype as frozen, not a base to build further on, until this syncs.
+
+Three decision docs now exist in `docs/decisions/`:
+`typechecker-version-history.md` (why 8 prior typechecker rewrites — v4, v5,
+v6, v7/framework, v9, toy_checker, declc — all failed; reconstructed from
+git history and session transcripts since CLAUDE.md's "v1→v4 failure" line
+was otherwise undocumented in one place), `typechecker-v10-proposal.md` (the
+v10 architecture proposal plus a critical evaluation against that graveyard
+record), and `typechecker-v10-design-sync.md` (a later round of design
+refinement, conducted partly with fable, covering the prefix-as-declared-
+citable-object architecture, the kernel-performative gap and its proposed
+generic-content-checking-primitives resolution, and a proposed-but-unbuilt
+axiom/taint mechanism for tracked, non-silent unsoundness).
+
+`typechecker-v10-design-sync.md` closes with six explicit open items —
+gating state for whoever picks this back up, not to be resolved here:
+
+1. **v5-op-sem citation discrepancy.** The doc's own §1 states, sourced from
+   direct file reading, that `lib/type/static-v5/op_sem.lua`/`op_sem_alt.lua`
+   formalize v5's *type-inference algorithm's* step relation, not
+   crescent-Lua's language semantics — off-target for the prefix role. A
+   later message from fable cited that same op_sem pair as a prefix-role
+   asset anyway, contradicting the sourced finding. Unreconciled.
+2. **"v3's constraint-gen/solve as the founding shape" is ambiguous** —
+   unclear whether this means reusing v3's actual code (which would repeat
+   the same "context poisoning" risk already flagged for adopting
+   `proof/typing.v` wholesale, since `lib/type/static/` is the exact lineage
+   with 105+ documented ad-hoc `ctx._foo` instances) or only the abstract
+   generation/solving-split pattern.
+3. **Schematic instantiation is undesigned**, blocked on an upstream fork:
+   is a judgment's content (e.g. `type_str`) an opaque string or a
+   structured term? Unresolved.
+4. **Discharge-certificate format is still open**, unchanged from prior
+   rounds.
+5. **Axiom/taint propagation cost is argued-plausible, not verified** — a
+   node shared by two parents with different discharge contexts should show
+   identical taint but potentially different discharge status; that's the
+   worked example fable proposed to distinguish correct (node-property)
+   taint propagation from an accidentally path-relative implementation, and
+   it hasn't been run.
+6. **The corroboration layer remains the standing, deliberately-unverified
+   research bet** from the original proposal — does the closure predicate
+   ever get exercised against a real, mature theory, or only against
+   founding toy entries.
+
 ## lib/y_crdt/update.lua: yjs update v1 wire codec (2026-07-27)
 
 Implemented `lib/y_crdt/update.lua` (encode_v1/apply_v1/encode_diff_v1/
