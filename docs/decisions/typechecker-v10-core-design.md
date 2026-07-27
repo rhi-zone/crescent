@@ -194,12 +194,67 @@ This closes the "concrete primitive set specification" open item below.
 
 ---
 
+## Operator signature format
+
+### Settled (owner-ratified this session)
+
+Closes the "operator-declaration format for registry entries — the
+concrete Lua shape" open item.
+
+- `kernel.declare_signature(spec) -> sig | nil, errmsg`; `spec = { name,
+  version, sorts = { names... }, ops = { opname = { result = sortname,
+  args = { { sort = sortname, binds = { sortnames... }? }... } } } }`.
+  Validation happens entirely at declaration (unknown sorts, duplicate
+  ops, malformed valences rejected); the result is an immutable signature
+  holding kernel-interned decl objects — after declaration succeeds no
+  malformed decl is observable (validity-by-construction, third
+  application of the fence pattern).
+- `build(decl, args)` takes a pre-resolved decl object (`sig.ops.X`), not
+  registry+name — no hot-path lookup. Node `bound_count` is stamped by
+  `build` from `#binds`; callers never supply it (refines the ratified
+  grammar: `bound_count`'s source is the decl).
+- Operator identity = declared-object identity (+version): same-named ops
+  in different signatures are different operators; vocabulary sharing =
+  citing the same signature object (this is how the prefix's shared
+  vocabulary will be imported). Terminology fixed: "signature".
+
+---
+
+## Schematic instantiation: conclusions are computed
+
+### Settled (owner-ratified this session)
+
+Task-4 fork A. This is also where the "no-metavars-in-conclusions check's
+placement" open item resolves: the check (`is_ground`) is enforced during
+replay, immediately after instantiating a rule's conclusion pattern and
+before the derivation node's conclusion exists at all.
+
+- A rule schema = premise patterns + conclusion pattern in the one term
+  grammar. Replay of a node citing rule R: match R's premise patterns
+  against the cited premises' conclusions in ONE shared binding
+  environment (non-linearity across premises = same mechanism as within a
+  pattern), instantiate R's conclusion pattern, require `is_ground`. This
+  realizes the "conclusions produced by primitive calls" resolution
+  literally.
+- Derivation nodes carry NO conclusions; replay derives them bottom-up.
+  Externally claimed statements are compared only at roots/exports.
+  Consequence, recorded explicitly: nothing inside a certificate can lie
+  about content — a producer bug yields a different conclusion, never a
+  wrong-but-accepted one. Optional per-node conclusion annotations are
+  permitted for debugging/tooling; the kernel verifies them when present
+  and never needs them.
+
+---
+
 ## Explicitly open (flagged, not settled — do not present as decided)
 
-- Operator-declaration format for registry entries (how a theory declares
-  its vocabulary: names, arities, valences, sorts — the concrete Lua
-  shape).
-- Pattern-discipline placement details (where the no-metavars-in-conclusions
-  check is enforced in the kernel API surface).
-- Everything downstream per the charter (instantiation checking, taint,
-  discharge format, prefix, corroboration).
+- Side conditions in rule schemas (task-4 fork B) — UNDESIGNED, owner
+  deliberately deferred. Requirement recorded for whatever design
+  eventually lands: side conditions must not pollute the core and must
+  scale to zero (zero cost and zero footprint when unused). Until
+  resolved, rules requiring side conditions are inexpressible — such a
+  rule halts to the owner rather than being worked around. None of the
+  three candidate approaches discussed (none-in-v1 /
+  mechanism-now-empty-vocabulary / starter set) has been chosen.
+- Everything downstream per the charter (taint, discharge format, prefix,
+  corroboration).
