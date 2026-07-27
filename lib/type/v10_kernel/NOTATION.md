@@ -119,3 +119,61 @@ capture-avoiding substitution — is still exactly the machinery the rejected
 `lib/type/framework/` attempt built (see
 `docs/typechecker-framework-postmortem.md`) and remains explicitly out of
 scope for this dinner-sized prototype. See `TODO.md`.
+
+## Term binder representation: de Bruijn indices (2026-07-27)
+
+Both theory entries (`theories/algorithm_w.lua`, `theories/algorithm_j.lua`)
+represent lambda-calculus terms using de Bruijn indices for variable
+binding, not source names:
+
+```
+var term  = { tag: "var", index: integer, name: string, locus: string }
+abs term  = { tag: "abs", param: string, body: Term, locus: string }
+let term  = { tag: "let", name: string, value: Term, body: Term, locus: string }
+```
+
+`index` is the de Bruijn index: `0` refers to the nearest enclosing binder
+(the innermost `abs`'s parameter or `let`'s bound name), `1` the next one
+out, and so on. The environment each producer threads through `infer` is a
+depth-indexed list (position 1 = index 0), extended by prepending one entry
+per binder (`env_extend` in both theory files) — never a name-keyed table.
+Variable lookup is `env[index + 1]`; there is no name comparison anywhere in
+either producer's binder-resolution path.
+
+`param` (on `abs`) and `name` (on `let` and `var`) are purely COSMETIC
+display strings — used only to label hypothesis payloads and node
+conclusions for readability (error messages, certificate pretty-printing).
+They are never consulted for lookup, unification, or any identity- or
+soundness-relevant comparison. Two variables at different de Bruijn depths
+may legitimately share a display name (shadowing); when they do, the index
+is what is semantically load-bearing, always — the display name is not.
+
+**Which framework lessons this closes, and which it doesn't**
+(`docs/typechecker-framework-postmortem.md`'s three carry-forward lessons):
+
+- **Lesson 1 (binder identity must be lexical position, never source-name
+  comparison) — now structurally true, not just true by implementation
+  accident.** Before this change, shadowing worked only because each theory's
+  environment was an ordinary Lua table chain (`setmetatable(..., { __index
+  = env })`) that happened to resolve innermost-first — nothing in the
+  certificate grammar tracked binder identity. Under de Bruijn there is no
+  name to compare in the first place; a lookup is an integer index into a
+  depth-indexed list. This is now true by construction.
+- **Lesson 3 (alpha-stable digests) — now free.** Alpha-equivalent named
+  terms (e.g. `\x -> x` and `\y -> y`) produce byte-identical de Bruijn terms
+  (`{ tag = "abs", param = <cosmetic>, body = { tag = "var", index = 0, ... } }`
+  either way — only the cosmetic `param`/`name` strings can differ, and
+  those are never part of what a digest over binding structure would need to
+  consider). Digesting a de Bruijn term for alpha-equivalence needs no
+  dedicated machinery, unlike the rejected `framework/` attempt's 239-line
+  `alpha.lua`.
+- **Lesson 2 (capture-avoidance must be a CHECKED condition, never assumed)
+  — only PARTIALLY resolved, do not overclaim this as closed.** De Bruijn
+  shift/substitution is capture-avoiding by construction of one correct
+  algorithm, which narrows what a future checked condition would need to
+  verify. But the kernel's whole discipline is to trust no producer's code —
+  W and J are untrusted producers `kernel.lua` never runs — and nothing in
+  this kernel replays or verifies that either producer's `infer` actually
+  performs shift/substitution correctly. A checked capture-avoidance
+  condition, replayed by the kernel the way hypothesis discharge already is,
+  remains unbuilt. See `TODO.md`.

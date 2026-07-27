@@ -23,11 +23,31 @@
 -- work around it.
 --
 -- Also omitted, on purpose, for dinner-sized scope: an occurs check (no
--- protection against constructing an infinite type), and any notion of
--- alpha-equivalence or binder identity beyond plain string names —
--- shadowing works because the environment is an ordinary Lua table chain
--- threaded recursively, not because the certificate grammar tracks binder
--- identity (see kernel.lua's stated discharge simplification).
+-- protection against constructing an infinite type).
+--
+-- BINDER REPRESENTATION (2026-07-27, standardized on de Bruijn indices):
+-- `var` terms carry a de Bruijn INDEX (0 = the nearest enclosing binder,
+-- counting outward), not a source name. The environment is a depth-indexed
+-- list (`WEnv`, position 1 = index 0 = innermost), extended by prepending
+-- one entry per `abs`/`let` binder (`env_extend`) — never looked up by
+-- name. Every `abs`/`let`/`var` term also carries a purely COSMETIC display
+-- name (`param`, `name`, or `var.name`) used only for hypothesis-payload and
+-- conclusion readability (error messages, certificate pretty-printing); it
+-- is never read by `infer`'s lookup, by `unify`, or by anything
+-- identity/soundness-relevant. Two variables at different indices may
+-- legitimately share a display name (shadowing) — the index is what's
+-- load-bearing, always.
+--
+-- This closes two of the three carry-forward lessons from the rejected
+-- `lib/type/framework/` attempt (`docs/typechecker-framework-postmortem.md`)
+-- structurally rather than by convention: binder identity is lexical
+-- position by construction (there is no name to compare — Lesson 1), and
+-- alpha-equivalent terms are byte-identical de Bruijn terms, so digesting is
+-- free (Lesson 3, no `alpha.lua`-style machinery needed). Capture-avoidance
+-- as a CHECKED condition (Lesson 2) is only partially addressed: de Bruijn
+-- shift/subst is capture-avoiding by construction of one correct algorithm,
+-- but nothing in this kernel replays or verifies that construction — W/J
+-- remain untrusted producers `kernel.lua` never runs. See NOTATION.md.
 
 local registry_mod = require("lib.type.v10_kernel.registry")
 
@@ -37,7 +57,7 @@ local M = {}
 
 M.THEORY = "algorithm_w"
 
---:: WTerm = { tag: "lit", base: string, value: unknown, locus: string } | { tag: "var", name: string, locus: string } | { tag: "abs", param: string, body: WTerm, locus: string } | { tag: "app", fn: WTerm, arg: WTerm, locus: string } | { tag: "let", name: string, value: WTerm, body: WTerm, locus: string }
+--:: WTerm = { tag: "lit", base: string, value: unknown, locus: string } | { tag: "var", index: integer, name: string, locus: string } | { tag: "abs", param: string, body: WTerm, locus: string } | { tag: "app", fn: WTerm, arg: WTerm, locus: string } | { tag: "let", name: string, value: WTerm, body: WTerm, locus: string }
 --:: WType = { tag: "con", name: string } | { tag: "var", id: string } | { tag: "fun", from: WType, to: WType }
 --:: WNode = { id: string, rule: string, judgment: string, locus: string, conclusion: unknown, premises: { [integer]: string }, assumes?: { [integer]: string }, discharges?: { [integer]: string } }
 --:: WHypothesis = { id: string, judgment: string, payload: unknown }
@@ -163,8 +183,23 @@ local function add_hyp(b, name, wtype)
 	return id
 end
 
---:: WEnvEntry = { hyp_id: string, type: WType }
---:: WEnv = { [string]: WEnvEntry }
+--:: WEnvEntry = { hyp_id: string, type: WType, name: string }
+--:: WEnv = { [integer]: WEnvEntry }
+
+-- Prepend one binder onto `env` (depth-indexed, position 1 = de Bruijn index
+-- 0 = innermost/nearest enclosing binder). Never mutates `env` itself, so a
+-- reference to the pre-extension environment (e.g. captured by a sibling
+-- subterm) stays valid — same non-mutating-extension discipline the old
+-- `setmetatable(..., { __index = env })` chain had, just index- rather than
+-- name-keyed.
+--: (WEnv, WEnvEntry) -> WEnv
+local function env_extend(env, entry)
+	local extended = { entry }
+	for i = 1, #env do
+		extended[i + 1] = env[i]
+	end
+	return extended
+end
 
 --: (WTerm, WEnv, { [string]: WType, ... }, Builder) -> (WType | nil, string | nil, string | nil)
 local function infer(term, env, subst, b)
@@ -177,11 +212,15 @@ local function infer(term, env, subst, b)
 		})
 		return t, node_id, nil
 	elseif term.tag == "var" then
-		local binding = env[term.name]
-		if not binding then return nil, nil, "unbound variable " .. term.name .. " at " .. term.locus end
+		-- LOOKUP IS BY INDEX ONLY. `term.name` below is purely cosmetic (error
+		-- text); it plays no role in resolving the binding.
+		local binding = env[term.index + 1]
+		if not binding then
+			return nil, nil, "unbound de Bruijn index " .. term.index .. " (" .. term.name .. ") at " .. term.locus
+		end
 		local node_id = add_node(b, {
 			rule = "W-Var", judgment = "has_type", locus = term.locus,
-			conclusion = { term = term.locus, type_str = show_type(resolve(binding.type, subst)) },
+			conclusion = { term = term.locus, type_str = show_type(resolve(binding.type, subst)), name = binding.name },
 			premises = {},
 			assumes = { binding.hyp_id },
 		})
@@ -189,7 +228,7 @@ local function infer(term, env, subst, b)
 	elseif term.tag == "abs" then
 		local param_type = fresh_var()
 		local hyp_id = add_hyp(b, term.param, param_type)
-		local inner_env = setmetatable({ [term.param] = { hyp_id = hyp_id, type = param_type } }, { __index = env })
+		local inner_env = env_extend(env, { hyp_id = hyp_id, type = param_type, name = term.param })
 		local body_type, body_node, err = infer(term.body, inner_env, subst, b)
 		if not body_type then return nil, nil, err end
 		local t = { tag = "fun", from = param_type, to = body_type }
@@ -221,7 +260,7 @@ local function infer(term, env, subst, b)
 		-- is bound directly to value_type (monomorphic), not to a
 		-- re-instantiated forall-scheme.
 		local hyp_id = add_hyp(b, term.name, value_type)
-		local inner_env = setmetatable({ [term.name] = { hyp_id = hyp_id, type = value_type } }, { __index = env })
+		local inner_env = env_extend(env, { hyp_id = hyp_id, type = value_type, name = term.name })
 		local body_type, body_node, err2 = infer(term.body, inner_env, subst, b)
 		if not body_type then return nil, nil, err2 end
 		local node_id = add_node(b, {

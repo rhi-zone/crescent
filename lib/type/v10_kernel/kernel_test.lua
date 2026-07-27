@@ -21,12 +21,16 @@ local function w_registry()
 end
 
 -- let id = \x -> x in id 42
+-- De Bruijn indices: inside the abs body, `x` is the nearest enclosing
+-- binder -> index 0. Inside the let body, `id` is the nearest enclosing
+-- binder -> index 0. (`name` fields below are purely cosmetic display
+-- hints, never used for lookup.)
 local VALID_TERM = {
 	tag = "let", name = "id", locus = "let@1",
 	value = { tag = "abs", param = "x", locus = "abs@1",
-		body = { tag = "var", name = "x", locus = "var@1" } },
+		body = { tag = "var", index = 0, name = "x", locus = "var@1" } },
 	body = { tag = "app", locus = "app@1",
-		fn = { tag = "var", name = "id", locus = "var@2" },
+		fn = { tag = "var", index = 0, name = "id", locus = "var@2" },
 		arg = { tag = "lit", base = "integer", value = 42, locus = "lit@1" } },
 }
 
@@ -113,17 +117,23 @@ T.describe("v10 kernel — W's documented limitation (shown, not fixed)", functi
 		-- a kernel failure. This is the intended, documented weakness — the
 		-- fix (let-generalization) is explicitly out of scope for this
 		-- founding entry.
+		-- De Bruijn indices: `x` in the abs body -> index 0 (its own
+		-- binder). Inside the outer let's body, env is [id] (depth 0 =
+		-- id): the inner let's `value` is still evaluated there, so its
+		-- `id` reference -> index 0. The inner let's `body` env is
+		-- [a, id] (depth 0 = a, depth 1 = id, since `a` shadows depth 0)
+		-- -- its `id` reference is now one level further out -> index 1.
 		local term = {
 			tag = "let", name = "id", locus = "let@outer",
 			value = { tag = "abs", param = "x", locus = "abs@1",
-				body = { tag = "var", name = "x", locus = "var@1" } },
+				body = { tag = "var", index = 0, name = "x", locus = "var@1" } },
 			body = {
 				tag = "let", name = "a", locus = "let@inner",
 				value = { tag = "app", locus = "app@1",
-					fn = { tag = "var", name = "id", locus = "var@2" },
+					fn = { tag = "var", index = 0, name = "id", locus = "var@2" },
 					arg = { tag = "lit", base = "integer", value = 1, locus = "lit@1" } },
 				body = { tag = "app", locus = "app@2",
-					fn = { tag = "var", name = "id", locus = "var@3" },
+					fn = { tag = "var", index = 1, name = "id", locus = "var@3" },
 					arg = { tag = "lit", base = "boolean", value = true, locus = "lit@2" } },
 			},
 		}

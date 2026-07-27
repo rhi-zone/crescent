@@ -65,6 +65,52 @@ below). It does not attempt to close every design question; see `TODO.md`
   verbatim rather than declaring an identical duplicate — see "Algorithm J:
   the genericity finding" above for why that's correct, and the naming
   tradeoff (J's certificates cite rules prefixed `W-`) it leaves open.
+- **Term binder representation**: de Bruijn indices, not source names — see
+  "De Bruijn indices: standardizing term binders" below.
+
+## De Bruijn indices: standardizing term binders (2026-07-27)
+
+Both theories originally represented lambda terms with named string binders
+(`{ tag = "abs", param = "x", ... }`) and looked up variables through a
+metatable-chained, name-keyed environment (`env[name]`, innermost binding
+shadowing outer ones because `setmetatable(..., { __index = env })`
+resolves innermost-first). Both now use de Bruijn indices instead: `var`
+terms carry an integer `index` (0 = nearest enclosing binder), and the
+environment each theory's `infer` threads is a depth-indexed list extended
+by prepending one entry per binder — never looked up by name. A purely
+cosmetic display name still rides alongside every binder and reference
+(`abs.param`, `let.name`, `var.name`) for hypothesis-payload and
+conclusion readability only; it is never consulted for lookup or any
+identity/soundness-relevant comparison. Full grammar and rationale in
+`NOTATION.md`'s "Term binder representation: de Bruijn indices" section.
+
+This was a deliberate design decision, not scope creep — made this session
+after weighing it against the three carry-forward lessons from the rejected
+`lib/type/framework/` attempt (`docs/typechecker-framework-postmortem.md`):
+
+- **Binder identity as lexical position (Lesson 1) and alpha-stable digests
+  (Lesson 3) are now structurally resolved** — true by construction of the
+  representation, not by an implementation accident (previously, shadowing
+  only worked because Lua's table-chain lookup happens to resolve
+  innermost-first; the certificate grammar itself tracked nothing about
+  binder identity).
+- **Capture-avoidance as a checked condition (Lesson 2) is only partially
+  addressed, and is NOT being claimed as closed.** De Bruijn shift/subst is
+  capture-avoiding by construction of one correct algorithm, which narrows
+  what a future checked condition needs to verify — but the kernel's
+  discipline is to trust no producer's code (W and J are untrusted producers
+  `kernel.lua` never runs), and nothing here replays or verifies that either
+  producer's `infer` actually implements that correct algorithm. This
+  remains open; see `TODO.md`.
+
+Unification and the rest of the type-level machinery (`unify`, `resolve`,
+`deep_resolve`, `show_type` in `algorithm_w.lua`; the mutable-cell/
+union-find analogues in `algorithm_j.lua`) operate purely on `WType`/`JType`
+and needed no changes — only the term representation and the environment-
+threading in `infer`'s `abs`/`let`/`var` cases changed. `kernel.lua` and
+`registry.lua` needed zero changes: both already treat `conclusion` and
+hypothesis `payload` as fully opaque, with no code path that distinguishes a
+de Bruijn payload from a named one.
 
 ## Algorithm J: the genericity finding
 

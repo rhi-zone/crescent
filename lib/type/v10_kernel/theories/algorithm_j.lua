@@ -53,8 +53,16 @@
 -- term.
 --
 -- Also omitted, on purpose, for dinner-sized scope (mirrors algorithm_w.lua):
--- no occurs check, no alpha-equivalence/binder-identity machinery beyond
--- plain string names in a chained environment table.
+-- no occurs check.
+--
+-- BINDER REPRESENTATION: matches algorithm_w.lua's 2026-07-27 standardization
+-- on de Bruijn indices — see that file's header for the full rationale
+-- (framework-postmortem Lessons 1 and 3 now hold structurally; Lesson 2,
+-- capture-avoidance as a CHECKED condition, remains open and out of scope
+-- here). `var` terms carry a de Bruijn index, never a name; the environment
+-- (`JEnv`) is a depth-indexed list extended by `env_extend`, never looked up
+-- by name. A cosmetic display name still rides alongside each index/binder
+-- for readability only.
 
 local registry_mod = require("lib.type.v10_kernel.registry")
 local w = require("lib.type.v10_kernel.theories.algorithm_w")
@@ -65,7 +73,7 @@ local M = {}
 
 M.THEORY = "algorithm_j"
 
---:: JTerm = { tag: "lit", base: string, value: unknown, locus: string } | { tag: "var", name: string, locus: string } | { tag: "abs", param: string, body: JTerm, locus: string } | { tag: "app", fn: JTerm, arg: JTerm, locus: string } | { tag: "let", name: string, value: JTerm, body: JTerm, locus: string }
+--:: JTerm = { tag: "lit", base: string, value: unknown, locus: string } | { tag: "var", index: integer, name: string, locus: string } | { tag: "abs", param: string, body: JTerm, locus: string } | { tag: "app", fn: JTerm, arg: JTerm, locus: string } | { tag: "let", name: string, value: JTerm, body: JTerm, locus: string }
 --:: Cell = { bound: JType | nil }
 --:: JType = { tag: "con", name: string } | { tag: "var", id: string, cell: Cell } | { tag: "fun", from: JType, to: JType }
 --:: JNode = { id: string, rule: string, judgment: string, locus: string, conclusion: unknown, premises: { [integer]: string }, assumes?: { [integer]: string }, discharges?: { [integer]: string } }
@@ -186,8 +194,21 @@ local function add_hyp(b, name, jtype)
 	return id
 end
 
---:: JEnvEntry = { hyp_id: string, type: JType }
---:: JEnv = { [string]: JEnvEntry }
+--:: JEnvEntry = { hyp_id: string, type: JType, name: string }
+--:: JEnv = { [integer]: JEnvEntry }
+
+-- Prepend one binder onto `env` (depth-indexed, position 1 = de Bruijn index
+-- 0 = innermost/nearest enclosing binder) — see algorithm_w.lua's identical
+-- `env_extend` for the non-mutation rationale; here it replaces the old
+-- `setmetatable(..., { __index = env })` name-chain the same way.
+--: (JEnv, JEnvEntry) -> JEnv
+local function env_extend(env, entry)
+	local extended = { entry }
+	for i = 1, #env do
+		extended[i + 1] = env[i]
+	end
+	return extended
+end
 
 -- No `subst` parameter threaded through, unlike algorithm_w.lua's `infer` —
 -- unification mutates cells reachable from any type already handed out, so
@@ -203,11 +224,14 @@ local function infer(term, env, b)
 		})
 		return t, node_id, nil
 	elseif term.tag == "var" then
-		local binding = env[term.name]
-		if not binding then return nil, nil, "unbound variable " .. term.name .. " at " .. term.locus end
+		-- LOOKUP IS BY INDEX ONLY. `term.name` below is purely cosmetic.
+		local binding = env[term.index + 1]
+		if not binding then
+			return nil, nil, "unbound de Bruijn index " .. term.index .. " (" .. term.name .. ") at " .. term.locus
+		end
 		local node_id = add_node(b, {
 			rule = "W-Var", judgment = "has_type", locus = term.locus,
-			conclusion = { term = term.locus, type_str = show_type(prune(binding.type)) },
+			conclusion = { term = term.locus, type_str = show_type(prune(binding.type)), name = binding.name },
 			premises = {},
 			assumes = { binding.hyp_id },
 		})
@@ -215,7 +239,7 @@ local function infer(term, env, b)
 	elseif term.tag == "abs" then
 		local param_type = fresh_var()
 		local hyp_id = add_hyp(b, term.param, param_type)
-		local inner_env = setmetatable({ [term.param] = { hyp_id = hyp_id, type = param_type } }, { __index = env })
+		local inner_env = env_extend(env, { hyp_id = hyp_id, type = param_type, name = term.param })
 		local body_type, body_node, err = infer(term.body, inner_env, b)
 		if not body_type then return nil, nil, err end
 		local t = { tag = "fun", from = param_type, to = body_type }
@@ -247,7 +271,7 @@ local function infer(term, env, b)
 		-- see module header. `name` is bound directly to value_type
 		-- (monomorphic), not to a re-instantiated forall-scheme.
 		local hyp_id = add_hyp(b, term.name, value_type)
-		local inner_env = setmetatable({ [term.name] = { hyp_id = hyp_id, type = value_type } }, { __index = env })
+		local inner_env = env_extend(env, { hyp_id = hyp_id, type = value_type, name = term.name })
 		local body_type, body_node, err2 = infer(term.body, inner_env, b)
 		if not body_type then return nil, nil, err2 end
 		local node_id = add_node(b, {

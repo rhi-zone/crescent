@@ -96,6 +96,35 @@ Deliberately out of scope (not attempted, not silently papered over):
   separate, still-open piece of the original `framework/`-sized machinery
   — not reopened as a new item since they were never this item's scope
   beyond the id-match-anywhere flaw, which is what's fixed.
+  **FURTHER RESOLVED (2026-07-27, binder-identity and alpha-stability
+  portions only — capture-avoidance-as-a-checked-condition remains
+  explicitly OPEN):** both theory entries (`theories/algorithm_w.lua`,
+  `theories/algorithm_j.lua`) now represent lambda terms with de Bruijn
+  indices instead of named string binders, with a purely cosmetic display
+  name riding alongside each index/binder for readability only (never used
+  for lookup or any identity-relevant comparison). This closes Lesson 1
+  (binder identity is lexical position by construction — there is no name
+  to compare) and Lesson 3 (alpha-equivalent terms are byte-identical de
+  Bruijn terms, so digesting is free) STRUCTURALLY rather than by the prior
+  implementation accident (Lua's metatable-chained environment happening to
+  resolve innermost-first). Lesson 2 (capture-avoidance must be a CHECKED
+  condition, never assumed) is only PARTIALLY narrowed by this change: de
+  Bruijn shift/subst is capture-avoiding by construction of one correct
+  algorithm, but the kernel trusts no producer's code (W/J are untrusted
+  producers `kernel.lua` never runs), and nothing here replays or verifies
+  that either producer's `infer` actually implements that correct
+  algorithm — a checked, kernel-replayed capture-avoidance condition remains
+  unbuilt. Do not read this as closing Lesson 2. See `NOTATION.md`'s "Term
+  binder representation: de Bruijn indices" section and README.md's "De
+  Bruijn indices: standardizing term binders" section for the full
+  writeup. Unification and type-level machinery (`unify`/`resolve`/
+  `deep_resolve`/`show_type` in W; the mutable-cell/union-find analogues in
+  J) were untouched — confirmed to operate purely on `WType`/`JType`, not
+  term binders. `kernel.lua`/`registry.lua` needed zero changes (both
+  already treat certificate payloads as fully opaque). All 38 existing
+  assertions across `kernel_test.lua`, `algorithm_j_test.lua`, and
+  `kernel_discharge_scope_test.lua` still pass — this was a representation
+  change, not a behavior change.
 
 Typechecker substrate gap found while building this (worked around, not
 silently avoided):
