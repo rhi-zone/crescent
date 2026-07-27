@@ -86,6 +86,61 @@ available follow-up before implementation hardens.
 
 ---
 
+## Kernel primitive tiers and trust
+
+### Settled (owner-ratified this session)
+
+**Perf-critical kernel primitives get two implementations, applying the
+repo's existing tier doctrine inside the kernel:**
+
+- A **reference tier** that IS the semantic definition: structural equality,
+  and eager de Bruijn substitution — simple, obviously correct. **Eager
+  substitution is the reference semantics.**
+- A **fast tier** as an optimization claim: hash-consed interning with
+  pointer equality, and explicit/lazy substitution. The lazy/explicit-subst
+  fast tier sits behind the same primitive signature as the reference tier,
+  so tier choice is swappable and benchmark-driven at implementation time,
+  per the repo's standing perf-work rules.
+
+**Each fast tier's soundness is a named, versioned registry axiom**
+(working names, not final: `kernel-interner-sound-v1`,
+`kernel-lazy-subst-sound-v1`) — assumed until proven, burned down like any
+other axiom. Until proof: mandatory parity tests + parity fuzzing of fast
+tier against reference tier, and benchmarks logged, per the repo's standing
+multiple-implementation discipline.
+
+**What "proven" will mean, recorded upfront:** a model-level proof
+(interner / explicit-substitution calculus proven correct, post-core, in
+the proof stack) plus empirical parity/fuzz evidence that the Lua
+implementation matches the model — the same model-vs-reality split the
+reality-bridge embodies. Proving the LuaJIT code itself is not on any path;
+the axiom burns down to "proved at model level + empirically bridged,"
+never to zero. This is not to be later read as more than that.
+
+**Run-level trust carveout for kernel axioms (owner-refined design):**
+
+- Kernel-implementation trust is uniform over a replay run — it cannot vary
+  per node, so per-node marking carries zero information at pure cost.
+  Kernel-config axioms are therefore carved out of per-node taint sets into
+  a single **run-level trust label** derived from the kernel configuration
+  (e.g. `{eq = reference|interned, subst = eager|lazy}`). Node taint sets
+  remain reserved for in-derivation axioms (legacy imports etc.), where
+  taint varies per node and means something. This carveout is deliberate,
+  not an oversight, and is documented here with this rationale for that
+  reason.
+- **Anti-laundering rule (extends the unlaunderability invariant):**
+  caches/memo tables are keyed (or labeled) by kernel-config hash — a
+  judgment produced under a fast config must never be served into a
+  reference-config run claiming axiom-freedom. Any persisted or exported
+  verdict carries its run label.
+- The trust-query API unions both sources: a judgment's effective axiom set
+  = node taint ∪ run label.
+- **Free property (requirement):** a run under the all-reference config
+  carries no kernel axioms — "re-run the slow kernel" is always the escape
+  to kernel-axiom-free status.
+
+---
+
 ## Explicitly open (flagged, not settled — do not present as decided)
 
 - Concrete primitive set specification: shift/subst, structural equality,
