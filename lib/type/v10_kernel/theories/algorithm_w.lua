@@ -45,6 +45,15 @@ M.THEORY = "algorithm_w"
 
 -- ---- rule schemas -------------------------------------------------------
 
+-- Exposed as M.RULES (not just a local) because these five schemas state a
+-- judgment shape (has_type; lit/var/abs/app/let arities and assumes/
+-- discharges flags), not anything specific to W's functional-substitution
+-- implementation style. theories/algorithm_j.lua — the same Damas-Milner
+-- algorithm in its imperative, mutable-ref-cell reformulation — registers
+-- these exact schema objects into its own (separately-scoped) registry
+-- rather than re-declaring identical ones, since the underlying judgment is
+-- provably the same one. See algorithm_j.lua's header for the citation-
+-- naming tradeoff that choice implies.
 local RULES = {
 	{ name = "W-Lit", judgment = "has_type", arity = 0 },
 	{ name = "W-Var", judgment = "has_type", arity = 0, assumes = true },
@@ -52,6 +61,7 @@ local RULES = {
 	{ name = "W-App", judgment = "has_type", arity = 2 },
 	{ name = "W-Let", judgment = "has_type", arity = 2, discharges = true },
 }
+M.RULES = RULES
 
 -- Register every W rule schema into `registry`. Call once before certifying
 -- against it.

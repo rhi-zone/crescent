@@ -52,6 +52,18 @@ RuleSchema = {
 }
 ```
 
+**Confirmed by adding a second theory (Algorithm J, see
+`theories/algorithm_j.lua`):** a `RuleSchema` describes a judgment and a
+node's structural shape only — never anything about how a producer derives
+that conclusion. Two producers implementing the same judgment (Algorithm W
+and Algorithm J both derive the same Damas-Milner `has_type` judgment, one
+functionally, one imperatively) can therefore cite the literal same
+`RuleSchema` objects, registered into their own separately-scoped
+`Registry` instances, with no kernel or registry changes. `registry.lua`
+already scopes schemas per `Registry`, and `kernel.lua`'s `M.replay` only
+ever consults the one registry passed to it — this is what makes the reuse
+possible without either trusted file needing to know it's happening.
+
 ## What the kernel checks, and in what order (`kernel.lua`'s `M.replay`)
 
 1. `certificate.theory == registry.theory` (right registry for this certificate).

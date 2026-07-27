@@ -32,7 +32,30 @@ shape from `docs/decisions/typechecker-v10-proposal.md` (the proposal + its
 in-session critical evaluation, not yet ratified) holds together at all;
 this prototype does not restate that design conversation.
 
+**Second theory entry added (2026-07-27): Algorithm J**
+(`lib/type/v10_kernel/theories/algorithm_j.lua`,
+`lib/type/v10_kernel/algorithm_j_test.lua`, 14 more assertions). Same
+Damas-Milner algorithm as W, in its classic imperative reformulation
+(mutable ref cells + union-find-style mutation instead of W's functional
+substitution map) — built specifically to stress-test registry/kernel
+genericity against a structurally different producer. **Finding: zero
+changes to `kernel.lua` or `registry.lua` were needed.** J registers zero
+new rule schemas — it reuses `algorithm_w.lua`'s exported `RULES` table
+verbatim into its own separately-scoped registry, since W and J derive the
+literal same judgment. See README.md's "Algorithm J: the genericity
+finding" section and NOTATION.md for the full writeup. J's let-binding
+deliberately does not generalize either (matches W on purpose, so the two
+are comparable on the same known weakness, not accidentally divergent).
+
 Deliberately out of scope (not attempted, not silently papered over):
+- [ ] **Algorithm-neutral rule-schema names.** Because
+  `algorithm_j.lua` reuses `algorithm_w.lua`'s rule schemas verbatim (see
+  above), J's certificates cite rules literally named `W-Lit`, `W-Var`,
+  etc. — cosmetically odd for a J-derived certificate, since the `W-`
+  prefix no longer means "specific to Algorithm W." Renaming to neutral
+  names (e.g. `HM-Lit`) would fix this but touches `algorithm_w.lua`'s
+  already-committed names and `kernel_test.lua`'s existing by-name lookups;
+  judged out of scope for the Algorithm J entry itself.
 - [ ] **Theory-registry soundness-of-schema verification beyond shape
   validity.** `registry.register` checks a schema's own structure only; a
   registrant's claim that its rule is sound is taken on faith, same as the
