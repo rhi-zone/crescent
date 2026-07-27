@@ -8,7 +8,7 @@
 local T = require("lib.test.assert")
 local registry_mod = require("lib.type.v10_kernel.registry")
 local kernel = require("lib.type.v10_kernel.kernel")
-local w = require("lib.type.v10_kernel.w")
+local w = require("lib.type.v10_kernel.theories.algorithm_w")
 
 --:: require "lib.type.v10_kernel.registry"
 

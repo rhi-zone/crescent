@@ -9,5 +9,5 @@ end
 return {
 	kernel = require("lib.type.v10_kernel.kernel"),
 	registry = require("lib.type.v10_kernel.registry"),
-	w = require("lib.type.v10_kernel.w"),
+	w = require("lib.type.v10_kernel.theories.algorithm_w"),
 }

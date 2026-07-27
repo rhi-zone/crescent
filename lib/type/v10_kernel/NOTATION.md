@@ -2,7 +2,7 @@
 
 This is the grammar the kernel (`kernel.lua`) replays. It is deliberately
 small — a stranger should be able to read this page and then read
-`kernel.lua` and `w.lua` without needing anything else.
+`kernel.lua` and `theories/algorithm_w.lua` without needing anything else.
 
 ## Certificate
 
@@ -72,7 +72,7 @@ RuleSchema = {
 The kernel never reads `conclusion` or `Hypothesis.payload` beyond checking
 existence — it has no idea what a "type," "term," or "unify" is. All meaning
 lives in the theory (the schemas registered, and the producer that cites
-them, e.g. `w.lua`).
+them, e.g. `theories/algorithm_w.lua`).
 
 ## Stated simplification (not a design closure)
 

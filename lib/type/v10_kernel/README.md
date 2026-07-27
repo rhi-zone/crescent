@@ -14,7 +14,7 @@ protocol end to end. It does not attempt to close every design question; see
   citations, and structural well-formedness only.
 - `registry.lua` — theory registry: `register(schema)` checks shape only
   (never soundness); `lookup(name)` is what the kernel uses during replay.
-- `w.lua` — Algorithm W, the founding theory entry. An untrusted *producer*:
+- `theories/algorithm_w.lua` — Algorithm W, the founding theory entry. An untrusted *producer*:
   it runs its own toy HM-style inference and emits a certificate citing the
   registered W rule schemas. The kernel never executes this file's logic.
 - `kernel_test.lua` — a valid certificate replays; three independently
