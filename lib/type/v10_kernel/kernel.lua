@@ -13,26 +13,36 @@
 --   3. well-foundedness     the premise graph has no cycle (no node's
 --                            justification depends, directly or
 --                            transitively, on itself).
---   4. hypothesis discharge every hypothesis id any reachable node
---                           `assumes` has a matching `discharges` entry on
---                           some reachable node, and is defined in
---                           certificate.hypotheses. A hypothesis cited but
---                           never discharged is a silent assumption, and is
---                           rejected.
+--   4. hypothesis discharge every hypothesis id a node `assumes` is
+--                           discharged by an ANCESTOR of that node — a node
+--                           on every root-to-node path through `premises` —
+--                           and is defined in certificate.hypotheses. A
+--                           hypothesis assumed but not discharged by an
+--                           enclosing node, on every path that reaches it,
+--                           is a silent (or partially-scoped) assumption,
+--                           and is rejected.
 --
 -- The kernel never inspects `conclusion` payloads beyond checking they
 -- exist; it has zero knowledge of what "var", "abs", "app", "let," or
 -- unification mean, or what a "type" is. See NOTATION.md for the full
 -- certificate grammar.
 --
--- STATED SIMPLIFICATION (dinner-sized prototype, not a design closure):
--- hypothesis discharge is checked by ID MATCH ANYWHERE IN THE REACHABLE SET,
--- not by verifying the discharging node is a lexical ancestor of the
--- assuming node. Real scoping / shadowing / capture-avoidance (alpha-
--- stability, binder identity) is exactly the machinery the rejected
--- `lib/type/framework/` attempt spent most of its complexity on (see
--- docs/typechecker-framework-postmortem.md) and is explicitly out of scope
--- here — see TODO.md.
+-- DERIVATION SHAPE: a certificate's `premises` edges form a DAG, not
+-- necessarily a tree — a node MAY be listed as a premise of more than one
+-- parent (a shared sub-derivation). A tree is the special case where every
+-- node has exactly one parent; neither W's nor J's producers ever emit a
+-- shared node today (each is built fresh per source-term occurrence), so
+-- this is a generalization with no effect on any certificate either theory
+-- currently produces. When a node IS shared, hypothesis discharge is
+-- checked against the INTERSECTION of what's discharged along every
+-- distinct root-to-node path — i.e. a shared node's assumption must be
+-- covered by an ancestor on EACH path that reaches it, not merely one. This
+-- is what makes a DAG certificate mean the same thing as the (possibly much
+-- larger) tree you'd get by unfolding each shared node into one copy per
+-- incoming path: each unfolded copy would independently need its own
+-- ancestor-discharge, so the shared node must satisfy all of them at once.
+-- Well-foundedness (no node depends on itself, `walk`'s cycle check) still
+-- guarantees the DAG has no cycles, so "every path" is always a finite set.
 
 local registry_mod = require("lib.type.v10_kernel.registry")
 
@@ -124,24 +134,93 @@ local function walk(cert, registry, root)
 	return reachable
 end
 
---: (Certificate, { [string]: boolean, ... }) -> (boolean | nil, string | nil)
-local function check_discharge(cert, reachable)
-	local discharged = {}
-	for node_id in pairs(reachable) do
+-- Topological order (parents before children) of `reachable`, computed as a
+-- DFS post-order over `premises` edges from `root`, reversed. Assumes
+-- `reachable` is already known acyclic (walk's well-foundedness check
+-- already ran against the same edges) — this pass never re-detects cycles,
+-- it only orders what's already been proven a DAG. A node with more than
+-- one parent is visited (and appended) exactly once, on whichever parent's
+-- premise list reaches it first during the DFS; that's safe here because
+-- topological order is what's needed, not a specific path, and any DFS
+-- order over an acyclic graph yields a valid one.
+--: (Certificate, { [string]: boolean, ... }, string) -> { [integer]: string, ... }
+local function topo_order(cert, reachable, root)
+	local postorder = {}
+	local done = {}
+	local visit
+	--: (string) -> ()
+	visit = function(node_id)
+		if done[node_id] then return end
+		done[node_id] = true
 		local node = cert.nodes[node_id]
-		for _, hyp_id in ipairs(node.discharges or {}) do
-			discharged[hyp_id] = true
+		for _, premise_id in ipairs(node.premises or {}) do
+			visit(premise_id)
+		end
+		postorder[#postorder + 1] = node_id
+	end
+	visit(root)
+	local topo = {}
+	for i = #postorder, 1, -1 do
+		topo[#topo + 1] = postorder[i]
+	end
+	return topo
+end
+
+-- For every node reachable from `root`, require that each hypothesis id it
+-- `assumes` (a) is defined in `cert.hypotheses`, and (b) is discharged by an
+-- ANCESTOR of that node on EVERY root-to-node path through `premises` — not
+-- merely present in some `discharges` list anywhere in the certificate, and
+-- not merely on some (rather than every) path when the node is shared by
+-- more than one parent. See kernel.lua's header for why "every path" is the
+-- correct scoping rule for a DAG-shaped derivation.
+--
+-- Implementation: walk `reachable` in topological order (parents before
+-- children). For each node, track the discharge set carried in from its
+-- ancestors — the intersection, across every incoming premises-edge, of
+-- (the carrying parent's own ancestor-discharge set UNION that parent's own
+-- `discharges`). A node with a single parent just inherits that parent's
+-- set (intersection of one set is itself); the intersection is what
+-- enforces "every path" once a node has more than one.
+--: (Certificate, { [string]: boolean, ... }, string) -> (boolean | nil, string | nil)
+local function check_discharge(cert, reachable, root)
+	local topo = topo_order(cert, reachable, root)
+
+	--:: HypSet = { [string]: boolean, ... }
+	local ancestor_discharges = {} --[[: { [string]: HypSet } ]]
+	ancestor_discharges[root] = {}
+
+	for _, node_id in ipairs(topo) do
+		local node = cert.nodes[node_id]
+		local carried = {} --[[: HypSet ]]
+		for hyp_id in pairs(ancestor_discharges[node_id] or {}) do carried[hyp_id] = true end
+		for _, hyp_id in ipairs(node.discharges or {}) do carried[hyp_id] = true end
+
+		for _, premise_id in ipairs(node.premises or {}) do
+			local existing = ancestor_discharges[premise_id]
+			if existing == nil then
+				local copy = {} --[[: HypSet ]]
+				for hyp_id in pairs(carried) do copy[hyp_id] = true end
+				ancestor_discharges[premise_id] = copy
+			else
+				local intersected = {} --[[: HypSet ]]
+				for hyp_id in pairs(existing) do
+					if carried[hyp_id] then intersected[hyp_id] = true end
+				end
+				ancestor_discharges[premise_id] = intersected
+			end
 		end
 	end
+
 	for node_id in pairs(reachable) do
 		local node = cert.nodes[node_id]
+		local node_ads = ancestor_discharges[node_id] or {}
 		for _, hyp_id in ipairs(node.assumes or {}) do
 			if not (cert.hypotheses or {})[hyp_id] then
 				return nil, path_err(node_id, "assumes undefined hypothesis '" .. tostring(hyp_id) .. "'")
 			end
-			if not discharged[hyp_id] then
+			if not node_ads[hyp_id] then
 				return nil, path_err(node_id, "assumes hypothesis '" .. tostring(hyp_id)
-					.. "' that is never discharged in this certificate")
+					.. "' that is not discharged by an ancestor on every path reaching this node")
 			end
 		end
 	end
@@ -168,7 +247,7 @@ function M.replay(cert, registry)
 	local reachable, err = walk(cert, registry, root)
 	if not reachable then return nil, err end
 
-	local ok, discharge_err = check_discharge(cert, reachable)
+	local ok, discharge_err = check_discharge(cert, reachable, root)
 	if not ok then return nil, discharge_err end
 
 	return true

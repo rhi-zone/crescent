@@ -24,7 +24,7 @@ Node = {
   judgment:   string,          -- which judgment this node concludes (must match the cited schema's judgment)
   locus:      string,          -- where in the source term this judgment holds ("judgment-at-a-locus")
   conclusion: <opaque>,        -- theory-specific payload (e.g. { term, type }). The kernel only checks it's non-nil.
-  premises:   { node_id, ... },        -- sub-derivations this node's rule cites (its "hypotheses" in the proof-tree sense)
+  premises:   { node_id, ... },        -- sub-derivations this node's rule cites (its "hypotheses" in the proof-tree sense). May repeat a node_id already cited elsewhere in the certificate (a shared sub-derivation) -- premises form a DAG, not only a tree. See "Discharge scoping" below.
   assumes:    { hyp_id, ... } | nil,   -- hypothesis ids this node's derivation structurally depends on (e.g. a variable lookup)
   discharges: { hyp_id, ... } | nil,   -- hypothesis ids this node's rule discharges (e.g. a lambda binding its parameter)
 }
@@ -75,25 +75,47 @@ possible without either trusted file needing to know it's happening.
    - **well-foundedness**: a node currently being visited that is visited
      again (i.e. reachable from itself) is a cycle — rejected immediately,
      no traversal ever loops.
-3. **Hypothesis discharge**: over the set of nodes reachable from root,
-   collect every `hyp_id` appearing in any node's `discharges`. Then for
-   every `hyp_id` appearing in any reachable node's `assumes`, require (a)
-   it is defined in `certificate.hypotheses`, and (b) it appears in the
-   discharged set. Either miss is rejected.
+3. **Hypothesis discharge (ancestor-scoped)**: `premises` edges form a DAG
+   rooted at `certificate.root` (a tree is the special case where every node
+   has exactly one parent). Compute, for every reachable node, the set of
+   hypothesis ids guaranteed discharged by an ANCESTOR on **every**
+   root-to-node path reaching it — the intersection, across each incoming
+   `premises` edge from a parent P, of (P's own ancestor-discharge set
+   UNION P's own `discharges`). Then for every `hyp_id` appearing in any
+   reachable node's `assumes`, require (a) it is defined in
+   `certificate.hypotheses`, and (b) it is in that node's ancestor-discharge
+   set. Either miss is rejected. A hypothesis discharged only on a sibling
+   branch, or only on some (not all) of the paths reaching a shared node,
+   does not count — see "Discharge scoping" below.
 
 The kernel never reads `conclusion` or `Hypothesis.payload` beyond checking
 existence — it has no idea what a "type," "term," or "unify" is. All meaning
 lives in the theory (the schemas registered, and the producer that cites
 them, e.g. `theories/algorithm_w.lua`).
 
-## Stated simplification (not a design closure)
+## Discharge scoping
 
-Hypothesis discharge above is checked by **id match anywhere in the
-reachable set** — it does not verify that the discharging node is a lexical
-ancestor of the assuming node in the derivation tree. A certificate could,
-in principle, discharge a hypothesis on an unrelated branch and this kernel
-would accept it as long as ids match. Real scoping — lexical ancestry,
-shadowing, alpha-equivalence, binder identity, capture-avoiding
-substitution — is exactly the machinery the rejected `lib/type/framework/`
-attempt built (see `docs/typechecker-framework-postmortem.md`) and is
-explicitly out of scope for this dinner-sized prototype. See `TODO.md`.
+Hypothesis discharge is checked by **ancestor-path scoping**, the way
+variable scoping works in a proof tree or lambda calculus: a hypothesis a
+node `assumes` must be discharged by a node that structurally encloses it —
+present on every root-to-node path through `premises` — not merely by some
+other node anywhere in the certificate. A discharge on an unrelated branch
+no longer satisfies an assumption in a sibling branch.
+
+`premises` edges may form a DAG, not only a tree: a node MAY be listed as a
+premise of more than one parent (a shared sub-derivation). Neither W's nor
+J's producers ever emit a shared node today (each is built fresh per
+source-term occurrence), so this generalization has no effect on any
+certificate either theory currently produces — a tree is just the DAG case
+where every node has one parent. When a node genuinely is shared, its
+assumption must be discharged by an ancestor on **every** path that reaches
+it, not merely one: this is what makes a DAG certificate mean the same thing
+as the (possibly larger) tree you'd get by unfolding each shared node into
+one copy per incoming path, since each unfolded copy would independently
+need its own ancestor-discharge.
+
+Real scoping beyond this — shadowing, alpha-equivalence, binder identity,
+capture-avoiding substitution — is still exactly the machinery the rejected
+`lib/type/framework/` attempt built (see
+`docs/typechecker-framework-postmortem.md`) and remains explicitly out of
+scope for this dinner-sized prototype. See `TODO.md`.

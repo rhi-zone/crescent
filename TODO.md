@@ -64,7 +64,7 @@ Deliberately out of scope (not attempted, not silently papered over):
   from more than one registered theory, or a kernel replay that spans
   theories. `kernel.replay` takes exactly one registry and rejects a
   certificate whose `theory` field doesn't match it.
-- [ ] **Evidence-grammar alpha-stability, binder-identity, and
+- [x] **Evidence-grammar alpha-stability, binder-identity, and
   capture-avoidance**, carried over unresolved from the rejected
   `lib/type/framework/` attempt (see
   `docs/typechecker-framework-postmortem.md`). This prototype's hypothesis-
@@ -75,6 +75,27 @@ Deliberately out of scope (not attempted, not silently papered over):
   exactly the machinery `framework/` spent most of its complexity on before
   being rejected on non-technical grounds; if v10 proceeds past prototype,
   this is the first real design debt to resolve.
+  **RESOLVED (2026-07-27, partially — the ancestor-scoping half only):**
+  `kernel.lua`'s `check_discharge` now requires a hypothesis's discharging
+  node to be an ANCESTOR of the assuming node — present on every
+  root-to-node path through `premises` — not merely present anywhere in the
+  reachable set. Implemented as a topological-order pass computing, per
+  node, the intersection (across all incoming `premises` edges) of each
+  parent's own ancestor-discharge set unioned with that parent's own
+  `discharges`; a plain tree is the one-parent special case where the
+  intersection is trivial. `premises` is now explicitly documented as a DAG
+  (a node may be a shared premise of more than one parent), a deliberate
+  generalization with zero effect on any certificate either W or J emits
+  today (neither producer ever shares a node), decided when this exact
+  scoping question was raised mid-implementation. See `NOTATION.md`'s
+  "Discharge scoping" section and `kernel.lua`'s header for the corrected
+  semantics, and `kernel_discharge_scope_test.lua` for the sibling-branch,
+  DAG-accepted, and DAG-rejected cases this closes. Ancestor-path scoping
+  was the whole ask here; alpha-equivalence, shadowing, and
+  capture-avoiding substitution proper remain unimplemented and are a
+  separate, still-open piece of the original `framework/`-sized machinery
+  — not reopened as a new item since they were never this item's scope
+  beyond the id-match-anywhere flaw, which is what's fixed.
 
 Typechecker substrate gap found while building this (worked around, not
 silently avoided):

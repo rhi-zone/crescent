@@ -102,7 +102,7 @@ T.describe("v10 kernel — tampered Algorithm J certificates fail at replay, not
 		let_node.discharges = {}
 		local ok, replay_err = kernel.replay(cert, reg)
 		T.fail(ok, "an undischarged assumed hypothesis must not replay")
-		T.ok(replay_err and replay_err:find("never discharged"), "error should name the missing discharge: " .. tostring(replay_err))
+		T.ok(replay_err and replay_err:find("not discharged by an ancestor"), "error should name the missing discharge: " .. tostring(replay_err))
 	end)
 end)
 
