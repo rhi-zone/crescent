@@ -274,17 +274,14 @@ T.describe("parity: multiple_inserts", function()
     T.eq(text.to_string(t), "hello world")
   end)
 
-  -- KNOWN DIFFERENCE (not a bug -- see TODO.md "item compaction"): real yjs
-  -- merges adjacent same-client Items with mergeable content during
+  -- yjs merges adjacent same-client Items with mergeable content during
   -- transaction cleanup (`tryToMergeWithLefts`, confirmed in
   -- node_modules/yjs/dist/yjs.cjs), so its wire output for two sequential
-  -- inserts is a single 11-byte "hello world" Item. This port doesn't
-  -- perform that compaction (doc.lua's own header already documents this
-  -- scope cut), so the same two Lua ops produce two separate wire Items
-  -- ("hello" then " world") -- semantically identical content, different
-  -- byte layout. Checked here via content-after-decode instead of a raw
-  -- byte comparison.
-  T.it("encode: two sequential Lua inserts produce semantically-equivalent content (byte layout differs -- no item compaction, see TODO.md)", function()
+  -- inserts is a single 11-byte "hello world" Item. `doc.lua`'s
+  -- `M.transact` now runs the same compaction (`transaction.lua`'s
+  -- `M.cleanup`) after each transaction, so the second `text.insert` call's
+  -- item merges with the first's, producing the same single-item layout.
+  T.it("encode: two sequential Lua inserts produce the same fixture bytes (item compaction merges them into one Item)", function()
     local d = doc_mod.new({ client_id = 1 })
     local t = doc_mod.get_text(d, "content")
     doc_mod.transact(d, function(txn) text.insert(t, txn, 0, "hello") end)
@@ -292,13 +289,12 @@ T.describe("parity: multiple_inserts", function()
     local empty_sv = update.encode_state_vector_from_table({})
     local bytes, err = update.encode_diff_v1(d, empty_sv)
     T.ok(bytes ~= nil, err)
+    T.eq(bytes, fixture)
 
     local d2 = doc_mod.new({ client_id = 99 })
     local t2 = doc_mod.get_text(d2, "content")
     update.apply_v1(d2, bytes)
     T.eq(text.to_string(t2), "hello world")
-
-    T.skip("byte-for-byte comparison against the fixture skipped: real yjs merges adjacent same-client items during transaction cleanup, which this port does not yet implement (TODO.md 'item compaction') -- content is verified equivalent above instead")
   end)
 end)
 
@@ -314,18 +310,14 @@ T.describe("parity: delete_middle", function()
     T.eq(text.to_string(t), "helrld")
   end)
 
-  -- KNOWN DIFFERENCE (not a bug -- see TODO.md "item compaction"): real
   -- yjs's default `gc: true` behavior replaces a deleted-and-superseded
   -- Item's content with a bare `ContentDeleted` placeholder (dropping the
   -- actual "lo wo" bytes, keeping only its length) once nothing can
-  -- reference the original content anymore. This port marks the item
-  -- `.deleted = true` (which apply_v1's decode side already handles
-  -- correctly, per the "decode" test above) but never GC-compacts its
-  -- content afterward, so Lua's own re-encode still carries the original
-  -- string bytes for that (deleted) middle item. Same "extra yjs cleanup
-  -- pass this port doesn't perform yet" family as multiple_inserts' item
-  -- compaction above -- checked via content-after-decode instead.
-  T.it("encode: matching Lua ops produce semantically-equivalent content (byte layout differs -- no deleted-content GC compaction, see TODO.md)", function()
+  -- reference the original content anymore. `doc.lua`'s `M.transact` now
+  -- runs the same GC pass (`transaction.lua`'s `M.cleanup`, gated on
+  -- `Doc.gc`, default true) after each transaction, so the deleted middle
+  -- item's content collapses to a length-only placeholder the same way.
+  T.it("encode: matching Lua ops produce the same fixture bytes (deleted-content GC compaction)", function()
     local d = doc_mod.new({ client_id = 1 })
     local t = doc_mod.get_text(d, "content")
     doc_mod.transact(d, function(txn) text.insert(t, txn, 0, "hello world") end)
@@ -333,13 +325,12 @@ T.describe("parity: delete_middle", function()
     local empty_sv = update.encode_state_vector_from_table({})
     local bytes, err = update.encode_diff_v1(d, empty_sv)
     T.ok(bytes ~= nil, err)
+    T.eq(bytes, fixture)
 
     local d2 = doc_mod.new({ client_id = 99 })
     local t2 = doc_mod.get_text(d2, "content")
     update.apply_v1(d2, bytes)
     T.eq(text.to_string(t2), "helrld")
-
-    T.skip("byte-for-byte comparison against the fixture skipped: real yjs GC-compacts deleted item content (dropping superseded bytes), which this port does not yet implement (TODO.md 'item compaction') -- content is verified equivalent above instead")
   end)
 end)
 
@@ -423,13 +414,13 @@ T.describe("parity: map_operations", function()
     T.eq(map.get(m, "c"), true)
   end)
 
-  -- KNOWN DIFFERENCE (not a bug -- see TODO.md "item compaction"): same
-  -- deleted-content GC-compaction family as delete_middle above -- real
-  -- yjs's default `gc: true` replaces the superseded `set(a,1)` and the
-  -- explicitly deleted `set(b,'two')` entries' content with bare
-  -- `ContentDeleted` placeholders (dropping the actual value bytes), which
-  -- this port doesn't perform. Checked via content-after-decode instead.
-  T.it("encode: matching Lua ops produce semantically-equivalent content (byte layout differs -- no deleted-content GC compaction, see TODO.md)", function()
+  -- Same deleted-content GC-compaction family as delete_middle above --
+  -- real yjs's default `gc: true` replaces the superseded `set(a,1)` and
+  -- the explicitly deleted `set(b,'two')` entries' content with bare
+  -- `ContentDeleted` placeholders (dropping the actual value bytes).
+  -- `doc.lua`'s `M.transact` now runs the same GC pass after each
+  -- transaction, so both superseded/deleted entries collapse the same way.
+  T.it("encode: matching Lua ops produce the same fixture bytes (deleted-content GC compaction)", function()
     local d = doc_mod.new({ client_id = 1 })
     local m = doc_mod.get_map(d, "content")
     doc_mod.transact(d, function(txn) map.set(m, txn, "a", 1) end)
@@ -440,6 +431,7 @@ T.describe("parity: map_operations", function()
     local empty_sv = update.encode_state_vector_from_table({})
     local bytes, err = update.encode_diff_v1(d, empty_sv)
     T.ok(bytes ~= nil, err)
+    T.eq(bytes, fixture)
 
     local d2 = doc_mod.new({ client_id = 99 })
     local m2 = doc_mod.get_map(d2, "content")
@@ -447,8 +439,6 @@ T.describe("parity: map_operations", function()
     T.eq(map.get(m2, "a"), 100)
     T.eq(map.has(m2, "b"), false)
     T.eq(map.get(m2, "c"), true)
-
-    T.skip("byte-for-byte comparison against the fixture skipped: real yjs GC-compacts superseded/deleted map entry content (dropping the old value's bytes), which this port does not yet implement (TODO.md 'item compaction') -- content is verified equivalent above instead")
   end)
 end)
 
