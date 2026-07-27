@@ -99,7 +99,7 @@ local sample_decoder = encoding.decoder("")
 
 --:: StructStore = { clients: { [number]: Struct[] } }
 --:: SharedTypeShare = { [string]: SharedType }
---:: Doc = { client_id: number, store: StructStore, share: SharedTypeShare, clock: number }
+--:: Doc = { client_id: number, store: StructStore, share: SharedTypeShare, clock: number, gc: boolean }
 --:: Transaction = { doc: Doc, new_items: Item[], deleted_items: Item[] }
 
 --:: StateVector = { [number]: integer }

@@ -23,8 +23,11 @@ local sample_store = struct_store.new()
 local sample_shared = shared_type.new("text")
 --:: SharedType = typeof sample_shared
 
---:: Doc = { client_id: number, store: StructStore, share: { [string]: SharedType }, clock: number }
---:: DocOpts = { client_id?: number }
+-- `gc` mirrors yjs's `Doc({gc: true})` option (default true): whether
+-- `M.transact`'s post-transaction cleanup replaces deleted items' content
+-- with a bare length placeholder. See transaction.lua's `M.cleanup`.
+--:: Doc = { client_id: number, store: StructStore, share: { [string]: SharedType }, clock: number, gc: boolean }
+--:: DocOpts = { client_id?: number, gc?: boolean }
 
 -- Client ids only need to be distinct with high probability across
 -- replicas (yjs draws them from `lib0/random#uint32`); this uses Lua's PRNG
@@ -39,11 +42,14 @@ end
 --: (opts: DocOpts | nil) -> Doc
 function M.new(opts)
   local o = opts or {}
+  local gc_enabled = o.gc
+  if gc_enabled == nil then gc_enabled = true end
   return {
     client_id = o.client_id or random_client_id(),
     store = struct_store.new(),
     share = {},
     clock = 0,
+    gc = gc_enabled,
   } --[[: Doc]]
 end
 
@@ -70,19 +76,21 @@ function M.get_array(d, name) return get_or_create(d, name, "array") end
 --: (d: Doc, name: string) -> SharedType | (nil, string)
 function M.get_map(d, name) return get_or_create(d, name, "map") end
 
--- Runs `fn(txn)` inside a fresh Transaction. Returns the Transaction (so the
--- caller can inspect new_items/deleted_items) on success, or (nil, errmsg)
--- if `fn` raised (a Lua `error`, not the library's data-error convention --
--- `fn` is caller-supplied application code, not a library function).
+-- Runs `fn(txn)` inside a fresh Transaction, then runs post-transaction
+-- cleanup (item compaction + GC of deleted content -- see
+-- transaction.lua's `M.cleanup`). Returns the Transaction (so the caller
+-- can inspect new_items/deleted_items) on success, or (nil, errmsg) if `fn`
+-- raised (a Lua `error`, not the library's data-error convention -- `fn` is
+-- caller-supplied application code, not a library function).
 --
--- SCOPE: does not yet compact (merge adjacent same-client items) or emit an
--- update event after `fn` returns -- both need machinery (a delete-set,
--- an observer/event system) not built in this task. See TODO.md.
+-- SCOPE: does not yet emit an update event after `fn` returns -- needs an
+-- observer/event system not built in this task. See TODO.md.
 --: (d: Doc, fn: (txn: unknown) -> nil) -> unknown | (nil, string)
 function M.transact(d, fn)
   local txn = transaction.new(d)
   local ok, err = pcall(fn, txn)
   if not ok then return nil, tostring(err) end
+  transaction.cleanup(txn, d.store, d.gc)
   return txn
 end
 
