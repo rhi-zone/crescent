@@ -10,6 +10,70 @@ See `docs/roadmap-v2.md` for the authoritative project roadmap and sequencing. T
 
 - **Rescribe fixture alignment (2026-07-26):** Crescent's format libraries will eventually be tested against rescribe's cross-language fixture suite. This is high-value for conformance but not immediately urgent — rescribe's format crates are still in progress. Approach: pick this up per-format as format work comes up in crescent, rather than as a dedicated alignment project. Documented in `docs/roadmap-v2.md`, "Strategic direction: Rescribe fixture alignment" section.
 
+## lib/type/v10_kernel/: v10 trust-core prototype (2026-07-27)
+
+Built an exploratory, dinner-sized prototype of the "v10" typechecker
+architecture's trust core: `lib/type/v10_kernel/registry.lua` (theory
+registry, shape-only validation), `lib/type/v10_kernel/kernel.lua` (a
+domain-blind certificate replayer — citation validity, rule instantiation,
+well-foundedness, hypothesis discharge), and `lib/type/v10_kernel/w.lua`
+(Algorithm W, the founding theory-registry entry, an untrusted producer that
+emits certificates). `lib/type/v10_kernel/kernel_test.lua` (14 assertions)
+demonstrates a valid certificate replaying with zero kernel knowledge of W's
+semantics, three independently tampered certificates each failing replay
+(forged citation, well-foundedness cycle, skipped hypothesis discharge), and
+W's own documented weakness (no let-generalization, so a let-bound
+polymorphic function's type variable pins at its first call site) rejecting
+a program a real let-polymorphic checker would accept — shown, not fixed.
+`NOTATION.md` documents the certificate/rule-schema grammar; `README.md`
+records the choices made and their rationale. This is **not** a production
+module — it tests whether the validate-only-kernel / untrusted-registry-entry
+shape from `docs/decisions/typechecker-v10-proposal.md` (the proposal + its
+in-session critical evaluation, not yet ratified) holds together at all;
+this prototype does not restate that design conversation.
+
+Deliberately out of scope (not attempted, not silently papered over):
+- [ ] **Theory-registry soundness-of-schema verification beyond shape
+  validity.** `registry.register` checks a schema's own structure only; a
+  registrant's claim that its rule is sound is taken on faith, same as the
+  rejected `lib/type/framework/` design's stated non-goal.
+- [ ] **Corroboration / cross-theory citation** — a certificate citing rules
+  from more than one registered theory, or a kernel replay that spans
+  theories. `kernel.replay` takes exactly one registry and rejects a
+  certificate whose `theory` field doesn't match it.
+- [ ] **Evidence-grammar alpha-stability, binder-identity, and
+  capture-avoidance**, carried over unresolved from the rejected
+  `lib/type/framework/` attempt (see
+  `docs/typechecker-framework-postmortem.md`). This prototype's hypothesis-
+  discharge check is stated plainly as an id-match-in-reachable-set
+  simplification (see `NOTATION.md`), not a scoped/lexical-ancestry check —
+  a certificate could in principle discharge a hypothesis on an unrelated
+  branch and this kernel would accept it. Building this properly is
+  exactly the machinery `framework/` spent most of its complexity on before
+  being rejected on non-technical grounds; if v10 proceeds past prototype,
+  this is the first real design debt to resolve.
+
+Typechecker substrate gap found while building this (worked around, not
+silently avoided):
+- [ ] **Concatenating (`..`) a table field whose value's type resolves
+  through a *different module's* `--:: require`-imported type alias reports
+  the field as type `never` at the point of concatenation only** — plain
+  field access, assignment to a local, `print`, and `return` of the exact
+  same value all typecheck fine; only the `..` operator on it fails.
+  Reproduces with a minimal two-file case: module A declares
+  `--:: Schema = { name: string, ... }` and a `lookup(name) -> Schema | nil`
+  function; module B does `--:: require "A"`, calls `lookup`, guards
+  `if not schema then return end`, assigns `local n = schema.name`, then
+  fails only on `"x " .. n` (not on `local n = schema.name` or `return n`
+  alone). Confirmed independent of parameter order and of whether a second
+  local type alias is declared in module B. Worked around throughout
+  `lib/type/v10_kernel/kernel.lua` by re-casting each field into a freshly
+  checked local (`local schema_name = schema.name --[[: string]]`) before
+  any concatenation — a checked cast, not a force cast, so it costs nothing
+  in soundness, only in each field needing one extra annotated line. Revert
+  (drop the `--[[: T]]` re-casts) once cross-module field types survive
+  `..` the same way same-module field types already do.
+
 ## lib/y_crdt/update.lua: yjs update v1 wire codec (2026-07-27)
 
 Implemented `lib/y_crdt/update.lua` (encode_v1/apply_v1/encode_diff_v1/
