@@ -19,38 +19,52 @@
 -- serialization — O(arity) per node, not O(subtree size).
 --
 -- ── Lazy substitution (kernel-lazy-subst-sound-v1) ──────────────────────────
--- `subst` does NOT eagerly rebuild the substituted term. It returns
--- immediately (O(1), or O(1) plus a cached-context lookup): a concrete
--- var/meta node resolves or no-ops immediately (no work to defer); a
--- concrete op node either short-circuits (target index provably absent,
--- via its cached context — an O(1) exact check) or wraps in a `thunk` node
--- recording the deferred substitution; a thunk base defers unconditionally
--- (its context isn't known without forcing). Work happens on demand via
--- `force_head`, one constructor level at a time, memoized on the thunk node
--- so repeated forcing is O(1) after the first — the standard technique
--- (cf. explicit substitution calculi, e.g. Abadi et al.'s lambda-sigma):
--- match/equal/instantiate only force the parts of a term they actually
--- inspect, never the whole tree.
+-- `subst` does NOT eagerly rebuild the substituted TERM. `mk_subst` forces
+-- its `base` argument one level (so it always has a concrete node's exact
+-- cached fields to read) and then: a var/meta base resolves or no-ops
+-- immediately; an op base either short-circuits (target index provably
+-- absent via the cached context — O(1)) or wraps in a `thunk` node
+-- recording the deferred substitution. Building that thunk still computes
+-- its sort/ctx/ground eagerly (see below) — genuinely deferred is only the
+-- NODE GRAPH itself (no new op/var/meta nodes are built or interned until
+-- something forces them). Work happens on demand via `force_head`, one
+-- constructor level at a time, memoized on the thunk node so repeated
+-- forcing is O(1) after the first — the standard technique (cf. explicit
+-- substitution calculi, e.g. Abadi et al.'s lambda-sigma): match/equal/
+-- instantiate only force the parts of a term they actually inspect, never
+-- the whole tree.
 --
--- Two honest, documented complexity-profile consequences of laziness (NOT
--- semantics differences — parity holds exactly once both sides are fully
--- forced, which is what the parity tests do):
---   * `sort_of` stays truly O(1) even on an unforced thunk (substitution
---     never changes a term's own top-level sort — `thunk.sort` is copied
---     directly from its base at construction, no forcing needed).
---   * `is_ground`/`is_closed` are NOT O(1) on an unforced thunk: reading a
---     whole-term property that depends on potentially-unforced parts
---     necessarily requires looking at those parts, so both fully force
---     (`force_deep`) before answering. This is a deliberate, narrow scope
---     choice (is_ground/is_closed have no O(1) requirement in the ratified
---     primitive spec the way sort_of does) rather than a semantics gap.
---   * A sort mismatch inside a substitution that was never eagerly checked
---     (the rare case: substituting into an unforced thunk *base*, where the
---     base's context isn't known) surfaces as a thrown error at force time
---     rather than as `(nil, errmsg)` at the original `subst` call — later,
---     but never silently wrong. The common case (substituting into an
---     already-concrete term) is checked eagerly via the cached context,
---     exactly like the reference tier.
+-- Every thunk carries an exact sort/ctx/ground, computed at construction,
+-- so `sort_of`/`is_ground`/`is_closed` are true O(1) even on an unforced
+-- term (no semantics difference from the reference tier — these are the
+-- same values the fully-forced term would report):
+--   * `sort` is subst-invariant — copied directly from `base`, O(1).
+--   * `ctx` is computed by `ctx_after_subst`, a dedicated recursion that
+--     mirrors `subst`'s own structural walk but threads only context maps
+--     (no node construction/interning) — genuinely lazy where it matters:
+--     it short-circuits and skips any subtree that doesn't reference the
+--     substituted index, exactly like the reference tier's own subst, and
+--     only forces (one level at a time) the nodes actually on the "spine"
+--     containing real occurrences.
+--   * `ground` is an exact O(1) formula: `base.ground and u.ground` — valid
+--     specifically because this is the "index occurs" branch (the only one
+--     that reaches thunk construction): base.ground already excludes a
+--     meta anywhere in base other than at the substituted position, so the
+--     result contains a meta iff u does.
+--   (Found via parity fuzzing, not by inspection: an earlier version of
+--   this file gave thunks no ctx/ground at all, which crashed the moment
+--   `force_head`'s own op-branch reconstruction — or a caller passing an
+--   unforced term straight into `Inst.build` — handed a thunk to `mk_op`,
+--   which unconditionally reads `a.term.ctx`/`a.term.ground` to validate
+--   and merge. Fixed properly rather than special-cased around.)
+--
+-- A sort mismatch inside a substitution that was never eagerly checked
+-- (the rare case: substituting into an unforced thunk *base*, where forcing
+-- one level to check might itself force further than a caller expects)
+-- surfaces as a thrown error at force time rather than as `(nil, errmsg)`
+-- at the original `subst` call — later, but never silently wrong. The
+-- common case (substituting into an already-concrete term) is checked
+-- eagerly via the cached context, exactly like the reference tier.
 --
 -- `shift` is NOT lazy (the ratified axiom is specifically named for subst,
 -- not shift): it forces a thunk fully, then shifts structurally like the
@@ -73,7 +87,7 @@ local M = {}
 --:: MetaTerm = { tag: "meta", id: string, sort: Sort, ctx: Ctx, ground: boolean }
 --:: OpTerm = { tag: "op", decl: OpDecl, args: OpArg[], sort: Sort, ctx: Ctx, ground: boolean }
 --:: Concrete = VarTerm | MetaTerm | OpTerm
---:: ThunkTerm = { tag: "thunk", base: Term, k: integer, u: Term, sort: Sort, forced: Term | nil }
+--:: ThunkTerm = { tag: "thunk", base: Term, k: integer, u: Term, sort: Sort, ctx: Ctx, ground: boolean, forced: Term | nil }
 --:: Term = Concrete | ThunkTerm
 --:: Binding = { term: Term, depth: integer }
 --:: Bindings = { [string]: Binding }
@@ -174,13 +188,76 @@ function M.new()
 
 	-- ── Forcing ────────────────────────────────────────────────────────────
 	--
-	-- Build a (possibly deferred) substitution node. See module header:
-	-- eager sort-check + short-circuit whenever the base is concrete (its
-	-- context is exact), deferred (wrapped in a thunk) otherwise. Defined
-	-- before force_head (which calls it) — mk_subst itself never forces, so
-	-- there is no actual mutual recursion needing a forward declaration.
-	--: (base: Term, k: integer, u: Term) -> (Term | nil, string | nil)
-	local function mk_subst(base, k, u)
+	-- mk_subst, force_head, and ctx_after_subst are mutually recursive:
+	-- mk_subst forces its own `base` one level (so it always decides
+	-- against a concrete node); force_head's op-branch reconstructs via
+	-- mk_subst on each child; ctx_after_subst (see below) may need to force
+	-- a child to compute an exact result. Pre-declared as locals so each
+	-- can reference the others as upvalues.
+	-- Not annotated here: an annotated `local x` with no initializer
+	-- requires the type to admit `nil`, which would force every use of
+	-- these three below to re-narrow away a spurious `| nil`. Left plain
+	-- (matching the pre-declare-then-assign idiom in docs/lua-gotchas.md);
+	-- each function's real signature is annotated at its assignment below.
+	local mk_subst
+	local force_head
+	local ctx_after_subst
+
+	--: (ctx: Ctx, d: integer) -> Ctx
+	local function shift_ctx(ctx, d)
+		local out = {} --[[: Ctx ]]
+		for idx, s in pairs(ctx) do out[idx + d] = s end
+		return out
+	end
+
+	-- Exact free-variable context of subst(t, k, u), computed WITHOUT
+	-- materializing the substituted term (no new nodes, no interning) —
+	-- mirrors reference.lua's subst recursion but only threads ctx maps.
+	-- Precondition (established by every call site): k occurs in t (i.e.
+	-- t's own ctx already reports it present) — this is only ever called
+	-- on the branch of mk_subst/force_head that already checked that.
+	-- Genuinely lazy where it matters: subtrees that don't reference k are
+	-- never visited (the ctx short-circuit below skips them entirely, same
+	-- as the reference tier's own subst); only the "spine" containing
+	-- actual occurrences of k is walked, and forced one level at a time
+	-- if a node on that spine happens to still be an unforced thunk.
+	--: (t_in: Term, k: integer, u_ctx: Ctx) -> Ctx
+	ctx_after_subst = function(t_in, k, u_ctx)
+		local t = force_head(t_in)
+		if t.tag == "var" then
+			if t.index == k then return u_ctx end
+			return t.ctx
+		elseif t.tag == "meta" then
+			return t.ctx
+		else
+			if t.ctx[k] == nil then return t.ctx end
+			local merged = {} --[[: Ctx ]]
+			for _, a in ipairs(t.args) do
+				local sub = ctx_after_subst(a.term, k + a.bound_count, shift_ctx(u_ctx, a.bound_count))
+				for idx, s in pairs(sub) do
+					if idx >= a.bound_count then merged[idx - a.bound_count] = s end
+				end
+			end
+			return merged
+		end
+	end
+
+	-- Build a (possibly deferred) substitution node. Eager sort-check +
+	-- short-circuit whenever the target index is provably absent (an O(1)
+	-- exact check via the cached context — `base` is forced one level
+	-- first specifically so this check, and the ctx/ground computation
+	-- below, always have a concrete node's exact cached fields to read).
+	-- When the index IS present, every field the thunk needs downstream
+	-- (sort, ctx, ground) is computed now — sort is subst-invariant (O(1));
+	-- ctx via ctx_after_subst (see above); ground via the exact O(1)
+	-- formula base.ground AND u.ground (valid specifically because we are
+	-- in the "k occurs" branch: a substitution introduces a meta into the
+	-- result iff u itself has one, since base.ground already excludes any
+	-- meta elsewhere in base). Only the substituted TERM (the full node
+	-- graph) stays deferred, forced on demand by force_head.
+	--: (base_in: Term, k: integer, u: Term) -> (Term | nil, string | nil)
+	mk_subst = function(base_in, k, u)
+		local base = force_head(base_in)
 		if base.tag == "meta" then return base end
 		if base.tag == "var" then
 			if base.index ~= k then return base end
@@ -189,14 +266,17 @@ function M.new()
 			end
 			return u
 		end
-		if base.tag == "op" then
-			local expected = base.ctx[k]
-			if expected == nil then return base end
-			if u.sort ~= expected then
-				return nil, "subst: replacement sort " .. u.sort .. " does not match target sort " .. expected
-			end
+		-- op
+		local expected = base.ctx[k]
+		if expected == nil then return base end
+		if u.sort ~= expected then
+			return nil, "subst: replacement sort " .. u.sort .. " does not match target sort " .. expected
 		end
-		return { tag = "thunk", base = base, k = k, u = u, sort = base.sort, forced = nil }
+		local new_ctx = ctx_after_subst(base, k, u.ctx)
+		return {
+			tag = "thunk", base = base, k = k, u = u, sort = base.sort,
+			ctx = new_ctx, ground = base.ground and u.ground, forced = nil,
+		}
 	end
 
 	-- TYPECHECKER WORKAROUND: `force_head`'s self-recursive calls
@@ -213,7 +293,7 @@ function M.new()
 	-- TODO.md. Revert the casts below once self-recursive return-type
 	-- narrowing is fixed.
 	--: (t: Term) -> Concrete
-	local function force_head(t)
+	force_head = function(t)
 		if t.tag ~= "thunk" then return t end
 		if t.forced then return force_head(t.forced) end
 		local base = force_head(t.base) --[[: Concrete]]
@@ -247,25 +327,22 @@ function M.new()
 		end
 	end
 
-	--: (t: Term) -> Concrete
-	local function force_deep(t)
-		local h = force_head(t)
-		if h.tag == "op" then
-			for _, a in ipairs(h.args) do force_deep(a.term) end
-		end
-		return h
-	end
-
 	-- ── Introspection ────────────────────────────────────────────────────────
+	--
+	-- All three are true O(1), including on an unforced thunk: sort is
+	-- subst-invariant (copied at thunk construction); ctx and ground are
+	-- computed exactly at thunk construction too (ctx_after_subst / the
+	-- base.ground-and-u.ground formula in mk_subst above) — no forcing
+	-- needed to answer either.
 
 	--: (t: Term) -> Sort
 	function Inst.sort_of(t) return t.sort end
 
 	--: (t: Term) -> boolean
-	function Inst.is_ground(t) return force_deep(t).ground end
+	function Inst.is_ground(t) return t.ground end
 
 	--: (t: Term) -> boolean
-	function Inst.is_closed(t) return next(force_deep(t).ctx) == nil end
+	function Inst.is_closed(t) return next(t.ctx) == nil end
 
 	-- ── Equality ─────────────────────────────────────────────────────────────
 	-- Pointer-eq first (the common case, O(1) for fully-forced/concrete
