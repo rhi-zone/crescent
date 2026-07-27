@@ -6,6 +6,113 @@ Bench machine: AMD Ryzen 7 5700G, LuaJIT 2.1.1741730670, NixOS Linux 6.12.67.
 
 ---
 
+## 2026-07-28: v10 kernel term algebra — reference vs. fast tier, first measurements
+
+Benchmark: `bin/cr run lib/type/v10_kernel/term_algebra/term_algebra_bench.lua`,
+commit `b4110092` (parity tests + fuzzing + the thunk ctx/ground bug fix — no
+further code changes since). `duration=0.5s` per case, `DEPTH=200` for the
+build/equal/shift cases, `CHAIN_LEN=50` for the subst-chain case.
+
+```
+build (construct the DEPTH-deep term from scratch)
+  reference     254.64µs ±104.62µs   min 64.00µs   3.92k ops/sec   1.28x
+  fast          326.49µs ±154.50µs   min 120.00µs  3.06k ops/sec   1.00x
+
+equal (t == t, same object)
+  fast          145.34ns ±356.04ns   min 0.00ns    2.08M ops/sec   1.05x
+  reference     152.23ns ±368.78ns   min 0.00ns    1.95M ops/sec   1.00x
+
+equal (structurally-equal but independently-built copy)
+  fast          148.90ns ±428.85ns   min 0.00ns    2.04M ops/sec   126.31x
+  reference     18.81µs  ±6.03µs     min 7.00µs    51.89k ops/sec  1.00x
+
+shift (whole term, d=1, cutoff=0)
+  reference     287.08µs ±374.87µs   min 67.00µs   3.48k ops/sec   1.56x
+  fast          447.43µs ±488.44µs   min 130.00µs  2.23k ops/sec   1.00x
+
+subst (single application, real work — replaces the one free var;
+       fast tier's result left unforced)
+  fast          147.50µs ±200.53µs   min 51.00µs   6.76k ops/sec   7.83x
+  reference     1.16ms   ±2.35ms     min 174.00µs  865 ops/sec     1.00x
+
+subst chain (50 steps, real work per step, force only at the end)
+  reference     4.76ms   ±2.33ms     min 2.33ms    210 ops/sec     10.46x
+  fast          49.76ms  ±33.10ms    min 23.82ms   20 ops/sec      1.00x
+```
+
+**Methodology note (a real bug in the first draft of this benchmark, caught
+before recording numbers):** the original subst benchmarks built their input
+via a fully-CLOSED term (`build_deep` — every `var(0)` bound by its own
+immediate `lam`). Every `subst` call on a closed term hits the O(1) "index
+provably absent" short-circuit in BOTH tiers regardless of design — it never
+exercises real substitution work. Fixed by adding `build_deep_with_free_var`
+(a deep term with one genuinely free variable, reached only by walking all
+DEPTH binders) for the single-application case, and `build_flat_chain` (a
+flat chain of `CHAIN_LEN` simultaneously-free variables, substituted one at a
+time in order) for the chain case — both confirmed to force real work by
+inspecting that `subst`'s reference-tier cost scales with the term actually
+being walked, not returning instantly.
+
+**Verdict, by case:**
+
+- **build / shift: reference wins (1.28x / 1.56x).** Expected and
+  unsurprising — the fast tier's interning (a structural key built via
+  `tostring(decl)` + `tostring(child)` per argument, string-concatenated, then
+  a hash-table lookup) is real per-node overhead that a one-shot construction
+  or a non-lazy `shift` never amortizes. `shift` is explicitly NOT lazy in the
+  fast tier's design (the ratified axiom names only `subst`), so this
+  reference-tier win here is exactly what the design already expects, not a
+  new finding.
+- **equal (same object): a wash (~1.05x, noise-level).** Both tiers check
+  `a == b` first; reference's own reference-tier `equal` already has this
+  fast path built in, so the fast tier's interning brings nothing extra to
+  THIS specific case — expected once you notice reference.equal's `if a == b
+  then return true` guard predates any tiering at all.
+- **equal (independently-built structural copy): fast tier wins 126x.** This
+  is the headline interning payoff and the clearest validation of
+  `kernel-interner-sound-v1`'s premise: two independently-constructed,
+  structurally-identical 200-deep terms ARE the same Lua table under the fast
+  tier, collapsing a 200-level recursive structural walk to one pointer
+  comparison.
+- **subst (single application, real work): fast tier wins 7.83x.** Validates
+  `kernel-lazy-subst-sound-v1`'s premise for the single-application case: the
+  fast tier's result is a single thunk allocation (deferred), while the
+  reference tier eagerly rebuilds the whole 200-node path (each node freshly
+  allocated) to produce its result.
+- **subst chain (50 steps, force only at the end): fast tier LOSES by
+  10.46x — the opposite of what the module's own design commentary claimed
+  ("the fast tier only allocates a thunk per step").** Root-caused, not left
+  as a mystery: `mk_subst` must force its `base` argument one level at EVERY
+  call (needed to read `base.ctx[k]`/`base.ground` for the new thunk's own
+  cached fields — the fix for the thunk-ctx crash bug recorded above in this
+  same commit). Per-step, this is proportionate work (not the O(n²) it might
+  look like at first: each step's forcing only touches the one node actually
+  changed, thanks to `ctx_after_subst`'s own short-circuit) — but every one of
+  those per-step operations pays interning overhead (a `tostring()`-based
+  structural key, string concatenation, and an intern-table lookup, for
+  EVERY reconstructed node, including a wasted `shift(u, 0, 0)` per step that
+  reconstructs-and-reinterns a term that never changes). For a chain of many
+  SMALL operations, this per-node interning constant factor dominates and
+  outweighs the deferred-allocation benefit lazy substitution is meant to
+  provide. This is a real, measured discrepancy between the design's stated
+  intent and the current implementation's actual behavior — corrected in
+  `fast.lua`'s module comments (no longer claims a chain-case win) rather
+  than left inaccurate. NOT a correctness issue (parity fuzzing already
+  confirms identical results across tiers, 300 iterations × 7 seeds, before
+  this benchmark was written) — a performance-tuning follow-up, filed in
+  TODO.md: candidates are (a) a non-string-based intern key (e.g. a small
+  per-instance identity-keyed cache keyed on `(decl, child1, child2, ...)`
+  tuples via nested tables instead of `tostring()`-concatenated strings, or
+  (b) accepting the eager-forcing-per-step cost as inherent to the current
+  ctx-safety design and re-scoping the "lazy subst helps chains" claim to
+  cases where the chain is fully built and only forced once at actual
+  consumption (e.g. building up a large substitution via a data structure
+  that isn't itself queried mid-chain) rather than the interleaved
+  build-and-inspect-context pattern this benchmark (deliberately, to catch
+  the ctx crash) exercises.
+
+---
+
 ## 2026-06-12: analysis substrate — content-addressed (interned) claim keys
 
 Benchmark: `bin/cr run lib/type/analysis/check_bench.lua`. Baseline `28c9312e`

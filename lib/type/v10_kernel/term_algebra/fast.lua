@@ -58,6 +58,19 @@
 --   which unconditionally reads `a.term.ctx`/`a.term.ground` to validate
 --   and merge. Fixed properly rather than special-cased around.)
 --
+-- MEASURED PERFORMANCE CAVEAT (docs/perf/log.md, 2026-07-28): computing
+-- ctx/ground at thunk-construction time means `mk_subst` forces its `base`
+-- one level at EVERY call — for a single substitution this is cheap and the
+-- fast tier wins clearly (benchmarked), but for a CHAIN of substitutions
+-- interleaved with re-inspection (each step's `base.ctx[k]` lookup requires
+-- the previous step's thunk to already be forced), the per-node interning
+-- overhead paid at every one of those forced steps compounds and measurably
+-- LOSES to the reference tier (10x slower at 50 chained steps) — the
+-- opposite of what a naive "lazy subst helps chains" reading of this file
+-- would predict. Not a correctness gap (parity fuzzing confirms identical
+-- results); a genuine, measured performance characteristic of the current
+-- design, with candidate follow-ups recorded in TODO.md.
+--
 -- A sort mismatch inside a substitution that was never eagerly checked
 -- (the rare case: substituting into an unforced thunk *base*, where forcing
 -- one level to check might itself force further than a caller expects)
