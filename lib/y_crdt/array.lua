@@ -61,11 +61,12 @@ local sample_store = struct_store.new()
 --:: StructStore = typeof sample_store
 
 -- `merge_structs` matches transaction.lua's/text.lua's own field of the
--- same name (unused by this file -- array.lua has no split call sites of
--- its own yet -- but present so a `txn` value threaded through both this
--- file and text.lua in the same `doc.transact` callback type-checks
--- consistently; see transaction.lua's `Transaction` header comment for
--- what the field is for).
+-- same name -- see transaction.lua's `Transaction` header comment for what
+-- it's for. `find_pos`'s and `M.delete`'s own split call sites below
+-- register into it directly (mirroring text.lua's `find_pos`/`M.delete`
+-- fix, TODO.md): a split that's the ONLY structural change for a client in
+-- a transaction is otherwise silently skipped by `transaction.lua`'s
+-- post-transaction merge sweep.
 --:: Transaction = { doc: { client_id: number, store: StructStore, clock: number }, new_items: Item[], deleted_items: Item[], merge_structs: Item[] }
 
 -- TYPECHECKER WORKAROUND: see map.lua's `M.new` for the full writeup --
@@ -113,8 +114,19 @@ end
 -- library's existing preference for per-file restatement over cross-file
 -- reuse of small internals (e.g. the Item/SharedType/Content type aliases
 -- above are restated the same way in text.lua).
---: (store: StructStore, parent: SharedType, index: integer) -> (Item | nil, Item | nil)
-local function find_pos(store, parent, index)
+--
+-- BUG FIX (mirrors text.lua's `find_pos` fix, TODO.md): the split-off tail
+-- produced when `index` lands strictly inside an existing Item is now
+-- registered into `txn.merge_structs` -- without this, a transaction whose
+-- ONLY structural change is a split (e.g. `array.insert`/`array.delete`
+-- landing `count` inside an existing run with nothing else touching that
+-- client) was silently skipped by `transaction.lua`'s post-transaction
+-- merge sweep, which only revisits clients appearing in
+-- `new_items`/`deleted_items`/`merge_structs`. Confirmed wire-visible the
+-- same way text.lua's was: fixed alongside forcing array's fuzz mode to
+-- always byte-compare (parity_fuzz_test.lua).
+--: (txn: Transaction, store: StructStore, parent: SharedType, index: integer) -> (Item | nil, Item | nil)
+local function find_pos(txn, store, parent, index)
   local n = parent.start
   local prev = nil --[[: Item | nil]]
   local count = index
@@ -124,6 +136,7 @@ local function find_pos(store, parent, index)
         if count > 0 then
           local right, err = struct_store.get_item_clean_start(store, id.new(n.id.client, n.id.clock + count))
           if right == nil then error(err or "array: split failed", 2) end
+          table.insert(txn.merge_structs, right)
           return right.left, right
         end
         return n.left, n
@@ -201,7 +214,7 @@ function M.insert(a, txn, index, values)
   if n == 0 then return true end
 
   local store = txn.doc.store
-  local left, right = find_pos(store, a, index)
+  local left, right = find_pos(txn, store, a, index)
 
   local batch = {} --[[: unknown[] ]]
 
@@ -251,7 +264,7 @@ function M.delete(a, txn, index, length)
   length = math.floor(length)
 
   local store = txn.doc.store
-  local _left, right = find_pos(store, a, index)
+  local _left, right = find_pos(txn, store, a, index)
 
   local n = right
   local remaining = length
@@ -262,8 +275,16 @@ function M.delete(a, txn, index, length)
         remaining = remaining - n.length
         n = n.right
       else
+        -- See `find_pos`'s header comment for why the split-off tail is
+        -- registered into `txn.merge_structs` -- same reasoning applies
+        -- here (this split's client is already touched via `item.delete`'s
+        -- `deleted_items` entry above in the common case, but registering
+        -- unconditionally, matching text.lua's own delete-time split and
+        -- real yjs's unconditional `_mergeStructs.push` inside `splitItem`,
+        -- keeps this invariant true regardless of call order).
         local tail, terr = struct_store.get_item_clean_start(store, id.new(n.id.client, n.id.clock + remaining))
         if tail == nil then return nil, terr or "array.delete: split failed" end
+        table.insert(txn.merge_structs, tail)
         delete_item(txn, n)
         remaining = 0
         n = tail

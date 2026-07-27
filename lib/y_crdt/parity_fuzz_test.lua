@@ -28,23 +28,18 @@
 -- both). Text always uses "bytes" mode now (`run_text_iteration`), verified
 -- clean over 800+ fuzz iterations across 8 seeds before this switch.
 --
--- ARRAY/MAP still use the two-mode split below -- their own equivalent of
--- text.lua's split-registration fix (a split whose tail never gets folded
--- back into an adjacent structurally-mergeable item because nothing else
--- in that transaction touched the client) is unverified for these two
--- kinds; array.lua's/map.lua's own `find_pos`/delete-split call sites don't
--- register into `txn.merge_structs` the way text.lua's now do. Fixing that
--- is a separate task (TODO.md), not something this text-focused pass
--- covers.
+-- ARRAY/MAP no longer need the weaker mode either (TODO.md): array.lua's
+-- `find_pos`/`M.delete` split call sites now register their split-off
+-- tails into `txn.merge_structs`, mirroring text.lua's fix exactly (map.lua
+-- has no split call sites of its own -- Map entries are single-value
+-- Items, never split -- so it needed no code change, only verification).
+-- Both kinds now always use "bytes" mode (`run_array_iteration`/
+-- `run_map_iteration` still accept a `mode` parameter, always "bytes",
+-- kept for the failure-message label the same way text.lua's does).
 --
---   "bytes" mode   -- exactly ONE insert op against a fresh doc. Nothing
---                     else exists yet for it to merge with or supersede,
---                     so this is guaranteed clean of both known gaps and
---                     checks the full update byte-for-byte.
---   "content" mode -- a richer multi-op sequence that deliberately
---                     includes deletes/overwrites, compared by decoding
---                     both sides' updates and checking the resulting
---                     document CONTENT matches, not raw bytes.
+--   "bytes" mode   -- byte-for-byte comparison of the full encoded update
+--                     against real yjs's, regardless of op sequence
+--                     richness (inserts/deletes/overwrites all included).
 --
 -- Every iteration logs which mode it used (in the assertion's own
 -- description/failure message) so a failure is unambiguous about what was
@@ -258,11 +253,6 @@ local function gen_value_list(rng, n)
 end
 
 --: (FuzzRng) -> { [integer]: ArrayOp }
-local function gen_array_bytes_ops(rng)
-  return { { op = "insert", index = 0, length = 0, values = gen_value_list(rng, rng:int(1, 3)) } }
-end
-
---: (FuzzRng) -> { [integer]: ArrayOp }
 local function gen_array_content_ops(rng)
   local ops = {} --[[: { [integer]: ArrayOp } ]]
   local len = 0
@@ -295,11 +285,6 @@ local function gen_array_content_ops(rng)
 end
 
 local MAP_KEY_POOL = { "k1", "k2", "k3", "k4", "k5" }
-
---: (FuzzRng) -> { [integer]: MapOp }
-local function gen_map_bytes_ops(rng)
-  return { { op = "set", key = pick_string(rng, MAP_KEY_POOL), value = gen_json_value(rng) } }
-end
 
 --: (FuzzRng) -> { [integer]: MapOp }
 local function gen_map_content_ops(rng)
@@ -408,13 +393,6 @@ local function build_payload(client_id, kind, ops)
   return payload_str
 end
 
---: (unknown) -> string
-local function content_repr(v)
-  local s, err = json.encode(v, json.null)
-  if s ~= nil then return s end
-  return tostring(v) .. " (json.encode failed: " .. tostring(err) .. ")"
-end
-
 -- Text always uses byte-for-byte comparison now, regardless of what ops
 -- were generated (see this file's header comment: both gaps that used to
 -- force a weaker "content" mode for text -- item compaction and the
@@ -459,6 +437,24 @@ local function run_array_iteration(i, mode, ops)
     local lua_bytes, lerr = update.encode_diff_v1(d, empty_sv)
     T.ok(lua_bytes ~= nil, lerr)
 
+    -- TYPECHECKER WORKAROUND: `mode` is always "bytes" now (the runner loop
+    -- below no longer generates "content" mode at all -- both known gaps
+    -- that used to force it are closed, see this file's header comment),
+    -- so the natural code here would be the single unconditional
+    -- `T.eq(lua_bytes, js_bytes, ...)` line with no `if`/`else` at all
+    -- (matching `run_text_iteration`/`run_map_iteration`'s shape). Confirmed
+    -- by direct bisection that removing this `else` branch (dead code --
+    -- unreachable since `mode` is always "bytes") makes THIS FILE'S
+    -- `doc_mod.transact(d, function(txn) ... end)` callback sites at
+    -- `apply_text_ops`/`apply_array_ops`/`apply_map_ops` (lines earlier in
+    -- this same file, uninvolved with array specifically) fail to narrow
+    -- `txn` from `unknown` to the `Transaction` each callback's body needs
+    -- -- a whole-file inference-order/shape sensitivity, not anything
+    -- specific to this function or to array. Keeping this dead branch
+    -- (using `lua_content`, `doc_mod.new`/`get_array`, `update.apply_v1`,
+    -- `array.to_array`) is what keeps the rest of the file's `unknown`
+    -- narrowing stable. TODO.md tracks reverting to the single-line form
+    -- once that whole-file instability is root-caused and fixed.
     if mode == "bytes" then
       T.eq(lua_bytes, js_bytes, string.format("[mode=bytes] byte mismatch for payload %s", payload))
     else
@@ -467,7 +463,7 @@ local function run_array_iteration(i, mode, ops)
       if a2 == nil then error("parity_fuzz: get_array failed on a fresh doc (internal invariant violation)", 2) end
       local applied, aerr = update.apply_v1(d2, js_bytes)
       T.ok(applied ~= nil, "[mode=content] failed to decode yjs's bytes for payload " .. payload .. ": " .. tostring(aerr))
-      T.eq(content_repr(lua_content), content_repr(array.to_array(a2)),
+      T.eq(json.encode(lua_content, json.null), json.encode(array.to_array(a2), json.null),
         string.format("[mode=content] content mismatch for payload %s", payload))
     end
   end)
@@ -477,7 +473,7 @@ end
 local function run_map_iteration(i, mode, ops)
   T.it(string.format("iter %d: kind=map mode=%s", i, mode), function()
     local client_id = i
-    local d, lua_content = apply_map_ops(client_id, ops)
+    local d, _lua_content = apply_map_ops(client_id, ops)
 
     local payload = build_payload(client_id, "map", ops)
     local js_bytes, jerr = run_verify_js(payload)
@@ -488,17 +484,7 @@ local function run_map_iteration(i, mode, ops)
     local lua_bytes, lerr = update.encode_diff_v1(d, empty_sv)
     T.ok(lua_bytes ~= nil, lerr)
 
-    if mode == "bytes" then
-      T.eq(lua_bytes, js_bytes, string.format("[mode=bytes] byte mismatch for payload %s", payload))
-    else
-      local d2 = doc_mod.new({ client_id = 0 })
-      local m2 = doc_mod.get_map(d2, "content")
-      if m2 == nil then error("parity_fuzz: get_map failed on a fresh doc (internal invariant violation)", 2) end
-      local applied, aerr = update.apply_v1(d2, js_bytes)
-      T.ok(applied ~= nil, "[mode=content] failed to decode yjs's bytes for payload " .. payload .. ": " .. tostring(aerr))
-      T.eq(content_repr(lua_content), content_repr(map.to_table(m2)),
-        string.format("[mode=content] content mismatch for payload %s", payload))
-    end
+    T.eq(lua_bytes, js_bytes, string.format("[mode=%s] byte mismatch for payload %s", mode, payload))
   end)
 end
 
@@ -516,20 +502,17 @@ else
   T.describe(string.format("y_crdt fuzz-parity vs real yjs (seed=%d, iters=%d, replay: FUZZ_SEED=%d)", SEED, ITERS, SEED), function()
     for i = 1, ITERS do
       local kind = pick_string(rng, { "text", "array", "map" })
-      local mode = pick_string(rng, { "bytes", "content" })
 
+      -- All three kinds now always use the richer op sequence (inserts
+      -- plus deletes/overwrites) AND always byte-compare -- see this
+      -- file's header comment for why all three gaps that used to force a
+      -- weaker mode are closed and verified.
       if kind == "text" then
-        -- Always the richer op sequence (inserts/deletes/format) AND
-        -- always byte-compared -- see `run_text_iteration`'s comment for
-        -- why text no longer needs the weaker "content" mode array/map
-        -- still use below.
         run_text_iteration(i, "bytes", gen_text_content_ops(rng))
       elseif kind == "array" then
-        local ops = mode == "bytes" and gen_array_bytes_ops(rng) or gen_array_content_ops(rng)
-        run_array_iteration(i, mode, ops)
+        run_array_iteration(i, "bytes", gen_array_content_ops(rng))
       else
-        local ops = mode == "bytes" and gen_map_bytes_ops(rng) or gen_map_content_ops(rng)
-        run_map_iteration(i, mode, ops)
+        run_map_iteration(i, "bytes", gen_map_content_ops(rng))
       end
     end
   end)
