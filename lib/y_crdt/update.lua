@@ -61,6 +61,8 @@ local skip = require("lib.y_crdt.skip")
 local struct_store = require("lib.y_crdt.struct_store")
 local integrate = require("lib.y_crdt.integrate")
 local json = require("lib.format.json")
+local transaction = require("lib.y_crdt.transaction")
+local text = require("lib.y_crdt.text")
 
 local M = {}
 
@@ -100,7 +102,12 @@ local sample_decoder = encoding.decoder("")
 --:: StructStore = { clients: { [number]: Struct[] } }
 --:: SharedTypeShare = { [string]: SharedType }
 --:: Doc = { client_id: number, store: StructStore, share: SharedTypeShare, clock: number, gc: boolean }
---:: Transaction = { doc: Doc, new_items: Item[], deleted_items: Item[] }
+-- `merge_structs` matches transaction.lua's own field of the same name
+-- (see that file's header comment on `M.new`/`Transaction` for why it's a
+-- separate list from `new_items`, not folded into it): a split-off tail
+-- registered so the post-apply merge sweep revisits its client even when
+-- nothing else changed for it this transaction.
+--:: Transaction = { doc: Doc, new_items: Item[], deleted_items: Item[], merge_structs: Item[] }
 
 --:: StateVector = { [number]: integer }
 
@@ -722,11 +729,24 @@ local function apply_delete_set(txn, store, ds)
           if s.kind == "item" then
             local split_off, split_err = struct_store.get_item_clean_end(store, id.new(math.floor(client), clock + remaining - 1))
             if split_off == nil then return nil, split_err or "update: failed to split item at delete range boundary" end
+            -- See text.lua's `find_pos` header comment for why this is
+            -- registered into `txn.merge_structs` (not `new_items`, which
+            -- would corrupt a later `encode_v1`/`encode_diff_v1` call on
+            -- this doc by encoding the split-off tail as if it were new
+            -- content): a delete-set range that only splits an existing
+            -- item -- with nothing else new or deleted for this client in
+            -- this transaction -- would otherwise leave the split
+            -- unmerged.
+            table.insert(txn.merge_structs, split_off)
           end
           take = remaining
         end
         if s.kind == "item" and not s.deleted then
-          item.delete(txn, s)
+          -- TYPECHECKER WORKAROUND: same reasoning as text.lua's own
+          -- `delete_item` wrapper -- item.lua's `Transaction` alias doesn't
+          -- carry `merge_structs`, so the wider local `txn` can't be
+          -- passed directly.
+          item.delete({ doc = txn.doc, new_items = txn.new_items, deleted_items = txn.deleted_items }, s)
         end
         -- GC and already-deleted Items need no further action; Skip means
         -- the struct this delete range targets hasn't arrived yet.
@@ -861,7 +881,22 @@ function M.encode_diff_v1(doc, sv_bytes)
 end
 
 -- Applies a decoded update to `doc`: integrates every struct (in
--- client-then-clock order) via integrate.lua, then applies the delete set.
+-- client-then-clock order) via integrate.lua, then applies the delete set,
+-- then runs the same post-transaction cleanup a local `doc.transact` call
+-- gets (`transaction.lua`'s `M.cleanup`: GC + merge-compaction) plus the
+-- Text-formatting cleanup that's specific to remote-origin transactions
+-- (`text.lua`'s `M.cleanup_after_remote_apply` -- see that function's
+-- comment for why it's only ever called from here, never from
+-- `doc.lua`'s `M.transact`). Until this was added, a remote update applied
+-- via this function got NONE of that cleanup -- no GC, no compaction, no
+-- formatting-gap removal -- unlike a locally-authored transaction, which is
+-- itself a wire-parity bug (a doc that only ever receives remote updates,
+-- e.g. a server relay, would never compact/GC/clean up at all). Ordering
+-- (formatting cleanup before GC/merge) matches yjs's own
+-- `cleanupTransactions`, where `cleanupYTextAfterTransaction` runs in the
+-- `try` block's observer-callback phase, strictly before the `finally`
+-- block's GC (`tryGcDeleteSet`) and merge (`tryToMergeWithLefts`) passes
+-- (`src/utils/Transaction.js`, tag v13.6.31).
 -- Returns the Transaction (so the caller can inspect new_items/
 -- deleted_items) on success.
 --: (doc: Doc, bytes: string) -> (Transaction | nil, string | nil)
@@ -878,7 +913,7 @@ function M.apply_v1(doc, bytes)
   -- as struct_store_test.lua's `new_parent`/`new_txn` helpers, which build
   -- SharedType/Transaction literals directly for the same cross-module
   -- reason). Runtime-identical to `transaction.new(doc)`.
-  local txn = { doc = doc, new_items = {}, deleted_items = {} } --[[: Transaction]]
+  local txn = { doc = doc, new_items = {}, deleted_items = {}, merge_structs = {} } --[[: Transaction]]
   local clients = {} --[[: integer[] ]]
   for client in pairs(by_client) do clients[#clients + 1] = math.floor(client) end
   for i = 2, #clients do
@@ -965,6 +1000,21 @@ function M.apply_v1(doc, bytes)
 
   local ok, err = apply_delete_set(txn, doc.store, ds)
   if not ok then return nil, err end
+
+  -- CHECKED CAST (not forced): `text.lua` declares its own narrower
+  -- `Transaction.doc` (`{ client_id, store, clock }` only, to avoid a
+  -- require() cycle back to this module) than this file's richer `Doc`
+  -- (which also carries `share`/`gc`) -- nested record fields aren't
+  -- width-subtyped by the typechecker (same gap `text.lua`'s own
+  -- `insert_item` documents at its `integrate.integrate` call site), so
+  -- `txn` can't be passed directly. Wrapping in a fresh table matching
+  -- text.lua's exact declared shape sidesteps that -- `new_items`/
+  -- `deleted_items` are the same array objects (Lua tables are
+  -- references), so `text.lua`'s `item.delete` calls still land in this
+  -- transaction's real arrays.
+  local txn_for_text = { doc = { client_id = doc.client_id, store = doc.store, clock = doc.clock }, new_items = txn.new_items, deleted_items = txn.deleted_items, merge_structs = txn.merge_structs }
+  text.cleanup_after_remote_apply(txn_for_text)
+  transaction.cleanup(txn, doc.store, doc.gc)
 
   return txn
 end
@@ -1055,7 +1105,7 @@ function M.merge_updates_v1(updates, roots)
     local txn, err = M.apply_v1(scratch, bytes)
     if txn == nil then return nil, err end
   end
-  local full_txn = { doc = scratch, new_items = {}, deleted_items = {} } --[[: Transaction]]
+  local full_txn = { doc = scratch, new_items = {}, deleted_items = {}, merge_structs = {} } --[[: Transaction]]
   for _, structs in pairs(scratch.store.clients) do
     for _, s in ipairs(structs) do
       if s.kind == "item" then

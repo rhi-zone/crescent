@@ -102,11 +102,26 @@ local sample_skip = skip.new(sample_id, 1)
 --:: Struct = Item | GcT | SkipT
 --:: StructStore = { clients: { [number]: Struct[] } }
 
---:: Transaction = { doc: unknown, new_items: Item[], deleted_items: Item[] }
+-- `merge_structs` mirrors yjs's `Transaction._mergeStructs`: a flat list of
+-- structs that need the post-transaction merge sweep to revisit their
+-- client, even though they're neither newly-authored content
+-- (`new_items`) nor a deletion (`deleted_items`) -- the sole producer is a
+-- split (`struct_store.get_item_clean_start`/`get_item_clean_end`'s
+-- split-off tail). This has to be a THIRD list, not folded into
+-- `new_items`: `update.lua`'s `M.encode_v1`/`M.encode_diff_v1` read
+-- `new_items` to decide what's genuinely new wire content for a peer, and
+-- a split-off tail is a repartition of ALREADY-known content, not new
+-- content -- conflating the two (an earlier version of this fix tried
+-- exactly that) corrupted encoded updates whenever a split was the only
+-- structural change in a transaction (confirmed via
+-- `update_test.lua`'s multi-exchange convergence test regressing: a
+-- delete's split-off tail got encoded as if it were new content, breaking
+-- the receiving peer's contiguity check).
+--:: Transaction = { doc: unknown, new_items: Item[], deleted_items: Item[], merge_structs: Item[] }
 
 --: (doc: unknown) -> Transaction
 function M.new(doc)
-  return { doc = doc, new_items = {}, deleted_items = {} } --[[: Transaction]]
+  return { doc = doc, new_items = {}, deleted_items = {}, merge_structs = {} } --[[: Transaction]]
 end
 
 --: (txn: Transaction, it: Item) -> nil
@@ -114,9 +129,20 @@ function M.add_item(txn, it)
   table.insert(txn.new_items, it)
 end
 
+-- TYPECHECKER WORKAROUND: `item.lua`'s own `Transaction` alias (`{ doc,
+-- new_items, deleted_items }`) doesn't carry `merge_structs` -- adding it
+-- would need widening item.lua's alias PLUS array.lua's/map.lua's/
+-- integrate.lua's own hand-restated copies (none of which read
+-- `merge_structs`), a wide ripple for a field only this file and text.lua
+-- actually consume. Reconstructing the narrower literal item.lua expects
+-- sidesteps that, matching this codebase's established pattern for
+-- crossing a module boundary with a wider local shape (e.g. text.lua's
+-- `insert_item` wrapping its own `Transaction.doc` down to what
+-- `integrate.integrate` declares). The natural code would call
+-- `item.delete(txn, it)` directly.
 --: (txn: Transaction, it: Item) -> nil
 function M.delete_item(txn, it)
-  item.delete(txn, it)
+  item.delete({ doc = txn.doc, new_items = txn.new_items, deleted_items = txn.deleted_items }, it)
 end
 
 -- TYPECHECKER WORKAROUND: indexing `store.clients[client]` (an index
@@ -203,6 +229,7 @@ function M.cleanup(txn, store, gc_enabled)
   local touched = {} --[[: { [number]: boolean } ]]
   for _, it in ipairs(txn.new_items) do touched[it.id.client] = true end
   for _, it in ipairs(txn.deleted_items) do touched[it.id.client] = true end
+  for _, it in ipairs(txn.merge_structs) do touched[it.id.client] = true end
 
   for client in pairs(touched) do
     local structs0 = store.clients[client]

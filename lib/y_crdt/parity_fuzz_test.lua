@@ -5,28 +5,46 @@
 -- fixtures/verify.js) to perform the identical sequence and compares the
 -- two resulting updates.
 --
--- Comparison mode is chosen per iteration, not fixed, because of a real
--- constraint discovered while building lib/y_crdt/parity_test.lua: real
--- yjs's default `gc: true` behavior GC-compacts any deleted item's content
--- down to a bare ContentDeleted placeholder (confirmed against
+-- Comparison mode used to be chosen per iteration for EVERY kind, because
+-- of a real constraint discovered while building lib/y_crdt/parity_test.lua:
+-- real yjs's default `gc: true` behavior GC-compacts any deleted item's
+-- content down to a bare ContentDeleted placeholder (confirmed against
 -- node_modules/yjs/dist/yjs.cjs; verified this happens even across
 -- separate transactions, not just same-transaction insert+delete), and its
 -- transaction-cleanup pass also merges adjacent same-client mergeable
--- items (`tryToMergeWithLefts`). Neither is implemented in this port yet
--- (TODO.md "item compaction"). A strict byte-for-byte comparison would
--- therefore fail on essentially any sequence containing a delete/overwrite,
--- for a reason already known and accepted -- not a new bug -- which would
--- drown out genuine finds. So:
+-- items (`tryToMergeWithLefts`) -- neither was implemented in this port at
+-- the time (TODO.md "item compaction"), so a strict byte-for-byte
+-- comparison would fail on essentially any sequence containing a
+-- delete/overwrite, for a reason already known and accepted, not a genuine
+-- bug, which would drown out real finds.
+--
+-- TEXT no longer needs the weaker mode: item compaction landed, and this
+-- port's `cleanupFormattingGap`/`cleanupYTextAfterTransaction` port (see
+-- lib/y_crdt/text.lua's header comment) closed the remaining format-marker
+-- gaps -- including two found ALONGSIDE that work, wire-visible even
+-- without formatting (`find_pos`'s stopping condition not matching yjs's
+-- `findPosition` exactly, and `M.insert`'s/`M.format`'s missing
+-- `minimizeAttributeChanges`/`insertAttributes` port -- see text.lua for
+-- both). Text always uses "bytes" mode now (`run_text_iteration`), verified
+-- clean over 800+ fuzz iterations across 8 seeds before this switch.
+--
+-- ARRAY/MAP still use the two-mode split below -- their own equivalent of
+-- text.lua's split-registration fix (a split whose tail never gets folded
+-- back into an adjacent structurally-mergeable item because nothing else
+-- in that transaction touched the client) is unverified for these two
+-- kinds; array.lua's/map.lua's own `find_pos`/delete-split call sites don't
+-- register into `txn.merge_structs` the way text.lua's now do. Fixing that
+-- is a separate task (TODO.md), not something this text-focused pass
+-- covers.
 --
 --   "bytes" mode   -- exactly ONE insert op against a fresh doc. Nothing
 --                     else exists yet for it to merge with or supersede,
 --                     so this is guaranteed clean of both known gaps and
 --                     checks the full update byte-for-byte.
 --   "content" mode -- a richer multi-op sequence that deliberately
---                     includes deletes/overwrites (and, for text, format),
---                     compared by decoding both sides' updates and
---                     checking the resulting document CONTENT matches,
---                     not raw bytes.
+--                     includes deletes/overwrites, compared by decoding
+--                     both sides' updates and checking the resulting
+--                     document CONTENT matches, not raw bytes.
 --
 -- Every iteration logs which mode it used (in the assertion's own
 -- description/failure message) so a failure is unambiguous about what was
@@ -191,15 +209,6 @@ end
 -- to serialize for verify.js. `did_destructive` tracks whether any
 -- delete/overwrite was generated, which decides the comparison mode.
 --------------------------------------------------------------------------
-
--- Single insert into a fresh doc: always index 0 (the only valid
--- position), so it can never end up structurally adjacent to anything
--- else -- guaranteed clean of both known compaction gaps, safe for
--- byte-for-byte "bytes" mode.
---: (FuzzRng) -> { [integer]: TextOp }
-local function gen_text_bytes_ops(rng)
-  return { { op = "insert", index = 0, length = 0, text = random_text(rng), key = "", value = false } }
-end
 
 --: (FuzzRng) -> { [integer]: TextOp }
 local function gen_text_content_ops(rng)
@@ -406,11 +415,21 @@ local function content_repr(v)
   return tostring(v) .. " (json.encode failed: " .. tostring(err) .. ")"
 end
 
+-- Text always uses byte-for-byte comparison now, regardless of what ops
+-- were generated (see this file's header comment: both gaps that used to
+-- force a weaker "content" mode for text -- item compaction and the
+-- formatting-gap/positioning-primitive bugs found and fixed alongside
+-- `cleanupFormattingGap`'s port -- are closed and verified against real
+-- yjs, 800+ fuzz iterations across 8 seeds with zero mismatches). `mode` is
+-- still threaded through for the assertion label/failure message, but it's
+-- always "bytes" for text now -- kept as a parameter (not hardcoded in the
+-- format string) so a future re-introduction of a weaker mode, if ever
+-- needed, has an obvious single place to change.
 --: (integer, string, { [integer]: TextOp }) -> nil
 local function run_text_iteration(i, mode, ops)
   T.it(string.format("iter %d: kind=text mode=%s", i, mode), function()
     local client_id = i -- distinct per iteration, deterministic given the fuzz seed
-    local d, lua_content = apply_text_ops(client_id, ops)
+    local d, _lua_content = apply_text_ops(client_id, ops)
 
     local payload = build_payload(client_id, "text", ops)
     local js_bytes, jerr = run_verify_js(payload)
@@ -421,17 +440,7 @@ local function run_text_iteration(i, mode, ops)
     local lua_bytes, lerr = update.encode_diff_v1(d, empty_sv)
     T.ok(lua_bytes ~= nil, lerr)
 
-    if mode == "bytes" then
-      T.eq(lua_bytes, js_bytes, string.format("[mode=bytes] byte mismatch for payload %s", payload))
-    else
-      local d2 = doc_mod.new({ client_id = 0 })
-      local t2 = doc_mod.get_text(d2, "content")
-      if t2 == nil then error("parity_fuzz: get_text failed on a fresh doc (internal invariant violation)", 2) end
-      local applied, aerr = update.apply_v1(d2, js_bytes)
-      T.ok(applied ~= nil, "[mode=content] failed to decode yjs's bytes for payload " .. payload .. ": " .. tostring(aerr))
-      T.eq(content_repr(lua_content), content_repr(text.to_string(t2)),
-        string.format("[mode=content] content mismatch for payload %s", payload))
-    end
+    T.eq(lua_bytes, js_bytes, string.format("[mode=%s] byte mismatch for payload %s", mode, payload))
   end)
 end
 
@@ -510,8 +519,11 @@ else
       local mode = pick_string(rng, { "bytes", "content" })
 
       if kind == "text" then
-        local ops = mode == "bytes" and gen_text_bytes_ops(rng) or gen_text_content_ops(rng)
-        run_text_iteration(i, mode, ops)
+        -- Always the richer op sequence (inserts/deletes/format) AND
+        -- always byte-compared -- see `run_text_iteration`'s comment for
+        -- why text no longer needs the weaker "content" mode array/map
+        -- still use below.
+        run_text_iteration(i, "bytes", gen_text_content_ops(rng))
       elseif kind == "array" then
         local ops = mode == "bytes" and gen_array_bytes_ops(rng) or gen_array_content_ops(rng)
         run_array_iteration(i, mode, ops)

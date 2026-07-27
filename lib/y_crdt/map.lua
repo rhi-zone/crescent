@@ -50,7 +50,13 @@ local M = {}
 --:: }
 
 --:: StructStore = { clients: { [number]: unknown } }
---:: Transaction = { doc: { client_id: number, store: StructStore, clock: number }, new_items: Item[], deleted_items: Item[] }
+-- `merge_structs` matches transaction.lua's/text.lua's own field of the
+-- same name (unused by this file -- map.lua has no split call sites of its
+-- own -- but present so a `txn` value threaded through both this file and
+-- text.lua in the same `doc.transact` callback type-checks consistently;
+-- see transaction.lua's `Transaction` header comment for what the field is
+-- for).
+--:: Transaction = { doc: { client_id: number, store: StructStore, clock: number }, new_items: Item[], deleted_items: Item[], merge_structs: Item[] }
 
 -- TYPECHECKER WORKAROUND: `shared_type.new(...)`'s return type is
 -- shared_type.lua's own declared `SharedType`, whose `start`/`map`/`item`
@@ -163,7 +169,14 @@ end
 function M.delete(m, txn, key)
   local it = m.map[key]
   if it == nil or it.deleted then return true end
-  item.delete(txn, it)
+  -- TYPECHECKER WORKAROUND: item.lua's own `Transaction` alias doesn't
+  -- carry this file's `merge_structs` field (added so a `txn` value
+  -- threaded through both this file and text.lua in the same
+  -- `doc.transact` callback type-checks consistently) -- reconstructing
+  -- the narrower shape sidesteps that, same reasoning as `M.set`'s own
+  -- `integrate.integrate` wrapping just above. The natural code would call
+  -- `item.delete(txn, it)` directly.
+  item.delete({ doc = txn.doc, new_items = txn.new_items, deleted_items = txn.deleted_items }, it)
   return true
 end
 

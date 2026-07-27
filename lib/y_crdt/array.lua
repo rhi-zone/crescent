@@ -60,7 +60,13 @@ local M = {}
 local sample_store = struct_store.new()
 --:: StructStore = typeof sample_store
 
---:: Transaction = { doc: { client_id: number, store: StructStore, clock: number }, new_items: Item[], deleted_items: Item[] }
+-- `merge_structs` matches transaction.lua's/text.lua's own field of the
+-- same name (unused by this file -- array.lua has no split call sites of
+-- its own yet -- but present so a `txn` value threaded through both this
+-- file and text.lua in the same `doc.transact` callback type-checks
+-- consistently; see transaction.lua's `Transaction` header comment for
+-- what the field is for).
+--:: Transaction = { doc: { client_id: number, store: StructStore, clock: number }, new_items: Item[], deleted_items: Item[], merge_structs: Item[] }
 
 -- TYPECHECKER WORKAROUND: see map.lua's `M.new` for the full writeup --
 -- `shared_type.new(...)`'s return can't be cast wholesale into this file's
@@ -161,6 +167,17 @@ local function insert_item(a, txn, left, right, c)
   return new_item
 end
 
+-- TYPECHECKER WORKAROUND: same reasoning as `insert_item` above, applied to
+-- `item.delete` -- item.lua's own `Transaction` alias doesn't carry this
+-- file's `merge_structs` field (added so a `txn` value threaded through
+-- both this file and text.lua in the same `doc.transact` callback
+-- type-checks consistently; see transaction.lua's `Transaction` header
+-- comment). The natural code would call `item.delete(txn, it)` directly.
+--: (txn: Transaction, it: Item) -> nil
+local function delete_item(txn, it)
+  item.delete({ doc = txn.doc, new_items = txn.new_items, deleted_items = txn.deleted_items }, it)
+end
+
 -- Inserts `values` (a Lua list -- no embedded literal `nil`; use
 -- `require("lib.y_crdt.encoding").null` for an explicit wire-null element,
 -- same sentinel convention encoding.lua already documents) at visible
@@ -241,13 +258,13 @@ function M.delete(a, txn, index, length)
   while remaining > 0 and n ~= nil do
     if not n.deleted and item.is_countable(n) then
       if n.length <= remaining then
-        item.delete(txn, n)
+        delete_item(txn, n)
         remaining = remaining - n.length
         n = n.right
       else
         local tail, terr = struct_store.get_item_clean_start(store, id.new(n.id.client, n.id.clock + remaining))
         if tail == nil then return nil, terr or "array.delete: split failed" end
-        item.delete(txn, n)
+        delete_item(txn, n)
         remaining = 0
         n = tail
       end
