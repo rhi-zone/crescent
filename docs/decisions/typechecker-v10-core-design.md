@@ -141,14 +141,65 @@ never to zero. This is not to be later read as more than that.
 
 ---
 
+## Primitive set specification
+
+### Settled (owner-ratified this session)
+
+Working names throughout; final names to be checked against
+`docs/conventions.md` naming rules at implementation.
+
+**Term grammar — exactly three node forms:**
+
+- `var(k)` — de Bruijn index.
+- `op(op_id, a1..an)` — operator node; each argument is `(bound_count,
+  term)` matching the operator's declared valence.
+- `meta(id, sort)` — metavariable node; legal in pattern positions only.
+
+**Declarations (registry-side; the kernel validates against them, stores
+none of their meaning):**
+
+- Sort: a bare name in the flat sort set.
+- Operator: name, result sort, per-argument `(sort, valence)` where
+  valence = list of sorts of the variables bound in that argument.
+
+**Primitives** (all data errors return `(nil, errmsg)` per repo
+convention):
+
+- `build(op_decl, args)` — the ONLY way to construct a term; checks arity,
+  argument sorts, valences. Ill-sorted/ill-formed terms are unrepresentable,
+  not detected. (Ratified explicitly: sole-constructor over
+  raw-construction-plus-check — validity by construction.)
+- `equal(a, b)` — reference: structural walk; fast: pointer-eq on interned
+  nodes (under `kernel-interner-sound-v1`).
+- `shift(t, d, cutoff)` — de Bruijn shift.
+- `subst(t, k, u)` — capture-avoiding by construction; reference: eager;
+  fast: explicit-subst (under `kernel-lazy-subst-sound-v1`).
+- `match(pattern, term)` — first-order, deterministic, no search;
+  shift-aware under binders; returns bindings (meta id → term + binding
+  depth) or `nil, err`. Non-linear patterns ALLOWED (ratified explicitly):
+  a metavariable occurring more than once binds on first occurrence and
+  each later occurrence is checked with `equal` at bind time — rules like
+  W-App need shared-metavariable premises, and moving that equality outside
+  the primitive into per-rule convention was rejected.
+- `instantiate(pattern, bindings)` — applies shifts per binding depth;
+  unbound metavariable is an error.
+- `is_ground(t)` — no metavariable nodes; the kernel refuses any concluded
+  judgment that is not ground.
+- `sort_of(t)` — O(1), sort stored at build.
+
+Kernel config `{eq, subst}` → run-level trust label, caches keyed by config
+hash, per the kernel primitive tiers and trust section above.
+
+This closes the "concrete primitive set specification" open item below.
+
+---
+
 ## Explicitly open (flagged, not settled — do not present as decided)
 
-- Concrete primitive set specification: shift/subst, structural equality,
-  sorted/valence-checked construction, first-order match + instantiate —
-  signatures and error behavior.
 - Operator-declaration format for registry entries (how a theory declares
-  its vocabulary: names, arities, valences, sorts).
-- Pattern-discipline details (exact shift-aware instantiation rules; the
-  no-metavars-in-conclusions check's placement).
+  its vocabulary: names, arities, valences, sorts — the concrete Lua
+  shape).
+- Pattern-discipline placement details (where the no-metavars-in-conclusions
+  check is enforced in the kernel API surface).
 - Everything downstream per the charter (instantiation checking, taint,
   discharge format, prefix, corroboration).
