@@ -192,7 +192,9 @@ are required ground AND closed.
 **Declarations (registry-side; the kernel validates against them, stores
 none of their meaning):**
 
-- Sort: a bare name in the flat sort set.
+- Sort: a declared object in the flat sort set, owned by exactly one
+  signature (+ version) — identity-by-declaration, not a bare name (see
+  "Sort identity" section below; this line amended by that ratification).
 - Operator: name, result sort, per-argument `(sort, valence)` where
   valence = list of sorts of the variables bound in that argument.
 
@@ -248,11 +250,15 @@ concrete Lua shape" open item.
 - `kernel.declare_signature(spec) -> sig | nil, errmsg`; `spec = { name,
   version, sorts = { names... }, ops = { opname = { result = sortname,
   args = { { sort = sortname, binds = { sortnames... }? }... } } } }`.
-  Validation happens entirely at declaration (unknown sorts, duplicate
-  ops, malformed valences rejected); the result is an immutable signature
-  holding kernel-interned decl objects — after declaration succeeds no
-  malformed decl is observable (validity-by-construction, third
-  application of the fence pattern).
+  **Amended below (sort identity ratification): `spec` also gains an
+  `imports` clause for citing sorts owned by another signature; the
+  `sorts` field declares sorts owned by THIS signature.** Validation
+  happens entirely at declaration (unknown sorts, duplicate ops,
+  malformed valences rejected, and — per the amendment — unresolvable
+  imports rejected); the result is an immutable signature holding
+  kernel-interned decl objects — after declaration succeeds no malformed
+  decl is observable (validity-by-construction, third application of the
+  fence pattern).
 - `build(decl, args)` takes a pre-resolved decl object (`sig.ops.X`), not
   registry+name — no hot-path lookup. Node `bound_count` is stamped by
   `build` from `#binds`; callers never supply it (refines the ratified
@@ -261,6 +267,32 @@ concrete Lua shape" open item.
   in different signatures are different operators; vocabulary sharing =
   citing the same signature object (this is how the prefix's shared
   vocabulary will be imported). Terminology fixed: "signature".
+
+### Sort identity: identity-by-declaration + explicit imports (owner-ratified)
+
+Ratified amendment, closing an asymmetry in the original spec above,
+surfaced by the pilot signature design (`docs/typechecker-v10-pilot-
+signatures-proposal.md`, commit `9f91a58b`): sorts were bare unversioned
+strings with no owning-signature identity, so unrelated signatures
+declaring a same-named sort were silently interchangeable — accidental
+vocabulary coincidence, the inverse of declc's H1 failure.
+
+- **Sort identity = declared object identity (owning signature +
+  version)** — exactly the already-ratified operator-identity principle
+  (above) applied to sorts. Sort equality is object identity, never name
+  equality.
+- `declare_signature` gains an explicit **imports clause** for citing
+  sorts owned by another signature (e.g. the shared addressing
+  signature's point/path). The precise Lua field shape of `imports` is
+  left to implementation-time, consistent with this document's existing
+  working-names convention for the primitive set — no shape is ratified
+  here beyond: it names a source signature and the sorts cited from it,
+  and declaration fails if the citation cannot be resolved.
+- **The flat-sort ratification is UNTOUCHED** — still a flat set, no
+  subsorting; only identity semantics change.
+- Rejected alternatives, recorded: merging signatures (forfeits
+  declared-once-shared addressing) and sort-name convention (unenforced
+  coincidence — the documented graveyard pattern).
 
 ---
 
@@ -425,6 +457,13 @@ corroboration wiring over the same addressing signature).
    `docs/typechecker-v10-pilot-signatures-proposal.md`).
 2. **Pilot type vocabulary signature** — pilot-scoped (primitives / union /
    nil-falsy), versioned, not the full type algebra.
+
+   **Note (owner-ratified):** signature 1 (`addr-v1`) and signature 2
+   (`narrow-pilot-v1`) from the pilot signature proposal proceed to
+   implementation on the basis of the sort-identity-by-declaration
+   ratification above — `holds_at`'s declaration, previously blocked, is
+   unblocked via sort imports (citing `addr-v1`'s point/path sorts from
+   `narrow-pilot-v1`).
 3. **Flow-narrowing theory** — rule schemas over 1+2; guard forms from
    real crescent usage; theory soundness enters as a named axiom (no
    prefix anchor yet — deliberate, priced). Any rule needing a side
