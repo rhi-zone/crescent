@@ -384,6 +384,77 @@ the owner.
 
 ---
 
+## Pilot: flow-narrowing on the kernel — plan of record
+
+This is a PLAN record, not a ratifications section: the items below are
+scheduled work and framing, not owner-ratified design conclusions. Ratified
+content stays exclusively under "Settled" sections above.
+
+### Status note — execution mode change
+
+The owner has delegated pilot execution to the design session ("execute,
+surface when something comes up"). Decisions made under this delegation
+are marked **fable-delegation-tier**: derived and recorded, explicitly NOT
+owner-ratified, and re-openable without ceremony. Owner-ratified items
+(the "Settled" sections above) remain the only fully settled tier —
+fable-delegation-tier content must not be read as equivalent to them.
+
+### Context (recorded so the plan's motivation survives)
+
+The campaign's open risk, owner-articulated: there is no confirmation the
+architecture yields a beyond-SOTA analysis engine. The known decomposition:
+
+- **Risk 1** — certificate-shapeability of serious analyses.
+- **Risk 2** — emit+replay overhead at real scale.
+- On top of both: the **corroboration bet** (power-by-composition), which
+  the design-sync already records as the sharpest unresolved point.
+
+MLstruct-class single-calculus systems are the floor the owner explicitly
+wants exceeded; power-by-composition over the trust substrate is the only
+known route that isn't the graveyard's fused-monolith shape. The pilot
+converts risks 1+2 from faith to measurement; the corroboration/power test
+is a planned successor with its increment defined (second theory +
+corroboration wiring over the same addressing signature).
+
+### Plan of record — five steps, each one artifact
+
+1. **Program-point addressing signature** — structural-path addressing
+   from chunk root, declared once, shared by all theories (the declc-H1
+   counter-move; evaluated against the framework postmortem's three
+   lessons). Under design now (proposal doc forthcoming at
+   `docs/typechecker-v10-pilot-signatures-proposal.md`).
+2. **Pilot type vocabulary signature** — pilot-scoped (primitives / union /
+   nil-falsy), versioned, not the full type algebra.
+3. **Flow-narrowing theory** — rule schemas over 1+2; guard forms from
+   real crescent usage; theory soundness enters as a named axiom (no
+   prefix anchor yet — deliberate, priced). Any rule needing a side
+   condition halts to the owner (the deferred side-condition fork, faced
+   with a concrete case).
+4. **Certificate-emitting prover** — crescent parser + narrowing analysis
+   (v3 readable now, post-core), two-pass emission per the W/J-port
+   pattern.
+5. **Measurement** on real `lib/` files vs the v3 checker: judgments
+   derived+replayed, precision deltas, wall-clock emit+replay vs check
+   time.
+
+### Parked (unchanged status)
+
+Awaiting owner attention after the pilot produces evidence — status
+unchanged by this plan record:
+
+- Tier-1 proof-restructure proposal's five forks
+  (`docs/typechecker-v10-proof-restructure-proposal.md`, commit
+  `be6b8f71`).
+- `ssub.v` proof-script fix (diagnosed: `decide_rsub_fuel_sound` at
+  `ssub.v:1381`, tactic-time blowup from a blind 121-case
+  destruct+`first[]` search; fix options recorded in the diagnosis
+  report).
+- Reality-bridge tier 2.
+- Coverage-formalization tier 3.
+- The compositionality-canary charter wording (strict vs permissive).
+
+---
+
 ## Explicitly open (flagged, not settled — do not present as decided)
 
 - Side conditions in rule schemas (task-4 fork B) — UNDESIGNED, owner
