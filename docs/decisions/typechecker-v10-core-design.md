@@ -469,6 +469,53 @@ corroboration wiring over the same addressing signature).
    prefix anchor yet — deliberate, priced). Any rule needing a side
    condition halts to the owner (the deferred side-condition fork, faced
    with a concrete case).
+
+   **Executed (fable-delegation-tier, not owner-ratified) —
+   `lib/type/v10_kernel/pilot/flow_narrow_v1.lua` +
+   `..._test.lua`.** Declares `{name="narrow-pilot-v1", version=2}`
+   (additive extension of step 2's signature — same op set + one new op;
+   a distinct declared object from v1, per operator/sort identity rules,
+   so v1's own module/tests are untouched) importing `point`/`path` from
+   `addr-v1`. Grepped real usage first (`| nil` ~6600 hits vs 3+-way
+   unions ~180 across `lib/`) to keep scope honest rather than assumed.
+
+   **Reality-boundary resolution (the pilot's version of "how do ground
+   facts about a file enter the derivation"):** one new judgment op,
+   `guard_selects(guard_point, branch_point, var_path, target_ty)`,
+   covering all three in-scope guard forms (`type(x)==/~="T"`, `x==/~=nil`,
+   bare truthiness) uniformly via `target_ty` — asserted only via a single
+   schematic axiom, `pilot-syntax-facts-v1` (fully-metavariable pattern;
+   every concrete instance is an untrusted-prover axiom CITATION, never a
+   hypothesis), which tags every derivation using it with that axiom key.
+   No kernel change — the ratified schematic-axiom mechanism already
+   covers this; confirms the brief's anticipation that it would.
+   Documented in the module as the reusable pattern for every future
+   theory needing syntax facts.
+
+   **Rule table** (two rules, signature `narrow-pilot-v1` v2):
+   | rule | premises | conclusion | informal statement |
+   |---|---|---|---|
+   | `narrow-select-match` v1 | `holds_at(Pg,X,ty_union(TA,Rest))`, `guard_selects(Pg,Pb,X,TA)` | `holds_at(Pb,X,TA)` | on the branch the guard's syntax fact names as matching, the variable narrows to the selected member |
+   | `narrow-select-rest` v1 | same two premises | `holds_at(Pb,X,Rest)` | on the other branch, the variable narrows to everything else in the union |
+
+   Polarity (`==`/`~=`) and then/else selection are not in the judgment or
+   rules at all — purely which rule + which point the (untrusted, later)
+   prover cites; the shared non-linear metavariable `TA` across both
+   premises is what makes this sound rather than a rubber stamp (same
+   mechanism as `hm-app`'s argument/domain forcing). Arbitrary-width
+   unions are handled by re-citing `narrow-select-rest` against a
+   possibly-union `Rest`, not by enumeration. No rule required a side
+   condition — HALT was not triggered. One explicit, flagged (not halted)
+   scope limit: a guard over an already-monomorphic (non-union) fact
+   doesn't match either premise shape — out of scope, not mishandled.
+
+   Tests (both term_algebra tiers): clean declaration; each rule replays a
+   hand-built certificate to its expected conclusion; a malformed variant
+   of each (mismatched `target_ty`, mismatched variable path) is rejected
+   at replay; the syntax-facts axiom itself rejects a discharge form; a
+   two-guard chain (truthiness peel, then a `type()`-tag peel on the
+   remainder) replays end-to-end; taint carries exactly the syntax-facts
+   axiom key, deduplicated across repeated citations.
 4. **Certificate-emitting prover** — crescent parser + narrowing analysis
    (v3 readable now, post-core), two-pass emission per the W/J-port
    pattern.
