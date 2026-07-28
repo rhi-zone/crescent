@@ -521,9 +521,29 @@ function M.new()
 				bindings[p.id] = { term = ft, depth = depth }
 				return bindings
 			end
-			local expected, err = Inst.shift(existing.term, depth - existing.depth, 0)
-			if not expected then
-				return nil, "match: non-linear metavariable " .. p.id .. " conflict: " .. (err or "shift failed")
+			-- PERFORMANCE NOTE (docs/perf/log.md, 2026-07-28 replay-shaped
+			-- follow-up): the ratified spec (typechecker-v10-core-design.md)
+			-- requires `equal(candidate, shift(stored, d'-d))` here — but
+			-- when `d' == d` (the common case: a non-linear metavariable's
+			-- second occurrence at the SAME binder depth as its first),
+			-- `shift(t, 0, 0)` is the identity, and calling it anyway pays
+			-- `Inst.shift`'s full force-and-rebuild-through-`Inst.build`
+			-- cost (see the REJECTED OPTIMIZATION note on `Inst.shift`
+			-- itself for why that cost can't be removed from `shift`'s own
+			-- contract). Skipped here at the call site instead, exactly
+			-- the same caller-side pattern already used in `force_head`:
+			-- `Inst.shift`'s public behavior is untouched, and
+			-- `Inst.equal` below already forces whatever it's given as
+			-- needed, so passing the unshifted (possibly still-unforced)
+			-- `existing.term` through when the offset is provably 0 is
+			-- observably identical, just without the redundant rebuild.
+			local expected = existing.term
+			if depth ~= existing.depth then
+				local shifted, err = Inst.shift(existing.term, depth - existing.depth, 0)
+				if not shifted then
+					return nil, "match: non-linear metavariable " .. p.id .. " conflict: " .. (err or "shift failed")
+				end
+				expected = shifted
 			end
 			if not Inst.equal(expected, ft) then
 				return nil, "match: non-linear metavariable " .. p.id .. " conflict"
@@ -561,9 +581,27 @@ function M.new()
 		if p.tag == "meta" then
 			local b = bindings[p.id]
 			if not b then return nil, "instantiate: unbound metavariable " .. p.id end
-			local shifted, err = Inst.shift(b.term, depth - b.depth, 0)
-			if not shifted then
-				return nil, "instantiate: metavariable " .. p.id .. ": " .. (err or "shift failed")
+			-- PERFORMANCE NOTE (docs/perf/log.md, 2026-07-28 replay-shaped
+			-- follow-up): same call-site skip as `match_at`'s non-linear
+			-- check, above — pasting a metavariable's binding at the SAME
+			-- depth it was captured (`depth == b.depth`) is the common
+			-- case for a great many rule applications, and `shift(t,0,0)`
+			-- is the identity, so the call (and its full
+			-- force-and-rebuild-through-`Inst.build` cost) is skipped
+			-- here rather than paid unconditionally. `Inst.shift`'s own
+			-- contract is untouched; `b.term` may be passed through
+			-- unforced (its `.sort` is O(1)-cached regardless, and every
+			-- downstream consumer — `Inst.build`'s validation, `mk_op`'s
+			-- ctx/ground reads — already handles unforced thunk args
+			-- correctly, the same invariant `force_head`'s own
+			-- reconstruction already relies on).
+			local shifted = b.term
+			if depth ~= b.depth then
+				local su, serr = Inst.shift(b.term, depth - b.depth, 0)
+				if not su then
+					return nil, "instantiate: metavariable " .. p.id .. ": " .. (serr or "shift failed")
+				end
+				shifted = su
 			end
 			if shifted.sort ~= p.sort then
 				return nil, "instantiate: metavariable " .. p.id .. " sort mismatch"
