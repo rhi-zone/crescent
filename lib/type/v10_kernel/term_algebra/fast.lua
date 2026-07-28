@@ -96,11 +96,11 @@ local M = {}
 --:: OpArgDecl = { sort: Sort, binds: Sort[], bound_count: integer }
 --:: OpDecl = { name: string, sig_name: string, sig_version: integer, result: Sort, args: OpArgDecl[], arity: integer }
 --:: OpArg = { bound_count: integer, term: Term }
---:: VarTerm = { tag: "var", index: integer, sort: Sort, ctx: Ctx, ground: boolean }
---:: MetaTerm = { tag: "meta", id: string, sort: Sort, ctx: Ctx, ground: boolean }
---:: OpTerm = { tag: "op", decl: OpDecl, args: OpArg[], sort: Sort, ctx: Ctx, ground: boolean }
+--:: VarTerm = { tag: "var", index: integer, sort: Sort, ctx: Ctx, ground: boolean, iid: integer }
+--:: MetaTerm = { tag: "meta", id: string, sort: Sort, ctx: Ctx, ground: boolean, iid: integer }
+--:: OpTerm = { tag: "op", decl: OpDecl, args: OpArg[], sort: Sort, ctx: Ctx, ground: boolean, iid: integer }
 --:: Concrete = VarTerm | MetaTerm | OpTerm
---:: ThunkTerm = { tag: "thunk", base: Term, k: integer, u: Term, sort: Sort, ctx: Ctx, ground: boolean, forced: Term | nil }
+--:: ThunkTerm = { tag: "thunk", base: Term, k: integer, u: Term, sort: Sort, ctx: Ctx, ground: boolean, forced: Term | nil, iid: integer }
 --:: Term = Concrete | ThunkTerm
 --:: Binding = { term: Term, depth: integer }
 --:: Bindings = { [string]: Binding }
@@ -125,6 +125,44 @@ function M.new()
 	local meta_intern = {} --[[: { [string]: MetaTerm } ]]
 	local op_intern = {} --[[: { [string]: OpTerm } ]]
 
+	-- Per-instance monotonic node id, assigned once at construction to every
+	-- var/meta/op/thunk node built through this Inst. Exists ONLY so
+	-- `mk_op`'s intern key (below) can reference a child by a cheap integer
+	-- instead of `tostring(child)` (a pointer-format string built fresh on
+	-- every call) — see the PERFORMANCE NOTE on `mk_op` and TODO.md's
+	-- chained-subst perf follow-up. Not observable outside this file: no
+	-- public accessor exposes `iid`, and it plays no role in equality,
+	-- sorting, or context bookkeeping.
+	local next_iid = 0
+	--: () -> integer
+	local function fresh_iid()
+		next_iid = next_iid + 1
+		return next_iid
+	end
+
+	-- Per-decl id, assigned the first time this Inst sees a given decl
+	-- OBJECT (table identity as the key — Lua tables hash/compare by
+	-- reference, which is exactly the "operator identity = declared-object
+	-- identity" invariant shared.lua's `declare_signature` establishes: two
+	-- signatures declaring the same-named op at the same version produce
+	-- two DIFFERENT decl tables and must intern as different operators).
+	-- Deliberately NOT `decl.sig_name/.sig_version/.name` — those are
+	-- content, not identity, and using them as the key collapsed two
+	-- distinct decls into one op_intern bucket (caught by
+	-- term_algebra_test.lua's "different signatures are different
+	-- operators" case). This table is the fix: identity-keyed, still O(1)
+	-- table lookup, still avoids `tostring(decl)`'s per-call pointer
+	-- formatting (paid once per decl instead of once per mk_op call).
+	local decl_iid = {} --[[: { [unknown]: integer } ]]
+	--: (decl: OpDecl) -> integer
+	local function decl_id(decl)
+		local existing = decl_iid[decl --[[: unknown ]]] --[[: integer | nil ]]
+		if existing then return existing end
+		local fresh = fresh_iid()
+		decl_iid[decl] = fresh
+		return fresh
+	end
+
 	local Inst = {}
 
 	--: (index: integer, sort: Sort) -> (VarTerm | nil, string | nil)
@@ -137,7 +175,7 @@ function M.new()
 		local key = "v:" .. idx .. ":" .. sort
 		local existing = var_intern[key]
 		if existing then return existing end
-		local node = { tag = "var", index = idx, sort = sort, ctx = { [idx] = sort }, ground = true } --[[: VarTerm ]]
+		local node = { tag = "var", index = idx, sort = sort, ctx = { [idx] = sort }, ground = true, iid = fresh_iid() } --[[: VarTerm ]]
 		var_intern[key] = node
 		return node
 	end
@@ -149,7 +187,7 @@ function M.new()
 		local key = "m:" .. id .. ":" .. sort
 		local existing = meta_intern[key]
 		if existing then return existing end
-		local node = { tag = "meta", id = id, sort = sort, ctx = {}, ground = false } --[[: MetaTerm ]]
+		local node = { tag = "meta", id = id, sort = sort, ctx = {}, ground = false, iid = fresh_iid() } --[[: MetaTerm ]]
 		meta_intern[key] = node
 		return node
 	end
@@ -158,24 +196,36 @@ function M.new()
 	-- local already validated sorts/contexts, or are reconstructing a term
 	-- that was already valid before substitution/shift — both provably
 	-- sort/context-preserving), but ctx/ground/interning still computed.
+	--
+	-- PERFORMANCE NOTE (docs/perf/log.md, 2026-07-28 chained-subst
+	-- follow-up): the intern key used to be `"o:" .. tostring(decl) .. ":"
+	-- .. tostring(child)` per argument — `tostring()` on a table formats a
+	-- pointer string on every call, a real per-node cost that dominates on
+	-- a long chain of interleaved subst+inspect (each step forces and
+	-- reconstructs through `mk_op`). Replaced with `decl_id(decl)` (an
+	-- identity-keyed per-decl id, see above — NOT content-derived, so the
+	-- "two signatures declaring the same-named op are different operators"
+	-- invariant still holds) and each child's own `iid` (assigned once at
+	-- construction, above) instead of `tostring(a.term)`. Same key SPACE,
+	-- just built from cheap integers instead of formatting pointers.
 	--: (decl: OpDecl, args: OpArg[]) -> (OpTerm | nil, string | nil)
 	local function mk_op(decl, args)
 		local child_ctxs = {} --[[: Ctx[] ]]
 		local ground = true
-		local key = "o:" .. tostring(decl)
+		local key = "o:" .. decl_id(decl)
 		for i = 1, decl.arity do
 			local a = args[i]
 			local outer_ctx, err = shared.discharge_arg_ctx(a.term.ctx, decl.args[i].binds)
 			if not outer_ctx then return nil, err end
 			child_ctxs[i] = outer_ctx
 			if not a.term.ground then ground = false end
-			key = key .. ":" .. tostring(a.term)
+			key = key .. ":" .. a.term.iid
 		end
 		local ctx, merge_err = shared.merge_ctxs(child_ctxs)
 		if not ctx then return nil, merge_err end
 		local existing = op_intern[key]
 		if existing then return existing end
-		local node = { tag = "op", decl = decl, args = args, sort = decl.result, ctx = ctx, ground = ground }
+		local node = { tag = "op", decl = decl, args = args, sort = decl.result, ctx = ctx, ground = ground, iid = fresh_iid() }
 		op_intern[key] = node
 		return node
 	end
@@ -288,7 +338,7 @@ function M.new()
 		local new_ctx = ctx_after_subst(base, k, u.ctx)
 		return {
 			tag = "thunk", base = base, k = k, u = u, sort = base.sort,
-			ctx = new_ctx, ground = base.ground and u.ground, forced = nil,
+			ctx = new_ctx, ground = base.ground and u.ground, forced = nil, iid = fresh_iid(),
 		}
 	end
 
@@ -327,8 +377,27 @@ function M.new()
 		else
 			local new_args = {} --[[: OpArg[] ]]
 			for i, a in ipairs(base.args) do
-				local shifted_u, serr = Inst.shift(u, a.bound_count, 0)
-				if not shifted_u then error("force: " .. (serr or "shift failed"), 0) end
+				-- PERFORMANCE NOTE (docs/perf/log.md, 2026-07-28
+				-- chained-subst follow-up): when this argument has no
+				-- binders (bound_count == 0), `Inst.shift(u, 0, 0)` would
+				-- — per its own documented full-forcing contract — force
+				-- `u` and rebuild it structurally through
+				-- `mk_op`/interning, only to produce something
+				-- structurally identical to `u` (shift by 0 is always the
+				-- identity — see the REJECTED OPTIMIZATION note on
+				-- `Inst.shift` itself for why that fact can't be used to
+				-- change shift's own public behavior). Here, at THIS call
+				-- site, bound_count is already known statically, so the
+				-- no-op case is skipped directly — `Inst.shift`'s public
+				-- contract (and every other caller's view of it) is
+				-- completely unchanged; this only avoids a redundant call
+				-- this one caller can prove in advance is unnecessary.
+				local shifted_u = u
+				if a.bound_count ~= 0 then
+					local su, serr = Inst.shift(u, a.bound_count, 0)
+					if not su then error("force: " .. (serr or "shift failed"), 0) end
+					shifted_u = su
+				end
 				local child, cerr = mk_subst(a.term, k + a.bound_count, shifted_u)
 				if not child then error("force: " .. (cerr or "subst failed"), 0) end
 				new_args[i] = { bound_count = a.bound_count, term = child }
@@ -390,6 +459,27 @@ function M.new()
 
 	--: (t: Term, d: integer, cutoff: integer) -> (Term | nil, string | nil)
 	function Inst.shift(t, d, cutoff)
+		-- REJECTED OPTIMIZATION (docs/perf/log.md, 2026-07-28 chained-subst
+		-- follow-up): shift by 0 is mathematically the identity for every
+		-- cutoff, and a `if d == 0 then return t end` short-circuit here
+		-- (skipping force_head entirely) was tried and measured — see the
+		-- perf log for the commit hash. Rejected: it silently changes
+		-- `shift`'s OBSERVABLE contract. This module's own header
+		-- documents "`shift` is NOT lazy... it forces a thunk fully, then
+		-- shifts structurally"; term_algebra_parity_test.lua's
+		-- `make_forcer` relies on exactly that ("shift by 0 at cutoff 0
+		-- always forces-and-rebuilds structurally in both tiers") as the
+		-- ratified-primitive-only way to force a possibly-unforced fast-
+		-- tier term to Concrete for comparison. A `d == 0` shortcut that
+		-- returns `t` unforced breaks that immediately (confirmed: parity
+		-- fuzz crashed with "unrecognized term tag: thunk" the moment a
+		-- forced-via-shift(_,0,0) result was fed to a Concrete-only
+		-- walker). Not an implementation-level tweak — it would require
+		-- ratifying "shift may return an unforced term" as new fast-tier
+		-- semantics and updating every caller (in and out of this
+		-- cleanroom boundary) that currently relies on shift-forces-fully.
+		-- Left un-shortcut; see the module header's caveat and TODO.md for
+		-- where this was reported instead of forced through.
 		local h = force_head(t)
 		if h.tag == "var" then
 			if h.index < cutoff then return h end
