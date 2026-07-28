@@ -58,18 +58,37 @@
 --   which unconditionally reads `a.term.ctx`/`a.term.ground` to validate
 --   and merge. Fixed properly rather than special-cased around.)
 --
--- MEASURED PERFORMANCE CAVEAT (docs/perf/log.md, 2026-07-28): computing
+-- MEASURED PERFORMANCE CAVEAT (docs/perf/log.md, 2026-07-28, revised same
+-- day after a design-level review + replay-shaped benchmarks): computing
 -- ctx/ground at thunk-construction time means `mk_subst` forces its `base`
--- one level at EVERY call — for a single substitution this is cheap and the
--- fast tier wins clearly (benchmarked), but for a CHAIN of substitutions
--- interleaved with re-inspection (each step's `base.ctx[k]` lookup requires
--- the previous step's thunk to already be forced), the per-node interning
--- overhead paid at every one of those forced steps compounds and measurably
--- LOSES to the reference tier (10x slower at 50 chained steps) — the
--- opposite of what a naive "lazy subst helps chains" reading of this file
--- would predict. Not a correctness gap (parity fuzzing confirms identical
--- results); a genuine, measured performance characteristic of the current
--- design, with candidate follow-ups recorded in TODO.md.
+-- one level at EVERY call, UNCONDITIONALLY — independent of whether any
+-- caller ever inspects the result. For a SINGLE substitution this is cheap
+-- and the fast tier wins clearly (benchmarked, ~7-8x). For a workload that
+-- CHAINS many substitutions on a term shaped like `var(i)` sitting `i`
+-- levels deep (so the "index provably absent" short-circuit never fires),
+-- this per-call forcing compounds across the chain and measurably LOSES to
+-- the reference tier — confirmed to be ~9-12x slower at 50 chained steps
+-- REGARDLESS of whether the caller ever inspects an intermediate result
+-- (a "compose N substitutions, then do ONE small rule-sized match" bench
+-- loses by essentially the same margin as "compose N, then fully force" —
+-- see docs/perf/log.md's 2026-07-28 replay-shaped-benchmarks entry). This
+-- is NOT the "lazy subst helps chains" premise failing on an adversarial,
+-- never-occurring access pattern — chaining several substitutions before
+-- using the result is a plausible workload, not a strawman. What DOES
+-- strongly validate the design (same entry, 33-46x fast-tier win,
+-- consistent across repeated runs): the workload the ratified replay hot
+-- path actually predicts dominates — MANY INDEPENDENT small `match`-then-
+-- `instantiate` rule applications, never chaining substitutions on one
+-- growing term. The fast tier's justification is therefore workload-
+-- dependent, confirmed by measurement, not assumed: strong for
+-- match/instantiate-heavy replay, weak for substitution-chaining. Closing
+-- the chaining weakness would require allowing a thunk to wrap ANOTHER
+-- unforced thunk (deferring collapse-to-Concrete across multiple composed
+-- substitutions, not just one) instead of always storing a fully-forced
+-- Concrete `.base` — a representation change, not an implementation
+-- tweak; open design question recorded in TODO.md. Not a correctness gap
+-- either way (parity fuzzing confirms identical results across all of
+-- this).
 --
 -- A sort mismatch inside a substitution that was never eagerly checked
 -- (the rare case: substituting into an unforced thunk *base*, where forcing

@@ -6,6 +6,183 @@ Bench machine: AMD Ryzen 7 5700G, LuaJIT 2.1.1741730670, NixOS Linux 6.12.67.
 
 ---
 
+## 2026-07-28: v10 kernel term algebra — replay-shaped benchmarks (mixed, non-uniform result)
+
+Follow-up to the two entries below, redirected by an owner-pressure-tested
+design observation: does the chained-subst regression matter, given that
+docs/decisions/typechecker-v10-core-design.md's replay hot path never
+deeply observes a term (match walks a rule-sized pattern without entering
+captured subterms; instantiate pastes shared references; non-linear/
+binding-depth checks reduce to pointer equality on the interned tier;
+groundness/closedness/sort are O(1) cached)? Two things needed checking
+before re-measuring: whether the adversarial chain bench actually exercises
+per-step deep observation (it doesn't — see below), and whether the
+ratified hot-path claims hold as implemented (mostly yes, with one real gap
+— see below). Then: build replay-shaped benchmarks and measure both tiers
+honestly. Commits: `4d0266c2` (code, the two additional no-op-shift skips),
+`232f0003` (the three new benchmarks + adversarial-bench relabel).
+
+**Claim 1 checked against `term_algebra_bench.lua`'s actual code (was
+inferred upstream, not verified): does the chain benchmark deeply observe
+the term after each subst step?** No. `bench_subst_chain`'s timed closure
+(`term_algebra_bench.lua`, the loop inside `s:add(tier, function() ... end)`)
+calls only `subst_fn(t, i, u)` per step; `sort_of_fn`/`shift_fn` are called
+exactly ONCE, after all `CHAIN_LEN` steps complete. The bench's own access
+pattern is "compose many, observe once" — already closer to replay's shape
+than the original "interleaved deep-inspect" framing assumed. This matters
+for what follows: it means the chain bench's slowdown is NOT explained by
+per-step caller-side inspection (there isn't any) — see Claim 2 and the
+compose-then-match result below for the actual explanation.
+
+**Claim 2 checked against `fast.lua` as built (was asserted, not verified)
+— confirmed against both the code and the ratified spec
+(`typechecker-v10-core-design.md` lines ~206-234):**
+- `equal` on the interned tier is pointer-eq (`if a == b then return true
+  end`, checked first) — confirmed, matches.
+- `match` walks the pattern, not the subject term — confirmed:
+  `match_at`'s recursion is driven entirely by the PATTERN's own structure
+  (`for i, pa in ipairs(p.args) do match_at(pa.term, ...) end`); a
+  metavariable position captures `force_head(term)` (one level, needed to
+  validate sort/tag at the binding point) into `bindings` WITHOUT
+  recursing into that captured term's own children — genuinely "rule-sized,
+  shared reference, not entered."
+- `instantiate` pastes bindings while walking the (also rule-sized)
+  conclusion pattern — confirmed: the op-case eagerly rebuilds through
+  `Inst.build` at every conclusion-pattern level (bounded by the
+  CONCLUSION's own size), and the meta-case pastes `bindings[id].term`.
+- groundness/closedness/sort are O(1) cached fields — confirmed
+  (`Inst.sort_of`/`is_ground`/`is_closed` are direct field reads, on
+  Concrete AND unforced Thunk terms alike, per the earlier ctx/ground fix).
+- intern hashing "incremental from child hashes" — confirmed in spirit,
+  with a nuance worth recording: `mk_op`'s key (after this session's first
+  fix, commit `6e243de3`) is built from each child's own already-assigned
+  `iid` plus a decl-identity id, not from re-serializing structure — genuinely
+  incremental in the sense of using already-known per-child identity — but
+  it is a per-call STRING CONCATENATION + table lookup, not a maintained
+  numeric hash field cached ON each node. The design doc's own wording
+  here ("content-hash = byte hash... O(1) interned equality") is explicitly
+  framed as a "ceiling/asymptotic argument, not a measurement" (design doc,
+  rationale item 2) — read as a structural-possibility claim, not a mandate
+  for a specific hash-caching mechanism, so this is not scored as a gap.
+- **Real gap found**: the spec's own formulas —
+  `equal(candidate, shift(stored, d'-d))` for non-linear match, and "applies
+  shifts per binding depth" for instantiate — both call `Inst.shift(x,
+  offset, 0)` even when `offset == 0` (the common case: a repeated
+  metavariable at the SAME binder depth, or pasting a binding at the depth
+  it was captured at). `Inst.shift(t, 0, 0)` forces `t` via `force_head`
+  and then REDUNDANTLY rebuilds through the public `Inst.build` at every
+  level, even though `force_head`'s own result is already canonical/
+  interned — real, avoidable cost sitting on the actual replay hot path,
+  not just the adversarial bench. Fixed in commit `4d0266c2` (same
+  caller-side-skip pattern already used for `force_head`'s op-branch;
+  `Inst.shift`'s own public contract untouched — see that commit and the
+  REJECTED OPTIMIZATION note on `Inst.shift` itself for why the contract
+  can't be changed directly).
+
+**Replay-shaped benchmarks (new, `term_algebra_bench.lua`,
+`bin/cr run lib/type/v10_kernel/term_algebra/term_algebra_bench.lua`,
+commit `232f0003`, `duration=0.5s`/`warmup=0.05s`). Four runs recorded (raw,
+same session/machine); the first run had unusually high adversarial-chain
+noise (excluded from averages below, shown separately) — the other three
+runs agree closely on both mean and min:**
+
+```
+Run 0 (noisier — shown separately, not averaged):
+  ADVERSARIAL chain:      fast 43.61ms  ref  6.72ms   6.49x
+  compose-then-match:     fast 42.44ms  ref 10.66ms   3.98x
+  instantiate-heavy:      fast  0.99ms  ref 42.75ms  42.99x (fast wins)
+  equal citation-check:   fast  1.00ms  ref  0.87ms   1.16x (ref wins)
+
+Run 1:
+  ADVERSARIAL chain:      fast 25.29ms  ref  2.19ms  11.57x   min: fast 12.96ms ref 1.43ms  9.05x
+  compose-then-match:     fast 23.25ms  ref  5.23ms   4.45x   min: fast 12.61ms ref 1.37ms  9.20x
+  instantiate-heavy:      fast  1.13ms  ref 40.16ms  35.43x   min: fast  0.72ms ref 26.62ms 37.0x  (fast wins)
+  equal citation-check:   fast  1.19ms  ref  0.77ms   1.55x   min: fast  0.98ms ref  0.69ms  1.43x (ref wins)
+
+Run 2:
+  ADVERSARIAL chain:      fast 25.90ms  ref  2.17ms  11.92x   min: fast 13.29ms ref 1.36ms  9.77x
+  compose-then-match:     fast 23.91ms  ref  3.71ms   6.45x   min: fast 13.22ms ref 1.36ms  9.72x
+  instantiate-heavy:      fast  1.08ms  ref 35.83ms  33.21x   min: fast  0.73ms ref 33.80ms 46.2x  (fast wins)
+  equal citation-check:   fast  1.17ms  ref  0.67ms   1.73x   min: fast  1.13ms ref  0.64ms  1.77x (ref wins)
+
+Run 3:
+  ADVERSARIAL chain:      fast 24.00ms  ref  2.06ms  11.66x   min: fast 12.74ms ref 1.43ms  8.91x
+  compose-then-match:     fast 23.75ms  ref  2.38ms  10.00x   min: fast 12.46ms ref 1.37ms  9.10x
+  instantiate-heavy:      fast  0.97ms  ref 38.00ms  39.13x   min: fast  0.77ms ref 34.53ms 45.1x  (fast wins)
+  equal citation-check:   fast  0.85ms  ref  0.63ms   1.35x   min: fast  0.84ms ref  0.62ms  1.35x (ref wins)
+```
+
+**Verdict — mixed, non-uniform, reported without spin (as instructed):**
+
+- **`instantiate-heavy` — the canonical replay shape (many independent
+  small rule applications, `match` then `instantiate`, over a growing
+  shared fact chain) — the fast tier wins decisively: ~35-46x (min),
+  ~33-43x (mean), consistent across all four runs.** This strongly
+  validates `kernel-lazy-subst-sound-v1` and `kernel-interner-sound-v1` for
+  the workload the design doc's own hot-path description actually
+  predicts replay spends most of its time in.
+- **`compose-then-match` — replay-adjacent (composes many substitutions
+  unobserved, then ONE rule-sized match, exactly the "compose many,
+  observe once" pattern Claim 1 confirmed the adversarial bench already
+  has) — the fast tier STILL loses substantially: ~9.1-9.8x (min),
+  ~4.5-10x (mean, noisier).** This is the important, non-spun finding: the
+  chained-subst regression is NOT explained by "interleaved deep
+  inspection" (there isn't any in this bench) or by an adversarial access
+  pattern replay would never hit. Root cause, confirmed by comparing
+  `compose-then-match`'s cost to the adversarial chain's (nearly IDENTICAL
+  — both dominated by the same 50-step composition loop, since
+  `compose-then-match`'s only difference is a cheap ending): `mk_subst`
+  itself calls `force_head(base_in)` UNCONDITIONALLY on every call,
+  independent of whether any caller ever inspects the result — for THIS
+  term shape (a chain where `var(i)` sits `i` levels deep, so `ctx[k]` is
+  never absent and the short-circuit never fires), that forces real
+  reconstruction work through `mk_op` at essentially every one of the 50
+  steps, regardless of observation timing. The interning-key fix (commit
+  `6e243de3`) reduced the CONSTANT factor of that forced work but could not
+  remove the forcing itself, because `mk_subst` stores the FORCED
+  (Concrete) result as each new thunk's `.base` field — thunks in the
+  current design never wrap another thunk, only a fully-Concrete node.
+  Closing this would require allowing thunk-of-thunk chains (deferring
+  collapse-to-Concrete across MULTIPLE composed substitutions, not just
+  one) — a representation change, not an implementation tweak; this is the
+  SAME open design question already recorded in TODO.md (substitution-
+  list/environment representation), not a new one.
+- **`equal` citation-check — roughly a wash, fast tier marginally SLOWER:
+  ~1.4-1.8x (both mean and min, consistent across runs).** Explained, not
+  concerning: these particular facts (`app(var(i mod 7), fact_{i-1})`)
+  diverge at the TOP level for most pairs, so neither tier's equality check
+  needs to walk deep — there is no interned-pointer win to exploit on this
+  specific access pattern, and the fast tier pays a small constant more per
+  call (force_head's tag dispatch) than reference's direct field
+  comparison. Not evidence against the design — this workload simply
+  doesn't exercise the case interning helps (duplicate/shared STRUCTURE,
+  not merely shared PREFIXES that diverge early).
+- **The adversarial chain bench's own slowdown (~9-12x) turns out to be
+  driven by the SAME root cause as `compose-then-match`'s, not by "deep
+  inspection"** — reinforcing that the two benchmarks are closer cousins
+  than the original "adversarial vs. replay-shaped" framing suggested. The
+  chain bench remains the right STRESS case to keep (worst-case: full
+  eager force at the end, on top of the same forced composition), but its
+  regression and `compose-then-match`'s regression share one cause.
+
+**Bottom line for the "ghost pattern" question**: refuted, not confirmed,
+for one of the two new benchmarks and confirmed for the other — genuinely
+open, as anticipated. Derivation replay's dominant shape
+(`instantiate-heavy`) is emphatically NOT hurt by the current design — it
+wins by 35-46x. But "compose several substitutions, then do one small
+match" — a plausible, non-adversarial pattern, not a ghost — still loses by
+~9-10x for the same root cause as the adversarial chain. The fast tier's
+justification is therefore workload-dependent, confirmed by measurement:
+strong for match/instantiate-heavy replay, weak for any workload that
+chains multiple substitutions on a term shaped like this benchmark's
+(`var(i)` at depth `i`) before the result is used. Whether that
+composition shape occurs on replay's actual critical path is outside this
+cleanroom-scoped investigation's reach to answer (would require reading
+`kernel.lua`'s replayer, excluded by the charter) — recorded as the
+remaining open question in TODO.md.
+
+---
+
 ## 2026-07-28: v10 kernel term algebra — chained-subst regression follow-up (partial fix)
 
 Benchmark: `bin/cr run lib/type/v10_kernel/term_algebra/term_algebra_bench.lua`,
