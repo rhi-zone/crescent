@@ -107,7 +107,7 @@ local M = {}
 --::   then_path: integer[], then_events: Event[],
 --::   else_path: integer[] | nil, else_events: Event[] | nil,
 --:: }
---:: NestedScopeEvent = { kind: "nested_scope", path: integer[], events: Event[] }
+--:: NestedScopeEvent = { kind: "nested_scope", path: integer[], events: Event[], fresh_scope: boolean }
 --:: Event = LocalFactEvent | GuardEvent | NestedScopeEvent
 
 local NODE_LOCAL_STMT  = defs.NODE_LOCAL_STMT
@@ -373,7 +373,7 @@ local function analyze_block(ctx, block_path, stmt_start, stmt_len, scope, stats
 				if init_n.kind == NODE_FUNC_EXPR then
 					local body_path = extend_path(stmt_path, 0)
 					local sub = analyze_block(ctx, body_path, init_n.data[2], init_n.data[3], {}, stats)
-					events[#events + 1] = { kind = "nested_scope", path = body_path, events = sub }
+					events[#events + 1] = { kind = "nested_scope", path = body_path, events = sub, fresh_scope = true }
 				end
 			end
 
@@ -388,12 +388,12 @@ local function analyze_block(ctx, block_path, stmt_start, stmt_len, scope, stats
 					local cl = ctx.nodes:get(clause_nid)
 					local body_path = extend_path(stmt_path, 2 * c + 1)
 					local sub = analyze_block(ctx, body_path, cl.data[1], cl.data[2], copy_scope(scope), stats)
-					events[#events + 1] = { kind = "nested_scope", path = body_path, events = sub }
+					events[#events + 1] = { kind = "nested_scope", path = body_path, events = sub, fresh_scope = false }
 				end
 				if has_else then
 					local else_path = extend_path(stmt_path, 2 * clauses_len)
 					local sub = analyze_block(ctx, else_path, n.data[2], n.data[3], copy_scope(scope), stats)
-					events[#events + 1] = { kind = "nested_scope", path = else_path, events = sub }
+					events[#events + 1] = { kind = "nested_scope", path = else_path, events = sub, fresh_scope = false }
 				end
 			else
 				local clause_nid = ctx.lists:get(n.data[0])
@@ -434,10 +434,10 @@ local function analyze_block(ctx, block_path, stmt_start, stmt_len, scope, stats
 					} --[[: Event ]]
 				else
 					local sub_then = analyze_block(ctx, then_path, cl.data[1], cl.data[2], copy_scope(scope), stats)
-					events[#events + 1] = { kind = "nested_scope", path = then_path, events = sub_then }
+					events[#events + 1] = { kind = "nested_scope", path = then_path, events = sub_then, fresh_scope = false }
 					if has_else then
 						local sub_else = analyze_block(ctx, else_path, n.data[2], n.data[3], copy_scope(scope), stats)
-						events[#events + 1] = { kind = "nested_scope", path = else_path, events = sub_else }
+						events[#events + 1] = { kind = "nested_scope", path = else_path, events = sub_else, fresh_scope = false }
 					end
 				end
 			end
@@ -470,23 +470,23 @@ local function analyze_block(ctx, block_path, stmt_start, stmt_len, scope, stats
 				} --[[: Event ]]
 			else
 				local sub = analyze_block(ctx, body_path, n.data[1], n.data[2], copy_scope(scope), stats)
-				events[#events + 1] = { kind = "nested_scope", path = body_path, events = sub }
+				events[#events + 1] = { kind = "nested_scope", path = body_path, events = sub, fresh_scope = false }
 			end
 
 		elseif kind == NODE_REPEAT_STMT then
 			local body_path = extend_path(stmt_path, 0)
 			local sub = analyze_block(ctx, body_path, n.data[1], n.data[2], copy_scope(scope), stats)
-			events[#events + 1] = { kind = "nested_scope", path = body_path, events = sub }
+			events[#events + 1] = { kind = "nested_scope", path = body_path, events = sub, fresh_scope = false }
 
 		elseif kind == NODE_DO_STMT then
 			local body_path = extend_path(stmt_path, 0)
 			local sub = analyze_block(ctx, body_path, n.data[0], n.data[1], copy_scope(scope), stats)
-			events[#events + 1] = { kind = "nested_scope", path = body_path, events = sub }
+			events[#events + 1] = { kind = "nested_scope", path = body_path, events = sub, fresh_scope = false }
 
 		elseif kind == NODE_FUNC_DECL then
 			local body_path = extend_path(stmt_path, 0)
 			local sub = analyze_block(ctx, body_path, n.data[3], n.data[4], {}, stats)
-			events[#events + 1] = { kind = "nested_scope", path = body_path, events = sub }
+			events[#events + 1] = { kind = "nested_scope", path = body_path, events = sub, fresh_scope = true }
 
 		elseif kind == NODE_ASSIGN_STMT then
 			-- Reassignment does NOT invalidate a tracked local's declared
@@ -505,7 +505,7 @@ local function analyze_block(ctx, block_path, stmt_start, stmt_len, scope, stats
 				if init_n.kind == NODE_FUNC_EXPR then
 					local body_path = extend_path(stmt_path, 0)
 					local sub = analyze_block(ctx, body_path, init_n.data[2], init_n.data[3], {}, stats)
-					events[#events + 1] = { kind = "nested_scope", path = body_path, events = sub }
+					events[#events + 1] = { kind = "nested_scope", path = body_path, events = sub, fresh_scope = true }
 				end
 			end
 		end
@@ -527,7 +527,7 @@ function M.analyze(parser, stats)
 	local root_node = pr.nodes:get(pr.root)
 	local root_path = {} --[[: integer[] ]]
 	local events = analyze_block(ctx, root_path, root_node.data[0], root_node.data[1], {}, stats)
-	return { kind = "nested_scope", path = root_path, events = events }, nil
+	return { kind = "nested_scope", path = root_path, events = events, fresh_scope = true }, nil
 end
 
 --: () -> Stats
