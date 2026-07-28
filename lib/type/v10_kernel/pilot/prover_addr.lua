@@ -60,10 +60,20 @@
 --   NODE_LOCAL_STMT      child 0..k-1 = the k declared names, in
 --                        left-to-right source order (used ONLY to build a
 --                        variable's declaration-site identity path — see
---                        `M.local_name_path` below; a local statement is
---                        never otherwise descended into by this prover:
---                        init expressions are not addressed, since no
---                        guard-emission or annotation-parsing needs them).
+--                        `M.local_name_path` below; a local statement's own
+--                        init expressions are otherwise not addressed --
+--                        EXCEPT the one shape below).
+--   `local f = function(...) ... end` / `x = function(...) ... end`
+--   (a single-name local, or single-target assignment, whose sole init
+--   expression is a func-expr) — crescent's dominant function-defining
+--   style — is addressed WITHOUT a separate hop for "the init expression
+--   slot": the func-expr's own path is defined to BE the owning
+--   NODE_LOCAL_STMT/NODE_ASSIGN_STMT's own path (child 0 of that path is
+--   the function body, per NODE_FUNC_EXPR's rule below, applied directly
+--   to the local/assign statement's path rather than to a separately
+--   addressed func-expr node). `function name(...) ... end` (NODE_FUNC_DECL)
+--   needs no such special-case: it IS the statement, its own path is the
+--   statement's path directly.
 --
 -- `file_id` comes from a content hash of the file's source text
 -- (lib/type/static/sha256.lua's `hash`, reused rather than reimplemented,
