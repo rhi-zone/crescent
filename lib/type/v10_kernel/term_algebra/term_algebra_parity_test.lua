@@ -150,9 +150,9 @@ local function make_build_from_desc(build_var_fn, build_meta_fn, build_fn)
 	--: (desc: Desc) -> (unknown | nil, string | nil)
 	local function build(desc)
 		if desc.k == "var" then
-			return build_var_fn(desc.index, "term")
+			return build_var_fn(desc.index, sig.sorts.term)
 		elseif desc.k == "meta" then
-			return build_meta_fn(desc.id, "term")
+			return build_meta_fn(desc.id, sig.sorts.term)
 		elseif desc.k == "zero" then
 			return build_fn(sig.ops.zero, {})
 		elseif desc.k == "succ" then
@@ -187,13 +187,14 @@ end
 -- inspection code below can narrow the otherwise-opaque `unknown` values
 -- the kernel API returns.
 
---:: CtxMap = { [integer]: string }
---:: COpArgDecl = { sort: string, binds: string[], bound_count: integer }
---:: COpDecl = { name: string, sig_name: string, sig_version: integer, result: string, args: COpArgDecl[], arity: integer }
---:: CVar = { tag: "var", index: integer, sort: string, ctx: CtxMap, ground: boolean }
---:: CMeta = { tag: "meta", id: string, sort: string, ctx: CtxMap, ground: boolean }
+--:: CSortDecl = { name: string, sig_name: string, sig_version: integer }
+--:: CtxMap = { [integer]: CSortDecl }
+--:: COpArgDecl = { sort: CSortDecl, binds: CSortDecl[], bound_count: integer }
+--:: COpDecl = { name: string, sig_name: string, sig_version: integer, result: CSortDecl, args: COpArgDecl[], arity: integer }
+--:: CVar = { tag: "var", index: integer, sort: CSortDecl, ctx: CtxMap, ground: boolean }
+--:: CMeta = { tag: "meta", id: string, sort: CSortDecl, ctx: CtxMap, ground: boolean }
 --:: CArg = { bound_count: integer, term: ConcreteTerm }
---:: COp = { tag: "op", decl: COpDecl, args: CArg[], sort: string, ctx: CtxMap, ground: boolean }
+--:: COp = { tag: "op", decl: COpDecl, args: CArg[], sort: CSortDecl, ctx: CtxMap, ground: boolean }
 --:: ConcreteTerm = CVar | CMeta | COp
 
 -- The kernel API's return values are opaque (`unknown`) at this module
@@ -205,6 +206,17 @@ end
 -- well-formed) term values: it re-validates and rebuilds a properly-typed
 -- ConcreteTerm from an opaque result, once, at the point each primitive's
 -- output needs field-level inspection below.
+
+-- Narrow, NOT rebuild: sort objects are sort identities (ratified — "sort
+-- identity = declared-object identity", the same principle as operator decl
+-- identity below), so this is a type-only narrowing cast (checked, not
+-- force), returning the SAME object, never copying it.
+--: (s: unknown) -> CSortDecl
+local function as_sort(s)
+	if type(s) ~= "table" then error("term sort is not a table") end
+	return s --[[: CSortDecl ]]
+end
+
 --: (ctx_: unknown) -> CtxMap
 local function as_ctx(ctx_)
 	if type(ctx_) ~= "table" then error("term ctx is not a table") end
@@ -212,8 +224,7 @@ local function as_ctx(ctx_)
 	local out = {} --[[: CtxMap ]]
 	for idx, s in pairs(raw) do
 		if type(idx) ~= "number" then error("ctx key is not a number") end
-		if type(s) ~= "string" then error("ctx value is not a string") end
-		out[idx] = s
+		out[idx] = as_sort(s)
 	end
 	return out
 end
@@ -238,9 +249,8 @@ local function as_concrete(t)
 	if type(t) ~= "table" then error("term is not a table") end
 	local raw = t --[[: { [string]: unknown } ]]
 	local tag = raw.tag
-	local sort = raw.sort
+	local sort = as_sort(raw.sort)
 	local ground = raw.ground
-	if type(sort) ~= "string" then error("term sort is not a string") end
 	if type(ground) ~= "boolean" then error("term ground is not a boolean") end
 	local ctx = as_ctx(raw.ctx)
 	if tag == "var" then

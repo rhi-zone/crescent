@@ -43,11 +43,19 @@ T.it("declare_signature succeeds for the toy theory", function()
 	T.ok(sig, sig_err)
 end)
 
--- A second, unrelated signature (for cross-signature rejection tests).
+-- A second, unrelated signature (for cross-signature rejection tests). It
+-- imports `sig`'s "prop" sort (rather than re-declaring its own same-named
+-- one) specifically so that a term built from `sig`'s vocabulary (`top`,
+-- below) can still be passed into `other_sig`'s operators — the point of
+-- the cross-signature test below is OPERATOR identity rejection, not an
+-- incidental sort-identity mismatch (with sort identity now
+-- declaration-based, an un-imported same-named "prop" would make `build`
+-- itself reject earlier, for the wrong reason).
 local other_sig = term_algebra.declare_signature({
 	name = "toy-other",
 	version = 1,
-	sorts = { "prop", "pf" },
+	sorts = { "pf" },
+	imports = { prop = sig.sorts.prop },
 	ops = {
 		atom = { result = "prop", args = { { sort = "prop" } } },
 		holds = { result = "pf", args = { { sort = "prop" } } },
@@ -67,7 +75,7 @@ for _, tier in ipairs(TIERS) do
 		local function C(a, b) return k.build(sig.ops.conj, { a, b }) end
 		--: (p: unknown) -> (unknown | nil, string | nil)
 		local function H(p) return k.build(sig.ops.holds, { p }) end
-		--: (id: string, sort: string) -> (unknown | nil, string | nil)
+		--: (id: string, sort: unknown) -> (unknown | nil, string | nil)
 		local function meta(id, sort) return k.build_meta(id, sort) end
 
 		-- Ground, CLOSED props p, q for concrete fixtures (built from the
@@ -94,8 +102,8 @@ for _, tier in ipairs(TIERS) do
 			name = "conj-intro",
 			version = 1,
 			signature = sig,
-			premises = { H(meta("X", "prop")), H(meta("Y", "prop")) },
-			conclusion = H(C(meta("X", "prop"), meta("Y", "prop"))),
+			premises = { H(meta("X", sig.sorts.prop)), H(meta("Y", sig.sorts.prop)) },
+			conclusion = H(C(meta("X", sig.sorts.prop), meta("Y", sig.sorts.prop))),
 		})
 		T.it("declare_rule succeeds for conj-intro", function()
 			T.ok(conj_intro, ci_err)
@@ -106,8 +114,8 @@ for _, tier in ipairs(TIERS) do
 			name = "self-conj",
 			version = 1,
 			signature = sig,
-			premises = { H(meta("X", "prop")), H(meta("X", "prop")) },
-			conclusion = H(C(meta("X", "prop"), meta("X", "prop"))),
+			premises = { H(meta("X", sig.sorts.prop)), H(meta("X", sig.sorts.prop)) },
+			conclusion = H(C(meta("X", sig.sorts.prop), meta("X", sig.sorts.prop))),
 		})
 		T.it("declare_rule succeeds for self-conj (non-linear metavariable)", function()
 			T.ok(self_conj)
@@ -123,9 +131,9 @@ for _, tier in ipairs(TIERS) do
 			name = "discharge-intro",
 			version = 1,
 			signature = sig,
-			premises = { H(meta("X", "prop")) },
-			conclusion = H(meta("X", "prop")),
-			discharges = { { premise = 1, pattern = H(meta("X", "prop")) } },
+			premises = { H(meta("X", sig.sorts.prop)) },
+			conclusion = H(meta("X", sig.sorts.prop)),
+			discharges = { { premise = 1, pattern = H(meta("X", sig.sorts.prop)) } },
 		})
 		T.it("declare_rule succeeds for discharge-intro (one discharge slot)", function()
 			T.ok(discharge_intro)
@@ -136,8 +144,8 @@ for _, tier in ipairs(TIERS) do
 			name = "unbound-concl",
 			version = 1,
 			signature = sig,
-			premises = { H(meta("X", "prop")) },
-			conclusion = H(meta("Y", "prop")),
+			premises = { H(meta("X", sig.sorts.prop)) },
+			conclusion = H(meta("Y", sig.sorts.prop)),
 		})
 
 		-- ── Axiom ─────────────────────────────────────────────────────────
@@ -158,7 +166,7 @@ for _, tier in ipairs(TIERS) do
 			name = "ax-schematic-self-conj",
 			version = 1,
 			signature = sig,
-			pattern = H(C(meta("X", "prop"), meta("X", "prop"))),
+			pattern = H(C(meta("X", sig.sorts.prop), meta("X", sig.sorts.prop))),
 		})
 
 		-- ── declare_rule / declare_axiom validation failures ────────────────
@@ -183,9 +191,9 @@ for _, tier in ipairs(TIERS) do
 					name = "bad-discharge-range",
 					version = 1,
 					signature = sig,
-					premises = { H(meta("X", "prop")) },
-					conclusion = H(meta("X", "prop")),
-					discharges = { { premise = 2, pattern = H(meta("X", "prop")) } },
+					premises = { H(meta("X", sig.sorts.prop)) },
+					conclusion = H(meta("X", sig.sorts.prop)),
+					discharges = { { premise = 2, pattern = H(meta("X", sig.sorts.prop)) } },
 				})
 				T.fail(bad)
 				T.ok(err)
@@ -313,7 +321,7 @@ for _, tier in ipairs(TIERS) do
 				-- must be rejected as non-ground (distinct from the
 				-- unbound-metavariable case below, where instantiate
 				-- itself fails).
-				local meta_hyp = replayer.hypothesis("hz", H(meta("Z", "prop")))
+				local meta_hyp = replayer.hypothesis("hz", H(meta("Z", sig.sorts.prop)))
 				local prem2 = replayer.cite_axiom(ax_holds_p, {})
 				local node = replayer.cite_rule(conj_intro, { meta_hyp, prem2 })
 				local result, err = r:replay(node)
@@ -352,8 +360,8 @@ for _, tier in ipairs(TIERS) do
 					name = "fixed-discharge",
 					version = 1,
 					signature = sig,
-					premises = { H(meta("X", "prop")) },
-					conclusion = H(meta("X", "prop")),
+					premises = { H(meta("X", sig.sorts.prop)) },
+					conclusion = H(meta("X", sig.sorts.prop)),
 					discharges = { { premise = 1, pattern = H(p) } }, -- fixed: must be holds(p)
 				})
 				local mismatched_hyp = replayer.hypothesis("h_mismatch", H(q)) -- holds(q), not holds(p)
@@ -517,7 +525,7 @@ end
 T.describe("memoization and anti-laundering across kernel configs", function()
 	local function build_for(tier)
 		local k = term_algebra.new({ tier = tier })
-		local p = k.build(sig.ops.atom, { k.build_var(0, "prop") })
+		local p = k.build(sig.ops.atom, { k.build_var(0, sig.sorts.prop) })
 		local ax = replayer.declare_axiom({ name = "cfg-ax", version = 1, signature = sig, pattern = k.build(sig.ops.holds, { p }) })
 		local node = replayer.cite_axiom(ax, {})
 		local r = replayer.new(k)

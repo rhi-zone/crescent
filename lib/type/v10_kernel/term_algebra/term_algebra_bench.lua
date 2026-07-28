@@ -53,12 +53,12 @@ local DEPTH = 200
 -- deep, fully CLOSED term built through them (every var(0) is bound by its
 -- own immediate lam — fine for build/equal/shift, which don't care whether
 -- a term is closed).
---: (build_var_fn: (integer, string) -> (unknown | nil, string | nil), build_fn: (unknown, unknown[]) -> (unknown | nil, string | nil)) -> unknown
+--: (build_var_fn: (integer, unknown) -> (unknown | nil, string | nil), build_fn: (unknown, unknown[]) -> (unknown | nil, string | nil)) -> unknown
 local function build_deep(build_var_fn, build_fn)
 	local t, err = build_fn(sig.ops.zero, {})
 	if not t then error("build_deep: " .. tostring(err)) end
 	for _ = 1, DEPTH do
-		local v0, verr = build_var_fn(0, "term")
+		local v0, verr = build_var_fn(0, sig.sorts.term)
 		if not v0 then error("build_deep: " .. tostring(verr)) end
 		local app_t, aerr = build_fn(sig.ops.app, { v0, t })
 		if not app_t then error("build_deep: " .. tostring(aerr)) end
@@ -79,9 +79,9 @@ end
 -- pointing at "the same" free variable, now one level further out (the
 -- discharge arithmetic in `build` confirms this: an index shifted by
 -- exactly the introduced binder count re-lands at the same outer index).
---: (build_var_fn: (integer, string) -> (unknown | nil, string | nil), build_fn: (unknown, unknown[]) -> (unknown | nil, string | nil), shift_fn: (unknown, integer, integer) -> (unknown | nil, string | nil)) -> unknown
+--: (build_var_fn: (integer, unknown) -> (unknown | nil, string | nil), build_fn: (unknown, unknown[]) -> (unknown | nil, string | nil), shift_fn: (unknown, integer, integer) -> (unknown | nil, string | nil)) -> unknown
 local function build_deep_with_free_var(build_var_fn, build_fn, shift_fn)
-	local t, verr = build_var_fn(0, "term")
+	local t, verr = build_var_fn(0, sig.sorts.term)
 	if not t then error("build_deep_with_free_var: " .. tostring(verr)) end
 	for _ = 1, DEPTH do
 		local shifted_t, serr = shift_fn(t, 1, 0)
@@ -215,12 +215,12 @@ end
 
 -- Takes already-extracted `build_var`/`build` functions and returns a flat
 -- chain of CHAIN_LEN simultaneously-free variables.
---: (build_var_fn: (integer, string) -> (unknown | nil, string | nil), build_fn: (unknown, unknown[]) -> (unknown | nil, string | nil)) -> unknown
+--: (build_var_fn: (integer, unknown) -> (unknown | nil, string | nil), build_fn: (unknown, unknown[]) -> (unknown | nil, string | nil)) -> unknown
 local function build_flat_chain(build_var_fn, build_fn)
 	local t, zerr = build_fn(sig.ops.zero, {})
 	if not t then error("build_flat_chain: " .. tostring(zerr)) end
 	for i = CHAIN_LEN - 1, 0, -1 do
-		local vi, verr = build_var_fn(i, "term")
+		local vi, verr = build_var_fn(i, sig.sorts.term)
 		if not vi then error("build_flat_chain: " .. tostring(verr)) end
 		local app_t, aerr = build_fn(sig.ops.app, { vi, t })
 		if not app_t then error("build_flat_chain: " .. tostring(aerr)) end
@@ -280,11 +280,11 @@ end
 -- declared valence. Building it once per tier (outside any timed closure)
 -- mirrors how a real replay run declares a rule's patterns once and reuses
 -- them across every citing derivation node, not once per citation.
---: (build_meta_fn: (string, string) -> (unknown | nil, string | nil), build_fn: (unknown, unknown[]) -> (unknown | nil, string | nil)) -> unknown
+--: (build_meta_fn: (string, unknown) -> (unknown | nil, string | nil), build_fn: (unknown, unknown[]) -> (unknown | nil, string | nil)) -> unknown
 local function build_pattern_app_a_b(build_meta_fn, build_fn)
-	local a, aerr = build_meta_fn("A", "term")
+	local a, aerr = build_meta_fn("A", sig.sorts.term)
 	if not a then error("build_pattern_app_a_b: " .. tostring(aerr)) end
-	local b, berr = build_meta_fn("B", "term")
+	local b, berr = build_meta_fn("B", sig.sorts.term)
 	if not b then error("build_pattern_app_a_b: " .. tostring(berr)) end
 	local pat, perr = build_fn(sig.ops.app, { a, b })
 	if not pat then error("build_pattern_app_a_b: " .. tostring(perr)) end
@@ -357,9 +357,9 @@ local function bench_instantiate_heavy()
 		local match_fn = k.match
 		local instantiate_fn = k.instantiate
 		local premise = build_pattern_app_a_b(build_meta_fn, build_fn)
-		local concl_b, cberr = build_meta_fn("B", "term")
+		local concl_b, cberr = build_meta_fn("B", sig.sorts.term)
 		if not concl_b then error("bench_instantiate_heavy: " .. tostring(cberr)) end
-		local concl_a, caerr = build_meta_fn("A", "term")
+		local concl_a, caerr = build_meta_fn("A", sig.sorts.term)
 		if not concl_a then error("bench_instantiate_heavy: " .. tostring(caerr)) end
 		local conclusion, coerr = build_fn(sig.ops.app, { concl_b, concl_a })
 		if not conclusion then error("bench_instantiate_heavy: " .. tostring(coerr)) end
@@ -368,7 +368,7 @@ local function bench_instantiate_heavy()
 		s:add(tier, function()
 			local fact = zero0
 			for i = 0, RULE_STEPS - 1 do
-				local vi, verr = build_var_fn(i, "term")
+				local vi, verr = build_var_fn(i, sig.sorts.term)
 				if not vi then error("bench_instantiate_heavy: build_var failed at step " .. i .. ": " .. tostring(verr)) end
 				local candidate, cerr = build_fn(sig.ops.app, { vi, fact })
 				if not candidate then error("bench_instantiate_heavy: build failed at step " .. i .. ": " .. tostring(cerr)) end
@@ -397,13 +397,13 @@ end
 
 local CITATION_FACTS = 100
 
---: (build_var_fn: (integer, string) -> (unknown | nil, string | nil), build_fn: (unknown, unknown[]) -> (unknown | nil, string | nil)) -> unknown
+--: (build_var_fn: (integer, unknown) -> (unknown | nil, string | nil), build_fn: (unknown, unknown[]) -> (unknown | nil, string | nil)) -> unknown
 local function build_citation_facts(build_var_fn, build_fn)
 	local facts = {} --[[: { [integer]: unknown } ]]
 	local fact, zerr = build_fn(sig.ops.zero, {})
 	if not fact then error("build_citation_facts: " .. tostring(zerr)) end
 	for i = 1, CITATION_FACTS do
-		local vi, verr = build_var_fn(i % 7, "term")
+		local vi, verr = build_var_fn(i % 7, sig.sorts.term)
 		if not vi then error("build_citation_facts: " .. tostring(verr)) end
 		local next_fact, ferr = build_fn(sig.ops.app, { vi, fact })
 		if not next_fact then error("build_citation_facts: " .. tostring(ferr)) end

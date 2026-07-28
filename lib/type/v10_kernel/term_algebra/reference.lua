@@ -48,34 +48,40 @@ local shared = require("lib.type.v10_kernel.term_algebra.shared")
 
 local M = {}
 
---:: Sort = string
---:: Ctx = { [integer]: Sort }
---:: OpArgDecl = { sort: Sort, binds: Sort[], bound_count: integer }
---:: OpDecl = { name: string, sig_name: string, sig_version: integer, result: Sort, args: OpArgDecl[], arity: integer }
+--:: SortName = string
+--:: SortDecl = { name: string, sig_name: string, sig_version: integer }
+--:: Ctx = { [integer]: SortDecl }
+--:: OpArgDecl = { sort: SortDecl, binds: SortDecl[], bound_count: integer }
+--:: OpDecl = { name: string, sig_name: string, sig_version: integer, result: SortDecl, args: OpArgDecl[], arity: integer }
 --:: OpArg = { bound_count: integer, term: Term }
---:: VarTerm = { tag: "var", index: integer, sort: Sort, ctx: Ctx, ground: boolean }
---:: MetaTerm = { tag: "meta", id: string, sort: Sort, ctx: Ctx, ground: boolean }
---:: OpTerm = { tag: "op", decl: OpDecl, args: OpArg[], sort: Sort, ctx: Ctx, ground: boolean }
+--:: VarTerm = { tag: "var", index: integer, sort: SortDecl, ctx: Ctx, ground: boolean }
+--:: MetaTerm = { tag: "meta", id: string, sort: SortDecl, ctx: Ctx, ground: boolean }
+--:: OpTerm = { tag: "op", decl: OpDecl, args: OpArg[], sort: SortDecl, ctx: Ctx, ground: boolean }
 --:: Term = VarTerm | MetaTerm | OpTerm
 --:: Binding = { term: Term, depth: integer }
 --:: Bindings = { [string]: Binding }
 
 -- ── Construction (build family — the only way to construct a term) ──────────
+--
+-- `sort` is a declared SortDecl object (identity-by-declaration — see
+-- shared.lua's "Sort identity" section), never a bare string: sort equality
+-- throughout this file is Lua object identity (`==`/`~=`), not name
+-- equality.
 
---: (index: integer, sort: Sort) -> (VarTerm | nil, string | nil)
+--: (index: integer, sort: SortDecl) -> (VarTerm | nil, string | nil)
 function M.build_var(index, sort)
 	if type(index) ~= "number" then return nil, "build_var: index must be a non-negative integer" end
 	if index < 0 then return nil, "build_var: index must be a non-negative integer" end
 	local idx = math.floor(index)
 	if idx ~= index then return nil, "build_var: index must be a non-negative integer" end
-	if type(sort) ~= "string" then return nil, "build_var: sort must be a string" end
+	if not shared.is_sort_decl(sort) then return nil, "build_var: sort must be a declared sort object" end
 	return { tag = "var", index = idx, sort = sort, ctx = { [idx] = sort }, ground = true }
 end
 
---: (id: string, sort: Sort) -> (MetaTerm | nil, string | nil)
+--: (id: string, sort: SortDecl) -> (MetaTerm | nil, string | nil)
 function M.build_meta(id, sort)
 	if type(id) ~= "string" then return nil, "build_meta: id must be a string" end
-	if type(sort) ~= "string" then return nil, "build_meta: sort must be a string" end
+	if not shared.is_sort_decl(sort) then return nil, "build_meta: sort must be a declared sort object" end
 	return { tag = "meta", id = id, sort = sort, ctx = {}, ground = false }
 end
 
@@ -92,8 +98,8 @@ function M.build(decl, args)
 		local argdecl = decl.args[i]
 		local term = args[i]
 		if term.sort ~= argdecl.sort then
-			return nil, "build: " .. decl.name .. " arg " .. i .. " expected sort " .. argdecl.sort
-				.. ", got " .. term.sort
+			return nil, "build: " .. decl.name .. " arg " .. i .. " expected sort " .. argdecl.sort.name
+				.. ", got " .. term.sort.name
 		end
 		local outer_ctx, err = shared.discharge_arg_ctx(term.ctx, argdecl.binds)
 		if not outer_ctx then
@@ -114,7 +120,7 @@ end
 
 -- ── Introspection ────────────────────────────────────────────────────────────
 
---: (t: Term) -> Sort
+--: (t: Term) -> SortDecl
 function M.sort_of(t) return t.sort end
 
 --: (t: Term) -> boolean
@@ -180,7 +186,7 @@ function M.subst(t, k, u)
 	if t.tag == "var" then
 		if t.index ~= k then return t end
 		if u.sort ~= t.sort then
-			return nil, "subst: replacement sort " .. u.sort .. " does not match target sort " .. t.sort
+			return nil, "subst: replacement sort " .. u.sort.name .. " does not match target sort " .. t.sort.name
 		end
 		return u
 	elseif t.tag == "meta" then
@@ -272,7 +278,8 @@ local function instantiate_at(pattern, bindings, depth)
 			return nil, "instantiate: metavariable " .. pattern.id .. ": " .. (err or "shift failed")
 		end
 		if shifted.sort ~= pattern.sort then
-			return nil, "instantiate: metavariable " .. pattern.id .. " sort mismatch"
+			return nil, "instantiate: metavariable " .. pattern.id .. " sort mismatch (expected "
+				.. pattern.sort.name .. ", got " .. shifted.sort.name .. ")"
 		end
 		return shifted
 	elseif pattern.tag == "var" then

@@ -110,25 +110,26 @@ local shared = require("lib.type.v10_kernel.term_algebra.shared")
 
 local M = {}
 
---:: Sort = string
---:: Ctx = { [integer]: Sort }
---:: OpArgDecl = { sort: Sort, binds: Sort[], bound_count: integer }
---:: OpDecl = { name: string, sig_name: string, sig_version: integer, result: Sort, args: OpArgDecl[], arity: integer }
+--:: SortName = string
+--:: SortDecl = { name: string, sig_name: string, sig_version: integer }
+--:: Ctx = { [integer]: SortDecl }
+--:: OpArgDecl = { sort: SortDecl, binds: SortDecl[], bound_count: integer }
+--:: OpDecl = { name: string, sig_name: string, sig_version: integer, result: SortDecl, args: OpArgDecl[], arity: integer }
 --:: OpArg = { bound_count: integer, term: Term }
---:: VarTerm = { tag: "var", index: integer, sort: Sort, ctx: Ctx, ground: boolean, iid: integer }
---:: MetaTerm = { tag: "meta", id: string, sort: Sort, ctx: Ctx, ground: boolean, iid: integer }
---:: OpTerm = { tag: "op", decl: OpDecl, args: OpArg[], sort: Sort, ctx: Ctx, ground: boolean, iid: integer }
+--:: VarTerm = { tag: "var", index: integer, sort: SortDecl, ctx: Ctx, ground: boolean, iid: integer }
+--:: MetaTerm = { tag: "meta", id: string, sort: SortDecl, ctx: Ctx, ground: boolean, iid: integer }
+--:: OpTerm = { tag: "op", decl: OpDecl, args: OpArg[], sort: SortDecl, ctx: Ctx, ground: boolean, iid: integer }
 --:: Concrete = VarTerm | MetaTerm | OpTerm
---:: ThunkTerm = { tag: "thunk", base: Term, k: integer, u: Term, sort: Sort, ctx: Ctx, ground: boolean, forced: Term | nil, iid: integer }
+--:: ThunkTerm = { tag: "thunk", base: Term, k: integer, u: Term, sort: SortDecl, ctx: Ctx, ground: boolean, forced: Term | nil, iid: integer }
 --:: Term = Concrete | ThunkTerm
 --:: Binding = { term: Term, depth: integer }
 --:: Bindings = { [string]: Binding }
 
 --:: Instance = {
---::   build_var: (index: integer, sort: Sort) -> (VarTerm | nil, string | nil),
---::   build_meta: (id: string, sort: Sort) -> (MetaTerm | nil, string | nil),
+--::   build_var: (index: integer, sort: SortDecl) -> (VarTerm | nil, string | nil),
+--::   build_meta: (id: string, sort: SortDecl) -> (MetaTerm | nil, string | nil),
 --::   build: (decl: OpDecl, args: Term[]) -> (OpTerm | nil, string | nil),
---::   sort_of: (t: Term) -> Sort,
+--::   sort_of: (t: Term) -> SortDecl,
 --::   is_ground: (t: Term) -> boolean,
 --::   is_closed: (t: Term) -> boolean,
 --::   equal: (a: Term, b: Term) -> boolean,
@@ -182,16 +183,35 @@ function M.new()
 		return fresh
 	end
 
+	-- Per-sort-object id, exactly the same identity-keyed pattern as decl_id
+	-- above (table identity as the key), applied to SortDecl objects instead
+	-- of OpDecl objects. NOT content-derived (sig_name/sig_version/name would
+	-- collapse two independently-declared same-named sorts into one
+	-- var_intern/meta_intern bucket, silently reintroducing the exact string-
+	-- comparison-by-a-different-route bug sort identity-by-declaration
+	-- exists to close) and NOT `tostring(sort)` (pointer-format string built
+	-- fresh per call — the same measured cost decl_id's own header note
+	-- already flags for decls).
+	local sort_iid = {} --[[: { [unknown]: integer } ]]
+	--: (sort: SortDecl) -> integer
+	local function sort_id(sort)
+		local existing = sort_iid[sort --[[: unknown ]]] --[[: integer | nil ]]
+		if existing then return existing end
+		local fresh = fresh_iid()
+		sort_iid[sort] = fresh
+		return fresh
+	end
+
 	local Inst = {}
 
-	--: (index: integer, sort: Sort) -> (VarTerm | nil, string | nil)
+	--: (index: integer, sort: SortDecl) -> (VarTerm | nil, string | nil)
 	function Inst.build_var(index, sort)
 		if type(index) ~= "number" then return nil, "build_var: index must be a non-negative integer" end
 		if index < 0 then return nil, "build_var: index must be a non-negative integer" end
 		local idx = math.floor(index)
 		if idx ~= index then return nil, "build_var: index must be a non-negative integer" end
-		if type(sort) ~= "string" then return nil, "build_var: sort must be a string" end
-		local key = "v:" .. idx .. ":" .. sort
+		if not shared.is_sort_decl(sort) then return nil, "build_var: sort must be a declared sort object" end
+		local key = "v:" .. idx .. ":" .. sort_id(sort)
 		local existing = var_intern[key]
 		if existing then return existing end
 		local node = { tag = "var", index = idx, sort = sort, ctx = { [idx] = sort }, ground = true, iid = fresh_iid() } --[[: VarTerm ]]
@@ -199,11 +219,11 @@ function M.new()
 		return node
 	end
 
-	--: (id: string, sort: Sort) -> (MetaTerm | nil, string | nil)
+	--: (id: string, sort: SortDecl) -> (MetaTerm | nil, string | nil)
 	function Inst.build_meta(id, sort)
 		if type(id) ~= "string" then return nil, "build_meta: id must be a string" end
-		if type(sort) ~= "string" then return nil, "build_meta: sort must be a string" end
-		local key = "m:" .. id .. ":" .. sort
+		if not shared.is_sort_decl(sort) then return nil, "build_meta: sort must be a declared sort object" end
+		local key = "m:" .. id .. ":" .. sort_id(sort)
 		local existing = meta_intern[key]
 		if existing then return existing end
 		local node = { tag = "meta", id = id, sort = sort, ctx = {}, ground = false, iid = fresh_iid() } --[[: MetaTerm ]]
@@ -258,8 +278,8 @@ function M.new()
 		for i = 1, decl.arity do
 			local term = args[i]
 			if term.sort ~= decl.args[i].sort then
-				return nil, "build: " .. decl.name .. " arg " .. i .. " expected sort " .. decl.args[i].sort
-					.. ", got " .. term.sort
+				return nil, "build: " .. decl.name .. " arg " .. i .. " expected sort " .. decl.args[i].sort.name
+					.. ", got " .. term.sort.name
 			end
 			out_args[i] = { bound_count = decl.args[i].bound_count, term = term }
 		end
@@ -344,7 +364,7 @@ function M.new()
 		if base.tag == "var" then
 			if base.index ~= k then return base end
 			if u.sort ~= base.sort then
-				return nil, "subst: replacement sort " .. u.sort .. " does not match target sort " .. base.sort
+				return nil, "subst: replacement sort " .. u.sort.name .. " does not match target sort " .. base.sort.name
 			end
 			return u
 		end
@@ -352,7 +372,7 @@ function M.new()
 		local expected = base.ctx[k]
 		if expected == nil then return base end
 		if u.sort ~= expected then
-			return nil, "subst: replacement sort " .. u.sort .. " does not match target sort " .. expected
+			return nil, "subst: replacement sort " .. u.sort.name .. " does not match target sort " .. expected.name
 		end
 		local new_ctx = ctx_after_subst(base, k, u.ctx)
 		return {
@@ -436,7 +456,7 @@ function M.new()
 	-- base.ground-and-u.ground formula in mk_subst above) — no forcing
 	-- needed to answer either.
 
-	--: (t: Term) -> Sort
+	--: (t: Term) -> SortDecl
 	function Inst.sort_of(t) return t.sort end
 
 	--: (t: Term) -> boolean
@@ -623,7 +643,8 @@ function M.new()
 				shifted = su
 			end
 			if shifted.sort ~= p.sort then
-				return nil, "instantiate: metavariable " .. p.id .. " sort mismatch"
+				return nil, "instantiate: metavariable " .. p.id .. " sort mismatch (expected "
+					.. p.sort.name .. ", got " .. shifted.sort.name .. ")"
 			end
 			return shifted
 		elseif p.tag == "var" then

@@ -13,7 +13,7 @@
 --   local kernel = require("lib.type.v10_kernel.term_algebra")
 --   local sig, err = kernel.declare_signature(spec)
 --   local k, err = kernel.new({ tier = "reference" })   -- or "fast"
---   local t, err = k.build_var(0, "term")
+--   local t, err = k.build_var(0, sig.sorts.term)   -- sort is a declared object, not a bare string
 --   ...
 --
 -- Tier selection is explicit and caps-first (passed in via `opts`, never an
@@ -43,13 +43,14 @@ local fast = require("lib.type.v10_kernel.term_algebra.fast")
 
 local M = {}
 
---:: Sort = string
---:: OpArgSpec = { sort: Sort, binds: Sort[] | nil }
---:: OpSpec = { result: Sort, args: OpArgSpec[] | nil }
---:: SignatureSpec = { name: string, version: integer, sorts: Sort[], ops: { [string]: OpSpec } }
---:: OpArgDecl = { sort: Sort, binds: Sort[], bound_count: integer }
---:: OpDecl = { name: string, sig_name: string, sig_version: integer, result: Sort, args: OpArgDecl[], arity: integer }
---:: Signature = { name: string, version: integer, sorts: { [string]: boolean }, ops: { [string]: OpDecl } }
+--:: SortName = string
+--:: SortDecl = { name: string, sig_name: string, sig_version: integer }
+--:: OpArgSpec = { sort: SortName, binds: SortName[] | nil }
+--:: OpSpec = { result: SortName, args: OpArgSpec[] | nil }
+--:: SignatureSpec = { name: string, version: integer, sorts: SortName[], ops: { [string]: OpSpec }, imports: { [string]: SortDecl } | nil }
+--:: OpArgDecl = { sort: SortDecl, binds: SortDecl[], bound_count: integer }
+--:: OpDecl = { name: string, sig_name: string, sig_version: integer, result: SortDecl, args: OpArgDecl[], arity: integer }
+--:: Signature = { name: string, version: integer, sorts: { [string]: SortDecl }, sort_set: { [unknown]: boolean }, ops: { [string]: OpDecl } }
 
 --:: TrustLabel = { eq: string, subst: string }
 --:: TierOpts = { tier: string | nil }

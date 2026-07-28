@@ -121,7 +121,7 @@ function M.declare_vocabulary(k)
 	if type(kt.build) ~= "function" or type(kt.build_meta) ~= "function" then
 		return nil, "declare_vocabulary: k must be a term_algebra tier instance"
 	end
-	local kk = k --[[: { build: (unknown, unknown) -> (unknown | nil, string | nil), build_meta: (string, string) -> (unknown | nil, string | nil) } ]]
+	local kk = k --[[: { build: (unknown, unknown) -> (unknown | nil, string | nil), build_meta: (string, unknown) -> (unknown | nil, string | nil) } ]]
 	local build = kk.build
 	local build_meta = kk.build_meta
 
@@ -144,7 +144,7 @@ function M.declare_vocabulary(k)
 	--: (a: unknown, b: unknown) -> (unknown | nil, string | nil)
 	local function Arrow(a, b) return build(ops.arrow_ty, { a, b }) end
 	--: (id: string) -> (unknown | nil, string | nil)
-	local function meta_ty(id) return build_meta(id, "ty") end
+	local function meta_ty(id) return build_meta(id, sig.sorts.ty) end
 
 	local int_ty = build(ops.int_ty, {})
 	local bool_ty = build(ops.bool_ty, {})

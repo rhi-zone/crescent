@@ -40,11 +40,10 @@ end
 
 local M = {}
 
---:: Sort = string
---:: SortSet = { [Sort]: boolean }
+--:: SortDecl = { name: string, sig_name: string, sig_version: integer }
 --:: OpDeclRef = { name: string, sig_name: string, sig_version: integer }
 --:: PatternArg = { term: unknown }
---:: Signature = { name: string, version: integer, sorts: SortSet, ops: unknown }
+--:: Signature = { name: string, version: integer, sorts: { [string]: SortDecl }, sort_set: { [unknown]: boolean }, ops: unknown }
 
 --:: DischargeSlotSpec = { premise: integer, pattern: unknown }
 --:: DischargeSlot = { premise: integer, pattern: unknown }
@@ -57,12 +56,16 @@ local M = {}
 -- ── Pattern well-formedness against a cited signature ───────────────────────
 --
 -- Walks a term_algebra term (var/meta/op, per the ratified three-node
--- grammar) checking: var/meta leaves have a sort declared in the
--- signature's sort set; op nodes carry a decl belonging to exactly this
--- signature (name + version) — operator identity is declared-object
--- identity, so "belongs to" is a name+version match, per
--- docs/decisions/typechecker-v10-core-design.md "Operator signature
--- format".
+-- grammar) checking: var/meta leaves carry a sort object that is a member of
+-- the signature's sort set (owned OR imported — sort identity is declared-
+-- object identity, so membership is checked by Lua object identity via
+-- `signature.sort_set`, never by name, per docs/decisions/typechecker-v10-
+-- core-design.md "Sort identity: identity-by-declaration + explicit
+-- imports"); op nodes carry a decl belonging to exactly this signature
+-- (name + version) — operator identity is declared-object identity, so
+-- "belongs to" is a name+version match, per docs/decisions/typechecker-v10-
+-- core-design.md "Operator signature format" (operators, unlike sorts, are
+-- never imported).
 
 --: (term: unknown, signature: Signature, path: string) -> string | nil
 local function check_pattern(term, signature, path)
@@ -73,8 +76,13 @@ local function check_pattern(term, signature, path)
 	local tag = t.tag
 	if tag == "var" or tag == "meta" then
 		local sort = t.sort
-		if type(sort) ~= "string" or not signature.sorts[sort] then
-			return "unknown sort " .. tostring(sort) .. " at " .. path
+		if type(sort) ~= "table" then
+			return "malformed sort at " .. path
+		end
+		local sort_t = sort --[[: { [string]: unknown } ]]
+		if not signature.sort_set[sort --[[: unknown ]]] then
+			return "sort " .. tostring(sort_t.name) .. " at " .. path
+				.. " does not belong to signature " .. signature.name .. " v" .. signature.version
 		end
 		return nil
 	elseif tag == "op" then
@@ -119,7 +127,7 @@ function M.declare_rule(spec)
 	local signature_raw = spec_t.signature
 	if type(signature_raw) ~= "table" then return nil, "declare_rule: spec.signature must be a declared signature" end
 	local signature = signature_raw --[[: Signature ]]
-	if type(signature.name) ~= "string" or type(signature.sorts) ~= "table" then
+	if type(signature.name) ~= "string" or type(signature.sorts) ~= "table" or type(signature.sort_set) ~= "table" then
 		return nil, "declare_rule: spec.signature must be a declared signature"
 	end
 
@@ -195,7 +203,7 @@ function M.declare_axiom(spec)
 	local signature_raw = spec_t.signature
 	if type(signature_raw) ~= "table" then return nil, "declare_axiom: spec.signature must be a declared signature" end
 	local signature = signature_raw --[[: Signature ]]
-	if type(signature.name) ~= "string" or type(signature.sorts) ~= "table" then
+	if type(signature.name) ~= "string" or type(signature.sorts) ~= "table" or type(signature.sort_set) ~= "table" then
 		return nil, "declare_axiom: spec.signature must be a declared signature"
 	end
 
