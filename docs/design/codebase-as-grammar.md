@@ -1,9 +1,15 @@
 # Codebase as one flat grammar: a first prototype
 
-**Status: exploratory, unproven at scale.** This is a sketch against one
-family of 5 files, not a validated claim about crescent as a whole. Read the
-"What's proven vs. aspirational" section before citing this document as
-justification for anything.
+**Status: exploratory; the core mechanism has been automated and run at
+whole-`lib/` scale (see "Automated induction" below), but scale-wide
+conclusions remain partial** — real new gaps surfaced (comment-embedded
+slots invisible to the AST tool, no discriminator between meaningful and
+noise slots) alongside real confirmations (the ground-truth ternary/if-else
+unification holds, and generalizes to dozens of independent instances
+across `lib/`). This started as a sketch against one family of 5 files;
+read the "What's proven vs. aspirational" section (and its "Automated
+induction" update near the end of this document) before citing this
+document as justification for anything.
 
 ## The mechanism
 
@@ -391,6 +397,215 @@ hand, because most of the file's bytes are productions already proven to
 exist. Whether that qualitative win survives contact with a properly
 factored derivation format, at a scale beyond 5 files, is exactly the open
 question flagged above.
+
+## Automated induction (2026-07-28 session)
+
+The prior section's induction was entirely by hand — a person diffing 5
+files. This session built an actual induction pass and ran it, first
+against the same 5 files (to check whether automation rediscovers what the
+hand-induction found) and then against all of `lib/`. Read this section as
+an update to, not a replacement of, everything above; the hand-induced
+productions and the honesty sections above still stand.
+
+### The representation, and the parser decision
+
+`tooling/grammar_gen/luaparse.lua` is a new, independent Lua 5.1/LuaJIT
+recursive-descent parser producing a plain nested-table AST (`{ tag =
+"binop", op = "+", lhs = ..., rhs = ... }` and so on — one shape per tag,
+matched at runtime).
+
+The alternative was building on `lib/type/static/parse.lua`, crescent's
+existing typechecker parser — CLAUDE.md is explicit that a second parser is
+a real cost and to grep before adding one. Reading that parser settled the
+question rather than leaving it as a coin flip: `lib/type/static/parse.lua`
+emits flat `ASTNode` records into an FFI arena, addressed by integer index,
+with node "kind" as a numeric code (`defs.NODE_*` constants) and children
+reached through a paired list-pool/intern-pool, explicitly designed
+("no intermediate tables" — the file's own header comment) for typechecker
+throughput on a hot path. Reusing it here would mean either pulling in its
+arena/intern machinery just to walk trees for shape comparison — a real
+coupling cost for a tool that needs none of the typechecker's actual
+concerns — or re-flattening its output back into an ordinary tree shape
+before any of `canon.lua`'s canonicalization could run, at which point most
+of the reuse benefit is gone anyway. `lib/type/static/parse.lua` remains
+the right parser for the typechecker; it is the wrong shape for "is this
+if/else the same shape as that ternary," which is this tool's entire job.
+This tradeoff is not close: the two parsers serve genuinely different
+consumers with genuinely different performance/ergonomics requirements, so
+this session built the second parser rather than forcing one representation
+to serve both.
+
+`luaparse.lua` covers the practical Lua-5.1-plus-LuaJIT-extensions subset
+`lib/` actually uses, including two things a naive Lua-5.1 grammar misses:
+`0b`-prefixed binary integer literals (crescent's vendored LuaJIT fork
+accepts them; confirmed by `bin/luajit -e 'return 0b0000'` succeeding) and
+`ULL`/`LL`-suffixed cdata literals. Deliberately NOT covered: Lua 5.4
+attribute names, bitwise operators (crescent targets LuaJIT, which has
+neither; the `bit` library is used instead). Measured coverage: parses
+1691/1698 `lib/` `.lua` files (99.6%); see TODO.md for the 7 known failures
+and the class of syntax not yet isolated.
+
+`tooling/grammar_gen/canon.lua` does two jobs on top of that AST:
+
+1. **Canonicalization**: rewrites `local x = C and A or B` (ternary) and
+   `if C then x = A else x = B end` (if/else, both branches a single
+   same-target assignment) into one shared `cond_assign` node — a real,
+   generic AST rewrite (fires on shape, not on file identity or variable
+   names) rather than a hand-picked special case for the known dispatcher
+   files.
+2. **Fingerprinting**: a structural key that abstracts identifiers and
+   literal values to placeholders (`ID`, `STR`, `NUM`, ...) while keeping
+   tags, operators, and arity, so two instances of "the same production"
+   collide textually. For `cond_assign` specifically, the fingerprint
+   deliberately EXCLUDES the condition's own shape and the if_else-vs-
+   ternary syntactic form, keeping only the coarse shape of the then/else
+   branches — see `canon.lua`'s header for the full reasoning. This is the
+   one modeling choice that makes the ground-truth case below pass, and
+   it's stated as a choice with a named tradeoff, not asserted as free.
+
+`tooling/grammar_gen/discover.lua` clusters occurrences (single statements,
+and sliding windows of 2–5 contiguous statements within one block) by
+fingerprint across an arbitrary corpus. A cluster of size 1 is residue. A
+cluster of size ≥2 where every occurrence has the identical concrete
+"hole" content (the abstracted-away identifiers/literals) is a **rule**
+(zero variance — a pure convention). A cluster where the hole content
+varies is a **slot**, and each distinct hole-tuple is a named alternative.
+This is a direct, mechanical reading of the design doc's own framing:
+reuse count and hole variance are read off the corpus, not asserted ahead
+of time.
+
+`tooling/grammar_gen/induce.lua` is the CLI entrypoint (the one place this
+tool touches `io.*` directly, same bootstrapping pattern as
+`generate.lua`): `--dispatchers` for the 5 ground-truth files, `--lib` for
+the whole tree.
+
+### Ground-truth check: does it catch the ternary/if-else case?
+
+Yes. Running `bin/luajit tooling/grammar_gen/induce.lua --dispatchers
+--verbose` and searching its single-statement output for the tier-select
+ok-check shape:
+
+```
+SLOT (3 occurrences, 3 alternatives): COND_ASSIGN(NAME;CALL(1))
+  alt 1 (1x): lib/compress/init.lua:20  [if_else | impl | ok | impl_raw | require("lib.compress.pure")]
+  alt 2 (1x): lib/crypto/init.lua:20    [if_else | impl | ok | sys | require("lib.crypto.pure")]
+  alt 3 (1x): lib/regex/init.lua:23     [ternary | impl_raw | (ok and type(mod) == "table") | mod | require("lib.regex.pure")]
+```
+
+compress's and crypto's `if/else` and regex's ternary — the exact case the
+brief named as the one prior art (normalize's `--scope blocks --mode exact
+--elide-identifiers`) misses because it compares AST node shapes directly
+(if/else vs. ternary are different node shapes at the token/AST-shingling
+level) — land in the same slot here, because `canon.lua` rewrites both into
+one `cond_assign` shape before fingerprinting and the fingerprint itself
+drops the condition (see above). This is the load-bearing result: the
+representation is abstract enough to catch this class of equivalence.
+
+The tool also independently rediscovered `path_bootstrap` as one slot with
+the same alternative split the hand-induced grammar documents (4 files
+using `"./?/init.lua"`, base64 alone using `"?/init.lua"`) — found by the
+same generic single-statement fingerprinting, not hand-keyed to this
+specific pattern.
+
+What it did NOT rediscover: `type_alias_block` and `narrow_comment`. Both
+live entirely inside `--:`/`--::` **comments** in the real source —
+crescent's type-annotation syntax rides on top of ordinary Lua comments,
+which `luaparse.lua`'s lexer discards like any other comment. A real,
+significant chunk of the hand-induced grammar (the piece the design doc
+calls "the closest thing to a pure convention," 100% reuse across all 5
+files) is structurally invisible to an AST-only tool. See TODO.md — a
+second extraction pass over raw contiguous comment blocks, classifying
+line-shapes independently of the Lua AST, would be needed to close this.
+
+### Whole-`lib/` run: real numbers
+
+```
+$ time bin/luajit tooling/grammar_gen/induce.lua --lib
+files: 1698 read, 0 unreadable, 7 failed to parse, 6.73s elapsed
+real    0m7.6s
+-- single-statement: 2134 rules, 6205 slots, 13081 residue
+-- 2-statement windows: 3662 rules, 9513 slots, 35224 residue
+-- 3-statement windows: 3611 rules, 6937 slots, 45530 residue
+-- 4-statement windows: 2720 rules, 4601 slots, 45761 residue
+-- 5-statement windows: 1908 rules, 3260 slots, 42692 residue
+```
+
+Performance is not a concern at this corpus size: parsing, canonicalizing,
+and clustering all of `lib/` (1698 files) takes under 8 seconds wall-clock
+on ordinary hardware, no narrowing of scope was needed to get a result.
+
+The `COND_ASSIGN(NAME;CALL(1))` slot — the exact tier-select shape above —
+generalizes past the 3 dispatcher files at whole-corpus scale: it grows to
+22 occurrences / 18 alternatives, picking up real, independent instances of
+the same "use an existing value, or else compute a fresh one" idiom in
+`lib/type/static-v4/`'s constraint-solving code, `lib/memoize/init.lua`'s
+nil-sentinel handling, `lib/spell_check/init.lua`, `lib/css/property.lua`,
+and others — a genuine mix of `if_else`-form and `ternary`-form instances,
+correctly unified. `COND_ASSIGN(STR;STR)` (picking between two string
+literals) shows the same pattern even more clearly: 74 occurrences across
+sixty-some files spanning wildly different subsystems (`lib/cr/init.lua`'s
+path separators, `lib/unified/mdast/`'s markdown AST tag names,
+`lib/css_parser/init.lua`'s pseudo-selector punctuation), if_else and
+ternary forms freely mixed within the same slot. This is real, structural
+evidence for the design doc's core claim — a production's reuse count is a
+statistical fact read off the corpus, and "conditional value assignment" is
+a real production with dozens of independent instances, not an artifact of
+the 5 hand-picked files.
+
+**The honest cost of the same modeling choice**, visible only at this
+scale: dropping the condition's shape to catch the ternary/if-else case
+also merges instances that share nothing but branch shape. The tier-select
+idiom and `lib/type/static-v4`'s constraint solver end up in the same
+`COND_ASSIGN(NAME;CALL(1))` bucket despite having no real semantic kinship
+beyond "assign an existing name, or else call something" — a false-positive
+cost of exactly the kind the ternary/if-else fix trades for. See TODO.md.
+
+The other large finding, also only visible at scale: single-statement
+fingerprinting floods with clusters like `RETURN(ID)` (6417 occurrences,
+925 "alternatives" — nearly one per distinct returned variable name across
+the whole corpus). This is real, correctly-computed reuse, but it is not
+"a slot with a bounded set of deliberate alternatives" in the `tier_select`
+sense; it is closer to "returning a local is universal, and locals have
+many names." The tool as built has no way to distinguish a slot whose
+alternative-count reflects genuine design variance from one whose
+alternative-count is just "how many distinct identifiers happen to exist."
+Recorded as an open gap, not silently filtered — filtering it out
+after the fact, tuned to make the ground-truth case look cleaner, would
+have been exactly the kind of result-shaped hardcoding this project's
+planning rules rule out.
+
+**Compression ratio**: this session did not build or measure a derivation-
+generator for the wider corpus (that remains the `tooling/grammar_gen/
+derivations.lua` + `generate.lua` machinery, scoped to the original 5
+files) — discovery and derivation-authoring are the two separable halves
+the earlier section names, and this session's work is entirely on the
+discovery half. The n=5 compression-ratio numbers in the section above are
+therefore unchanged by this session and should not be read as validated or
+refuted at scale; that remains open, tracked in TODO.md.
+
+### What's proven vs. aspirational, updated
+
+**Newly proven:**
+- Automated induction over an independent, non-typechecker AST finds the
+  same ground-truth slot (tier-select, if/else vs. ternary unified) the
+  hand-induction found, via a documented, generic canonicalization rule —
+  not tuned to the 5 files.
+- The same induction scales to all of `lib/` (1698 files) in under 8
+  seconds with no scope-narrowing, and surfaces real slot growth beyond the
+  original 5-file family for the same production.
+
+**Newly falsified / narrowed:**
+- "Grammar induction itself... untested" (previous section) — now tested,
+  and the answer is a genuine mix: it works for the specific ground-truth
+  case, and it also surfaces two real, previously-unknown limitations
+  (comment-embedded slots invisible to an AST tool; statement-shape
+  fingerprinting alone doesn't distinguish meaningful design-decision slots
+  from "any distinct identifier ever used here").
+
+**Still open:** everything the prior section marked open that this session
+didn't touch — derivation-format compactness, the keyring/stb looser-family
+question, and compression ratio at scale — plus the new items above,
+recorded in TODO.md rather than closed by assertion.
 
 ## Where this fits in crescent's docs
 

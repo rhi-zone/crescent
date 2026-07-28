@@ -322,11 +322,81 @@ throwaway analysis tooling). Byte-for-byte reproduction of 5 real files verified
   struct type, M-table) instead of named once and referenced three times.
   Fixing (2) is a real refactor of the derivation format, not the mechanism;
   worth doing before drawing scale conclusions from byte ratios.
-- [ ] **No automated grammar induction.** Slots were found by a person
-  hand-diffing 5 files. A RePair/SEQUITUR-style induction pass over a larger
-  corpus, to check whether it finds the same slots (including the
-  file-level "indent style" slot, which is easy to miss if you look
-  production-by-production instead of file-by-file), is unbuilt.
+- [x] **No automated grammar induction.** (2026-07-28) Built
+  `tooling/grammar_gen/luaparse.lua` (independent Lua 5.1/LuaJIT parser,
+  plain nested-table AST — `lib/type/static/parse.lua` is a flat FFI-arena
+  parser built for typechecker throughput and was the wrong shape for
+  shape-comparison work; see the design doc for the full reasoning),
+  `tooling/grammar_gen/canon.lua` (canonicalizes ternary `x and a or b` and
+  `if c then x=a else x=b end` into one `cond_assign` shape; structural
+  fingerprinting that abstracts identifiers/literals but keeps tag/operator/
+  arity), and `tooling/grammar_gen/discover.lua` + `induce.lua` (clusters
+  single-statement and 2–5-statement-window occurrences across a corpus
+  into rules/slots/residue). Verified against the ground-truth case: on the
+  5 dispatcher files, `compress`/`crypto`'s `if/else` ok-check and
+  `regex`'s ternary land in the SAME slot
+  (`COND_ASSIGN(NAME;CALL(1))`, 3 alternatives) — `luajit
+  tooling/grammar_gen/induce.lua --dispatchers --verbose` reproduces this.
+  Also independently rediscovered `path_bootstrap` as one slot with the
+  same 4-vs-1 (base64 anomaly) alternative split the hand-induced grammar
+  documents. Run on all of `lib/` (1698 files, ~7s): 2134 single-statement
+  rules / 6205 slots / 13081 residue, plus 2–5-statement window clusters;
+  see the design doc for real numbers and the caveats below — this is a
+  genuine finding, not a tuned-to-pass demo, and it surfaced real new gaps
+  (next few items), not a clean "solved."
+- [ ] **Statement-shape fingerprinting floods with reuse-heavy but
+  semantically-empty "slots" at whole-`lib/` scale.** `RETURN(ID)` shows
+  6417 occurrences / 925 "alternatives" — nearly every single-identifier
+  return statement in the corpus, one alternative per distinct variable
+  name. This is real, high reuse, but it isn't "a design decision with
+  named alternatives" in the same sense as `tier_select` — the variable
+  name is unconstrained, not chosen from a small deliberate set. The tool
+  as built has no discriminator between "a slot whose alternatives are a
+  real, bounded design choice" and "a slot whose alternatives are just
+  every distinct identifier that ever appeared there." Needs either an
+  alternative-count/entropy threshold, a way to recognize "this hole is
+  just an identifier reference, ignore its cardinality," or both — unbuilt.
+- [ ] **`canon.lua`'s `cond_assign` fingerprint deliberately drops the
+  condition's shape (see that file's header) to unify if/else and ternary
+  forms — this is proven to work for the ground-truth case, but at whole-
+  `lib/` scale it also merges semantically unrelated conditional-assignments
+  that happen to share a branch-shape.** E.g. `COND_ASSIGN(NAME;CALL(1))` at
+  full-corpus scale mixes crescent's tier-select idiom with unrelated code
+  in `lib/type/static-v4/`'s constraint solver and `lib/memoize/init.lua`'s
+  nil-sentinel handling — same shape, different concerns. Not fixed here;
+  recorded as the honest tradeoff of the modeling choice (see canon.lua's
+  header and the design doc).
+- [ ] **Crescent's `--:`/`--::` type-annotation lines are Lua comments,
+  invisible to `tooling/grammar_gen/luaparse.lua`'s AST.** The hand-induced
+  grammar's `type_alias_block` and `narrow_comment` productions — called
+  "the closest thing to a pure convention" in the design doc, 100% reuse
+  across all 5 dispatcher files — are NOT rediscovered by this tool at all,
+  because the parser treats them as comment text and discards them like any
+  other comment. A real chunk of the corpus's actual repeated structure is
+  invisible to this induction pass. Would need a second extraction pass
+  over raw source treating contiguous `--:`/`--::` comment blocks as their
+  own span type (line-shape classification: alias decl / struct open /
+  field line / struct close / narrow line), separate from the Lua-syntax
+  AST — unbuilt.
+- [ ] **No promotion pass from raw statement-window clusters into named,
+  parameterized multi-part productions.** The hand-induced grammar's
+  `tier_select_cast_narrow` is one production with a `variant` parameter
+  selecting a sub-shape; this tool's window clustering finds the same
+  *span* repeated (e.g. the 2-, 3-, and 4-statement windows around
+  compress/crypto's pcall-then-cond_assign sequence all show up as separate
+  clusters at each window size) but never merges these into one named,
+  parameterized production the way a human write-up would. Each window
+  size is clustered independently; there's no step that recognizes "these
+  N clusters at window sizes 2..5, all starting at the same statement
+  positions, are one production at different levels of context."
+- [ ] **Parser coverage: 7 of 1698 `lib/` files fail to parse** (as of
+  2026-07-28): `lib/argon2/init.lua`, `lib/game_math/init.lua`,
+  `lib/image_processing/init.lua`, `lib/keyring/keyring_test.lua`,
+  `lib/logic_circuit/init.lua`, `lib/qrencode/init.lua`,
+  `lib/sat/sat_test.lua`. Real syntax this parser doesn't yet handle (not
+  isolated further — see `tooling/grammar_gen/induce.lua --lib`'s
+  "unparsed files" output for the exact line/column). These 7 files are
+  silently excluded from induction results, not miscounted as residue.
 
 ## Typechecker substrate gaps (found while implementing lib/y_crdt/encoding.lua, 2026-07-27)
 
@@ -383,6 +453,51 @@ Scope cuts made in the same work, none typechecker-related, all deliberate and d
   exception for exactly this boundary shape. Do not silently re-permit
   force casts broadly to unblock this — that's the general case CLAUDE.md's
   "almost never correct" rule is protecting.
+
+## Typechecker substrate gaps (found while building tooling/grammar_gen's induction pass, 2026-07-28)
+
+- [ ] **Confirms the item above more strongly: `--[[:! T]]` force casts are
+  a hard `bin/cr check` error, not merely discouraged.** Attempted using
+  force casts as accessor helpers for `tooling/grammar_gen`'s dynamically-
+  tagged AST nodes (a self-authored, internally-consistent tree — not
+  narrowing external input, exactly the case one might expect a force cast
+  to be defensible for) and every `--[[:! T]]` site was rejected outright
+  ("force cast — fix the upstream type annotation instead"). Worked around
+  in `tooling/grammar_gen/canon.lua` (`get`/`gs`/`gb`/`gl`/`gi`) with real
+  `type()` runtime narrowing instead, erroring on a shape mismatch (an
+  internal-consistency bug in this tool's own parser, not a data error).
+- [ ] **Reassigning a local across several sequential `pattern:find(...)`
+  calls (`local s, e, cap = str:find(p1); if not cap then s, e, cap =
+  str:find(p2) end; ...`) widens the reassigned variable's type in a way
+  that breaks later arithmetic on it**, distinct from the already-documented
+  `string.byte`-multi-return gaps. Repro (recreate from description; not
+  committed): chaining several `source:find(pattern, i)` calls into the
+  same `s, e, num` locals across `if not num then ... end` branches, then
+  using `i = e + 1` after, fails with "cannot perform arithmetic on `_`".
+  Worked around in `tooling/grammar_gen/luaparse.lua` (`lex`'s number
+  scanning) by factoring a `match_at(from, pattern)` helper that returns
+  `(string | nil, integer)` from a single `find` call, called once per
+  candidate pattern instead of reassigning shared locals across branches.
+  Revert to the direct chained-reassignment form once this widens correctly.
+- [ ] **`table.sort`'s declared generic `<V>(t: { [integer]: V, ... }, comp)
+  -> ()` appears to monomorphize to the first call site's `V` for the rest
+  of the file, rejecting a later, textually-distinct call with a different
+  element type** ("cannot assign `{Slot fields...}` to `string`" after an
+  earlier `table.sort(paths, ...)` over a `{ [integer]: string }` in the
+  same file). Additionally, **passing an array into a helper function whose
+  parameter type only mentions a subset of the element's fields (e.g.
+  `{ count: number, ... }`, to sort generically by one shared field)
+  degrades the argument's own static element type at the call site for the
+  rest of its lifetime in the caller** — a later read of a field the
+  helper's parameter type didn't mention fails as if the field didn't
+  exist. Neither repro isolated to a minimal standalone case yet. Worked
+  around in `tooling/grammar_gen/induce.lua` (`print_cluster_result`) by
+  building fresh sorted arrays via insertion (never passing
+  `result.slots`/`result.rules` through another function boundary, never
+  reusing `table.sort` a second time in the file) instead of an in-place
+  generic sort. Revert to `table.sort(result.slots, function(a,b) return
+  a.count > b.count end)` (and the `result.rules` equivalent) once either
+  gap resolves.
 
 ## Fixed bugs
 
