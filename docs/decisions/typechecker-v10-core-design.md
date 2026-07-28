@@ -290,6 +290,77 @@ before the derivation node's conclusion exists at all.
 
 ---
 
+## Replayer: certificates, taint, discharge
+
+### Settled (owner-ratified this session)
+
+Tasks 5+6 merged: axiom/taint mechanism and discharge format, designed as
+one object. Closes the standing discharge-certificate format open item
+carried from design-sync, and closes the "taint" and "discharge format"
+items from the downstream catch-all below.
+
+**Sequencing.** The fresh replayer is built now over term_algebra,
+cleanroom, with taint and discharge as birth structure — never
+retrofitted. The existing `kernel.lua` is not read, not patched; it gets
+retired/ported at the conformance task, per the charter's firewall.
+
+**Axioms are schematic.** An axiom declaration is a named, owned,
+versioned registry object carrying a judgment pattern; a citing node
+supplies bindings; the kernel computes the axiom node's conclusion by
+instantiating the declaration's pattern. Ground axioms are the
+zero-metavariable special case — schematic strictly subsumes ground, and
+that subsumption is the basis of the ratification. Assumption content
+therefore never rides in certificates; the can't-lie property (schematic
+instantiation section above) survives axioms.
+
+**Certificate/derivation grammar — three node kinds:**
+
+1. Rule-citation node — cites a rule schema + premise nodes; conclusion
+   computed per the ratified match/instantiate replay algorithm.
+2. Axiom-citation node — cites a declared axiom (+ bindings); conclusion =
+   `instantiate(declaration pattern, bindings)`. Axiom nodes admit NO
+   discharge form — enforced at schema/grammar validation; this is the
+   stated condition keeping taint a node property.
+3. Hypothesis node — a leaf introducing an assumption, carrying its
+   assumed judgment as a term. The ONLY content-carrying node kind, and
+   its content is CHECKED, not trusted: validated at discharge time
+   (below).
+
+**Taint.** A node property, computed bottom-up by set union: node's taint
+= own axiom citation (if any) ∪ union of premises' taints. Memoized per
+node, parent-independent. Kernel-config axioms stay in the run-level label
+per the earlier carveout; effective axiom set = node taint ∪ run label.
+
+**Discharge: bottom-up open-hypothesis sets.** Every node has a computed
+set of open (undischarged) hypothesis ids below it: a hypothesis leaf
+contributes itself; a rule node's open set = union of premises' open sets
+MINUS the hypotheses its schema discharges. A rule schema declares
+discharge slots as `(premise index, hypothesis pattern)`; at replay, the
+discharged hypothesis's carried judgment must equal `instantiate(hypothesis
+pattern, bindings)` — this is what makes hypothesis content checked.
+Validity = root's open set is empty.
+
+DAG sharing needs no extra mechanism: a shared subderivation has one fixed
+open set; each parent subtracts within its own computation only — nothing
+is ever globally marked discharged, which structurally prevents
+re-introducing the historical all-paths discharge bug (the c4b62ec2
+lesson). Fable's acceptance case (shared node, two parents with different
+discharge contexts → identical taint, potentially different discharge
+status) falls out of the formulation and is REQUIRED as an executable
+test.
+
+**Replay** = one bottom-up pass per node computing `(conclusion, taint
+set, open-hypothesis set)`, all memoized; root checks: conclusion ground
+AND closed, open set empty; run-level trust label attached; caches keyed
+by kernel-config hash.
+
+**Side conditions note.** Remain deferred/undesigned (removability
+requirement stands, per the clarified open item below); rule schemas in
+this replayer have NO side-condition slot — a rule needing one halts to
+the owner.
+
+---
+
 ## Explicitly open (flagged, not settled — do not present as decided)
 
 - Side conditions in rule schemas (task-4 fork B) — UNDESIGNED, owner
@@ -307,5 +378,4 @@ before the derivation node's conclusion exists at all.
   worked around. The fork remains deferred; no approach is chosen (none of
   the three candidates discussed — none-in-v1 / mechanism-now-empty-
   vocabulary / starter set — has been chosen).
-- Everything downstream per the charter (taint, discharge format, prefix,
-  corroboration).
+- Everything downstream per the charter (prefix, corroboration).
