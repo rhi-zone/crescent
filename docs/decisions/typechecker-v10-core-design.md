@@ -335,10 +335,33 @@ per the earlier carveout; effective axiom set = node taint ∪ run label.
 set of open (undischarged) hypothesis ids below it: a hypothesis leaf
 contributes itself; a rule node's open set = union of premises' open sets
 MINUS the hypotheses its schema discharges. A rule schema declares
-discharge slots as `(premise index, hypothesis pattern)`; at replay, the
-discharged hypothesis's carried judgment must equal `instantiate(hypothesis
-pattern, bindings)` — this is what makes hypothesis content checked.
-Validity = root's open set is empty.
+discharge slots as `(premise index, hypothesis pattern)` — what kind of
+assumption the rule may close. Validity = root's open set is empty.
+
+**Refinement, owner-ratified this session — discharge slots resolve to
+instances by explicit id citation** (labeled discharge, the standard
+natural-deduction mechanism; surfaced because the replayer builder halted
+on a genuine gap — the prior text didn't specify how a schema-level
+discharge slot picks out hypothesis instances):
+
+- Schema level unchanged: slots = `(premise_index, hypothesis_pattern)`.
+- Certificate level: a rule-citation node carries, per slot, the SET of
+  hypothesis ids it discharges. Ids only, never content — the can't-lie
+  property is preserved.
+- Replay checks each named id: it must be open in the cited premise's
+  open-hypothesis set (citing a non-open id rejects), and its carried
+  judgment must equal `instantiate(slot pattern, shared bindings)`
+  (mismatch rejects — this makes judgment-mismatch-at-discharge a real,
+  testable failure mode). Valid ids are subtracted; all unnamed
+  hypotheses stay open and bubble upward (nested unrelated hypothetical
+  contexts compose untouched). An empty id-set per slot is legal —
+  vacuous discharge, standard ND.
+- Rejected alternatives, recorded with reasons: filter-and-subtract
+  (auto-discharge all judgment-matching open hyps — makes
+  mismatch-at-discharge unreachable as an error and removes deliberate
+  keep-open control) and discharge-all-and-verify (force-checks unrelated
+  outer hypotheses against a pattern they were never meant to satisfy —
+  breaks nested composability).
 
 DAG sharing needs no extra mechanism: a shared subderivation has one fixed
 open set; each parent subtracts within its own computation only — nothing
