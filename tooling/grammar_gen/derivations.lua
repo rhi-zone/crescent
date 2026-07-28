@@ -21,9 +21,9 @@
 -- Narrowing that unknown back down for a whole module surface — as opposed
 -- to one value crossing a pcall boundary — hit a real substrate gap, and the
 -- checker now rejects the force-cast the corpus's own tiered dispatchers use
--- at exactly this kind of boundary (see docs/design/codebase-as-grammar.md's
--- honesty section and TODO.md for the reproduction). One file sidesteps the
--- gap entirely rather than hacking around it.
+-- at exactly this kind of boundary (see docs/design/decision-tape.md's
+-- "what's proven vs aspirational" section and TODO.md for the reproduction).
+-- One file sidesteps the gap entirely rather than hacking around it.
 --
 -- ═══════════════════════════ productions ═══════════════════════════
 

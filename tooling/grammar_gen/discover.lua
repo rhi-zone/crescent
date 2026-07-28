@@ -9,7 +9,10 @@
 -- zero variance"), and flag shapes occurring exactly once as residue.
 --
 -- Two span granularities are extracted, both needed to reproduce the hand-
--- induced grammar in docs/design/codebase-as-grammar.md:
+-- induced grammar in docs/design/decision-tape.md. NOTE: the window-size
+-- knob below is scaffolding for this clone-detection technique, not a
+-- parameter the corrected model in that doc has — see its "dead end,
+-- isolated to the induction tool" section.
 --   - single statements (after canon.canonicalize_block's ternary/if-else
 --     rewrite), at every nesting level in every file — this is what
 --     catches the tier_select ok-check as one slot with if_else/ternary

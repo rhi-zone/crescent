@@ -16,7 +16,7 @@
 -- wants ordinary tagged tables it can pattern-match and rewrite in place.
 -- lib/type/static/parse.lua remains the right choice for the typechecker;
 -- it is simply the wrong shape for this job. See
--- docs/design/codebase-as-grammar.md for the fuller writeup of this decision.
+-- docs/design/decision-tape.md for the fuller writeup of this decision.
 --
 -- Deliberately NOT a complete Lua grammar: no attribute names (`<const>`,
 -- Lua 5.4), no bitwise operators (LuaJIT doesn't have them; crescent uses

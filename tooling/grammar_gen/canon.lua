@@ -14,6 +14,16 @@
 --    file identity) — it fires on any ternary or if/else fitting the shape,
 --    anywhere in the corpus, not just the known dispatcher files.
 --
+--    KNOWN BUG (unsound, not just lossy — see TODO.md and
+--    docs/design/decision-tape.md's "live correctness bug" section): `C and
+--    A or B` and `if C then x=A else x=B end` are NOT equivalent when `A`
+--    can be `false` or `nil` — the ternary silently falls through to `B` in
+--    that case, the if/else does not. This rewrite unifies them anyway. It
+--    is acceptable as a clustering heuristic (finding structural kinship)
+--    and every ground-truth instance in this corpus happens to fall on the
+--    sound side, but it must never be read as a semantic equivalence, and
+--    it is NOT fixed here — fixing it is out of scope for this pass.
+--
 -- 2. fingerprint(node): produce a string key abstract enough that two
 --    instances of "the same production" collide, but concrete enough that
 --    unrelated code doesn't. Identifiers and literal values become
@@ -22,7 +32,7 @@
 --    For `cond_assign` specifically, the fingerprint deliberately DROPS the
 --    condition's own internal shape and keeps only the coarse ("what kind
 --    of expression") shape of the then/else branches. This is a modeling
---    choice, documented here and in docs/design/codebase-as-grammar.md: the
+--    choice, documented here and in docs/design/decision-tape.md: the
 --    condition is the instance-specific "decision content" of a
 --    conditional-assignment idiom (what varies from call site to call
 --    site), while the branch shapes (name-reference vs. fresh call vs.

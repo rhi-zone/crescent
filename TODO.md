@@ -298,7 +298,11 @@ integrate,struct_store,update}.lua`):
 
 ## Grammar-induction prototype for tiered-dispatcher init.lua files (2026-07-27)
 
-See `docs/design/codebase-as-grammar.md` and `tooling/grammar_gen/` (not `lib/` —
+See `docs/design/decision-tape.md` (renamed and rewritten 2026-07-28 from
+`docs/design/codebase-as-grammar.md` — the reuse-count/flat-grammar framing
+recorded there was corrected; see that document's "corrected model" and
+"two framings this document tried and retracted" sections) and
+`tooling/grammar_gen/` (not `lib/` —
 throwaway analysis tooling). Byte-for-byte reproduction of 5 real files verified
 (`bin/luajit tooling/grammar_gen/generate.lua --all --diff`). Open items:
 
@@ -397,6 +401,68 @@ throwaway analysis tooling). Byte-for-byte reproduction of 5 real files verified
   isolated further — see `tooling/grammar_gen/induce.lua --lib`'s
   "unparsed files" output for the exact line/column). These 7 files are
   silently excluded from induction results, not miscounted as residue.
+
+## Decision-tape model correction (2026-07-28)
+
+`docs/design/codebase-as-grammar.md` was renamed and rewritten to
+`docs/design/decision-tape.md` — the reuse-count/flat-grammar framing and a
+briefly-considered probabilistic/entropy framing are both recorded there as
+retracted dead ends, replaced by: determinacy (forced vs. free), not reuse
+count, is the discriminator; the artifact is a decision tape (a
+deterministic expander plus exactly the free choices). No `tooling/
+grammar_gen/` logic changed in this pass except comment updates pointing at
+the renamed doc, plus a new header comment on the item immediately below.
+Open items this correction produced, not yet closed:
+
+- [ ] **`tooling/grammar_gen/canon.lua`'s `cond_assign` unification of
+  ternary (`x and a or b`) and if/else (`if c then x=a else x=b end`) is
+  UNSOUND, not merely lossy — this is a real bug in committed code.** When
+  `a` can evaluate to `false` or `nil`, the ternary silently falls through
+  to `b` regardless of `c`; the if/else form has no such fallthrough. The
+  two forms diverge on real inputs whenever `a`'s value set includes
+  `false`/`nil`. This unification is exactly what produces the headline
+  ground-truth result (compress/crypto's `if/else` and regex's ternary
+  landing in the same slot), so that result rests on an unsound
+  equivalence — every confirmed instance so far happens to fall on the
+  sound side (none of the sampled `a` values are `false`/`nil`-valued in a
+  way that changes behavior), but the unification doesn't check for this
+  and would silently misclassify a case where it matters. Acceptable as a
+  clustering heuristic (finding structural kinship between idioms); NOT
+  acceptable as a semantic-equivalence claim, and any fidelity check built
+  on top of it would be vacuous exactly where the bug lives. See
+  `docs/design/decision-tape.md`'s "live correctness bug" section. Not
+  fixed in this pass — fixing requires either restricting the rewrite to
+  provably-truthy `a` values, or keeping the two forms in separate
+  fingerprint buckets and finding a different (sound) way to relate them.
+- [ ] **Fidelity canonicalization vs. clustering canonicalization are
+  distinct and only the latter exists.** The owner's stated correctness bar
+  for any "lossless" or round-trip claim is canonical-form *equality*, but
+  `canon.lua`'s only canonicalization (the `cond_assign` rewrite above,
+  plus its identifier/literal-abstracting fingerprint) is deliberately
+  lossy — built for finding structural kinship across instances, not for
+  proving two pieces of code are equivalent. It cannot serve as a fidelity
+  check as-is (see the unsoundness item above for why using it as one would
+  be actively wrong, not just insufficiently precise). What a fidelity
+  canonicalization would need to preserve, that the clustering one is free
+  to drop, is not yet decided — this is unresolved, not merely unbuilt.
+- [ ] **`discover.lua`'s "residue" bucket (cluster size 1) conflates two
+  different things the corrected model needs told apart: a genuinely free
+  one-off decision, and a forced-but-rare site that simply doesn't repeat
+  in this corpus** (e.g. the JSON `\u`-surrogate-pair escape handling,
+  forced by RFC 8259, occurs once per file and would land in "residue" the
+  same as an actual one-off free choice). The tool has no way to
+  distinguish these today. Related to, but distinct from, the
+  already-tracked `RETURN(ID)` noise-slot problem above — that one is about
+  slots with too many spurious "alternatives"; this one is about size-1
+  clusters having no forced/free signal at all.
+- [ ] **Compression ratio at scale remains open, not negative.** The n=5
+  hand-built prototype's derivation source (15770 bytes) is larger than the
+  code it generates (13418 bytes) — see the two concrete, believed-fixable
+  causes already tracked above (repeated field lists; doc-header prose
+  stored as an uncompressed raw terminal). Carried forward unchanged: this
+  is an open question about a 5-file sample, not evidence against the
+  corrected model, and should not be read as a verdict either way until
+  re-measured at scale with a fixed derivation format.
 
 ## Typechecker substrate gaps (found while implementing lib/y_crdt/encoding.lua, 2026-07-27)
 
