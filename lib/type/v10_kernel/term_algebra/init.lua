@@ -2,9 +2,13 @@
 --
 -- Public entry point for the v10 kernel term algebra
 -- (docs/decisions/typechecker-v10-core-design.md,
--- docs/decisions/typechecker-v10-core-charter.md). Cleanroom-built; NOT yet
--- wired into the existing lib/type/v10_kernel/kernel.lua replayer — that
--- integration is a separate, later task per the charter.
+-- docs/decisions/typechecker-v10-core-charter.md). Cleanroom-built. Wired
+-- into lib/type/v10_kernel/replayer/ (the ratified certificate replayer)
+-- and, on top of that, lib/type/v10_kernel/theories/ (the ported
+-- Algorithm W / Algorithm J theory entries) — the retired
+-- lib/type/v10_kernel/kernel.lua prototype replayer this module was
+-- originally NOT yet wired into has since been ported onto replayer/ and
+-- removed; see NOTATION.md's "Port notes" section.
 --
 --   local kernel = require("lib.type.v10_kernel.term_algebra")
 --   local sig, err = kernel.declare_signature(spec)
