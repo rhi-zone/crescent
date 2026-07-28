@@ -6,6 +6,116 @@ Bench machine: AMD Ryzen 7 5700G, LuaJIT 2.1.1741730670, NixOS Linux 6.12.67.
 
 ---
 
+## 2026-07-28: v10 kernel term algebra — chained-subst regression follow-up (partial fix)
+
+Benchmark: `bin/cr run lib/type/v10_kernel/term_algebra/term_algebra_bench.lua`,
+same script/params as the entry below (`duration=0.5s`, `DEPTH=200`,
+`CHAIN_LEN=50`). Paired A/B in the same session (same machine load) rather
+than comparing across separately-recorded runs, given the chain case's high
+run-to-run variance (see raw numbers below): "before" = commit `f92513d8`
+(the entry below, code unchanged), "after" = commit `6e243de3`.
+
+Root cause investigation (see fast.lua's module header and TODO.md's prior
+entry for the full trace): the chain benchmark's interleaved
+subst-then-inspect pattern is NOT the O(n) "lazy subst helps chains" case
+the design doc envisioned. Forcing a thunk from step i cascades into forcing
+still-unforced thunks embedded from steps < i (each step's `mk_op`
+reconstruction embeds an unforced thunk as a child whenever that child's own
+substitution target is still present in its context), making BOTH tiers
+effectively O(n²) in node reconstructions for this specific access pattern —
+they differ only in per-node constant factor, not asymptotically. Confirmed
+by tracing `mk_subst`/`force_head` by hand against the benchmark's actual
+`build_flat_chain` structure, not by inspection alone.
+
+Two implementation-level fixes applied (constant-factor only, no tier
+behavior change — parity tests + fuzz across 10 `FUZZ_SEED` values stayed
+clean throughout):
+
+1. **`mk_op`'s intern key**: was `"o:" .. tostring(decl) .. ":" ..
+   tostring(child)` per argument — `tostring()` on a table formats a pointer
+   string on every call, paid at every one of the O(n²) forced
+   reconstructions. Replaced with a per-decl identity-keyed id (`decl_id`,
+   a `{ [unknown]: integer }` table keyed by the decl TABLE ITSELF, assigned
+   once per distinct decl the instance ever sees) and a per-node `iid`
+   (assigned once at construction to every var/meta/op/thunk node) — both
+   cheap integers, no string formatting of a pointer.
+   - **First attempt was wrong and caught by the test suite**: using
+     `decl.sig_name .. ":" .. decl.sig_version .. ":" .. decl.name`
+     (content, not identity) collapsed two independently-`declare_signature`d
+     operators with the same name/version into one op_intern bucket, failing
+     `term_algebra_test.lua`'s "operators from different signatures are
+     different operators (decl identity)" case and a parity fuzz property
+     within the first 300 iterations. Fixed by keying on decl table identity
+     instead — the exact invariant shared.lua documents ("operator identity
+     = declared-object identity").
+2. **`force_head`'s op-branch**: skipped the call to `Inst.shift(u, 0, 0)`
+   at the one call site where `bound_count == 0` is known statically (true
+   for every argument in this benchmark's binder-free `app`/`zero` ops) —
+   that call was previously always made, forcing `u` and rebuilding it
+   through `mk_op`/interning to produce something structurally identical to
+   `u` (shift by 0 is the identity for every cutoff). `Inst.shift`'s own
+   public behavior is untouched; this only removes a redundant call this one
+   caller can prove in advance is unnecessary.
+
+**Rejected experiment** (tried, measured, not committed as a standalone
+change — reverted in the same working session before commit `6e243de3`):
+short-circuiting `Inst.shift` itself with `if d == 0 then return t end`
+before forcing. This measurably helped (chain case dropped further) but
+broke an observable contract: this module's own header states "`shift` is
+NOT lazy... it forces a thunk fully, then shifts structurally," and
+`term_algebra_parity_test.lua`'s `make_forcer` explicitly relies on
+`shift(t, 0, 0)` as the ratified-primitives-only way to force a
+possibly-unforced fast-tier term to Concrete for comparison. The
+short-circuit made `shift(t, 0, 0)` return an unforced thunk, which crashed
+`as_concrete` ("unrecognized term tag: thunk") the instant a forced-via-
+shift result was fed to a Concrete-only walker — caught by parity fuzz
+within 300 iterations, both properties, `FUZZ_SEED=1785198562`, input
+`"\4\5\6\7"`. This is a genuine "implementation optimization" vs.
+"observable contract change" boundary case, not something the surrounding
+code merely assumed: another module (the test suite) demonstrably depends
+on `shift` always fully forcing. Left un-shortcut; see the open design
+question below.
+
+```
+BEFORE (commit f92513d8)                    AFTER (commit 6e243de3)
+build:      fast 173.73µs  ref 140.76µs      fast 236.33µs  ref 254.97µs
+  1.23x ref wins                               1.08x ref wins
+equal(self): fast 96.17ns  ref 95.66ns        fast 132.26ns ref 149.16ns
+  1.01x wash                                    1.13x fast wins (noise)
+equal(struct): fast 98.05ns ref 12.52µs       fast 143.92ns ref 21.51µs
+  127.66x fast wins                             149.48x fast wins
+shift:      fast 203.73µs  ref 140.33µs       fast 145.10µs  ref 170.13µs
+  1.45x ref wins                                1.17x ref wins
+subst(single): fast 86.08µs ref 653.01µs      fast 90.16µs  ref 665.45µs
+  7.59x fast wins                               7.38x fast wins
+subst chain (50 steps): fast 29.49ms ref 2.32ms   fast 24.91ms ref 2.10ms
+  12.69x ref wins (single-run)                   11.84x ref wins (single-run)
+```
+
+Multi-run averages (5× each, same session, to control for the chain case's
+high variance — see commit `6e243de3`'s message for the exact runs):
+chain-case slowdown vs. reference reduced from **~13.4x average (before) to
+~11.3x average (after)** — roughly a 15% reduction in how much slower the
+fast tier is, not a fix. The other four cases' wins/losses are unchanged
+within noise (interning's 127–150x structural-equal win and lazy-subst's
+7.4–7.6x single-subst win both preserved, per the module's non-negotiable
+constraint).
+
+**Verdict**: real, verified, semantics-preserving improvement — but a
+partial one. The residual ~11x gap is dominated by the O(n²) forcing
+cascade itself (see root cause above), which is a property of the
+interleaved build-and-inspect access pattern this benchmark deliberately
+exercises, not of key-construction cost. Closing it further requires either
+changing when/how eagerly the fast tier forces (which risks exactly the
+kind of "shift is not lazy" contract violation the rejected experiment hit)
+or restructuring the substitution representation (e.g. an explicit
+substitution-list/environment batching multiple pending substitutions into
+one thunk instead of allocating one thunk per chain step) — both are
+design-level changes, not implementation tweaks, and are recorded as an open
+question in TODO.md rather than attempted here.
+
+---
+
 ## 2026-07-28: v10 kernel term algebra — reference vs. fast tier, first measurements
 
 Benchmark: `bin/cr run lib/type/v10_kernel/term_algebra/term_algebra_bench.lua`,
