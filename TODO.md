@@ -14,7 +14,44 @@ See `docs/roadmap-v2.md` for the authoritative project roadmap and sequencing. T
 
 - [ ] **Indexing a `{ [unknown]: T }`-shaped map with a key narrowed only to `table` (not a primitive) infers `any` at the read site, even with an explicit checked cast (`--[[: T | nil]]`) immediately on that same read.** Minimal repro shape: `memo` typed `{ [unknown]: MemoEntry }`, `node` narrowed via `type(node) == "table"` (never further to a specific record shape, since certificate nodes are a tagged union read generically); `local cached = memo[node] --[[: MemoEntry | nil ]]` still warns "inference fell back to `any` — narrow the source type or annotate to avoid the firewall" at the `memo[node]` subexpression itself, despite the enclosing `local` already carrying the intended cast. `[unknown]`-keyed maps are the correct shape here (both `memo` and the cycle-detection `visiting` set are keyed by certificate-node **table identity**, deliberately, so shared DAG nodes memoize once — there is no primitive id to key by instead). Worked around in `lib/type/v10_kernel/replayer/replay.lua` (`replay_node`) by accepting the warning (0 errors, checker still passes) rather than restructuring node identity around a synthetic string/integer id, which would be a correctness-irrelevant workaround forced onto the data model. Revisit once `[unknown]`-keyed map reads narrow via an explicit read-site cast the same way `[string]`/`[integer]`-keyed map reads already do.
 
-## lib/type/v10_kernel/: v10 trust-core prototype (2026-07-27)
+## lib/type/v10_kernel/: theories ported onto the ratified core, prototype kernel retired (2026-07-28)
+
+**Conformance task completed:** the two theory entries described in the
+section immediately below (`theories/algorithm_w.lua`,
+`theories/algorithm_j.lua`) have been ported onto the ratified
+`docs/decisions/typechecker-v10-core-design.md` term algebra + replayer
+(`lib/type/v10_kernel/term_algebra/`, `lib/type/v10_kernel/replayer/`), and
+the section's own trust core — `kernel.lua`, `registry.lua` — has been
+removed (git history preserves it; ported-not-lost). New: `theories/hm.lua`
+(shared judgment vocabulary + rule/axiom schemas both theories build
+against), `theories/algorithm_w_test.lua` (26 assertions),
+`theories/algorithm_j_test.lua` (22 assertions),
+`theories/discharge_scope_test.lua` (30 assertions, replacing the retired
+`kernel_discharge_scope_test.lua`). `lib/type/v10_kernel/init.lua`,
+`README.md`, `NOTATION.md` updated to describe the current module set — see
+`NOTATION.md`'s "Port notes" section for the full correspondence between the
+retired grammar and the ratified one. No expressiveness gap was hit
+requiring owner escalation; every translation difference (two-pass
+certificate construction instead of inline emission, a discharged
+hypothesis cited as an explicit rule premise instead of an out-of-band
+payload, no wrapping rule needed for a bare variable reference, two
+concrete base-type operators instead of one polymorphic `con(name)`) is
+accounted for by primitives the ratified design already provides
+(schematic axioms, non-linear metavariables shared across premises,
+DAG-shared certificate nodes) — see `README.md`'s and `NOTATION.md`'s "port
+notes" for detail, including two places (App's argument/domain consistency;
+discharge-pattern matching) where the new core structurally verifies more
+than the retired prototype's opaque-payload design ever could. This also
+resolves this section's own "**RESOLVED (2026-07-27, partially...)**" item's
+open half below (ancestor-scoped discharge is superseded by the ratified
+core's own, differently-formulated but verified-equivalent, per-parent DAG
+discharge mechanism — see `theories/discharge_scope_test.lua`) and the
+"design-sync PAUSED" section further below (superseded by
+`docs/decisions/typechecker-v10-core-charter.md` +
+`typechecker-v10-core-design.md`, both already ratified and built against
+before this task started).
+
+## lib/type/v10_kernel/: v10 trust-core prototype, RETIRED — ported above (2026-07-27)
 
 Built an exploratory, dinner-sized prototype of the "v10" typechecker
 architecture's trust core: `lib/type/v10_kernel/registry.lua` (theory
@@ -153,11 +190,28 @@ silently avoided):
 
 ## v10 typechecker: PAUSED pending design sync with external collaborator (2026-07-27)
 
-**Stated explicitly by the project owner this session: no further
+**SUPERSEDED (2026-07-28): the design sync this section paused on has since
+happened and produced two ratified decision docs —
+`docs/decisions/typechecker-v10-core-charter.md` (cleanroom discipline +
+scope) and `docs/decisions/typechecker-v10-core-design.md` (the term
+algebra + replayer design itself, resolving open items 1 and 2 below and
+scheduling 3-6 as campaign tasks).** `lib/type/v10_kernel/term_algebra/` and
+`lib/type/v10_kernel/replayer/` were built fresh against that ratified
+design (cleanroom, per the charter), and the section-above prototype's two
+theory entries have since been ported onto it, with the prototype's own
+`kernel.lua`/`registry.lua` retired — see the dated section above this
+one ("theories ported onto the ratified core, prototype kernel retired").
+This section's original pause instruction and the six-item gating list
+below are kept as historical record of what the sync needed to resolve, not
+current status.
+
+**Stated explicitly by the project owner this session (2026-07-27, now
+historical — see the supersession note just above): no further
 implementation on `lib/type/v10_kernel/` until the conceptual/architectural
 model is fully synced with an external collaborator referred to as
-"fable."** This gates everything in the section above — treat that section's
-prototype as frozen, not a base to build further on, until this syncs.
+"fable."** This gated everything in the section above at the time — treat
+that section's prototype as frozen, not a base to build further on, until
+this synced.
 
 Three decision docs now exist in `docs/decisions/`:
 `typechecker-version-history.md` (why 8 prior typechecker rewrites — v4, v5,
@@ -5312,5 +5366,5 @@ framing.
   **UPDATE 2026-07-28, part 2 (commit `4d0266c2`): the same no-op-`shift`-skip pattern also applied to `match_at`'s non-linear check and `instantiate_at`'s metavariable-paste — both genuinely on replay's hot path (not just the adversarial bench).** The ratified spec (`typechecker-v10-core-design.md`) requires `equal(candidate, shift(stored, d'-d))` for non-linear match and "applies shifts per binding depth" for instantiate; both call `Inst.shift(x, offset, 0)` even when `offset == 0` (the common case), paying `shift`'s full force-and-rebuild-through-`Inst.build` cost for what is mathematically a no-op. Fixed the same way as the `force_head` skip: caller-side skip when the offset is provably 0, `Inst.shift`'s own contract untouched. Verified: parity tests + fuzz clean across 15 `FUZZ_SEED` values.
   **UPDATE 2026-07-28, part 3 (commits `232f0003` + `docs/perf/log.md`'s replay-shaped-benchmarks entry): built and measured replay-shaped benchmarks, per an owner-pressure-tested hypothesis that the chained-subst regression might be against a workload replay never executes. Result: mixed, non-uniform, reported without spin.** `instantiate-heavy` (many independent small `match`-then-`instantiate` rule applications over a growing shared fact chain — the canonical replay shape per the design doc's hot-path description) shows the fast tier winning 33-46x, consistently across repeated runs — strong validation for the workload replay's own hot path actually predicts dominates. But `compose-then-match` (the SAME `CHAIN_LEN`-step substitution composition as the adversarial bench, ending in ONE small rule-sized match instead of a full force — i.e., "compose many, observe once," NOT the interleaved-deep-inspection pattern originally assumed to be the culprit) STILL loses ~9-10x, nearly matching the adversarial bench's own cost. Root cause (confirmed, not the original "interleaved observation" theory): `mk_subst` forces `base` UNCONDITIONALLY on every call regardless of caller-side observation, and — for a term shaped like `var(i)` at depth `i` — stores the fully-FORCED result as each new thunk's `.base`, so the forcing cost compounds across a composed chain no matter when (or whether) the result is inspected. This is the SAME root cause and the SAME open design question below (thunk-of-thunk chaining), not a new one. `equal` citation-check (pairwise equal over a growing shared-prefix fact pool) came out roughly a wash (fast tier ~1.4-1.8x slower) — explained by these particular facts diverging at the top level, so there's no interned-pointer win to exploit either way; not evidence against the design, just a workload that doesn't exercise interning's strength. Bottom line: the fast tier's justification is workload-dependent, confirmed by measurement — strong for match/instantiate-heavy replay, weak for substitution-chaining regardless of when the chained result is observed. Whether replay's actual critical path chains substitutions this way is outside this cleanroom investigation's reach (would require reading `kernel.lua`'s replayer, excluded by the charter) — see the design question below, now updated to reflect this.
 - [ ] **OPEN DESIGN QUESTION (surfaced 2026-07-28 while investigating the chained-subst regression above, not resolved — see `docs/perf/log.md` for the investigation): does `kernel-lazy-subst-sound-v1`'s "lazy subst helps chains" premise need re-scoping to exclude the interleaved build-and-inspect access pattern, or is a representation change (e.g. an explicit substitution-list/environment batching multiple pending substitutions into one thunk instead of one thunk per chain step) the intended way to cover that pattern too?** Both are ratified-semantics-or-representation-level calls, not implementation tweaks — out of scope for an implementation-only fix per the cleanroom charter's own rules (a change here would need to stay observably identical to the current tiers per parity, which a representation change of this kind likely cannot promise without becoming a NEW axiom/primitive needing its own registry entry and owner ratification, per `docs/decisions/typechecker-v10-core-design.md`). A related, narrower rejected experiment (`Inst.shift` short-circuiting at `d == 0` without forcing) is recorded in `docs/perf/log.md`'s 2026-07-28 follow-up entry as a concrete example of why "just make shift lazier" isn't a free implementation-level move either — `shift`'s current "always forces fully" behavior is itself something other code (`term_algebra_parity_test.lua`'s `make_forcer`) already treats as a load-bearing, relied-upon contract, not an incidental detail.
-  **UPDATE 2026-07-28 (replay-shaped benchmarks, see part 3 above and `docs/perf/log.md`): the "interleaved build-and-inspect" framing this question was originally posed against turns out NOT to be the operative distinction — `compose-then-match` (composes many substitutions with ZERO intermediate observation, then ONE small match) loses by almost the same margin as the fully-interleaved adversarial bench.** The re-scoping question is therefore sharper than originally posed: it is not "does replay ever interleave deep inspection with substitution" (it doesn't, confirmed) but "does replay's actual critical path ever COMPOSE MULTIPLE substitutions on one term before using the result, versus always applying at most one substitution per match/instantiate step" — the latter is exactly what `instantiate-heavy`'s 33-46x win models, and if it's also what replay always does, the chaining weakness may be moot in practice without needing either re-scoping OR a representation change. This is a question about `kernel.lua`'s replayer's actual call pattern, which this cleanroom-scoped investigation cannot answer (charter excludes reading it) — genuinely open, owner/replayer-side territory, not implementation work.
+  **UPDATE 2026-07-28 (replay-shaped benchmarks, see part 3 above and `docs/perf/log.md`): the "interleaved build-and-inspect" framing this question was originally posed against turns out NOT to be the operative distinction — `compose-then-match` (composes many substitutions with ZERO intermediate observation, then ONE small match) loses by almost the same margin as the fully-interleaved adversarial bench.** The re-scoping question is therefore sharper than originally posed: it is not "does replay ever interleave deep inspection with substitution" (it doesn't, confirmed) but "does replay's actual critical path ever COMPOSE MULTIPLE substitutions on one term before using the result, versus always applying at most one substitution per match/instantiate step" — the latter is exactly what `instantiate-heavy`'s 33-46x win models, and if it's also what replay always does, the chaining weakness may be moot in practice without needing either re-scoping OR a representation change. This is a question about the replayer's actual call pattern (`lib/type/v10_kernel/replayer/replay.lua`, called "kernel.lua's replayer" here since it was written before the theories' conformance port — the retired `kernel.lua` this originally meant no longer exists, see the 2026-07-28 "theories ported onto the ratified core" TODO section above), which this cleanroom-scoped perf investigation could not answer at the time (charter excluded reading `replayer/` from the term-algebra-only perf work) — genuinely open, owner/replayer-side territory, not implementation work. The 2026-07-28 conformance port (`theories/algorithm_w.lua`, `theories/algorithm_j.lua`) exercises `replay.lua` via `match`-then-`instantiate` per rule citation, one substitution-free step per premise (no composed substitution CHAINS on the replayer's own hot path) — consistent with the `instantiate-heavy` benchmark's shape, not `compose-then-match`'s, though this is an incidental observation from the port, not a targeted answer to this question.
 

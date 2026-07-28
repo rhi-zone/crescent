@@ -1,179 +1,171 @@
-# v10 kernel — certificate notation
+# v10 kernel — term algebra and certificate notation
 
-This is the grammar the kernel (`kernel.lua`) replays. It is deliberately
-small — a stranger should be able to read this page and then read
-`kernel.lua` and `theories/algorithm_w.lua` without needing anything else.
+This describes the CURRENT `lib/type/v10_kernel/` grammar: sorted ABT term
+algebra (`term_algebra/`) plus a certificate replayer built on top of it
+(`replayer/`). The retired prototype this directory used to hold
+(`kernel.lua`, `registry.lua`, opaque-string certificates keyed by rule
+name) has been ported onto this grammar and removed — see
+`docs/decisions/typechecker-v10-core-design.md` and
+`docs/decisions/typechecker-v10-core-charter.md` for the ratified design
+this page restates in this directory's own words, and the "Port notes"
+section below for what changed structurally in the port.
 
-## Certificate
+## Term grammar (`term_algebra/`)
+
+Exactly three node forms, sorted, de Bruijn-indexed:
 
 ```
-Certificate = {
-  theory:      string,               -- name of the registered theory (must match Registry.theory)
-  nodes:       { [node_id]: Node },   -- every derivation step, keyed by its own id
-  hypotheses:  { [hyp_id]: Hypothesis },  -- every hypothesis assumed anywhere in the certificate
-  root:        node_id,               -- the node whose conclusion is the certificate's overall claim
+var(index, sort)     -- bound-variable reference; intrinsically sorted
+op(decl, args)        -- operator node; args[i] = { bound_count, term }
+meta(id, sort)         -- metavariable; legal in PATTERN positions only
+```
+
+Operator vocabularies are declared once per theory via
+`term_algebra.declare_signature(spec)`:
+
+```
+spec = {
+  name: string, version: integer,
+  sorts: { sortname, ... },
+  ops: { [opname]: { result: sortname, args: { { sort: sortname, binds: { sortname, ... } | nil }, ... } | nil } },
 }
 ```
 
-## Node — a judgment-at-a-locus, justified by a rule citation
+`build(decl, args)` is the ONLY way to construct a term; ill-sorted or
+malformed terms are unrepresentable, not merely rejected. See
+`term_algebra/reference.lua`'s header for the full primitive set
+(`equal`/`shift`/`subst`/`match`/`instantiate`/`is_ground`/`is_closed`/
+`sort_of`) and the reference-vs-fast tier split.
+
+## Certificate grammar (`replayer/`)
+
+Exactly three certificate node kinds (`replayer/certificate.lua`):
 
 ```
-Node = {
-  id:         string,          -- this node's own id (matches its key in Certificate.nodes)
-  rule:       string,          -- CITATION: name of a rule schema registered in the theory registry
-  judgment:   string,          -- which judgment this node concludes (must match the cited schema's judgment)
-  locus:      string,          -- where in the source term this judgment holds ("judgment-at-a-locus")
-  conclusion: <opaque>,        -- theory-specific payload (e.g. { term, type }). The kernel only checks it's non-nil.
-  premises:   { node_id, ... },        -- sub-derivations this node's rule cites (its "hypotheses" in the proof-tree sense). May repeat a node_id already cited elsewhere in the certificate (a shared sub-derivation) -- premises form a DAG, not only a tree. See "Discharge scoping" below.
-  assumes:    { hyp_id, ... } | nil,   -- hypothesis ids this node's derivation structurally depends on (e.g. a variable lookup)
-  discharges: { hyp_id, ... } | nil,   -- hypothesis ids this node's rule discharges (e.g. a lambda binding its parameter)
-}
+hypothesis(id, judgment)              -- leaf; the ONLY content-carrying
+                                          node kind; unchecked at
+                                          construction, validated only at
+                                          discharge
+cite_axiom(axiom_decl, bindings)      -- cites a declared axiom; conclusion
+                                          = instantiate(axiom.pattern, bindings)
+cite_rule(rule_decl, premises,
+          discharges)                 -- cites a declared rule schema +
+                                          premise nodes + per-discharge-slot
+                                          hypothesis-id sets
 ```
 
-## Hypothesis — an assumption that must be discharged somewhere
+Rule/axiom schemas are declared once via `replayer.declare_rule(spec)` /
+`replayer.declare_axiom(spec)` (`replayer/registry.lua`):
 
 ```
-Hypothesis = {
-  id:        string,
-  judgment:  string,    -- what judgment this hypothesis states
-  payload:   <opaque>,  -- theory-specific (e.g. { name, type })
-}
+RuleDecl  = { premises: pattern[], conclusion: pattern, discharges: { premise: integer, pattern: pattern }[] }
+AxiomDecl = { pattern: pattern }   -- schematic; ground = zero-metavariable case
 ```
 
-## RuleSchema — what a theory registers, once, per rule
+Certificate nodes carry NO conclusions — `replayer.new(k):replay(node)`
+computes `(conclusion, taint, open)` bottom-up per node, memoized, by
+matching a cited rule's premise patterns against the ACTUAL premises'
+(recursively replayed) conclusions in one shared binding environment, then
+instantiating the rule's conclusion pattern. Nothing inside a certificate
+can lie about its content: a producer bug yields a different conclusion,
+never a wrong-but-accepted one.
 
-```
-RuleSchema = {
-  name:       string,    -- the string a Node.rule cites
-  judgment:   string,    -- the judgment a node citing this schema must conclude
-  arity:      integer,   -- exact required length of Node.premises for a node citing this schema
-  assumes:    boolean | nil,     -- whether a node citing this schema may set `assumes`
-  discharges: boolean | nil,     -- whether a node citing this schema may set `discharges`
-}
-```
+**Discharge**: labeled, by explicit hypothesis-id citation. A rule schema
+declares discharge slots as `(premise_index, hypothesis_pattern)`; a citing
+node names, per slot, the SET of open hypothesis ids it discharges there
+(ids only, never content). Replay checks each named id is open in the cited
+premise's own open-hypothesis set and that its carried judgment equals
+`instantiate(slot_pattern, bindings)`; valid ids are subtracted, everything
+unnamed stays open and bubbles upward. `replay_root` additionally requires
+the conclusion be ground AND closed, and the open-hypothesis set empty.
 
-**Confirmed by adding a second theory (Algorithm J, see
-`theories/algorithm_j.lua`):** a `RuleSchema` describes a judgment and a
-node's structural shape only — never anything about how a producer derives
-that conclusion. Two producers implementing the same judgment (Algorithm W
-and Algorithm J both derive the same Damas-Milner `has_type` judgment, one
-functionally, one imperatively) can therefore cite the literal same
-`RuleSchema` objects, registered into their own separately-scoped
-`Registry` instances, with no kernel or registry changes. `registry.lua`
-already scopes schemas per `Registry`, and `kernel.lua`'s `M.replay` only
-ever consults the one registry passed to it — this is what makes the reuse
-possible without either trusted file needing to know it's happening.
+**Taint**: a node property, computed bottom-up by set union (own axiom
+citation, if any, union of premises' taints). Kernel-config (tier) trust is
+carved out into a separate run-level label (`{eq, subst}`), never mixed into
+node taint — see `replayer/replay.lua`'s header.
 
-## What the kernel checks, and in what order (`kernel.lua`'s `M.replay`)
+**DAG sharing**: a certificate node may be cited as a premise of more than
+one parent. There is no single node-level discharge verdict computed once
+against the whole DAG — each parent's own replay independently unions its
+premises' open sets and subtracts what ITS OWN discharge slots name. A
+shared subderivation with an open hypothesis is validly discharged through
+one parent and left open through another; `replay_root` on each parent's own
+root reflects that parent's own obligation. See
+`replayer/replayer_test.lua`'s "MANDATORY: DAG-shared discharge" case.
 
-1. `certificate.theory == registry.theory` (right registry for this certificate).
-2. DFS from `certificate.root` over `premises` edges. Per node visited:
-   - **citation validity**: `registry.lookup(node.rule)` must resolve.
-   - **rule instantiation**: `node.judgment` must equal the schema's `judgment`;
-     `#node.premises` must equal the schema's `arity`; `node.assumes` may only
-     be set if the schema's `assumes` is true; same for `discharges`.
-   - **well-foundedness**: a node currently being visited that is visited
-     again (i.e. reachable from itself) is a cycle — rejected immediately,
-     no traversal ever loops.
-3. **Hypothesis discharge (ancestor-scoped)**: `premises` edges form a DAG
-   rooted at `certificate.root` (a tree is the special case where every node
-   has exactly one parent). Compute, for every reachable node, the set of
-   hypothesis ids guaranteed discharged by an ANCESTOR on **every**
-   root-to-node path reaching it — the intersection, across each incoming
-   `premises` edge from a parent P, of (P's own ancestor-discharge set
-   UNION P's own `discharges`). Then for every `hyp_id` appearing in any
-   reachable node's `assumes`, require (a) it is defined in
-   `certificate.hypotheses`, and (b) it is in that node's ancestor-discharge
-   set. Either miss is rejected. A hypothesis discharged only on a sibling
-   branch, or only on some (not all) of the paths reaching a shared node,
-   does not count — see "Discharge scoping" below.
+## Ported theory entries (`theories/`)
 
-The kernel never reads `conclusion` or `Hypothesis.payload` beyond checking
-existence — it has no idea what a "type," "term," or "unify" is. All meaning
-lives in the theory (the schemas registered, and the producer that cites
-them, e.g. `theories/algorithm_w.lua`).
+`theories/hm.lua` declares the shared Hindley-Milner judgment vocabulary
+(`hm-judgment` signature: `int_ty`/`bool_ty`/`arrow_ty`/`has_type`) and rule
+schemas (`hm-abs`, `hm-app`, `hm-let`) plus an axiom (`hm-ax-lit`), built
+against a caller-supplied `term_algebra` tier instance. `theories/algorithm_w.lua`
+and `theories/algorithm_j.lua` are untrusted PRODUCERS — Algorithm W
+(functional substitution map) and Algorithm J (mutable ref cells /
+union-find), the same toy four-construct lambda calculus (lit/var/abs/app/let)
+as the retired prototype, still de Bruijn-indexed, still deliberately
+non-generalizing on `let` — that emit certificates over `hm.lua`'s
+vocabulary. The replayer never runs either producer's code.
 
-## Discharge scoping
+### Port notes (what changed going from the retired prototype to this grammar)
 
-Hypothesis discharge is checked by **ancestor-path scoping**, the way
-variable scoping works in a proof tree or lambda calculus: a hypothesis a
-node `assumes` must be discharged by a node that structurally encloses it —
-present on every root-to-node path through `premises` — not merely by some
-other node anywhere in the certificate. A discharge on an unrelated branch
-no longer satisfies an assumption in a sibling branch.
+- **No name-keyed citation.** The retired kernel resolved a node's `rule`
+  field by string name against a per-theory `Registry`. `cite_rule`/
+  `cite_axiom` take the declared rule/axiom OBJECT directly — there is no
+  registry, no name lookup, and therefore no "citation to an unregistered
+  name" failure mode; a malformed citation is instead rejected by
+  `cite_rule`'s own shape validation at construction time, earlier and
+  stronger than the retired design's replay-time-only check.
+- **Rule/axiom identity is the declared object, not a per-theory
+  registration.** `algorithm_j.lua` shares `theories/hm.lua`'s vocabulary
+  with `algorithm_w.lua` even more directly than the retired prototype's
+  "J re-registers W's schemas into its own registry" — there is no
+  registration step at all; both simply hold a reference to the same
+  declared objects.
+- **A rule's discharge target must be an explicit premise, not an
+  out-of-band payload.** The retired prototype recorded a fresh
+  hypothesis's type in `Hypothesis.payload`, fully opaque to the kernel,
+  and discharged it via an unchecked id list. The new core's discharge
+  slots are checked structurally (`instantiate(slot_pattern, bindings)`
+  must equal the discharged hypothesis's actual judgment), and a rule's
+  bindings only ever come from matching its OWN declared premises — so
+  `hm-abs`/`hm-let` cite the hypothesis they introduce as an explicit
+  premise of the rule itself (the standard natural-deduction shape: the
+  assumption you discharge is a premise of the intro rule), not merely
+  something a var-lookup happens to reference somewhere inside another
+  premise's subtree.
+- **A variable reference needs no rule at all.** The retired prototype's
+  `W-Var`/`assumes` was a 0-premise node restating a hypothesis's judgment.
+  Under the new core, DAG-sharing the hypothesis leaf node itself wherever
+  the bound name is referenced already IS that judgment (replay computes a
+  hypothesis leaf's conclusion as its own carried judgment) — no wrapping
+  schema needed.
+- **Two-pass certificate construction.** Term algebra terms must be ground
+  the instant they're built; there is no cross-node "same unification
+  variable, resolved later" identity the way a shared substitution map (W)
+  or mutable cell (J) provided. Both theories now run their real inference
+  to completion first (unchanged from the retired algorithm), THEN
+  re-walk the term a second, deterministic time building certificate nodes
+  from the now-fully-resolved types. See `algorithm_w.lua`'s and
+  `algorithm_j.lua`'s headers for the full rationale.
+- **App's argument/domain consistency is now independently verified by
+  replay itself**, via a shared (non-linear) metavariable across `hm-app`'s
+  two premise patterns — the retired kernel's opaque `conclusion` payload
+  meant this consistency was entirely the untrusted producer's own
+  responsibility, unverified by the trust core.
+- **No cosmetic node fields.** The retired grammar's `locus` and cosmetic
+  display names rode along on every node/hypothesis. The new certificate
+  grammar has no room for them (nodes carry only what replay needs); this
+  drops nothing semantically load-bearing, since the retired kernel never
+  checked those fields either.
+- **Two concrete base types, not an arbitrary `con(name)`.** `term_algebra`
+  operators carry no free-form payload field, so each base type the ported
+  theories exercise (`integer`, `boolean`) is its own declared nullary
+  operator (`int_ty`, `bool_ty`) rather than one polymorphic `con(name)`
+  constructor. Adding another base type means declaring another operator in
+  `hm.lua`, not passing a new string.
 
-`premises` edges may form a DAG, not only a tree: a node MAY be listed as a
-premise of more than one parent (a shared sub-derivation). Neither W's nor
-J's producers ever emit a shared node today (each is built fresh per
-source-term occurrence), so this generalization has no effect on any
-certificate either theory currently produces — a tree is just the DAG case
-where every node has one parent. When a node genuinely is shared, its
-assumption must be discharged by an ancestor on **every** path that reaches
-it, not merely one: this is what makes a DAG certificate mean the same thing
-as the (possibly larger) tree you'd get by unfolding each shared node into
-one copy per incoming path, since each unfolded copy would independently
-need its own ancestor-discharge.
-
-Real scoping beyond this — shadowing, alpha-equivalence, binder identity,
-capture-avoiding substitution — is still exactly the machinery the rejected
-`lib/type/framework/` attempt built (see
-`docs/typechecker-framework-postmortem.md`) and remains explicitly out of
-scope for this dinner-sized prototype. See `TODO.md`.
-
-## Term binder representation: de Bruijn indices (2026-07-27)
-
-Both theory entries (`theories/algorithm_w.lua`, `theories/algorithm_j.lua`)
-represent lambda-calculus terms using de Bruijn indices for variable
-binding, not source names:
-
-```
-var term  = { tag: "var", index: integer, name: string, locus: string }
-abs term  = { tag: "abs", param: string, body: Term, locus: string }
-let term  = { tag: "let", name: string, value: Term, body: Term, locus: string }
-```
-
-`index` is the de Bruijn index: `0` refers to the nearest enclosing binder
-(the innermost `abs`'s parameter or `let`'s bound name), `1` the next one
-out, and so on. The environment each producer threads through `infer` is a
-depth-indexed list (position 1 = index 0), extended by prepending one entry
-per binder (`env_extend` in both theory files) — never a name-keyed table.
-Variable lookup is `env[index + 1]`; there is no name comparison anywhere in
-either producer's binder-resolution path.
-
-`param` (on `abs`) and `name` (on `let` and `var`) are purely COSMETIC
-display strings — used only to label hypothesis payloads and node
-conclusions for readability (error messages, certificate pretty-printing).
-They are never consulted for lookup, unification, or any identity- or
-soundness-relevant comparison. Two variables at different de Bruijn depths
-may legitimately share a display name (shadowing); when they do, the index
-is what is semantically load-bearing, always — the display name is not.
-
-**Which framework lessons this closes, and which it doesn't**
-(`docs/typechecker-framework-postmortem.md`'s three carry-forward lessons):
-
-- **Lesson 1 (binder identity must be lexical position, never source-name
-  comparison) — now structurally true, not just true by implementation
-  accident.** Before this change, shadowing worked only because each theory's
-  environment was an ordinary Lua table chain (`setmetatable(..., { __index
-  = env })`) that happened to resolve innermost-first — nothing in the
-  certificate grammar tracked binder identity. Under de Bruijn there is no
-  name to compare in the first place; a lookup is an integer index into a
-  depth-indexed list. This is now true by construction.
-- **Lesson 3 (alpha-stable digests) — now free.** Alpha-equivalent named
-  terms (e.g. `\x -> x` and `\y -> y`) produce byte-identical de Bruijn terms
-  (`{ tag = "abs", param = <cosmetic>, body = { tag = "var", index = 0, ... } }`
-  either way — only the cosmetic `param`/`name` strings can differ, and
-  those are never part of what a digest over binding structure would need to
-  consider). Digesting a de Bruijn term for alpha-equivalence needs no
-  dedicated machinery, unlike the rejected `framework/` attempt's 239-line
-  `alpha.lua`.
-- **Lesson 2 (capture-avoidance must be a CHECKED condition, never assumed)
-  — only PARTIALLY resolved, do not overclaim this as closed.** De Bruijn
-  shift/substitution is capture-avoiding by construction of one correct
-  algorithm, which narrows what a future checked condition would need to
-  verify. But the kernel's whole discipline is to trust no producer's code —
-  W and J are untrusted producers `kernel.lua` never runs — and nothing in
-  this kernel replays or verifies that either producer's `infer` actually
-  performs shift/substitution correctly. A checked capture-avoidance
-  condition, replayed by the kernel the way hypothesis discharge already is,
-  remains unbuilt. See `TODO.md`.
+Binder representation (de Bruijn indices for the OBJECT-language lambda
+terms `algorithm_w.lua`/`algorithm_j.lua` infer over) is unchanged from the
+retired prototype and lives entirely in those files' own untrusted
+producers — it was never part of the trusted kernel/replayer's grammar
+either before or after this port.

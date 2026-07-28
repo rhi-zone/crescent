@@ -1,100 +1,70 @@
--- lib/type/v10_kernel/w.lua
--- Algorithm W, dinner-sized: the v10 kernel's founding theory-registry entry.
+-- lib/type/v10_kernel/theories/algorithm_w.lua
+-- Algorithm W, ported onto the ratified v10 core
+-- (docs/decisions/typechecker-v10-core-design.md,
+-- docs/decisions/typechecker-v10-core-charter.md). An UNTRUSTED PRODUCER:
+-- it runs its own toy Hindley-Milner-style inference for a four-construct
+-- lambda calculus (lit/var/abs/app/let) and emits a certificate the
+-- replayer (lib/type/v10_kernel/replayer/) can replay purely structurally,
+-- citing the hm.lua rule/axiom vocabulary. The replayer never runs this
+-- code path and knows nothing about it.
 --
--- A toy Hindley-Milner-style inferencer for a four-construct lambda calculus
--- (lit, var, abs, app, let). It is an UNTRUSTED PRODUCER: it runs its own
--- inference algorithm — the kernel never runs this code path and knows
--- nothing about it — and emits a certificate the kernel can replay purely
--- structurally, by citing the rule schemas `M.register_rules` registers.
+-- DELIBERATE, DOCUMENTED WEAKNESS (carried over from the retired prototype,
+-- unchanged): does NOT generalize let-bindings into type schemes. `let x =
+-- e1 in e2` infers e1's type once and binds x to that concrete
+-- (monomorphic) type for e2 — a type variable free in e1's type gets
+-- unified against whatever the FIRST use in e2 requires and stays pinned
+-- there; a second, differently-typed use of the same let-bound name is
+-- rejected. See algorithm_w_test.lua's "known limitation" case. No occurs
+-- check either, also carried over.
 --
--- DELIBERATE, DOCUMENTED WEAKNESS: this implementation does NOT generalize
--- let-bindings into type schemes. `let x = e1 in e2` infers e1's type once
--- and binds x to that concrete (monomorphic) type for e2 — it never
--- produces a forall-quantified scheme re-instantiated fresh at each use.
--- A type variable free in e1's type therefore gets unified (mutated in
--- place, via `subst`) against whatever the FIRST use in e2 requires, and
--- stays pinned there: a second, differently-but-compatibly-typed use of the
--- same let-bound name is rejected. This is the classic v1 "online
--- unification" failure mode documented in
--- docs/decisions/typechecker-version-history.md ("v1 — original
--- online-unification checker"), reproduced here on purpose as the founding
--- entry's known limitation, not a bug to fix — see kernel_test.lua's
--- "known limitation" case, which demonstrates it and does not attempt to
--- work around it.
+-- TWO-PASS CONSTRUCTION (the actual porting finding — see hm.lua's header
+-- for the vocabulary/rule-shape findings): the retired prototype built
+-- certificate nodes INLINE, one recursive descent, because its certificate
+-- grammar's `conclusion`/hypothesis `payload` fields were fully OPAQUE
+-- strings the kernel never checked — a hypothesis introduced for an
+-- abs/let binder could carry a still-unresolved type variable's display
+-- string at creation time, later becoming stale once further unification
+-- elsewhere pinned it, and nothing ever noticed because nothing ever
+-- looked. The new core's term_algebra has no analogous "fill in later"
+-- placeholder: every certificate node's judgment must be a GROUND term the
+-- moment it's built (a metavariable may never survive into a concluded
+-- judgment or a hypothesis that must later match one structurally), and
+-- there is no cross-node "same unification variable" identity spanning
+-- separate certificate nodes the way a shared `subst` map provided. So
+-- `certify` runs Algorithm W's real inference (fresh type variables +
+-- global substitution map, exactly as before, entirely OUTSIDE
+-- term_algebra) to completion FIRST, producing an annotated copy of the
+-- term recording each binder's own (Lua-internal, not-yet-materialized)
+-- `WType`; only THEN does a second, purely mechanical pass walk that
+-- annotated tree and build actual term_algebra terms + certificate nodes,
+-- with every type fully resolved (`deep_resolve`) by construction. This is
+-- a required restructuring for any incremental/mutable-unification
+-- algorithm targeting this certificate model, not a workaround for a gap —
+-- see hm.lua's header, "Finding 3", for the flip side (the new core
+-- catches consistency mistakes the old opaque-payload design structurally
+-- could not).
 --
--- Also omitted, on purpose, for dinner-sized scope: an occurs check (no
--- protection against constructing an infinite type).
---
--- BINDER REPRESENTATION (2026-07-27, standardized on de Bruijn indices):
--- `var` terms carry a de Bruijn INDEX (0 = the nearest enclosing binder,
--- counting outward), not a source name. The environment is a depth-indexed
--- list (`WEnv`, position 1 = index 0 = innermost), extended by prepending
--- one entry per `abs`/`let` binder (`env_extend`) — never looked up by
--- name. Every `abs`/`let`/`var` term also carries a purely COSMETIC display
--- name (`param`, `name`, or `var.name`) used only for hypothesis-payload and
--- conclusion readability (error messages, certificate pretty-printing); it
--- is never read by `infer`'s lookup, by `unify`, or by anything
--- identity/soundness-relevant. Two variables at different indices may
--- legitimately share a display name (shadowing) — the index is what's
--- load-bearing, always.
---
--- This closes two of the three carry-forward lessons from the rejected
--- `lib/type/framework/` attempt (`docs/typechecker-framework-postmortem.md`)
--- structurally rather than by convention: binder identity is lexical
--- position by construction (there is no name to compare — Lesson 1), and
--- alpha-equivalent terms are byte-identical de Bruijn terms, so digesting is
--- free (Lesson 3, no `alpha.lua`-style machinery needed). Capture-avoidance
--- as a CHECKED condition (Lesson 2) is only partially addressed: de Bruijn
--- shift/subst is capture-avoiding by construction of one correct algorithm,
--- but nothing in this kernel replays or verifies that construction — W/J
--- remain untrusted producers `kernel.lua` never runs. See NOTATION.md.
+-- BINDER REPRESENTATION: unchanged from the retired prototype — `var` terms
+-- carry a de Bruijn INDEX (0 = nearest enclosing binder), not a source
+-- name; the environment threaded through both passes is a depth-indexed
+-- list, never looked up by name. `param`/`name` display strings remain
+-- purely cosmetic (used only in error messages here — the new certificate
+-- grammar has no field for them at all, unlike the retired prototype's
+-- `locus`/cosmetic-name node fields, so they don't even ride along into the
+-- certificate; this is a straightforward consequence of nodes carrying no
+-- payload beyond what replay computes, not a loss of anything
+-- semantically load-bearing, since the retired design never checked them
+-- either).
 
-local registry_mod = require("lib.type.v10_kernel.registry")
-
---:: require "lib.type.v10_kernel.registry"
+local replayer = require("lib.type.v10_kernel.replayer")
 
 local M = {}
 
 M.THEORY = "algorithm_w"
 
 --:: WTerm = { tag: "lit", base: string, value: unknown, locus: string } | { tag: "var", index: integer, name: string, locus: string } | { tag: "abs", param: string, body: WTerm, locus: string } | { tag: "app", fn: WTerm, arg: WTerm, locus: string } | { tag: "let", name: string, value: WTerm, body: WTerm, locus: string }
---:: WType = { tag: "con", name: string } | { tag: "var", id: string } | { tag: "fun", from: WType, to: WType }
---:: WNode = { id: string, rule: string, judgment: string, locus: string, conclusion: unknown, premises: { [integer]: string }, assumes?: { [integer]: string }, discharges?: { [integer]: string } }
---:: WHypothesis = { id: string, judgment: string, payload: unknown }
---:: WCert = { theory: string, nodes: { [string]: WNode }, hypotheses: { [string]: WHypothesis }, root: string }
-
--- ---- rule schemas -------------------------------------------------------
-
--- Exposed as M.RULES (not just a local) because these five schemas state a
--- judgment shape (has_type; lit/var/abs/app/let arities and assumes/
--- discharges flags), not anything specific to W's functional-substitution
--- implementation style. theories/algorithm_j.lua — the same Damas-Milner
--- algorithm in its imperative, mutable-ref-cell reformulation — registers
--- these exact schema objects into its own (separately-scoped) registry
--- rather than re-declaring identical ones, since the underlying judgment is
--- provably the same one. See algorithm_j.lua's header for the citation-
--- naming tradeoff that choice implies.
-local RULES = {
-	{ name = "W-Lit", judgment = "has_type", arity = 0 },
-	{ name = "W-Var", judgment = "has_type", arity = 0, assumes = true },
-	{ name = "W-Abs", judgment = "has_type", arity = 1, discharges = true },
-	{ name = "W-App", judgment = "has_type", arity = 2 },
-	{ name = "W-Let", judgment = "has_type", arity = 2, discharges = true },
-}
-M.RULES = RULES
-
--- Register every W rule schema into `registry`. Call once before certifying
--- against it.
---: (Registry) -> (boolean | nil, string | nil)
-function M.register_rules(registry)
-	for _, schema in ipairs(RULES) do
-		local ok, err = registry_mod.register(registry, schema)
-		if not ok then return nil, err end
-	end
-	return true
-end
-
--- ---- types, substitution, unification -----------------------------------
+--:: WType = { tag: "con", base: string } | { tag: "var", id: string } | { tag: "fun", from: WType, to: WType }
+--:: Subst = { [string]: WType }
 
 local fresh_counter = 0
 --: () -> WType
@@ -103,20 +73,13 @@ local function fresh_var()
 	return { tag = "var", id = "t" .. fresh_counter }
 end
 
---: (string) -> WType
-local function con(name)
-	return { tag = "con", name = name }
-end
-
---: (WType, { [string]: WType, ... }) -> WType
+--: (WType, Subst) -> WType
 local function resolve(t, subst)
-	while t.tag == "var" and subst[t.id] do
-		t = subst[t.id]
-	end
+	while t.tag == "var" and subst[t.id] do t = subst[t.id] end
 	return t
 end
 
---: (WType, { [string]: WType, ... }) -> WType
+--: (WType, Subst) -> WType
 local function deep_resolve(t, subst)
 	t = resolve(t, subst)
 	if t.tag == "fun" then
@@ -125,20 +88,14 @@ local function deep_resolve(t, subst)
 	return t
 end
 
---: (WType, WType, { [string]: WType, ... }) -> (boolean | nil, string | nil)
+--: (WType, WType, Subst) -> (boolean | nil, string | nil)
 local function unify(a, b, subst)
 	a = resolve(a, subst)
 	b = resolve(b, subst)
-	if a.tag == "var" then
-		subst[a.id] = b
-		return true
-	end
-	if b.tag == "var" then
-		subst[b.id] = a
-		return true
-	end
+	if a.tag == "var" then subst[a.id] = b; return true end
+	if b.tag == "var" then subst[b.id] = a; return true end
 	if a.tag == "con" and b.tag == "con" then
-		if a.name ~= b.name then return nil, "cannot unify " .. a.name .. " with " .. b.name end
+		if a.base ~= b.base then return nil, "cannot unify " .. a.base .. " with " .. b.base end
 		return true
 	end
 	if a.tag == "fun" and b.tag == "fun" then
@@ -149,141 +106,184 @@ local function unify(a, b, subst)
 	return nil, "cannot unify " .. tostring(a.tag) .. " with " .. tostring(b.tag)
 end
 
---: (WType) -> string
-local function show_type(t)
-	if t.tag == "con" then return t.name end
-	if t.tag == "var" then return "'" .. t.id end
-	if t.tag == "fun" then return "(" .. show_type(t.from) .. " -> " .. show_type(t.to) .. ")" end
-	return "?"
-end
+-- ── Pass 1: type inference only (no term_algebra/replayer involvement) ──────
 
--- ---- certificate construction -------------------------------------------
+--:: WEnv = { [integer]: WType }
 
---:: Builder = { nodes: { [string]: WNode }, hypotheses: { [string]: WHypothesis }, node_counter: integer, hyp_counter: integer }
-
---: () -> Builder
-local function new_builder()
-	return { nodes = {}, hypotheses = {}, node_counter = 0, hyp_counter = 0 }
-end
-
---: (Builder, unknown) -> string
-local function add_node(b, node)
-	b.node_counter = b.node_counter + 1
-	local id = "n" .. b.node_counter
-	node.id = id
-	b.nodes[id] = node
-	return id
-end
-
---: (Builder, string, WType) -> string
-local function add_hyp(b, name, wtype)
-	b.hyp_counter = b.hyp_counter + 1
-	local id = "h" .. b.hyp_counter
-	b.hypotheses[id] = { id = id, judgment = "has_type", payload = { name = name, type_str = show_type(wtype) } }
-	return id
-end
-
---:: WEnvEntry = { hyp_id: string, type: WType, name: string }
---:: WEnv = { [integer]: WEnvEntry }
-
--- Prepend one binder onto `env` (depth-indexed, position 1 = de Bruijn index
--- 0 = innermost/nearest enclosing binder). Never mutates `env` itself, so a
--- reference to the pre-extension environment (e.g. captured by a sibling
--- subterm) stays valid — same non-mutating-extension discipline the old
--- `setmetatable(..., { __index = env })` chain had, just index- rather than
--- name-keyed.
---: (WEnv, WEnvEntry) -> WEnv
-local function env_extend(env, entry)
-	local extended = { entry }
-	for i = 1, #env do
-		extended[i + 1] = env[i]
-	end
+--: (WEnv, WType) -> WEnv
+local function env_extend(env, t)
+	local extended = { t }
+	for i = 1, #env do extended[i + 1] = env[i] end
 	return extended
 end
 
---: (WTerm, WEnv, { [string]: WType, ... }, Builder) -> (WType | nil, string | nil, string | nil)
-local function infer(term, env, subst, b)
+--: (WTerm, WEnv, Subst) -> (WType | nil, string | nil)
+local function infer_types(term, env, subst)
 	if term.tag == "lit" then
-		local t = con(term.base)
-		local node_id = add_node(b, {
-			rule = "W-Lit", judgment = "has_type", locus = term.locus,
-			conclusion = { term = term.locus, type_str = show_type(t) },
-			premises = {},
-		})
-		return t, node_id, nil
+		return { tag = "con", base = term.base }, nil
 	elseif term.tag == "var" then
-		-- LOOKUP IS BY INDEX ONLY. `term.name` below is purely cosmetic (error
-		-- text); it plays no role in resolving the binding.
+		local t = env[term.index + 1]
+		if not t then
+			return nil, "unbound de Bruijn index " .. term.index .. " (" .. term.name .. ") at " .. term.locus
+		end
+		return t, nil
+	elseif term.tag == "abs" then
+		local param_type = fresh_var()
+		local body_type, err = infer_types(term.body, env_extend(env, param_type), subst)
+		if not body_type then return nil, err end
+		return { tag = "fun", from = param_type, to = body_type }, nil
+	elseif term.tag == "app" then
+		local fn_type, err1 = infer_types(term.fn, env, subst)
+		if not fn_type then return nil, err1 end
+		local arg_type, err2 = infer_types(term.arg, env, subst)
+		if not arg_type then return nil, err2 end
+		local result_type = fresh_var()
+		local ok, uerr = unify(fn_type, { tag = "fun", from = arg_type, to = result_type }, subst)
+		if not ok then return nil, "at " .. term.locus .. ": " .. (uerr or "unify failed") end
+		return result_type, nil
+	elseif term.tag == "let" then
+		local value_type, err1 = infer_types(term.value, env, subst)
+		if not value_type then return nil, err1 end
+		-- DELIBERATE WEAKNESS: no generalization -- see module header.
+		local body_type, err2 = infer_types(term.body, env_extend(env, value_type), subst)
+		if not body_type then return nil, err2 end
+		return body_type, nil
+	end
+	return nil, "unknown term tag " .. tostring(term.tag)
+end
+
+-- ── Pass 2: certificate construction over the resolved types ────────────────
+--
+-- Re-walks the SAME term (deterministic: no branching depends on anything
+-- but term structure, so re-running the recursive descent visits binders in
+-- the identical order pass 1 did) creating a FRESH `fresh_var()` per binder
+-- purely as a key into `subst` (populated, complete, by pass 1) -- never
+-- calling `unify` again. Builds hm.lua vocabulary citations with every type
+-- fully ground via `deep_resolve` against pass 1's finished `subst`.
+
+--:: CertBinding = { hyp_node: unknown, ty: unknown }
+--:: CertEnv = { [integer]: CertBinding }
+--:: Vocab = { signature: unknown, int_ty: unknown, bool_ty: unknown, H: (unknown) -> (unknown | nil, string | nil), Arrow: (unknown, unknown) -> (unknown | nil, string | nil), ax_lit: unknown, rule_abs: unknown, rule_app: unknown, rule_let: unknown }
+
+--: (CertEnv, unknown, unknown) -> CertEnv
+local function cert_env_extend(env, hyp_node, ty)
+	local extended = { { hyp_node = hyp_node, ty = ty } } --[[: CertEnv ]]
+	for i = 1, #env do extended[i + 1] = env[i] end
+	return extended
+end
+
+local hyp_counter = 0
+--: () -> string
+local function fresh_hyp_id()
+	hyp_counter = hyp_counter + 1
+	return "h" .. hyp_counter
+end
+
+--: (WType, Subst, Vocab) -> (unknown | nil, string | nil)
+local function to_ty(t, subst, vocab)
+	t = deep_resolve(t, subst)
+	if t.tag == "con" then
+		if t.base == "integer" then return vocab.int_ty end
+		if t.base == "boolean" then return vocab.bool_ty end
+		return nil, "to_ty: unknown base type " .. t.base
+	elseif t.tag == "fun" then
+		local from_ty, ferr = to_ty(t.from, subst, vocab)
+		if not from_ty then return nil, ferr end
+		local to_ty_, terr = to_ty(t.to, subst, vocab)
+		if not to_ty_ then return nil, terr end
+		return vocab.Arrow(from_ty, to_ty_)
+	elseif t.tag == "var" then
+		return nil, "to_ty: unresolved type variable t" .. tostring(t.id)
+	end
+	return nil, "to_ty: unrecognized WType tag"
+end
+
+-- Returns (ty_term, cert_node, nil) on success -- ty_term is the fully
+-- ground hm.lua `ty`-sort term_algebra term for `term`'s type (needed by
+-- LET to build its own bound hypothesis's judgment from the value's
+-- already-resolved type, and by ABS to build the arrow result -- see
+-- module header's two-pass note).
+--: (WTerm, CertEnv, Subst, Vocab) -> (unknown | nil, unknown | nil, string | nil)
+local function build_cert(term, env, subst, vocab)
+	if term.tag == "lit" then
+		if term.base ~= "integer" and term.base ~= "boolean" then
+			return nil, nil, "build_cert: unknown literal base " .. tostring(term.base) .. " at " .. term.locus
+		end
+		local ty_term = term.base == "integer" and vocab.int_ty or vocab.bool_ty
+		local node, err = replayer.cite_axiom(vocab.ax_lit, { A = { term = ty_term, depth = 0 } })
+		if not node then return nil, nil, err end
+		return ty_term, node, nil
+	elseif term.tag == "var" then
 		local binding = env[term.index + 1]
 		if not binding then
 			return nil, nil, "unbound de Bruijn index " .. term.index .. " (" .. term.name .. ") at " .. term.locus
 		end
-		local node_id = add_node(b, {
-			rule = "W-Var", judgment = "has_type", locus = term.locus,
-			conclusion = { term = term.locus, type_str = show_type(resolve(binding.type, subst)), name = binding.name },
-			premises = {},
-			assumes = { binding.hyp_id },
-		})
-		return binding.type, node_id, nil
+		return binding.ty, binding.hyp_node, nil
 	elseif term.tag == "abs" then
-		local param_type = fresh_var()
-		local hyp_id = add_hyp(b, term.param, param_type)
-		local inner_env = env_extend(env, { hyp_id = hyp_id, type = param_type, name = term.param })
-		local body_type, body_node, err = infer(term.body, inner_env, subst, b)
-		if not body_type then return nil, nil, err end
-		local t = { tag = "fun", from = param_type, to = body_type }
-		local node_id = add_node(b, {
-			rule = "W-Abs", judgment = "has_type", locus = term.locus,
-			conclusion = { term = term.locus, type_str = show_type(deep_resolve(t, subst)) },
-			premises = { body_node },
-			discharges = { hyp_id },
-		})
-		return t, node_id, nil
+		local param_wtype = fresh_var()
+		local param_ty, terr = to_ty(param_wtype, subst, vocab)
+		if not param_ty then return nil, nil, terr end
+		local hyp_id = fresh_hyp_id()
+		local hyp_h, herr = vocab.H(param_ty)
+		if not hyp_h then return nil, nil, herr end
+		local hyp_node, hnerr = replayer.hypothesis(hyp_id, hyp_h)
+		if not hyp_node then return nil, nil, hnerr end
+		local body_ty, body_node, berr = build_cert(term.body, cert_env_extend(env, hyp_node, param_ty), subst, vocab)
+		if not body_ty then return nil, nil, berr end
+		local node, cerr = replayer.cite_rule(vocab.rule_abs, { hyp_node, body_node }, { { hyp_id } })
+		if not node then return nil, nil, cerr end
+		local arrow_ty, aerr = vocab.Arrow(param_ty, body_ty)
+		if not arrow_ty then return nil, nil, aerr end
+		return arrow_ty, node, nil
 	elseif term.tag == "app" then
-		local fn_type, fn_node, err1 = infer(term.fn, env, subst, b)
-		if not fn_type then return nil, nil, err1 end
-		local arg_type, arg_node, err2 = infer(term.arg, env, subst, b)
-		if not arg_type then return nil, nil, err2 end
-		local result_type = fresh_var()
-		local ok, uerr = unify(fn_type, { tag = "fun", from = arg_type, to = result_type }, subst)
-		if not ok then return nil, nil, "at " .. term.locus .. ": " .. (uerr or "unify failed") end
-		local node_id = add_node(b, {
-			rule = "W-App", judgment = "has_type", locus = term.locus,
-			conclusion = { term = term.locus, type_str = show_type(deep_resolve(result_type, subst)) },
-			premises = { fn_node, arg_node },
-		})
-		return result_type, node_id, nil
+		local fn_ty, fn_node, err1 = build_cert(term.fn, env, subst, vocab)
+		if not fn_ty then return nil, nil, err1 end
+		local arg_ty, arg_node, err2 = build_cert(term.arg, env, subst, vocab)
+		if not arg_ty then return nil, nil, err2 end
+		local result_wtype = fresh_var()
+		local result_ty, rerr = to_ty(result_wtype, subst, vocab)
+		if not result_ty then return nil, nil, rerr end
+		local node, cerr = replayer.cite_rule(vocab.rule_app, { fn_node, arg_node })
+		if not node then return nil, nil, cerr end
+		return result_ty, node, nil
 	elseif term.tag == "let" then
-		local value_type, value_node, err1 = infer(term.value, env, subst, b)
-		if not value_type then return nil, nil, err1 end
-		-- DELIBERATE WEAKNESS: no generalization — see module header. `name`
-		-- is bound directly to value_type (monomorphic), not to a
-		-- re-instantiated forall-scheme.
-		local hyp_id = add_hyp(b, term.name, value_type)
-		local inner_env = env_extend(env, { hyp_id = hyp_id, type = value_type, name = term.name })
-		local body_type, body_node, err2 = infer(term.body, inner_env, subst, b)
-		if not body_type then return nil, nil, err2 end
-		local node_id = add_node(b, {
-			rule = "W-Let", judgment = "has_type", locus = term.locus,
-			conclusion = { term = term.locus, type_str = show_type(deep_resolve(body_type, subst)) },
-			premises = { value_node, body_node },
-			discharges = { hyp_id },
-		})
-		return body_type, node_id, nil
+		local value_ty, value_node, err1 = build_cert(term.value, env, subst, vocab)
+		if not value_ty then return nil, nil, err1 end
+		-- DELIBERATE WEAKNESS, matching pass 1: no generalization -- the
+		-- let-bound hypothesis's type is exactly the value's own (already
+		-- fully resolved) type, monomorphic, not a re-instantiated scheme.
+		local hyp_id = fresh_hyp_id()
+		local hyp_h, herr = vocab.H(value_ty)
+		if not hyp_h then return nil, nil, herr end
+		local hyp_node, hnerr = replayer.hypothesis(hyp_id, hyp_h)
+		if not hyp_node then return nil, nil, hnerr end
+		local body_ty, body_node, err2 = build_cert(term.body, cert_env_extend(env, hyp_node, value_ty), subst, vocab)
+		if not body_ty then return nil, nil, err2 end
+		local node, cerr = replayer.cite_rule(vocab.rule_let, { value_node, hyp_node, body_node }, { { hyp_id } })
+		if not node then return nil, nil, cerr end
+		return body_ty, node, nil
 	end
 	return nil, nil, "unknown term tag " .. tostring(term.tag)
 end
 
--- Infer `term`'s type and emit a certificate citing the W rule schemas.
--- Returns (certificate, nil) on success, or (nil, errmsg) on an inference
--- failure (unify mismatch, unbound variable) — never a thrown error.
---: (WTerm) -> (WCert | nil, string | nil)
-function M.certify(term)
-	local b = new_builder()
-	local subst = {}
-	local _, root_node, err = infer(term, {}, subst, b)
-	if not root_node then return nil, err end
-	return { theory = M.THEORY, nodes = b.nodes, hypotheses = b.hypotheses, root = root_node }, nil
+-- Infer `term`'s type against the given vocabulary and emit a certificate
+-- citing hm.lua's rule/axiom vocabulary. `vocab` is caps-first injected
+-- (never ambient): the caller chooses the term_algebra tier and builds the
+-- vocabulary once (`hm.declare_vocabulary(k)`), typically shared with
+-- algorithm_j.lua's `certify` -- see hm.lua's header. Returns (root
+-- certificate node, nil) on success, or (nil, errmsg) on an inference
+-- failure (unify mismatch, unbound variable) -- never a thrown error.
+--: (WTerm, Vocab) -> (unknown | nil, string | nil)
+function M.certify(term, vocab)
+	fresh_counter = 0
+	hyp_counter = 0
+	local subst = {} --[[: Subst ]]
+	local root_type, err = infer_types(term, {}, subst)
+	if not root_type then return nil, err end
+	fresh_counter = 0
+	local _, root_node, cerr = build_cert(term, {}, subst, vocab)
+	if not root_node then return nil, cerr end
+	return root_node, nil
 end
 
 return M
