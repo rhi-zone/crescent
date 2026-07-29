@@ -59,6 +59,17 @@ local function set_field(t, k, val)
 	end
 end
 
+-- dynamic-key read for shape-distinguishability tests (the static types
+-- correctly lack each other's fields, so a typed read would not compile)
+--: (t: unknown, k: string) -> unknown
+local function get_field(t, k)
+	if type(t) == "table" then
+		local tt = t --[[: { [string]: unknown } ]]
+		return tt[k]
+	end
+	return nil
+end
+
 -- ── shared test signature and registry ────────────────────────────────────────
 
 local sig = must_sig(ta.declare_signature({
@@ -525,6 +536,83 @@ T.describe("discharge", function()
 		T.eq(res3.taint[rl.citation_key("syntax-fact", 1)], ax_fact)
 		-- S was memoized once for the whole run (DAG sharing, no re-replay)
 		T.ok(memo_has(rp, S))
+	end)
+end)
+
+-- ── observation entry point ───────────────────────────────────────────────────
+
+T.describe("observation entry point (read-only, no acceptance)", function()
+	--: (v: Observation | nil, err: string | nil) -> Observation
+	local function must_obs(v, err)
+		if v == nil then error("unexpected error: " .. tostring(err), 2) end
+		return v
+	end
+
+	T.it("returns the per-node triple for a deliberately-open derivation the strict path rejects", function()
+		local rp = new_rp()
+		local H = hyp(mk(ops.hj, c0))
+		local S = rule(r_pair, { H, ax(ax_fact, { M = c0 }) })
+		-- strict acceptance rejects: H is open
+		local res, err = rl.replay(rp, S)
+		T.eq(res, nil)
+		T.ok(err:find("undischarged", 1, true))
+		-- observation exposes the same node's computed triple, open set in plain view
+		local obs = must_obs(rl.observe(rp, S))
+		T.ok(ta.equal(obs.conclusion, mk(ops.both, c0)))
+		T.eq(count(obs.taint), 1)
+		T.eq(obs.taint[rl.citation_key("syntax-fact", 1)], ax_fact)
+		T.eq(#obs.open, 1)
+		T.eq(obs.open[1], H)
+	end)
+
+	T.it("carries no acceptance signal: shape is structurally distinct from a ReplayResult", function()
+		local rp = new_rp()
+		local node = rule(r_from_ax, { ax(ax_fact, { M = c0 }) })
+		local obs = must_obs(rl.observe(rp, node))
+		-- an Observation exposes `open` and has neither trust_label nor
+		-- config_hash — a caller probing for a root-strict verdict finds
+		-- nil. Probed via a dynamic-key read (get_field): the static
+		-- types (correctly) do not carry each other's fields, which is
+		-- exactly the structural distinction under test.
+		T.neq(get_field(obs, "open"), nil)
+		T.eq(get_field(obs, "trust_label"), nil)
+		T.eq(get_field(obs, "config_hash"), nil)
+		-- the strict path's result is the inverse shape
+		local res = must_res(rl.replay(rp, node))
+		T.eq(get_field(res, "open"), nil)
+		T.neq(get_field(res, "trust_label"), nil)
+	end)
+
+	T.it("shares the strict path's memoized computation and config-keyed cache", function()
+		local rp = new_rp()
+		local H = hyp(mk(ops.hj, c0))
+		local S = rule(r_pair, { H, ax(ax_fact, { M = c0 }) })
+		must_obs(rl.observe(rp, S))
+		T.ok(memo_has(rp, S))
+		T.eq(count(rp.cache), 1)
+		-- a later strict replay of a discharging parent reuses S's memo entry
+		local P = rule(r_close, { S }, { [1] = { H } })
+		local res = must_res(rl.replay(rp, P))
+		T.ok(ta.equal(res.conclusion, mk(ops.closedj, c0)))
+	end)
+
+	T.it("per-node data errors still reject: observation relaxes only the root check", function()
+		local rp = new_rp()
+		-- F10: hypothesis judgment with a metavariable
+		local obs, err = rl.observe(rp, hyp(mk(ops.hj, m("M"))))
+		T.eq(obs, nil)
+		T.ok(err:find("metavariable", 1, true))
+		-- F9 strict: non-closed interior conclusion
+		local H = hyp(mk(ops.hj, c0))
+		local obs2, err2 = rl.observe(rp, rule(r_open_concl, { H }))
+		T.eq(obs2, nil)
+		T.ok(err2:find("not closed", 1, true))
+		-- cycles
+		local n = rule(r_from_ax, {})
+		n.premises[1] = n
+		local obs3, err3 = rl.observe(rp, n)
+		T.eq(obs3, nil)
+		T.ok(err3:find("cycle", 1, true))
 	end)
 end)
 

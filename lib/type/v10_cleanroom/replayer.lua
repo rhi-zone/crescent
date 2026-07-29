@@ -64,6 +64,7 @@ local M = {}
 --:: VisitLink = { node: CertNode, prev: VisitLink | nil }
 --:: KernelConfig = { eq: string, subst: string }
 --:: ReplayResult = { conclusion: Term, taint: TaintSet, trust_label: string[], config_hash: string }
+--:: Observation = { conclusion: Term, taint: TaintSet, open: CertNode[] }
 --:: RuleSpec = { name: string, version: integer, premises: Term[], conclusion: Term, discharges?: DischargeSlot[] }
 --:: AxiomSpec = { name: string, version: integer, pattern: Term, discharges?: unknown, discharge?: unknown }
 --:: Replayer = { registry: Registry, config: KernelConfig, config_hash: string, trust_label: string[], cache: { [string]: MemoTable } }
@@ -647,6 +648,33 @@ M.replay = function(rp, root)
 		trust_label = rp.trust_label,
 		config_hash = rp.config_hash,
 	}
+end
+
+--- Read-only OBSERVATION entry point (owner-ratified; design doc
+--- "Read-only observation entry point"): computes the already-ratified
+--- per-node triple (conclusion, taint set, open-hypothesis set) for a
+--- node, open set in plain view. Carries NO acceptance signal — the
+--- result exposes `open` and has no trust_label/config_hash, so it is
+--- structurally distinct from a ReplayResult and cannot be laundered
+--- into a root-strict verdict; M.replay remains the sole acceptance
+--- channel. Same memoized bottom-up computation as M.replay (same
+--- per-config-hash cache — anti-laundering keying unchanged), stopped
+--- before the root checks. Per-node data errors (F9/F10 violations,
+--- cycles, failed matches) still reject — observation relaxes only the
+--- root's open-set-empty acceptance criterion, never node validity.
+--: (rp: Replayer, node: CertNode) -> (Observation | nil, string | nil)
+M.observe = function(rp, node)
+	if not is_table(rp) or not is_table(rp.cache) or not is_nonempty_string(rp.config_hash) then
+		return nil, "observe: rp is not a replayer instance"
+	end
+	local memo = rp.cache[rp.config_hash]
+	if memo == nil then
+		memo = memo_new()
+		rp.cache[rp.config_hash] = memo
+	end
+	local res, err = replay_node(rp, node, memo, nil)
+	if res == nil then return nil, err end
+	return { conclusion = res.conclusion, taint = res.taint, open = res.open }
 end
 
 --- Trust query: a judgment's effective axiom set = node taint (citation
