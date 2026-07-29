@@ -629,6 +629,39 @@ above, not the other way around.
 
 ---
 
+## Canon swap: cleanroom core
+
+### Settled (owner-ratified this session)
+
+**`lib/type/v10_cleanroom/`** (the fable cleanroom reimplementation,
+built from spec under the F1–F13 adjudications above, commits
+`810097ff`/`248b1a1b`) **is now the canonical v10 kernel core.**
+
+The prior implementation (`lib/type/v10_kernel/term_algebra/` +
+`replayer/`) retires, on the evidence of the differential adjudication
+(`docs/typechecker-v10-parity-adjudication.md`, commit `30f3867f`): 7
+confirmed divergences, all bugs in the prior implementation against
+rulings F4/F7/F8/F10/F11/F12/F13 — the F8 hypothesis-identity conflation
+being soundness-relevant — with zero cleanroom-side bugs and zero new
+underdeterminations.
+
+- Dependents (HM theories, pilot modules) port to the canonical API,
+  meaning-preserved.
+- The fast tier retires with the old core and will be rebuilt against
+  the canonical reference as a separate, axiom-carrying effort
+  (`kernel-interner-sound` / `kernel-lazy-subst-sound` names unchanged).
+- The adjudicator's untested areas (deep F9, broad declare-time fuzz,
+  meta-in-subject fuzz, independently-derived DAG discharge case) become
+  **required additions to the canonical test suite**, rather than
+  assumed-same.
+
+**Process note for the record:** the swap validates the
+cleanroom+adjudication pattern — same-author tests (510 assertions)
+missed all 7 divergences; the spec-first cleanroom found 13 spec gaps
+before writing code and implemented clean.
+
+---
+
 ## Explicitly open (flagged, not settled — do not present as decided)
 
 - Side conditions in rule schemas (task-4 fork B) — UNDESIGNED, owner
