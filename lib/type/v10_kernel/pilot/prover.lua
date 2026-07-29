@@ -4,10 +4,15 @@
 -- Mirrors lib/type/v10_kernel/theories/algorithm_w.lua's two-pass
 -- precedent: prover_narrow.lua (pass 1) produces a fully-resolved,
 -- plain-data event tree over a real file's AST; this module walks that
--- SAME tree mechanically, building term_algebra terms and replayer
--- certificate nodes, citing flow_narrow_v1's rules/axiom and
--- pilot_initial_facts_v1's axiom, replaying every emitted certificate
--- immediately (never batch-deferred).
+-- SAME tree mechanically, building canonical-core terms and certificate
+-- nodes (lib/type/v10_cleanroom/, per the owner-ratified canon swap),
+-- citing flow_narrow_v1's rules/axiom and pilot_initial_facts_v1's axiom,
+-- replaying every emitted certificate immediately (never batch-deferred).
+-- Certificate nodes are plain tables per the canonical grammar; the
+-- replayer validates them at replay. Prover-emitted certificates contain
+-- only axiom citations and rule applications — never hypotheses — so
+-- their open-hypothesis set is empty by construction and root-strict
+-- replay (the acceptance channel) is the correct call per certificate.
 --
 -- ── How an initial fact enters a derivation, lazily ─────────────────────────
 --
@@ -46,8 +51,8 @@
 -- copy-on-branch-entry discipline exactly, so nothing narrowed inside one
 -- branch leaks into an unrelated sibling.
 
-local term_algebra = require("lib.type.v10_kernel.term_algebra")
-local replayer = require("lib.type.v10_kernel.replayer")
+local ta = require("lib.type.v10_cleanroom.term_algebra")
+local rl = require("lib.type.v10_cleanroom.replayer")
 local parse_mod = require("lib.type.static.parse")
 local addr_v1 = require("lib.type.v10_kernel.pilot.addr_v1")
 local flow_narrow_v1 = require("lib.type.v10_kernel.pilot.flow_narrow_v1")
@@ -59,10 +64,7 @@ local M = {}
 
 --:: ClockFn = () -> number
 
---:: TermAlgebra = { build: (unknown, unknown[]) -> (unknown | nil, string | nil), build_meta: (string, unknown) -> (unknown | nil, string | nil), equal: (unknown, unknown) -> boolean, [string]: unknown }
---:: AddrOps = { [string]: unknown }
-
---:: VarFact = { node: unknown, term: unknown, point: unknown, members: string[] }
+--:: VarFact = { node: CertNode | nil, term: Term | nil, point: Term | nil, members: string[] }
 --:: VarFacts = { [integer]: VarFact }
 
 -- The same event-tree shapes prover_narrow.lua declares (structural, not
@@ -102,7 +104,6 @@ local M = {}
 --:: NestedScopeEvent = { kind: "nested_scope", path: integer[], events: unknown[], fresh_scope: boolean }
 --:: Event = LocalFactEvent | GuardEvent | NestedScopeEvent
 
---:: JudgmentRecord = { conclusion: unknown, taint: { [string]: boolean }, open: { [string]: unknown } }
 --:: SkipCounts = { [string]: integer }
 --:: Stats = {
 --::   guards_found: integer, guards_handled: integer, guards_skipped: SkipCounts,
@@ -111,7 +112,7 @@ local M = {}
 --::   emission_skipped: SkipCounts,
 --::   timing: { analyze_ms: number, emit_ms: number, replay_ms: number },
 --:: }
---:: AnalyzeResult = { judgments: JudgmentRecord[], stats: Stats }
+--:: AnalyzeResult = { judgments: ReplayResult[], stats: Stats }
 --:: AnalyzeOpts = { clock_fn: ClockFn | nil }
 
 -- ── Small pure helpers over member-tag sets (mirrors prover_narrow.lua's
@@ -147,38 +148,28 @@ local function bump(counts, reason)
 	return counts[reason]
 end
 
---:: Vocab = {
---::   signature: unknown,
---::   HoldsAt: (unknown, unknown, unknown) -> (unknown | nil, string | nil),
---::   TyOf: (unknown) -> (unknown | nil, string | nil),
---::   TyUnion: (unknown, unknown) -> (unknown | nil, string | nil),
---::   GuardSelects: (unknown, unknown, unknown, unknown) -> (unknown | nil, string | nil),
---::   tag_nil: () -> (unknown | nil, string | nil), tag_boolean: () -> (unknown | nil, string | nil),
---::   tag_true: () -> (unknown | nil, string | nil), tag_false: () -> (unknown | nil, string | nil),
---::   tag_number: () -> (unknown | nil, string | nil), tag_string: () -> (unknown | nil, string | nil),
---::   tag_table: () -> (unknown | nil, string | nil), tag_function: () -> (unknown | nil, string | nil),
---::   falsy_ty: () -> (unknown | nil, string | nil),
---::   ax_syntax_facts: unknown, rule_match: unknown, rule_rest: unknown,
---:: }
-
 -- The target term a guard's `guard_selects`/rule citations bind TA to.
---: (Vocab, string) -> (unknown | nil, string | nil)
+--: (NarrowVocab, string) -> (Term | nil, string | nil)
 local function target_term_of(vocab, target)
 	if target == "falsy" then return vocab.falsy_ty() end
-	if target == "nil" then return vocab.TyOf(vocab.tag_nil()) end
-	if target == "boolean" then return vocab.TyOf(vocab.tag_boolean()) end
-	if target == "number" then return vocab.TyOf(vocab.tag_number()) end
-	if target == "string" then return vocab.TyOf(vocab.tag_string()) end
-	if target == "table" then return vocab.TyOf(vocab.tag_table()) end
-	if target == "function" then return vocab.TyOf(vocab.tag_function()) end
-	return nil, "target_term_of: unrecognized target " .. tostring(target)
+	local tag = nil --[[: Term | nil ]]
+	local tag_err = nil --[[: string | nil ]]
+	if target == "nil" then tag, tag_err = vocab.tag_nil()
+	elseif target == "boolean" then tag, tag_err = vocab.tag_boolean()
+	elseif target == "number" then tag, tag_err = vocab.tag_number()
+	elseif target == "string" then tag, tag_err = vocab.tag_string()
+	elseif target == "table" then tag, tag_err = vocab.tag_table()
+	elseif target == "function" then tag, tag_err = vocab.tag_function()
+	else return nil, "target_term_of: unrecognized target " .. tostring(target) end
+	if not tag then return nil, tag_err end
+	return vocab.TyOf(tag)
 end
 
 -- Build a union term over an ordered member-tag list, with `first` (if
 -- given and present in `members`) positioned as the union's structural
 -- first operand -- the chain-aware ordering prover.lua's header describes.
 -- Falls back to declared order when there is nothing to chain into.
---: (Vocab, string[], string | nil) -> (unknown | nil, string | nil)
+--: (NarrowVocab, string[], string | nil) -> (Term | nil, string | nil)
 local function build_member_union(vocab, members, first)
 	if #members == 0 then return nil, "build_member_union: empty member list" end
 	local ordered = members
@@ -214,23 +205,23 @@ local function peek_next_target(events, var_name_id)
 	return nil
 end
 
+--:: AddrOps = { [string]: OpDecl }
+
 -- Build an addr-v1 path term from a root-relative child-index array.
---: (TermAlgebra, AddrOps, integer[]) -> (unknown | nil, string | nil)
-local function path_of(k, addr_ops, indices)
-	local p, err = prover_addr.root(k, addr_ops)
+--: (AddrOps, integer[]) -> (Term | nil, string | nil)
+local function path_of(addr_ops, indices)
+	local p, err = prover_addr.root(addr_ops)
 	if not p then return nil, err end
 	for _, i in ipairs(indices) do
-		p, err = prover_addr.child(k, addr_ops, p, i)
+		p, err = prover_addr.child(addr_ops, p, i)
 		if not p then return nil, err end
 	end
 	return p
 end
 
---:: Replayer = { replay: (Replayer, unknown) -> (JudgmentRecord | nil, string | nil), [string]: unknown }
-
 --:: EmitCtx = {
---::   k: TermAlgebra, addr_ops: AddrOps, file_id: unknown, vocab: Vocab, ax_initial: unknown,
---::   r: Replayer, stats: Stats, judgments: JudgmentRecord[],
+--::   addr_ops: AddrOps, file_id: Term, vocab: NarrowVocab, ax_initial: AxiomDecl,
+--::   rp: Replayer, stats: Stats, judgments: ReplayResult[],
 --:: }
 
 local emit_events --: ((EmitCtx, unknown[], VarFacts) -> ()) | nil
@@ -238,24 +229,18 @@ local emit_events --: ((EmitCtx, unknown[], VarFacts) -> ()) | nil
 -- Cite + replay one rule application (`narrow-select-match` or
 -- `-rest`), recording the judgment and stats, returning the built node
 -- (for threading into a chained continuation) or nil on a replay failure
--- (recorded via emission_skipped, never silently dropped).
---: (EmitCtx, unknown, unknown, unknown, unknown, unknown, unknown) -> unknown | nil
-local function cite_and_replay(ectx, rule, premise_node, pg, pb, x, ta)
-	local fact_node, ferr = replayer.cite_axiom(ectx.vocab.ax_syntax_facts, {
-		Pg = { term = pg, depth = 0 }, Pb = { term = pb, depth = 0 },
-		X = { term = x, depth = 0 }, TA = { term = ta, depth = 0 },
-	})
-	if not fact_node then
-		bump(ectx.stats.emission_skipped, "failed to build guard_selects citation: " .. tostring(ferr))
-		return nil
-	end
-	local node, cerr = replayer.cite_rule(rule, { premise_node, fact_node })
-	if not node then
-		bump(ectx.stats.emission_skipped, "failed to build rule citation: " .. tostring(cerr))
-		return nil
-	end
+-- (recorded via emission_skipped, never silently dropped). Certificate
+-- nodes are plain tables (no construction step can fail); the sole
+-- validation point is replay itself.
+--: (EmitCtx, RuleDecl, CertNode, Term, Term, Term, Term) -> CertNode | nil
+local function cite_and_replay(ectx, rule, premise_node, pg, pb, x, target_ty)
+	local fact_node = {
+		kind = "axiom", axiom = ectx.vocab.ax_syntax_facts,
+		bindings = { Pg = pg, Pb = pb, X = x, TA = target_ty },
+	} --[[: CertNode ]]
+	local node = { kind = "rule", rule = rule, premises = { premise_node, fact_node } } --[[: CertNode ]]
 	ectx.stats.certificates_emitted = ectx.stats.certificates_emitted + 1
-	local result, rerr = ectx.r:replay(node)
+	local result, rerr = rl.replay(ectx.rp, node)
 	if not result then
 		ectx.stats.replay_fail = ectx.stats.replay_fail + 1
 		bump(ectx.stats.emission_skipped, "replay rejected an emitted certificate: " .. tostring(rerr))
@@ -269,7 +254,6 @@ end
 --: (EmitCtx, unknown[], VarFacts) -> ()
 emit_events = function(ectx, events, facts)
 	if not emit_events then return end
-	local k = ectx.k
 	local addr_ops = ectx.addr_ops
 	local vocab = ectx.vocab
 
@@ -311,70 +295,83 @@ emit_events = function(ectx, events, facts)
 					rest_path, rest_events = ge.then_path, ge.then_events
 				end
 
-				local var_path, vperr = prover_addr.local_name_path(k, addr_ops,
-					(path_of(k, addr_ops, ge.var_local_stmt_path)), 0)
+				local stmt_path, sperr = path_of(addr_ops, ge.var_local_stmt_path)
 				local target_term, tterr = target_term_of(vocab, target)
-				if not var_path or not target_term then
+				if stmt_path == nil or target_term == nil then
 					bump(ectx.stats.emission_skipped, "failed to build var path / target term: "
-						.. tostring(vperr or tterr))
+						.. tostring(sperr or tterr))
 				else
-					if vf.node == nil then
-						local rest_members0 = member_set_without(vf.members, member_removed_by(target))
-						local next_target0 = peek_next_target(rest_events, var_name_id)
-						local rest_term0, rterr = build_member_union(vocab, rest_members0, next_target0)
-						if not rest_term0 then
-							bump(ectx.stats.emission_skipped, "failed to build initial rest term: " .. tostring(rterr))
-						else
-							local whole_term, uerr = vocab.TyUnion(target_term, rest_term0)
-							local guard_point, gperr = prover_addr.exit(k, addr_ops, ectx.file_id,
-								(path_of(k, addr_ops, ge.guard_expr_path)))
-							if not whole_term or not guard_point then
-								bump(ectx.stats.emission_skipped, "failed to build guard point/union: "
-									.. tostring(uerr or gperr))
+					local var_path, vperr = prover_addr.local_name_path(addr_ops, stmt_path, 0)
+					if var_path == nil then
+						bump(ectx.stats.emission_skipped, "failed to build var path / target term: "
+							.. tostring(vperr))
+					else
+						if vf.node == nil then
+							local rest_members0 = member_set_without(vf.members, member_removed_by(target))
+							local next_target0 = peek_next_target(rest_events, var_name_id)
+							local rest_term0, rterr = build_member_union(vocab, rest_members0, next_target0)
+							if rest_term0 == nil then
+								bump(ectx.stats.emission_skipped, "failed to build initial rest term: " .. tostring(rterr))
 							else
-								local init_node, ierr = replayer.cite_axiom(ectx.ax_initial, {
-									P = { term = guard_point, depth = 0 },
-									X = { term = var_path, depth = 0 },
-									T = { term = whole_term, depth = 0 },
-								})
-								if not init_node then
-									bump(ectx.stats.emission_skipped, "failed to cite pilot-initial-facts-v1: " .. tostring(ierr))
+								local whole_term, uerr = vocab.TyUnion(target_term, rest_term0)
+								local guard_expr_path, gpperr = path_of(addr_ops, ge.guard_expr_path)
+								if whole_term == nil or guard_expr_path == nil then
+									bump(ectx.stats.emission_skipped, "failed to build guard point/union: "
+										.. tostring(uerr or gpperr))
 								else
-									vf.node = init_node
-									vf.term = whole_term
-									vf.point = guard_point
+									local guard_point, gperr = prover_addr.exit(addr_ops, ectx.file_id, guard_expr_path)
+									if guard_point == nil then
+										bump(ectx.stats.emission_skipped, "failed to build guard point/union: "
+											.. tostring(gperr))
+									else
+										local init_node = {
+											kind = "axiom", axiom = ectx.ax_initial,
+											bindings = { P = guard_point, X = var_path, T = whole_term },
+										} --[[: CertNode ]]
+										vf.node = init_node
+										vf.term = whole_term
+										vf.point = guard_point
+									end
 								end
 							end
 						end
-					end
 
-					if vf.node ~= nil then
-						local mp = match_path
-						if type(mp) == "table" then
-							local match_point = prover_addr.entry(k, addr_ops, ectx.file_id, (path_of(k, addr_ops, mp)))
-							if match_point then
-								local node = cite_and_replay(ectx, vocab.rule_match, vf.node, vf.point, match_point, var_path, target_term)
-								local me = match_events
-								if node and type(me) == "table" then
-									local child_facts = copy_facts(facts)
-									child_facts[var_name_id] = { node = node, term = target_term, point = match_point, members = { target } }
-									emit_events(ectx, me, child_facts)
+						local vf_node = vf.node
+						local vf_point = vf.point
+						if vf_node ~= nil and vf_point ~= nil then
+							local mp = match_path
+							if type(mp) == "table" then
+								local match_body_path = path_of(addr_ops, mp)
+								if match_body_path ~= nil then
+									local match_point = prover_addr.entry(addr_ops, ectx.file_id, match_body_path)
+									if match_point ~= nil then
+										local node = cite_and_replay(ectx, vocab.rule_match, vf_node, vf_point, match_point, var_path, target_term)
+										local me = match_events
+										if node and type(me) == "table" then
+											local child_facts = copy_facts(facts)
+											child_facts[var_name_id] = { node = node, term = target_term, point = match_point, members = { target } }
+											emit_events(ectx, me, child_facts)
+										end
+									end
 								end
 							end
-						end
-						local rp = rest_path
-						if type(rp) == "table" then
-							local rest_point = prover_addr.entry(k, addr_ops, ectx.file_id, (path_of(k, addr_ops, rp)))
-							if rest_point then
-								local rest_members = member_set_without(vf.members, member_removed_by(target))
-								local next_target = peek_next_target(rest_events, var_name_id)
-								local rest_term = build_member_union(vocab, rest_members, next_target)
-								local node = cite_and_replay(ectx, vocab.rule_rest, vf.node, vf.point, rest_point, var_path, target_term)
-								local re = rest_events
-								if node and rest_term and type(re) == "table" then
-									local child_facts = copy_facts(facts)
-									child_facts[var_name_id] = { node = node, term = rest_term, point = rest_point, members = rest_members }
-									emit_events(ectx, re, child_facts)
+							local rp_path = rest_path
+							if type(rp_path) == "table" then
+								local rest_body_path = path_of(addr_ops, rp_path)
+								if rest_body_path ~= nil then
+									local rest_point = prover_addr.entry(addr_ops, ectx.file_id, rest_body_path)
+									if rest_point ~= nil then
+										local rest_members = member_set_without(vf.members, member_removed_by(target))
+										local next_target = peek_next_target(rest_events, var_name_id)
+										local rest_term = build_member_union(vocab, rest_members, next_target)
+										local node = cite_and_replay(ectx, vocab.rule_rest, vf_node, vf_point, rest_point, var_path, target_term)
+										local re = rest_events
+										if node and rest_term and type(re) == "table" then
+											local child_facts = copy_facts(facts)
+											child_facts[var_name_id] = { node = node, term = rest_term, point = rest_point, members = rest_members }
+											emit_events(ectx, re, child_facts)
+										end
+									end
 								end
 							end
 						end
@@ -440,30 +437,25 @@ function M.analyze_file(source, file_path, opts)
 	stats.annotations_skipped = pass1_stats.annotations_skipped
 	stats.timing.analyze_ms = t1 - t0
 
-	local k_raw = term_algebra.new({ tier = "reference" })
-	if type(k_raw) ~= "table" then return nil, "analyze_file: term_algebra.new failed" end
-	local k = k_raw --[[: TermAlgebra ]]
-
-	local addr_sig_raw = addr_v1.declare()
-	if type(addr_sig_raw) ~= "table" then return nil, "analyze_file: addr_v1.declare failed" end
-	local addr_sig = addr_sig_raw --[[: { ops: AddrOps } ]]
+	local addr_sig = addr_v1.declare()
+	if addr_sig == nil then return nil, "analyze_file: addr_v1.declare failed" end
 	local addr_ops = addr_sig.ops
 
-	local vocab, verr = flow_narrow_v1.declare_vocabulary(k, addr_sig)
-	if type(vocab) ~= "table" then return nil, "analyze_file: " .. tostring(verr) end
-	local ax_initial, iaerr = pilot_initial_facts_v1.declare(k, vocab)
+	local reg = rl.new_registry()
+	local vocab, verr = flow_narrow_v1.declare_vocabulary(reg, addr_sig)
+	if not vocab then return nil, "analyze_file: " .. tostring(verr) end
+	local ax_initial, iaerr = pilot_initial_facts_v1.declare(reg, vocab)
 	if not ax_initial then return nil, "analyze_file: " .. tostring(iaerr) end
-	local file_id, fierr = prover_addr.file_id_of_source(k, addr_ops, source)
+	local file_id, fierr = prover_addr.file_id_of_source(addr_ops, source)
 	if not file_id then return nil, "analyze_file: " .. tostring(fierr) end
 
-	local r_raw = replayer.new(k)
-	if type(r_raw) ~= "table" then return nil, "analyze_file: replayer.new failed" end
-	local r = r_raw --[[: Replayer ]]
+	local rp, rperr = rl.new_replayer({ registry = reg })
+	if not rp then return nil, "analyze_file: " .. tostring(rperr) end
 
-	local judgments = {} --[[: JudgmentRecord[] ]]
+	local judgments = {} --[[: ReplayResult[] ]]
 	local ectx = {
-		k = k, addr_ops = addr_ops, file_id = file_id, vocab = vocab, ax_initial = ax_initial,
-		r = r, stats = stats, judgments = judgments,
+		addr_ops = addr_ops, file_id = file_id, vocab = vocab, ax_initial = ax_initial,
+		rp = rp, stats = stats, judgments = judgments,
 	} --[[: EmitCtx ]]
 
 	emit_events(ectx, root.events, {})

@@ -1,28 +1,22 @@
 -- lib/type/v10_kernel/pilot/narrow_pilot_v1.lua
 --
 -- Pilot type vocabulary signature (`narrow-pilot-v1`), per
--- docs/typechecker-v10-pilot-signatures-proposal.md §2. Previously blocked
--- at §3/§4 of the proposal — its `holds_at` operator needs to cite
--- addr-v1's `point` and `path` sorts, and at proposal time
--- `declare_signature` had no cross-signature sort mechanism. Phase 1
--- (docs/decisions/typechecker-v10-core-design.md, "Sort identity:
--- identity-by-declaration + explicit imports") closed that gap by giving
--- `declare_signature` a `spec.imports` field: cite a SortDecl object
--- already owned by another, previously-declared signature under a local
--- name, usable in this signature's op specs exactly like a locally-declared
--- sort. This signature's own `sorts` list holds only `prim_tag, ty,
--- judgment`; `point`/`path` are imported from an already-declared addr-v1
--- signature, resolving proposal §4 via option (C) rather than (A) merging
--- the two signatures or (B) an unenforced same-name convention.
+-- docs/typechecker-v10-pilot-signatures-proposal.md §2, declared over the
+-- canonical v10 core (lib/type/v10_cleanroom/, per the owner-ratified
+-- canon swap). Its `holds_at` operator cites addr-v1's `point` and `path`
+-- sorts via the canonical `imports` clause: a list of
+-- { from = <source signature>, sorts = { names } } citations — the
+-- imported sort objects ARE the source signature's own objects (sort
+-- identity is declared-object identity), resolving proposal §4 via option
+-- (C) rather than (A) merging the two signatures or (B) an unenforced
+-- same-name convention. This signature's own `sorts` list holds only
+-- `prim_tag, ty, judgment`.
 --
 -- Deliberately signature-only (no rules/axioms/side-conditions/replayer
 -- wiring): that is pilot step 3+, gated separately. Per proposal §2.4, no
 -- side condition is needed for this vocabulary.
 
-local term_algebra = require("lib.type.v10_kernel.term_algebra")
-
---:: SortDecl = { name: string, sig_name: string, sig_version: integer }
---:: Signature = { name: string, version: integer, sorts: { [string]: SortDecl }, sort_set: { [unknown]: boolean }, ops: unknown }
+local ta = require("lib.type.v10_cleanroom.term_algebra")
 
 local M = {}
 
@@ -30,30 +24,27 @@ local M = {}
 -- an already-declared addr-v1 signature (see pilot/addr_v1.lua). The
 -- dependency is passed explicitly, caps-clean — no hidden global signature
 -- registry.
---
--- `addr_sig` is typed `unknown` and narrowed by hand (same pattern as
--- hm.lua's `declare_vocabulary(k)`), not declared as `Signature` up front —
--- doing so confuses the typechecker's runtime-guard narrowing (a `type(x)
--- ~= "table"` check on an already-record-typed value widens the else
--- branch back to `unknown` instead of preserving the declared shape).
+-- `addr_sig` is typed `unknown` and narrowed by hand: a `type(x) ~=
+-- "table"` guard on an already-record-typed parameter widens the else
+-- branch back to `unknown` (the same typechecker gotcha the pre-swap file
+-- documented), so the runtime guard runs on `unknown` and a checked cast
+-- restores the shape.
 --: (addr_sig: unknown) -> (Signature | nil, string | nil)
 function M.declare(addr_sig)
 	if type(addr_sig) ~= "table" then
 		return nil, "narrow_pilot_v1.declare: addr_sig (a declared addr-v1 signature) is required"
 	end
-	local addr_sig_t = addr_sig --[[: Signature ]]
-	local addr_sorts = addr_sig_t.sorts
-	local point_sort = addr_sorts.point
-	local path_sort = addr_sorts.path
-	if not point_sort or not path_sort then
+	local sig_in = addr_sig --[[: Signature ]]
+	local addr_sorts = sig_in.sorts
+	if type(addr_sorts) ~= "table" or not addr_sorts.point or not addr_sorts.path then
 		return nil, "narrow_pilot_v1.declare: addr_sig must declare point and path sorts"
 	end
 
-	return term_algebra.declare_signature({
+	return ta.declare_signature({
 		name = "narrow-pilot-v1",
 		version = 1,
 		sorts = { "prim_tag", "ty", "judgment" },
-		imports = { point = point_sort, path = path_sort },
+		imports = { { from = sig_in, sorts = { "point", "path" } } },
 		ops = {
 			tag_nil      = { result = "prim_tag", args = {} },
 			tag_boolean  = { result = "prim_tag", args = {} },

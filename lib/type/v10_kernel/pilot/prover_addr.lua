@@ -7,7 +7,10 @@
 -- (pilot/addr_v1.lua) — this module only fixes, ONCE, a deterministic
 -- mapping from parser node kinds to path_child indices, so every
 -- certificate the prover (prover_narrow.lua / prover.lua) emits addresses
--- the same real source location the same way every time.
+-- the same real source location the same way every time. Terms are built
+-- via the canonical v10 core (lib/type/v10_cleanroom/term_algebra, per the
+-- owner-ratified canon swap) — module-level primitives, no tier instance
+-- parameter.
 --
 -- ── The addressing contract (per-node-kind child-index table) ──────────────
 --
@@ -76,22 +79,21 @@
 --   statement's path directly.
 --
 -- `file_id` comes from a content hash of the file's source text
--- (lib/type/static/sha256.lua's `hash`, reused rather than reimplemented,
--- per the task brief's explicit instruction to reuse an existing hash
--- utility) encoded as an addr-v1 bitstring: each of the 64 hex digits of
--- the SHA-256 hex digest becomes 4 bits (MSB-first per digit), consed
+-- (lib/type/static/sha256.lua's `hash`, reused rather than reimplemented)
+-- encoded as an addr-v1 bitstring: each of the 64 hex digits of the
+-- SHA-256 hex digest becomes 4 bits (MSB-first per digit), consed
 -- left-to-right so the resulting `bs_cons` chain's head is the digest's
 -- first hex digit's high bit and the tail is `bs_nil` — a purely
 -- deterministic, structural encoding with no string payload anywhere in
 -- the resulting term (per addr-v1's own design constraint).
 
+local ta = require("lib.type.v10_cleanroom.term_algebra")
 local sha256 = require("lib.type.static.sha256")
 
 local M = {}
 
---:: AddrOps = { [string]: unknown }
---:: TermAlgebra = { build: (unknown, unknown[]) -> (unknown | nil, string | nil), [string]: unknown }
---:: Path = unknown
+--:: AddrOps = { [string]: OpDecl }
+--:: Path = Term
 
 local HEX_BITS = {
 	["0"] = { 0, 0, 0, 0 }, ["1"] = { 0, 0, 0, 1 }, ["2"] = { 0, 0, 1, 0 }, ["3"] = { 0, 0, 1, 1 },
@@ -101,16 +103,16 @@ local HEX_BITS = {
 } --[[: { [string]: integer[] } ]]
 
 -- Build a `file_id` term from the SHA-256 hash of `source`, over the given
--- addr-v1 operator table. Caps-clean: `k` and `addr_ops` are injected, the
--- source text is a parameter (no ambient io — the caller reads the file).
---: (k: TermAlgebra, addr_ops: AddrOps, source: string) -> (unknown | nil, string | nil)
-function M.file_id_of_source(k, addr_ops, source)
+-- addr-v1 operator table. Caps-clean: `addr_ops` is injected, the source
+-- text is a parameter (no ambient io — the caller reads the file).
+--: (addr_ops: AddrOps, source: string) -> (Term | nil, string | nil)
+function M.file_id_of_source(addr_ops, source)
 	local hex = sha256.hash(source)
-	local b0, err0 = k.build(addr_ops.b0, {})
-	local b1, err1 = k.build(addr_ops.b1, {})
+	local b0, err0 = ta.build(addr_ops.b0, {})
+	local b1, err1 = ta.build(addr_ops.b1, {})
 	if not b0 then return nil, err0 end
 	if not b1 then return nil, err1 end
-	local acc, aerr = k.build(addr_ops.bs_nil, {})
+	local acc, aerr = ta.build(addr_ops.bs_nil, {})
 	if not acc then return nil, aerr end
 	for i = #hex, 1, -1 do
 		local c = hex:sub(i, i)
@@ -118,48 +120,48 @@ function M.file_id_of_source(k, addr_ops, source)
 		if not bits then return nil, "file_id_of_source: unexpected hex digit " .. tostring(c) end
 		for j = 4, 1, -1 do
 			local bit_term = (bits[j] == 1) and b1 or b0
-			local next_acc, cerr = k.build(addr_ops.bs_cons, { bit_term, acc })
+			local next_acc, cerr = ta.build(addr_ops.bs_cons, { bit_term, acc })
 			if not next_acc then return nil, cerr end
 			acc = next_acc
 		end
 	end
-	return k.build(addr_ops.file_id_of, { acc })
+	return ta.build(addr_ops.file_id_of, { acc })
 end
 
 -- Build a peano `nat` term for a non-negative integer child index.
---: (k: TermAlgebra, addr_ops: AddrOps, n: integer) -> (unknown | nil, string | nil)
-function M.nat(k, addr_ops, n)
-	local acc, err = k.build(addr_ops.zero, {})
+--: (addr_ops: AddrOps, n: integer) -> (Term | nil, string | nil)
+function M.nat(addr_ops, n)
+	local acc, err = ta.build(addr_ops.zero, {})
 	if not acc then return nil, err end
 	for _ = 1, n do
-		local next_acc, cerr = k.build(addr_ops.succ, { acc })
+		local next_acc, cerr = ta.build(addr_ops.succ, { acc })
 		if not next_acc then return nil, cerr end
 		acc = next_acc
 	end
 	return acc
 end
 
---: (k: TermAlgebra, addr_ops: AddrOps) -> (Path | nil, string | nil)
-function M.root(k, addr_ops)
-	return k.build(addr_ops.path_root, {})
+--: (addr_ops: AddrOps) -> (Path | nil, string | nil)
+function M.root(addr_ops)
+	return ta.build(addr_ops.path_root, {})
 end
 
 -- Descend one child index from `parent`.
---: (k: TermAlgebra, addr_ops: AddrOps, parent: Path, index: integer) -> (Path | nil, string | nil)
-function M.child(k, addr_ops, parent, index)
-	local idx_term, ierr = M.nat(k, addr_ops, index)
+--: (addr_ops: AddrOps, parent: Path, index: integer) -> (Path | nil, string | nil)
+function M.child(addr_ops, parent, index)
+	local idx_term, ierr = M.nat(addr_ops, index)
 	if not idx_term then return nil, ierr end
-	return k.build(addr_ops.path_child, { parent, idx_term })
+	return ta.build(addr_ops.path_child, { parent, idx_term })
 end
 
---: (k: TermAlgebra, addr_ops: AddrOps, file_id: unknown, path: Path) -> (unknown | nil, string | nil)
-function M.entry(k, addr_ops, file_id, path)
-	return k.build(addr_ops.entry_of, { file_id, path })
+--: (addr_ops: AddrOps, file_id: Term, path: Path) -> (Term | nil, string | nil)
+function M.entry(addr_ops, file_id, path)
+	return ta.build(addr_ops.entry_of, { file_id, path })
 end
 
---: (k: TermAlgebra, addr_ops: AddrOps, file_id: unknown, path: Path) -> (unknown | nil, string | nil)
-function M.exit(k, addr_ops, file_id, path)
-	return k.build(addr_ops.exit_of, { file_id, path })
+--: (addr_ops: AddrOps, file_id: Term, path: Path) -> (Term | nil, string | nil)
+function M.exit(addr_ops, file_id, path)
+	return ta.build(addr_ops.exit_of, { file_id, path })
 end
 
 -- ── If-statement child indices (see header table) ───────────────────────────
@@ -182,9 +184,9 @@ M.FUNC_BODY_INDEX = 0
 
 -- A local variable's declaration-site identity path: child `name_index`
 -- (0-based, left-to-right) of the NODE_LOCAL_STMT's own path.
---: (k: TermAlgebra, addr_ops: AddrOps, local_stmt_path: Path, name_index: integer) -> (Path | nil, string | nil)
-function M.local_name_path(k, addr_ops, local_stmt_path, name_index)
-	return M.child(k, addr_ops, local_stmt_path, name_index)
+--: (addr_ops: AddrOps, local_stmt_path: Path, name_index: integer) -> (Path | nil, string | nil)
+function M.local_name_path(addr_ops, local_stmt_path, name_index)
+	return M.child(addr_ops, local_stmt_path, name_index)
 end
 
 return M

@@ -4,7 +4,8 @@
 -- per docs/typechecker-v10-pilot-signatures-proposal.md §1.2 exactly as
 -- specified there — no deviation from the operator list or shapes, since
 -- the proposal's own summary table (§5) marks this signature "Committable
--- as written — no cross-signature dependency."
+-- as written — no cross-signature dependency." Declared over the canonical
+-- v10 core (lib/type/v10_cleanroom/, per the owner-ratified canon swap).
 --
 -- Deliberately signature-only (no rules/axioms/replayer wiring): that is
 -- pilot step 3+, gated separately per the proposal's scope note. This
@@ -20,11 +21,9 @@
 -- nullary constants (bs_nil/bs_cons over b0/b1) — no string payload
 -- anywhere, per proposal §1.1's file-identity choice (A).
 
-local term_algebra = require("lib.type.v10_kernel.term_algebra")
+local ta = require("lib.type.v10_cleanroom.term_algebra")
 
 local M = {}
-
---:: Signature = unknown
 
 -- Declare the addr-v1 signature. Call once; share the returned signature
 -- object with every consumer that needs to cite its sorts (e.g.
@@ -32,7 +31,7 @@ local M = {}
 -- declared object itself, never a re-declaration.
 --: () -> (Signature | nil, string | nil)
 function M.declare()
-	return term_algebra.declare_signature({
+	return ta.declare_signature({
 		name = "addr-v1",
 		version = 1,
 		sorts = { "nat", "bit", "bitstring", "file_id", "path", "point" },
