@@ -6,6 +6,49 @@ Bench machine: AMD Ryzen 7 5700G, LuaJIT 2.1.1741730670, NixOS Linux 6.12.67.
 
 ---
 
+## 2026-07-30: v10 kernel narrowing pilot — real-corpus measurement (Phase 3, measurement-only)
+
+Full report: `docs/typechecker-v10-pilot-measurement.md`. Commit measured: `eeb18b1a`
+(`lib/type/v10_kernel/pilot/*.lua` last touched at `bd95559e`/`875e6a5d`, both ancestors).
+`bin/cr test lib/type/v10_kernel/pilot/` 7/7 files green (196 assertions); `bin/cr test
+lib/type/v10_cleanroom/` 3/3 files green (1044 assertions) — both reconfirmed at this HEAD.
+No pilot source touched to produce these numbers; driver is a disposable script
+(`/tmp/v10_parity/measure.lua`, not in the repo) calling `prover.M.analyze_file` directly plus
+shelling to `bin/cr check` for the v3 baseline (wall-clock via `date +%s%N` inside the shelled
+subprocess — an earlier attempt using `os.clock()` around a blocking `io.popen` measured the
+parent Lua process's own idle CPU time, not the child's wall time, and was discarded before
+any numbers below were recorded).
+
+**Corpus**: 27 real `lib/` files (20,097 lines / 791,033 bytes combined), selected by grepping
+for `local X --: <six-tag-union>` locals with a guard on that SAME variable nearby (see the
+full report for the two-pass selection method and the complete file list).
+
+**Methodology note (not apples-to-apples, by design)**: `v3_ms` is the full `bin/cr check`
+process (loader + LuaJIT + stdlib + full typecheck) — 29–42ms across every file in this
+corpus regardless of size (863B–221,816B), i.e. dominated by fixed process-startup cost at
+this corpus's file sizes, not a throughput measurement. `analyze_ms`/`emit_ms` are the pilot's
+in-process pass-1/pass-2+replay timings for narrowing-only analysis (no process startup, no
+full type inference). The two are not scope-comparable; see the full report.
+
+**Aggregate**: 546 guards found, 17 handled (529 skipped — **100% of skips carry the single
+reason** `"guarded variable not a tracked annotated local"`, i.e., real guards on variables
+the pilot's scope-tracking never touches: mostly function-parameter annotations, since
+`prover_narrow.lua` only populates scope from `NODE_LOCAL_STMT`, never from a parameter list).
+141 annotations parsed / 196 rejected (record/function/named-alias/`integer`/`unknown` — all
+out of the pilot's declared six-tag scope, not bugs). 20 certificates emitted, 20/20 replay
+pass, 0 fail. Total `analyze_ms` summed across the corpus: 105.471ms. Total `emit_ms`
+(includes inline replay): 72.736ms.
+
+**Truth check**: all 20 emitted judgments individually verified by hand against source (table
+in the full report) — **20/20 TRUE**, no wrong judgment found in this sample. Sample is
+dominated by bare-truthiness/`nil`-check guard forms (18/20); only 4 rows exercise the
+elseif-chain mechanism, only 2 rows touch a nested-function scope boundary. No `type(x)=="table"
+/"function"/"boolean"`, no `while`-guard, no fully-eligible 3+-clause elseif chain occurred
+naturally in this corpus — absence of those forms from the sample is a corpus-coverage gap,
+not evidence about them.
+
+---
+
 ## 2026-07-28: v10 kernel term algebra — replay-shaped benchmarks (mixed, non-uniform result)
 
 Follow-up to the two entries below, redirected by an owner-pressure-tested
