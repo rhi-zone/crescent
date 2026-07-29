@@ -1,5 +1,5 @@
 {
-  "agent": "me",
+  "agent": "peer",
   "hooks": {
     "UserPromptSubmit": [
       {
