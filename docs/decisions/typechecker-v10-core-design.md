@@ -405,9 +405,14 @@ status) falls out of the formulation and is REQUIRED as an executable
 test.
 
 **Replay** = one bottom-up pass per node computing `(conclusion, taint
-set, open-hypothesis set)`, all memoized; root checks: conclusion ground
-AND closed, open set empty; run-level trust label attached; caches keyed
-by kernel-config hash.
+set, open-hypothesis set)`, all memoized. **Amended by F9 below (spec
+adjudications section): EVERY node's computed conclusion must be ground
+AND closed, not only the root's** — a node failing this check is a
+replay error at that node. Root additionally checks open set empty;
+run-level trust label attached; caches keyed by kernel-config hash. (The
+prior wording here — "root checks: conclusion ground AND closed" — is
+superseded; the root's ground/closed check is now redundant belt over
+the per-node requirement, not the sole enforcement point.)
 
 **Side conditions note.** Remain deferred/undesigned (removability
 requirement stands, per the clarified open item below); rule schemas in
@@ -538,6 +543,89 @@ unchanged by this plan record:
 - Reality-bridge tier 2.
 - Coverage-formalization tier 3.
 - The compositionality-canary charter wording (strict vs permissive).
+
+---
+
+## Spec adjudications — cleanroom findings F1–F13
+
+### Settled (owner-ratified this session)
+
+**Status line: the halt discipline worked as designed again.** A
+cleanroom reimplementation of the ratified spec above halted on 13
+genuine underdeterminations rather than guessing past them; each is
+adjudicated below. This is the same discipline credited earlier in this
+document (the intrinsically-sorted-variables and non-linear-metavariable
+refinements) recurring at a different layer of the build.
+
+- **F1 — binds order.** `binds[i+1]` corresponds to de Bruijn index `i`
+  (list position order, matching the spec sentence's juxtaposition).
+  Convention now fixed.
+- **F2 — `subst(t, k, u)` semantics.** Pure replacement, no index
+  renumbering (TAPL `[k↦u]t`); indices `> k` are untouched. β-style
+  decrementing subst is NOT the primitive; expressible as `shift ∘ subst`
+  if ever needed.
+- **F3 — `subst` when `k` is not free in `t`.** No-op success; no sort
+  check applies (there is no target occurrence to check against).
+  Documented as such.
+- **F4 — `shift` with negative amounts.** Allowed; index underflow
+  (below cutoff) is a data error (`nil, errmsg`). `match` internally
+  converts underflow arising during non-linear/depth adjustment into
+  ordinary match failure — this makes the already-ratified "candidates
+  referencing binders strictly between the two depths fail naturally"
+  literal rather than aspirational.
+- **F5 — `match` traversal order.** Pre-order, left-to-right, is the
+  defined order; "first occurrence" and its recorded binding depth are
+  normative to that order. Given F4, accept/reject is order-invariant;
+  binding output is normalized to preorder-first.
+- **F6 — `declare_signature` name collisions.** ALL name collisions
+  reject: duplicate names within `sorts`, own sort vs. import, import vs.
+  import. No precedence/shadowing rules, ever. An operator's result sort
+  MAY be an imported sort.
+- **F7 — `match` subject containing metavariables.** A data error,
+  distinct from ordinary no-match. The primitive is strict;
+  pattern-vs-pattern matching is not a supported operation.
+- **F8 — hypothesis identity.** The certificate leaf's object identity
+  IS the hypothesis id; there is no separate id field. Two leaves
+  carrying the same judgment are two distinct hypotheses (standard ND); a
+  DAG-shared leaf is one hypothesis. "A hypothesis leaf contributes
+  itself" (replayer section above) is literal, not shorthand.
+- **F9 — CONTRADICTION RESOLVED: per-node vs. root-only ground/closed
+  check.** The strict reading is ratified: EVERY node's computed
+  conclusion must be ground AND closed, not only the root's. The root
+  check remains as a redundant belt. Rationale: an open intermediate
+  judgment asserts nothing — the derivation has no term-level binder that
+  could close it; kernel-conservative. The prior replayer-section
+  wording (closedness enforced at root only) is superseded — see the
+  amendment applied to the "Replayer: certificates, taint, discharge"
+  section above.
+- **F10 — hypothesis leaf judgments.** Must be ground AND closed at
+  construction. Metavariables in hypotheses are rejected (would smuggle
+  unification into discharge).
+- **F11 — declaration-time validation, extended.** Reject at
+  `declare`-time: a discharge-slot `premise_index` out of range; a
+  conclusion-pattern or slot-pattern metavariable not a subset of the
+  union of premise-pattern metavariables (a rule that can never replay is
+  malformed at birth). `(name, version)` uniqueness is enforced per
+  registry; taint-set element identity is the declaration OBJECT
+  (identity-by-declaration, consistent with the sorts/ops ratification
+  above), with `(name, version)` serving only as the display/citation
+  key.
+- **F12 — axiom-citation bindings.** Plain terms at depth 0; each must be
+  ground AND closed; bindings supplied for metavariables not in the
+  declared pattern are rejected (no silent ignoring).
+- **F13 — sort discipline at binding.** Certified as entailed by the
+  already-ratified "ill-sorted terms unrepresentable" property: `match`
+  binding `meta(id, s)` to a term of sort `≠ s` fails; `instantiate`
+  rejects mis-sorted bindings. Metavariable identity is `id` alone; the
+  same `id` appearing with two different sorts in one pattern is a
+  validation error at declaration.
+
+**Provenance note.** These 13 readings were resolved SILENTLY by the
+existing `lib/type/v10_kernel` implementation — it was built before they
+were ever asked as questions. A cross-parity adjudication of that
+implementation against the cleanroom build is the planned next step;
+divergences found there will be judged against the rulings F1–F13 record
+above, not the other way around.
 
 ---
 
