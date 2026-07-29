@@ -111,6 +111,13 @@ T.describe("finance.init", function()
 
       local sheet, serr = app.get_balance_sheet("2026-09-30")
       T.ok(sheet ~= nil, serr)
+
+      local entries, lieerr = app.list_entries()
+      T.ok(entries ~= nil, lieerr)
+      if entries ~= nil then
+        T.eq(#entries, 1)
+        T.eq(entries[1].period_id, "2026-Q3")
+      end
     end)
   end)
 

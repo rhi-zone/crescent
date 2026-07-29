@@ -49,7 +49,7 @@ local sample_reg = doc_registry.new({ client_id = 0 })
 -- concrete Bridge record rather than `unknown` -- a nil-check narrows
 -- `Bridge | nil` to `Bridge`, but does not narrow a bare `unknown`.
 --:: SyncManagerCap = { broadcast_change: (unknown, string, string) -> (true | nil, string | nil), ... }
---:: Bridge = { registry: Registry, db: DbCap, sync_manager: SyncManagerCap | nil, book_currency: string }
+--:: Bridge = { registry: Registry, db: DbCap, sync_manager: SyncManagerCap | nil, book_currency: string, _next_entry_id: number }
 
 -- Restated from lib/platform/apps/finance/sync_manager.lua's own header
 -- (typeof doesn't survive require(), and this shape is needed to annotate
@@ -141,6 +141,14 @@ M.new = function(opts)
   --: () -> (unknown | nil, string | nil)
   local function list_accounts() return bridge_mod.list_accounts(bridge) end
 
+  -- Every posted entry across every period, each tagged with its period_id
+  -- (see lib/platform/apps/finance/bridge.lua's own doc comment on
+  -- M.list_entries: this is the only way to recover the period_id
+  -- void_entry/delete_entry require, since neither WireEntry nor
+  -- get_ledger's ledger_row carry it).
+  --: () -> (unknown | nil, string | nil)
+  local function list_entries() return bridge_mod.list_entries(bridge) end
+
   --: (string, WireEntry) -> (unknown | nil, string | nil)
   local function post_entry(period_id, data) return bridge_mod.post_entry(bridge, period_id, data) end
   --: (string, string, string) -> (unknown | nil, string | nil)
@@ -172,6 +180,7 @@ M.new = function(opts)
     update_account = update_account,
     delete_account = delete_account,
     list_accounts = list_accounts,
+    list_entries = list_entries,
 
     post_entry = post_entry,
     void_entry = void_entry,
