@@ -5383,3 +5383,12 @@ framing.
   use sites. Natural code = inline `type()` guards and direct field writes;
   revert when the checker intersects `type()` narrowing with existing
   annotations.
+
+- [ ] Revert TYPECHECKER WORKAROUND in `lib/type/v10_cleanroom/replayer.lua`:
+  replay memoization and the open/discharged sets are naturally Lua tables
+  keyed by certificate-node objects, but index signatures only admit
+  primitive key types (`{ [string]: T }` / `{ [integer]: T }`), so the memo
+  is a parallel-array association, the sets are node lists, and the
+  cycle-detection path is a linked list (O(n) lookup instead of O(1)).
+  Revert to node-keyed tables when the checker supports non-primitive
+  index-signature keys.
