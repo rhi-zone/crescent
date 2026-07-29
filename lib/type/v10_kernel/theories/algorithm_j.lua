@@ -1,51 +1,53 @@
 -- lib/type/v10_kernel/theories/algorithm_j.lua
--- Algorithm J, ported onto the ratified v10 core, mirroring
--- algorithm_w.lua's port structure (see that file's header for the shared
--- two-pass rationale and hm.lua's header for the vocabulary/rule-shape
--- findings). Same tiny lambda calculus (lit/var/abs/app/let), same
--- Damas-Milner typing judgment, same non-generalizing let — but a
--- structurally different PRODUCER: Algorithm W's functional-substitution-map
--- unification is replaced here by the classic imperative reformulation (a
--- type variable IS a mutable ref cell; unifying a variable with something
--- means MUTATING its cell in place, union-find style via `prune`). J is an
--- UNTRUSTED PRODUCER exactly like W: the replayer never runs this code path.
+-- Algorithm J, ported onto the canonical v10 core (lib/type/v10_cleanroom/),
+-- mirroring algorithm_w.lua's port structure (see that file's header for
+-- the shared two-pass rationale, the canonical certificate grammar — plain
+-- tables, F8 node-identity hypotheses, F12 plain-term axiom bindings — and
+-- hm.lua's header for the vocabulary/rule-shape findings). Same tiny lambda
+-- calculus (lit/var/abs/app/let), same Damas-Milner typing judgment, same
+-- non-generalizing let — but a structurally different PRODUCER: Algorithm
+-- W's functional-substitution-map unification is replaced here by the
+-- classic imperative reformulation (a type variable IS a mutable ref cell;
+-- unifying a variable with something means MUTATING its cell in place,
+-- union-find style via `prune`). J is an UNTRUSTED PRODUCER exactly like W:
+-- the replayer never runs this code path.
 --
--- GENERICITY FINDING (carried over from the retired prototype, now even
--- more directly true): this theory declares ZERO new vocabulary. It takes
--- the SAME `hm.declare_vocabulary(k)` result W uses (a caller builds one
--- vocabulary per tier and passes it to both `algorithm_w.certify` and
--- `algorithm_j.certify`) — there is no registry step to "reuse into"
--- anymore (rule/axiom identity is the declared object itself; the retired
--- prototype's registry-scoped reuse collapses to "hold a reference to the
--- same object"). This is a STRONGER form of the original finding: the
--- retired prototype's J still had to call `registry.register` once per
--- rule to install W's schema objects into its own registry instance; here
--- there is no analogous step at all.
+-- GENERICITY FINDING (still true under the canon swap, unchanged): this
+-- theory declares ZERO new vocabulary. It takes the SAME
+-- `hm.declare_vocabulary(registry)` result W uses (a caller builds one
+-- vocabulary per registry and passes it to both `algorithm_w.certify` and
+-- `algorithm_j.certify`) — rule/axiom identity is the declared object
+-- itself; sharing a rule is holding a reference to the same object.
 --
 -- SAME DELIBERATE WEAKNESS as algorithm_w.lua: does not generalize
--- let-bindings (see algorithm_w_test.lua's / algorithm_j_test.lua's "known
--- limitation" case, run on the identical term both files use). No occurs
--- check.
+-- let-bindings (see the two test files' "known limitation" case, run on the
+-- identical term both files use). No occurs check.
 --
 -- TWO-PASS CONSTRUCTION, J's specific shape: same requirement and reason as
--- algorithm_w.lua's header (term_algebra terms must be ground the moment
--- they're built; there is no cross-node "same unification variable"
--- identity a certificate node can defer to). Unlike W (whose "final
--- resolved type" lookup is a plain `subst` table keyed by id, valid
--- regardless of which JType object queries it), J's resolution lives in
--- MUTABLE CELLS attached to the specific var OBJECTS `unify` mutated — a
--- fresh cell created later, even with a matching id, was never mutated and
--- would prune to itself. So pass 1 THREADS a `created`-by-id side table
--- through its own recursion (populated at the exact point each fresh var is
--- made, before any mutation), and only AFTER `infer_types` fully returns
--- (every reachable `unify` call has run) does `certify` walk that table and
--- `deep_prune` each ORIGINAL var object — capturing pass 1's actual mutation
--- result. Pass 2 then creates its OWN fresh (never mutated) vars purely to
--- advance the id counter in lockstep with pass 1's deterministic traversal
--- order, and looks up the recorded resolved type by id rather than pruning
--- its own, unrelated cell.
+-- algorithm_w.lua's header (terms must be ground the moment they're built;
+-- there is no cross-node "same unification variable" identity a certificate
+-- node can defer to). Unlike W (whose "final resolved type" lookup is a
+-- plain `subst` table keyed by id, valid regardless of which JType object
+-- queries it), J's resolution lives in MUTABLE CELLS attached to the
+-- specific var OBJECTS `unify` mutated — a fresh cell created later, even
+-- with a matching id, was never mutated and would prune to itself. So pass
+-- 1 THREADS a `created`-by-id side table through its own recursion
+-- (populated at the exact point each fresh var is made, before any
+-- mutation), and only AFTER `infer_types` fully returns (every reachable
+-- `unify` call has run) does `certify` walk that table and `deep_prune`
+-- each ORIGINAL var object — capturing pass 1's actual mutation result.
+-- Pass 2 then creates its OWN fresh (never mutated) vars purely to advance
+-- the id counter in lockstep with pass 1's deterministic traversal order,
+-- and looks up the recorded resolved type by id rather than pruning its
+-- own, unrelated cell.
 
-local replayer = require("lib.type.v10_kernel.replayer")
+-- Required for the type vocabulary this module consumes (Term/CertNode
+-- from the canonical core, Vocab from hm.lua); certificate nodes
+-- themselves are plain tables, so there is no runtime constructor call
+-- into either module.
+local ta = require("lib.type.v10_cleanroom.term_algebra")
+local replayer = require("lib.type.v10_cleanroom.replayer")
+local hm = require("lib.type.v10_kernel.theories.hm")
 
 local M = {}
 
@@ -161,25 +163,24 @@ end
 
 -- ── Pass 2: certificate construction over the resolved types ────────────────
 
---:: CertBinding = { hyp_node: unknown, ty: unknown }
+--:: CertBinding = { hyp_node: CertNode, ty: Term }
 --:: CertEnv = { [integer]: CertBinding }
---:: Vocab = { signature: unknown, int_ty: unknown, bool_ty: unknown, H: (unknown) -> (unknown | nil, string | nil), Arrow: (unknown, unknown) -> (unknown | nil, string | nil), ax_lit: unknown, rule_abs: unknown, rule_app: unknown, rule_let: unknown }
 
---: (CertEnv, unknown, unknown) -> CertEnv
+--: (CertEnv, CertNode, Term) -> CertEnv
 local function cert_env_extend(env, hyp_node, ty)
 	local extended = { { hyp_node = hyp_node, ty = ty } } --[[: CertEnv ]]
 	for i = 1, #env do extended[i + 1] = env[i] end
 	return extended
 end
 
-local hyp_counter = 0
---: () -> string
-local function fresh_hyp_id()
-	hyp_counter = hyp_counter + 1
-	return "h" .. hyp_counter
+-- Hypothesis leaf builder (a plain table per the canonical certificate
+-- grammar; its object identity IS the hypothesis id -- F8).
+--: (j: Term) -> CertNode
+local function hyp_node_of(j)
+	return { kind = "hypothesis", judgment = j }
 end
 
---: (Resolved, Vocab) -> (unknown | nil, string | nil)
+--: (Resolved, Vocab) -> (Term | nil, string | nil)
 local function to_ty(t, vocab)
 	if t.tag == "con" then
 		if t.base == "integer" then return vocab.int_ty end
@@ -198,15 +199,14 @@ end
 -- after pass 1 finished -- see module header). Pass 2 creates fresh (never
 -- mutated) vars solely to keep `fresh_counter` advancing in the same
 -- deterministic order pass 1 used, then looks the resulting id up here.
---: (JTerm, CertEnv, ResolvedById, Vocab) -> (unknown | nil, unknown | nil, string | nil)
+--: (JTerm, CertEnv, ResolvedById, Vocab) -> (Term | nil, CertNode | nil, string | nil)
 local function build_cert(term, env, resolved, vocab)
 	if term.tag == "lit" then
 		if term.base ~= "integer" and term.base ~= "boolean" then
 			return nil, nil, "build_cert: unknown literal base " .. tostring(term.base) .. " at " .. term.locus
 		end
 		local ty_term = term.base == "integer" and vocab.int_ty or vocab.bool_ty
-		local node, err = replayer.cite_axiom(vocab.ax_lit, { A = { term = ty_term, depth = 0 } })
-		if not node then return nil, nil, err end
+		local node = { kind = "axiom", axiom = vocab.ax_lit, bindings = { A = ty_term } } --[[: CertNode ]]
 		return ty_term, node, nil
 	elseif term.tag == "var" then
 		local binding = env[term.index + 1]
@@ -220,15 +220,16 @@ local function build_cert(term, env, resolved, vocab)
 		if not param_resolved then return nil, nil, "build_cert: no resolved type recorded for t" .. param_var.id end
 		local param_ty, terr = to_ty(param_resolved, vocab)
 		if not param_ty then return nil, nil, terr end
-		local hyp_id = fresh_hyp_id()
 		local hyp_h, herr = vocab.H(param_ty)
 		if not hyp_h then return nil, nil, herr end
-		local hyp_node, hnerr = replayer.hypothesis(hyp_id, hyp_h)
-		if not hyp_node then return nil, nil, hnerr end
+		local hyp_node = hyp_node_of(hyp_h)
 		local body_ty, body_node, berr = build_cert(term.body, cert_env_extend(env, hyp_node, param_ty), resolved, vocab)
 		if not body_ty then return nil, nil, berr end
-		local node, cerr = replayer.cite_rule(vocab.rule_abs, { hyp_node, body_node }, { { hyp_id } })
-		if not node then return nil, nil, cerr end
+		local node = {
+			kind = "rule", rule = vocab.rule_abs,
+			premises = { hyp_node, body_node },
+			discharge = { [1] = { hyp_node } },
+		} --[[: CertNode ]]
 		local arrow_ty, aerr = vocab.Arrow(param_ty, body_ty)
 		if not arrow_ty then return nil, nil, aerr end
 		return arrow_ty, node, nil
@@ -242,8 +243,7 @@ local function build_cert(term, env, resolved, vocab)
 		if not result_resolved then return nil, nil, "build_cert: no resolved type recorded for t" .. result_var.id end
 		local result_ty, rerr = to_ty(result_resolved, vocab)
 		if not result_ty then return nil, nil, rerr end
-		local node, cerr = replayer.cite_rule(vocab.rule_app, { fn_node, arg_node })
-		if not node then return nil, nil, cerr end
+		local node = { kind = "rule", rule = vocab.rule_app, premises = { fn_node, arg_node } } --[[: CertNode ]]
 		return result_ty, node, nil
 	elseif term.tag == "let" then
 		local value_ty, value_node, err1 = build_cert(term.value, env, resolved, vocab)
@@ -251,15 +251,16 @@ local function build_cert(term, env, resolved, vocab)
 		-- DELIBERATE WEAKNESS, matching pass 1: no generalization -- the
 		-- let-bound hypothesis's type is exactly the value's own (already
 		-- fully resolved) type, monomorphic, not a re-instantiated scheme.
-		local hyp_id = fresh_hyp_id()
 		local hyp_h, herr = vocab.H(value_ty)
 		if not hyp_h then return nil, nil, herr end
-		local hyp_node, hnerr = replayer.hypothesis(hyp_id, hyp_h)
-		if not hyp_node then return nil, nil, hnerr end
+		local hyp_node = hyp_node_of(hyp_h)
 		local body_ty, body_node, err2 = build_cert(term.body, cert_env_extend(env, hyp_node, value_ty), resolved, vocab)
 		if not body_ty then return nil, nil, err2 end
-		local node, cerr = replayer.cite_rule(vocab.rule_let, { value_node, hyp_node, body_node }, { { hyp_id } })
-		if not node then return nil, nil, cerr end
+		local node = {
+			kind = "rule", rule = vocab.rule_let,
+			premises = { value_node, hyp_node, body_node },
+			discharge = { [1] = { hyp_node } },
+		} --[[: CertNode ]]
 		return body_ty, node, nil
 	end
 	return nil, nil, "unknown term tag " .. tostring(term.tag)
@@ -270,10 +271,9 @@ end
 -- `certify` -- see module header's genericity finding). Returns (root
 -- certificate node, nil) on success, or (nil, errmsg) on an inference
 -- failure -- never a thrown error.
---: (JTerm, Vocab) -> (unknown | nil, string | nil)
+--: (JTerm, Vocab) -> (CertNode | nil, string | nil)
 function M.certify(term, vocab)
 	fresh_counter = 0
-	hyp_counter = 0
 
 	local created = {} --[[: CreatedById ]]
 	local root_type, err = infer_types(term, {}, created)

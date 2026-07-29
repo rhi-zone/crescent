@@ -1,62 +1,51 @@
 -- lib/type/v10_kernel/theories/algorithm_w.lua
--- Algorithm W, ported onto the ratified v10 core
--- (docs/decisions/typechecker-v10-core-design.md,
--- docs/decisions/typechecker-v10-core-charter.md). An UNTRUSTED PRODUCER:
--- it runs its own toy Hindley-Milner-style inference for a four-construct
--- lambda calculus (lit/var/abs/app/let) and emits a certificate the
--- replayer (lib/type/v10_kernel/replayer/) can replay purely structurally,
--- citing the hm.lua rule/axiom vocabulary. The replayer never runs this
--- code path and knows nothing about it.
+-- Algorithm W, ported onto the canonical v10 core (lib/type/v10_cleanroom/,
+-- per the owner-ratified canon swap — see
+-- docs/decisions/typechecker-v10-core-design.md, "Canon swap: cleanroom
+-- core"). An UNTRUSTED PRODUCER: it runs its own toy Hindley-Milner-style
+-- inference for a four-construct lambda calculus (lit/var/abs/app/let) and
+-- emits a certificate the canonical replayer can replay purely
+-- structurally, citing the hm.lua rule/axiom vocabulary. The replayer never
+-- runs this code path and knows nothing about it.
 --
--- DELIBERATE, DOCUMENTED WEAKNESS (carried over from the retired prototype,
--- unchanged): does NOT generalize let-bindings into type schemes. `let x =
--- e1 in e2` infers e1's type once and binds x to that concrete
--- (monomorphic) type for e2 — a type variable free in e1's type gets
--- unified against whatever the FIRST use in e2 requires and stays pinned
--- there; a second, differently-typed use of the same let-bound name is
--- rejected. See algorithm_w_test.lua's "known limitation" case. No occurs
--- check either, also carried over.
+-- DELIBERATE, DOCUMENTED WEAKNESS (carried over unchanged): does NOT
+-- generalize let-bindings into type schemes. `let x = e1 in e2` infers e1's
+-- type once and binds x to that concrete (monomorphic) type for e2. See
+-- algorithm_w_test.lua's "known limitation" case. No occurs check either,
+-- also carried over.
 --
--- TWO-PASS CONSTRUCTION (the actual porting finding — see hm.lua's header
--- for the vocabulary/rule-shape findings): the retired prototype built
--- certificate nodes INLINE, one recursive descent, because its certificate
--- grammar's `conclusion`/hypothesis `payload` fields were fully OPAQUE
--- strings the kernel never checked — a hypothesis introduced for an
--- abs/let binder could carry a still-unresolved type variable's display
--- string at creation time, later becoming stale once further unification
--- elsewhere pinned it, and nothing ever noticed because nothing ever
--- looked. The new core's term_algebra has no analogous "fill in later"
--- placeholder: every certificate node's judgment must be a GROUND term the
--- moment it's built (a metavariable may never survive into a concluded
--- judgment or a hypothesis that must later match one structurally), and
--- there is no cross-node "same unification variable" identity spanning
--- separate certificate nodes the way a shared `subst` map provided. So
--- `certify` runs Algorithm W's real inference (fresh type variables +
--- global substitution map, exactly as before, entirely OUTSIDE
--- term_algebra) to completion FIRST, producing an annotated copy of the
--- term recording each binder's own (Lua-internal, not-yet-materialized)
--- `WType`; only THEN does a second, purely mechanical pass walk that
--- annotated tree and build actual term_algebra terms + certificate nodes,
--- with every type fully resolved (`deep_resolve`) by construction. This is
--- a required restructuring for any incremental/mutable-unification
--- algorithm targeting this certificate model, not a workaround for a gap —
--- see hm.lua's header, "Finding 3", for the flip side (the new core
--- catches consistency mistakes the old opaque-payload design structurally
--- could not).
+-- TWO-PASS CONSTRUCTION (unchanged in meaning by the canon swap — see the
+-- prior port finding): every certificate node's judgment must be a GROUND
+-- term the moment it's built, and there is no cross-node "same unification
+-- variable" identity, so `certify` runs Algorithm W's real inference (fresh
+-- type variables + global substitution map, entirely OUTSIDE the term
+-- algebra) to completion FIRST; only THEN does a second, purely mechanical
+-- pass build actual terms + certificate nodes with every type fully
+-- resolved (`deep_resolve`) by construction.
 --
--- BINDER REPRESENTATION: unchanged from the retired prototype — `var` terms
--- carry a de Bruijn INDEX (0 = nearest enclosing binder), not a source
--- name; the environment threaded through both passes is a depth-indexed
--- list, never looked up by name. `param`/`name` display strings remain
--- purely cosmetic (used only in error messages here — the new certificate
--- grammar has no field for them at all, unlike the retired prototype's
--- `locus`/cosmetic-name node fields, so they don't even ride along into the
--- certificate; this is a straightforward consequence of nodes carrying no
--- payload beyond what replay computes, not a loss of anything
--- semantically load-bearing, since the retired design never checked them
--- either).
+-- CERTIFICATE GRAMMAR under the canonical core: certificate nodes are plain
+-- tables (the replayer validates, never trusts — there are no node
+-- constructors and no construction-time validation; malformed citations are
+-- rejected at REPLAY, e.g. a wrong premise count). Hypothesis identity is
+-- the LEAF NODE OBJECT itself (F8): there are no hypothesis id strings any
+-- more — the same node reference cited in a rule's premises and named in
+-- its discharge set IS the hypothesis, and re-citing the same node object
+-- wherever the bound name is referenced is the DAG-sharing port of
+-- "assumes". Axiom-citation bindings are plain ground closed terms at
+-- depth 0 (F12) — no { term, depth } wrapper.
+--
+-- BINDER REPRESENTATION: unchanged — `var` terms carry a de Bruijn INDEX
+-- (0 = nearest enclosing binder); the environment threaded through both
+-- passes is a depth-indexed list, never looked up by name. `param`/`name`
+-- display strings remain purely cosmetic (error messages only).
 
-local replayer = require("lib.type.v10_kernel.replayer")
+-- Required for the type vocabulary this module consumes (Term/CertNode
+-- from the canonical core, Vocab from hm.lua); certificate nodes
+-- themselves are plain tables, so there is no runtime constructor call
+-- into either module.
+local ta = require("lib.type.v10_cleanroom.term_algebra")
+local replayer = require("lib.type.v10_cleanroom.replayer")
+local hm = require("lib.type.v10_kernel.theories.hm")
 
 local M = {}
 
@@ -106,7 +95,7 @@ local function unify(a, b, subst)
 	return nil, "cannot unify " .. tostring(a.tag) .. " with " .. tostring(b.tag)
 end
 
--- ── Pass 1: type inference only (no term_algebra/replayer involvement) ──────
+-- ── Pass 1: type inference only (no term algebra / replayer involvement) ────
 
 --:: WEnv = { [integer]: WType }
 
@@ -161,25 +150,24 @@ end
 -- calling `unify` again. Builds hm.lua vocabulary citations with every type
 -- fully ground via `deep_resolve` against pass 1's finished `subst`.
 
---:: CertBinding = { hyp_node: unknown, ty: unknown }
+--:: CertBinding = { hyp_node: CertNode, ty: Term }
 --:: CertEnv = { [integer]: CertBinding }
---:: Vocab = { signature: unknown, int_ty: unknown, bool_ty: unknown, H: (unknown) -> (unknown | nil, string | nil), Arrow: (unknown, unknown) -> (unknown | nil, string | nil), ax_lit: unknown, rule_abs: unknown, rule_app: unknown, rule_let: unknown }
 
---: (CertEnv, unknown, unknown) -> CertEnv
+--: (CertEnv, CertNode, Term) -> CertEnv
 local function cert_env_extend(env, hyp_node, ty)
 	local extended = { { hyp_node = hyp_node, ty = ty } } --[[: CertEnv ]]
 	for i = 1, #env do extended[i + 1] = env[i] end
 	return extended
 end
 
-local hyp_counter = 0
---: () -> string
-local function fresh_hyp_id()
-	hyp_counter = hyp_counter + 1
-	return "h" .. hyp_counter
+-- Hypothesis leaf builder (a plain table per the canonical certificate
+-- grammar; its object identity IS the hypothesis id -- F8).
+--: (j: Term) -> CertNode
+local function hyp_node_of(j)
+	return { kind = "hypothesis", judgment = j }
 end
 
---: (WType, Subst, Vocab) -> (unknown | nil, string | nil)
+--: (WType, Subst, Vocab) -> (Term | nil, string | nil)
 local function to_ty(t, subst, vocab)
 	t = deep_resolve(t, subst)
 	if t.tag == "con" then
@@ -199,19 +187,18 @@ local function to_ty(t, subst, vocab)
 end
 
 -- Returns (ty_term, cert_node, nil) on success -- ty_term is the fully
--- ground hm.lua `ty`-sort term_algebra term for `term`'s type (needed by
--- LET to build its own bound hypothesis's judgment from the value's
--- already-resolved type, and by ABS to build the arrow result -- see
--- module header's two-pass note).
---: (WTerm, CertEnv, Subst, Vocab) -> (unknown | nil, unknown | nil, string | nil)
+-- ground hm.lua `ty`-sort term for `term`'s type (needed by LET to build
+-- its own bound hypothesis's judgment from the value's already-resolved
+-- type, and by ABS to build the arrow result -- see module header's
+-- two-pass note).
+--: (WTerm, CertEnv, Subst, Vocab) -> (Term | nil, CertNode | nil, string | nil)
 local function build_cert(term, env, subst, vocab)
 	if term.tag == "lit" then
 		if term.base ~= "integer" and term.base ~= "boolean" then
 			return nil, nil, "build_cert: unknown literal base " .. tostring(term.base) .. " at " .. term.locus
 		end
 		local ty_term = term.base == "integer" and vocab.int_ty or vocab.bool_ty
-		local node, err = replayer.cite_axiom(vocab.ax_lit, { A = { term = ty_term, depth = 0 } })
-		if not node then return nil, nil, err end
+		local node = { kind = "axiom", axiom = vocab.ax_lit, bindings = { A = ty_term } } --[[: CertNode ]]
 		return ty_term, node, nil
 	elseif term.tag == "var" then
 		local binding = env[term.index + 1]
@@ -223,15 +210,16 @@ local function build_cert(term, env, subst, vocab)
 		local param_wtype = fresh_var()
 		local param_ty, terr = to_ty(param_wtype, subst, vocab)
 		if not param_ty then return nil, nil, terr end
-		local hyp_id = fresh_hyp_id()
 		local hyp_h, herr = vocab.H(param_ty)
 		if not hyp_h then return nil, nil, herr end
-		local hyp_node, hnerr = replayer.hypothesis(hyp_id, hyp_h)
-		if not hyp_node then return nil, nil, hnerr end
+		local hyp_node = hyp_node_of(hyp_h)
 		local body_ty, body_node, berr = build_cert(term.body, cert_env_extend(env, hyp_node, param_ty), subst, vocab)
 		if not body_ty then return nil, nil, berr end
-		local node, cerr = replayer.cite_rule(vocab.rule_abs, { hyp_node, body_node }, { { hyp_id } })
-		if not node then return nil, nil, cerr end
+		local node = {
+			kind = "rule", rule = vocab.rule_abs,
+			premises = { hyp_node, body_node },
+			discharge = { [1] = { hyp_node } },
+		} --[[: CertNode ]]
 		local arrow_ty, aerr = vocab.Arrow(param_ty, body_ty)
 		if not arrow_ty then return nil, nil, aerr end
 		return arrow_ty, node, nil
@@ -243,8 +231,7 @@ local function build_cert(term, env, subst, vocab)
 		local result_wtype = fresh_var()
 		local result_ty, rerr = to_ty(result_wtype, subst, vocab)
 		if not result_ty then return nil, nil, rerr end
-		local node, cerr = replayer.cite_rule(vocab.rule_app, { fn_node, arg_node })
-		if not node then return nil, nil, cerr end
+		local node = { kind = "rule", rule = vocab.rule_app, premises = { fn_node, arg_node } } --[[: CertNode ]]
 		return result_ty, node, nil
 	elseif term.tag == "let" then
 		local value_ty, value_node, err1 = build_cert(term.value, env, subst, vocab)
@@ -252,15 +239,16 @@ local function build_cert(term, env, subst, vocab)
 		-- DELIBERATE WEAKNESS, matching pass 1: no generalization -- the
 		-- let-bound hypothesis's type is exactly the value's own (already
 		-- fully resolved) type, monomorphic, not a re-instantiated scheme.
-		local hyp_id = fresh_hyp_id()
 		local hyp_h, herr = vocab.H(value_ty)
 		if not hyp_h then return nil, nil, herr end
-		local hyp_node, hnerr = replayer.hypothesis(hyp_id, hyp_h)
-		if not hyp_node then return nil, nil, hnerr end
+		local hyp_node = hyp_node_of(hyp_h)
 		local body_ty, body_node, err2 = build_cert(term.body, cert_env_extend(env, hyp_node, value_ty), subst, vocab)
 		if not body_ty then return nil, nil, err2 end
-		local node, cerr = replayer.cite_rule(vocab.rule_let, { value_node, hyp_node, body_node }, { { hyp_id } })
-		if not node then return nil, nil, cerr end
+		local node = {
+			kind = "rule", rule = vocab.rule_let,
+			premises = { value_node, hyp_node, body_node },
+			discharge = { [1] = { hyp_node } },
+		} --[[: CertNode ]]
 		return body_ty, node, nil
 	end
 	return nil, nil, "unknown term tag " .. tostring(term.tag)
@@ -268,15 +256,14 @@ end
 
 -- Infer `term`'s type against the given vocabulary and emit a certificate
 -- citing hm.lua's rule/axiom vocabulary. `vocab` is caps-first injected
--- (never ambient): the caller chooses the term_algebra tier and builds the
--- vocabulary once (`hm.declare_vocabulary(k)`), typically shared with
+-- (never ambient): the caller owns the registry, builds the vocabulary once
+-- (`hm.declare_vocabulary(registry)`), typically shared with
 -- algorithm_j.lua's `certify` -- see hm.lua's header. Returns (root
 -- certificate node, nil) on success, or (nil, errmsg) on an inference
 -- failure (unify mismatch, unbound variable) -- never a thrown error.
---: (WTerm, Vocab) -> (unknown | nil, string | nil)
+--: (WTerm, Vocab) -> (CertNode | nil, string | nil)
 function M.certify(term, vocab)
 	fresh_counter = 0
-	hyp_counter = 0
 	local subst = {} --[[: Subst ]]
 	local root_type, err = infer_types(term, {}, subst)
 	if not root_type then return nil, err end
