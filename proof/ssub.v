@@ -1383,18 +1383,31 @@ Proof.
   intro n. induction n as [ | n IHn ]; intros a b Hd.
   - simpl in Hd. discriminate.
   - rewrite decide_rsub_step in Hd.
-    destruct a as [| | | | | | | |Sc| |Ta]; destruct b as [| | | | | | | |Tc| |Tb];
-      (* ref-head pairs handled specifically; everything else delegates. *)
-      first
-        [ (* BRef Sc, BRef Tc : invariant / reflexive *)
-          destruct (bty_eqb Sc Tc) eqn:Hb;
-            [ apply bty_eqb_true in Hb; subst Tc; apply rsub_refl
-            | apply andb_true_iff in Hd; destruct Hd as [H1 H2];
-              apply RsRefInv; [ apply IHn; exact H1 | apply IHn; exact H2 ] ]
-        | (* BAnyRef, BRef _ : false branch *) discriminate
-        | (* BRef _, BAnyRef and BAnyRef, BAnyRef : true leaves *)
-          solve [ apply RsAnyRef | apply rsub_refl ]
-        | (* delegated pairs *) apply RsSsub; apply decide_ssub_sound; exact Hd ].
+    (* [decide_rsub_fuel] only case-splits on the PAIR (a,b) at four ref-head
+       corners (BRef/BRef, BRef/BAnyRef, BAnyRef/BAnyRef, BAnyRef/BRef); every
+       other [a] delegates to [decide_ssub] regardless of [b], so [Hd] already
+       reduces to [decide_ssub a b = true] there without touching [b] at all.
+       Destructing [a] ALONE and discharging those nine cases with one cheap
+       [try] avoids ever materializing the full 11x11 cross product — only the
+       two ref-headed branches of [a] need a further [destruct b]. *)
+    destruct a as [ax| | |a1 a2|a1 a2|a1|af|A1 B1|Sc| |Ta];
+      try (apply RsSsub; apply decide_ssub_sound; exact Hd).
+    + (* a = BRef Sc *)
+      destruct b as [bx| | |b1 b2|b1 b2|b1|bg|A2 B2|Tc| |Tb];
+        try (apply RsSsub; apply decide_ssub_sound; exact Hd).
+      * (* b = BRef Tc : invariant / reflexive *)
+        destruct (bty_eqb Sc Tc) eqn:Hb.
+        -- apply bty_eqb_true in Hb. subst Tc. apply rsub_refl.
+        -- apply andb_true_iff in Hd. destruct Hd as [H1 H2].
+           apply RsRefInv; [ apply IHn; exact H1 | apply IHn; exact H2 ].
+      * (* b = BAnyRef : any-ref widening *) apply RsAnyRef.
+    + (* a = BAnyRef : EVERY [b] here is already closed by the generic [try]
+         above — [decide_ssub] itself agrees with [rsub]'s answer at both
+         [b = BRef Tc] (both reduce to [false]) and [b = BAnyRef] (both
+         reduce to [true], reflexivity), so [destruct b] leaves no goal for
+         any further bullet. *)
+      destruct b as [bx| | |b1 b2|b1 b2|b1|bg|A2 B2|Tc| |Tb];
+        try (apply RsSsub; apply decide_ssub_sound; exact Hd).
 Qed.
 
 Corollary decide_rsub_sound : forall a b, decide_rsub a b = true -> rsub a b.
