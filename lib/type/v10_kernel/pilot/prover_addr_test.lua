@@ -74,6 +74,36 @@ T.describe("prover_addr", function()
 		T.ok(ta.equal(name0, must_term(prover_addr.child(addr_ops, local_stmt_path, 0))))
 		T.eq(ta.equal(name0, name1), false)
 	end)
+
+	T.it("local_stmt_init_path is injective against the local-stmt's own path and its names: " ..
+		"`local f = function(...) ... end` gives the statement, the func-expr, and each declared " ..
+		"name three pairwise-distinct paths", function()
+		local local_stmt_path = must_term(prover_addr.child(addr_ops, must_term(prover_addr.root(addr_ops)), 0))
+		local name0 = must_term(prover_addr.local_name_path(addr_ops, local_stmt_path, 0))
+		-- names_len = 1 (single-name local), init_index = 0 (sole init expr)
+		local func_expr_path = must_term(prover_addr.local_stmt_init_path(addr_ops, local_stmt_path, 1, 0))
+		T.eq(ta.equal(func_expr_path, local_stmt_path), false)
+		T.eq(ta.equal(func_expr_path, name0), false)
+		T.ok(ta.equal(func_expr_path, must_term(prover_addr.child(addr_ops, local_stmt_path, 1))))
+	end)
+
+	T.it("local_stmt_init_path offsets by names_len: a two-name local's init expressions " ..
+		"start after both declared names, not at child 0", function()
+		local local_stmt_path = must_term(prover_addr.child(addr_ops, must_term(prover_addr.root(addr_ops)), 0))
+		local init0 = must_term(prover_addr.local_stmt_init_path(addr_ops, local_stmt_path, 2, 0))
+		local init1 = must_term(prover_addr.local_stmt_init_path(addr_ops, local_stmt_path, 2, 1))
+		T.ok(ta.equal(init0, must_term(prover_addr.child(addr_ops, local_stmt_path, 2))))
+		T.ok(ta.equal(init1, must_term(prover_addr.child(addr_ops, local_stmt_path, 3))))
+		T.eq(ta.equal(init0, init1), false)
+	end)
+
+	T.it("assign_stmt_init_path is injective against the assign-stmt's own path: " ..
+		"`f = function(...) ... end` gives the statement and the func-expr distinct paths", function()
+		local assign_stmt_path = must_term(prover_addr.child(addr_ops, must_term(prover_addr.root(addr_ops)), 0))
+		local func_expr_path = must_term(prover_addr.assign_stmt_init_path(addr_ops, assign_stmt_path, 0))
+		T.eq(ta.equal(func_expr_path, assign_stmt_path), false)
+		T.ok(ta.equal(func_expr_path, must_term(prover_addr.child(addr_ops, assign_stmt_path, 0))))
+	end)
 end)
 
 return {}

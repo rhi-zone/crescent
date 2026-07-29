@@ -60,23 +60,44 @@
 --   (e.g. an if-clause's body block is child index `2k+1` of the if-stmt;
 --   that body's OWN first statement is child 0 of path_child(if_path,2k+1),
 --   its second statement child 1 of the same, etc).
---   NODE_LOCAL_STMT      child 0..k-1 = the k declared names, in
+--   NODE_LOCAL_STMT      child 0..nl-1 = the nl declared names, in
 --                        left-to-right source order (used ONLY to build a
 --                        variable's declaration-site identity path — see
---                        `M.local_name_path` below; a local statement's own
---                        init expressions are otherwise not addressed --
---                        EXCEPT the one shape below).
---   `local f = function(...) ... end` / `x = function(...) ... end`
---   (a single-name local, or single-target assignment, whose sole init
---   expression is a func-expr) — crescent's dominant function-defining
---   style — is addressed WITHOUT a separate hop for "the init expression
---   slot": the func-expr's own path is defined to BE the owning
---   NODE_LOCAL_STMT/NODE_ASSIGN_STMT's own path (child 0 of that path is
---   the function body, per NODE_FUNC_EXPR's rule below, applied directly
---   to the local/assign statement's path rather than to a separately
---   addressed func-expr node). `function name(...) ... end` (NODE_FUNC_DECL)
---   needs no such special-case: it IS the statement, its own path is the
---   statement's path directly.
+--                        `M.local_name_path` below; the names themselves
+--                        are bare intern ids, not AST nodes, so this range
+--                        addresses identity only, not a sub-term).
+--                        child nl+j   = the j-th init expression (0-based,
+--                        j in 0..el-1), in left-to-right source order,
+--                        immediately following the name range (source
+--                        order: names precede `=` precede init
+--                        expressions — same source-order rationale as
+--                        NODE_REPEAT_STMT's body/test ordering above). See
+--                        `M.local_stmt_init_path` below.
+--   NODE_ASSIGN_STMT     targets (`data[0]`/`data[1]`, AST nodes — unlike
+--                        NODE_LOCAL_STMT's bare-intern-id names) are NOT
+--                        addressed — out of scope, same convention as
+--                        NODE_FUNC_DECL's params below: an unaddressed
+--                        slot reserves no index, and nothing in this
+--                        prover cites a path to an assignment target
+--                        itself. child j = the j-th RHS expression
+--                        (0-based, j in 0..el-1), in left-to-right source
+--                        order — since targets consume no slots, RHS
+--                        expressions start at child 0 directly. See
+--                        `M.assign_stmt_init_path` below.
+--   A func-expr that is the SOLE init expression of a single-name
+--   NODE_LOCAL_STMT (`local f = function(...) ... end`) or a single-target
+--   NODE_ASSIGN_STMT (`f = function(...) ... end`) — crescent's dominant
+--   function-defining style — is addressed like any other init
+--   expression: its path is the owning statement's
+--   `M.local_stmt_init_path`/`M.assign_stmt_init_path` child (the
+--   init-expression slot), NEVER the statement's own path — the func-expr
+--   is a distinct AST node from its owning statement and MUST get a
+--   distinct path (injectivity: no two distinct AST nodes may share one
+--   path). NODE_FUNC_EXPR's own "child 0 = body block" rule then applies
+--   to THIS path, exactly as it would for a func-expr reached any other
+--   way. `function name(...) ... end` (NODE_FUNC_DECL) needs no such
+--   indirection: it IS the statement, its own path is the statement's
+--   path directly.
 --
 -- `file_id` comes from a content hash of the file's source text
 -- (lib/type/static/sha256.lua's `hash`, reused rather than reimplemented)
@@ -187,6 +208,28 @@ M.FUNC_BODY_INDEX = 0
 --: (addr_ops: AddrOps, local_stmt_path: Path, name_index: integer) -> (Path | nil, string | nil)
 function M.local_name_path(addr_ops, local_stmt_path, name_index)
 	return M.child(addr_ops, local_stmt_path, name_index)
+end
+
+-- A local statement's j-th init expression (0-based, left-to-right): child
+-- `names_len + init_index` of the NODE_LOCAL_STMT's own path (see header
+-- table) — the names occupy children 0..names_len-1, so init expressions
+-- follow immediately after. Distinct from `local_name_path`'s indices for
+-- any names_len > 0, keeping every init expression's path distinct from
+-- every name's identity path AND from the statement's own path (child
+-- indices are never negative, and names_len+init_index >= names_len for
+-- all init_index >= 0, so this range never overlaps 0..names_len-1).
+--: (addr_ops: AddrOps, local_stmt_path: Path, names_len: integer, init_index: integer) -> (Path | nil, string | nil)
+function M.local_stmt_init_path(addr_ops, local_stmt_path, names_len, init_index)
+	return M.child(addr_ops, local_stmt_path, names_len + init_index)
+end
+
+-- An assign statement's j-th RHS expression (0-based, left-to-right):
+-- child `init_index` of the NODE_ASSIGN_STMT's own path (see header
+-- table). Targets are NOT addressed by this module (out of scope), so RHS
+-- expressions occupy children 0..el-1 directly, with no offset.
+--: (addr_ops: AddrOps, assign_stmt_path: Path, init_index: integer) -> (Path | nil, string | nil)
+function M.assign_stmt_init_path(addr_ops, assign_stmt_path, init_index)
+	return M.child(addr_ops, assign_stmt_path, init_index)
 end
 
 return M

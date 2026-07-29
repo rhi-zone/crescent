@@ -367,11 +367,17 @@ local function analyze_block(ctx, block_path, stmt_start, stmt_len, scope, stats
 			-- init expression is a func-expr is treated exactly like
 			-- NODE_FUNC_DECL (own independent, empty-initial-scope analysis) --
 			-- see header note on the two func-defining shapes this pilot walks.
+			-- The func-expr gets its OWN path (child names_len+0 of the
+			-- local-stmt path, per prover_addr.lua's M.local_stmt_init_path),
+			-- distinct from the statement's own path; its body is then child 0
+			-- of THAT path (NODE_FUNC_EXPR's own rule), not of stmt_path
+			-- directly — this is the injectivity fix (see prover_addr.lua).
 			if names_len == 1 and n.data[3] == 1 then
 				local init_nid = ctx.lists:get(n.data[2])
 				local init_n = ctx.nodes:get(init_nid)
 				if init_n.kind == NODE_FUNC_EXPR then
-					local body_path = extend_path(stmt_path, 0)
+					local func_expr_path = extend_path(stmt_path, names_len + 0)
+					local body_path = extend_path(func_expr_path, 0)
 					local sub = analyze_block(ctx, body_path, init_n.data[2], init_n.data[3], {}, stats)
 					events[#events + 1] = { kind = "nested_scope", path = body_path, events = sub, fresh_scope = true }
 				end
@@ -499,11 +505,19 @@ local function analyze_block(ctx, block_path, stmt_start, stmt_len, scope, stats
 			-- "does not dig into arbitrary expression trees" limitation (see
 			-- header): this is a single target/init pair on the assignment
 			-- statement itself, not a nested expression search.
+			-- The func-expr gets its OWN path (child 0 of the assign-stmt
+			-- path, per prover_addr.lua's M.assign_stmt_init_path — targets
+			-- are unaddressed so the RHS expression occupies child 0
+			-- directly), distinct from the statement's own path; its body is
+			-- then child 0 of THAT path (NODE_FUNC_EXPR's own rule), not of
+			-- stmt_path directly — this is the injectivity fix (see
+			-- prover_addr.lua).
 			if n.data[1] == 1 and n.data[3] == 1 then
 				local init_nid = ctx.lists:get(n.data[2])
 				local init_n = ctx.nodes:get(init_nid)
 				if init_n.kind == NODE_FUNC_EXPR then
-					local body_path = extend_path(stmt_path, 0)
+					local func_expr_path = extend_path(stmt_path, 0)
+					local body_path = extend_path(func_expr_path, 0)
 					local sub = analyze_block(ctx, body_path, init_n.data[2], init_n.data[3], {}, stats)
 					events[#events + 1] = { kind = "nested_scope", path = body_path, events = sub, fresh_scope = true }
 				end
