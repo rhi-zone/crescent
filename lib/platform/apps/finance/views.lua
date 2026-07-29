@@ -720,4 +720,32 @@ M.report_balance_sheet = function(app, as_of_date)
   return view
 end
 
+-- ---------------------------------------------------------------------------
+-- Dispatch: view name -> constructor
+-- ---------------------------------------------------------------------------
+
+-- Single dispatch point from a route name (one of M.routes' keys) to the
+-- View it builds, so tui.lua/dom.lua share one "name -> constructor +
+-- which params it reads" mapping instead of each hand-rolling their own.
+-- `params` is the flat string map a route/menu selection carries (e.g.
+-- account_form's `id`, the report forms' date fields); `form_error`
+-- carries a failed lib.platform.apps.finance.actions submission's message
+-- through to the re-rendered view. Unknown names fall back to the
+-- dashboard rather than erroring -- a stale/bookmarked link should recover,
+-- not crash the app.
+--: (string, AppApi, { [string]: string } | nil, string | nil) -> View
+M.build = function(name, app, params, form_error)
+  local p = params or {}
+  if name == "accounts" then return M.accounts(app) end
+  if name == "account_form" then return M.account_form(app, p.id, nil, form_error) end
+  if name == "periods" then return M.periods(app) end
+  if name == "entries" then return M.entries(app) end
+  if name == "post_entry" then return M.post_entry_form(app, form_error) end
+  if name == "reports" then return M.reports(app) end
+  if name == "report_trial_balance" then return M.report_trial_balance(app) end
+  if name == "report_income_statement" then return M.report_income_statement(app, p.start_date, p.end_date) end
+  if name == "report_balance_sheet" then return M.report_balance_sheet(app, p.as_of_date) end
+  return M.dashboard(app)
+end
+
 return M
