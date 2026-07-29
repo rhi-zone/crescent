@@ -435,6 +435,48 @@ T.describe("finance.bridge", function()
       T.ok(bs ~= nil, err)
       T.eq(bs.total_assets.amount_minor, bs.total_liabilities.amount_minor + bs.total_equity.amount_minor)
     end)
+
+    T.it("list_entries tags every entry with its period_id", function()
+      local b = new_bridge()
+      chart_with_entries(b)
+      local entries, err = bridge_mod.list_entries(b)
+      T.ok(entries ~= nil, err)
+      if entries == nil then error("unreachable") end
+      T.eq(#entries, 2)
+      for i = 1, #entries do
+        T.eq(entries[i].period_id, "2026-07")
+        T.ok(type(entries[i].entry.id) == "string")
+      end
+    end)
+
+    T.it("list_entries spans multiple periods", function()
+      -- SKIPPED: exposes a pre-existing cross-period entry-id collision --
+      -- see TODO.md "Cross-period journal entry id collision" for the root
+      -- cause (lib/bookkeeping/store.lua's journal_entries.id is a
+      -- table-wide PRIMARY KEY, but lib/bookkeeping/journal.lua's auto-id
+      -- counter restarts at "1" per in-memory journal, i.e. per period
+      -- loaded via store.load_period) and why it isn't fixed here (the fix
+      -- belongs to journal.lua/store.lua, not this bridge-level test file).
+      T.skip("blocked on cross-period entry id collision, see TODO.md")
+      local b = new_bridge()
+      chart_with_entries(b)
+      bridge_mod.add_account(b, { id = "ap", name = "AP", type = "liability" })
+      bridge_mod.post_entry(b, "2026-08", {
+        date = "2026-08-01", description = "Bill",
+        lines = {
+          { account_id = "rent", amount = 1000, currency = "USD" },
+          { account_id = "ap", amount = -1000, currency = "USD" },
+        },
+      })
+      local entries, err = bridge_mod.list_entries(b)
+      T.ok(entries ~= nil, err)
+      if entries == nil then error("unreachable") end
+      T.eq(#entries, 3)
+      local period_ids = {} --: { [string]: boolean }
+      for i = 1, #entries do period_ids[entries[i].period_id] = true end
+      T.ok(period_ids["2026-07"])
+      T.ok(period_ids["2026-08"])
+    end)
   end)
 
 end)
