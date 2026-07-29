@@ -6,6 +6,48 @@ Bench machine: AMD Ryzen 7 5700G, LuaJIT 2.1.1741730670, NixOS Linux 6.12.67.
 
 ---
 
+## 2026-07-30: v10 kernel narrowing pilot — parameter-sourced facts, real-corpus re-measurement (run 2)
+
+Full report: `docs/typechecker-v10-pilot-measurement.md`, "## Run 2" section. Baseline commit
+`eeb18b1a` (run 1, below), this change's commit `aa2f6155` ("v10 kernel pilot narrows function
+parameters, not just locals"). Same 27-file / 791,033-byte corpus as run 1, same driver
+methodology (`/tmp/v10_parity/measure.lua`, updated in place for `prover_narrow.M.analyze`'s
+new required `source` parameter). `bin/cr test lib/type/v10_kernel/pilot/` 7/7 files green, 249
+assertions (up from 196 at the run-1 commit). `bin/cr test lib/type/v10_cleanroom/` 3/3 files
+green, 1044 assertions (unchanged).
+
+**Aggregate, run 1 → run 2**: guards found 546 → 546 (unchanged). guards handled 17 → 23
+(3.11% → 4.21%). guards skipped 529 → 523, still 100% single reason (`"guarded variable not a
+tracked annotated local or parameter"`, reason string updated to reflect the new second
+tracking source). annotations parsed 141 → 284. annotations skipped 196 → 757 (the 196
+"whole-annotation, not one of the six type() classes" bucket is IDENTICAL to run 1 — the
+increase is 543 NEW per-parameter rejections + 10 "not in (T1,...)->R form" + 5
+overload-ambiguity skips + 2 vararg skips + 1 param-count-mismatch skip, all new categories
+introduced by this change, none a regression of the existing local path). certificates emitted
+20 → 27, replay pass 20 → 27, replay fail 0 → 0. Total `analyze_ms` (summed) 105.471ms →
+124.725ms (+18.3%, more per-file work parsing signatures). Total `emit_ms` (summed) 72.736ms →
+64.903ms (run-to-run variance at this timing magnitude, not attributed to a specific change).
+
+**A real addressing bug was found and fixed as part of this work** (authorized mid-task,
+outside the file list initially scoped): `prover.lua`'s pass 2 hardcoded every tracked
+variable's identity path as `local_name_path(_, 0)`, correct only because locals are always
+single-name-at-index-0. A function parameter can qualify at any position, so this would have
+either misaddressed or failed to replay any qualifying parameter past index 0. Fixed by adding
+a `kind: "local" | "param"` discriminator to `ScopeVar`/`GuardHit`/`GuardEvent` and dispatching
+to `local_name_path` vs the new `func_param_path` with the real index. A second bug (pass 1
+never emitted a `local_fact` event for parameters, so pass 2 never learned about them at all)
+was found and fixed in the same pass. Both were caught by a dedicated non-zero-index parameter
+end-to-end replay test in `prover_test.lua` before any corpus measurement ran; also confirmed
+live in the corpus itself (`lib/actor/init.lua`'s `ActorCtx:receive(timeout_ms)` — a `:`-method,
+so `timeout_ms` sits at parameter index 1, not 0 — replayed green).
+
+**Truth check**: 7 files gained judgments not present in run 1 (`daemon` 0→2, `actor` 0→1,
+`finance/views` 0→2, `ed25519` 2→4; total 7 new, 20+7=27). All 7 hand-verified TRUE (full table
+in the report) — fewer than the 20-judgment sample size the task requested; reported as a
+corpus-size fact rather than padded with already-verified run-1 judgments.
+
+---
+
 ## 2026-07-30: v10 kernel narrowing pilot — real-corpus measurement (Phase 3, measurement-only)
 
 Full report: `docs/typechecker-v10-pilot-measurement.md`. Commit measured: `eeb18b1a`

@@ -253,3 +253,189 @@ and pass-1 correlation walk are inline in the file). Corpus-widening scanner:
 REPO=/home/me/git/rhizone/crescent
 "$REPO/bin/ld-musl-x86_64.so.1" "$REPO/bin/luajit-bin" /tmp/v10_parity/measure.lua "$REPO"
 ```
+
+## Run 2 — parameter-sourced facts (commit `aa2f6155`)
+
+Measured against commit `aa2f6155` ("v10 kernel pilot narrows function parameters, not just
+locals"), same day as run 1 (`eeb18b1a` baseline unchanged, still the parent lineage). Same 27
+files, same corpus, same driver methodology as run 1 — no new/removed/altered fixtures,
+`prover_narrow.lua`'s scope population extended to also populate `scope[name_id]` from function
+parameters sourced from a preceding-line `--: (T1, T2, ...) -> R` signature annotation (see the
+commit for the full contract-extension description). `bin/cr test lib/type/v10_kernel/pilot/`
+7/7 files green, 249 assertions (up from 196 in run 1 — 53 new assertions added covering each
+guard form on a parameter, non-zero-index parameter addressing, nested-function-parameter
+shadowing/isolation, vararg wholesale-skip, and signature/param-count-mismatch wholesale-skip).
+`bin/cr test lib/type/v10_cleanroom/` 3/3 files green, 1044 assertions (unchanged — this module
+is not touched by the parameter-scope change).
+
+### Contract-extension summary
+
+- `prover_addr.lua`: function parameters get child indices `0..np-1` (0-based, left-to-right,
+  same convention as `NODE_LOCAL_STMT`'s own name-indexing), body moves from the old fixed
+  child `0` to child `np` (`M.func_body_index(num_params)`, generalizing the removed
+  `M.FUNC_BODY_INDEX = 0` constant — `func_body_index(0) == 0`, the same value for the no-params
+  case). `M.func_param_path` added, mirroring `M.local_name_path`.
+- `prover_narrow.lua`: locates the preceding-line function-type annotation using the same
+  line-association rule as `lib/type/static/constrain.lua`'s `get_ann`/`collect_preceding_run`
+  (inline-same-line takes priority; else scan backward skipping blank/comment-only lines,
+  requiring source text — `M.analyze`'s signature gained a required third `source` parameter).
+  Does NOT merge multiple consecutive annotation lines into an overload intersection (unlike the
+  real checker) — 2+ is wholesale-skipped as ambiguous for positional attribution. Per-parameter
+  types are sliced by a depth-aware top-level-comma split, each slice handed unmodified to the
+  EXISTING `parse_annotation_members` (no new nested-shape check needed — a slice containing
+  parens/braces is rejected by the same six-tag check that already rejects any non-six-tag
+  member). Vararg functions and signature/parameter-count mismatches are wholesale-skipped
+  (reason recorded). A function body's scope is always built fresh from `{}` plus only that
+  function's own qualifying parameters — never the caller's ambient scope — which gives
+  nested-function shadowing/isolation correctly by construction (verified by a dedicated test).
+- **A real addressing bug was found and fixed during this work** (not part of the original
+  task scope, authorized mid-task): `prover.lua`'s pass 2 (`emit_events`) hardcoded every
+  tracked variable's identity path as `local_name_path(_, 0)` — correct only because locals are
+  always single-name-at-index-0. A parameter can qualify at any position, so `ScopeVar` /
+  `GuardHit` / `GuardEvent` gained a `kind: "local" | "param"` discriminator plus
+  `root_path`/`index` fields, and pass 2 now dispatches to `local_name_path` or
+  `func_param_path` with the real index (`prover.lua`'s new `var_identity_path`). A second,
+  related bug was found in the same work: pass 1 populated its own scope for guard recognition
+  but never emitted a `local_fact` event for parameters, so pass 2 never learned about them at
+  all (`param_scope` now returns matching `LocalFactEvent`s, prepended to the function body's
+  own event list via `prepend_facts`). Both bugs were caught by the new non-zero-index
+  parameter test in `prover_test.lua` (an end-to-end replay test, not just a pass-1 shape test)
+  before any corpus measurement was run.
+
+### Coverage delta
+
+| metric | run 1 | run 2 |
+|---|---:|---:|
+| guards found | 546 | 546 |
+| guards handled | 17 (3.11%) | 23 (4.21%) |
+| guards skipped | 529 | 523 |
+| annotations parsed | 141 | 284 |
+| annotations skipped | 196 | 757 |
+| certificates emitted | 20 | 27 |
+| replay pass | 20 | 27 |
+| replay fail | 0 | 0 |
+| judgments | 20 | 27 |
+| total analyze_ms (summed) | 105.471 | 124.725 |
+| total emit_ms (summed) | 72.736 | 64.903 |
+| combined corpus bytes | 791,033 | 791,033 (same corpus) |
+
+`guards_found` is unchanged (546) — parameter-sourced scope population does not change what
+`extract_guard` recognizes as a guard shape, only whether the guarded variable is tracked.
+
+### Skip-reason breakdown
+
+**`guards_skipped` (523 total, 100% single reason, same discipline as run 1):**
+
+```
+523x guarded variable not a tracked annotated local or parameter
+```
+
+The reason string itself was updated (run 1: `"guarded variable not a tracked annotated
+local"`) to reflect that parameters are now a second thing a guarded variable can be tracked
+as — the skip still means neither a local nor a parameter track it. No other guard-skip reason
+occurred in this corpus (unchanged from run 1: no `truthiness guard unsupported`, no `guard
+over an already-monomorphic fact`, no `guard target not structurally first in the carried
+union`).
+
+**`annotations_skipped` (757 total, up from 196 — categorized, not a single reason):**
+
+| reason category | count |
+|---|---:|
+| `parameter N: unsupported annotation member '...'` (six-tag rejection, per-parameter — NEW) | 543 |
+| `unsupported annotation member '...'` (six-tag rejection, whole-annotation — SAME as run 1's 196) | 196 |
+| `function annotation is not in '(T1, ...) -> R' form` (NEW) | 10 |
+| `multiple preceding-line function-type annotations (overload) not supported` (NEW) | 5 |
+| `vararg function: positional parameter/signature attribution out of scope` (NEW) | 2 |
+| `function signature parameter count (N) does not match declared parameter count (M)` (NEW) | 1 |
+
+The 196-count "whole-annotation" bucket is IDENTICAL to run 1's total — confirms the pre-existing
+local-annotation rejection path is unaffected by this change. The 543-count "per-parameter"
+bucket is the dominant new contributor: annotations_skipped rose sharply not because more things
+are broken, but because a single multi-parameter function-type signature with N non-six-tag
+parameters now records N individual per-parameter skips (one per rejected position) where run 1
+recorded nothing at all for it (function signatures were entirely invisible to run 1's scope
+population). `function annotation is not in '(T1, ...) -> R' form` fires when a preceding-line
+annotation exists but isn't shaped like a signature (e.g. a stray type-alias-only annotation line
+immediately above a function, or an annotation that actually belongs to something else the
+backward scan reached). `emission_skipped`: 0 entries in this corpus, same as run 1.
+
+### Updated per-file table
+
+| file | bytes | v3_exit | v3_ms | guards found | guards handled | annotations parsed | certs emitted | replay pass/fail | analyze_ms | emit_ms | judgments |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| lib/dice/init.lua | 21129 | 1 | 36 | 27 | 0 | 36 | 0 | 0/0 | 10.089 | 0.530 | 0 |
+| lib/platform/daemon/init.lua | 71669 | 1 | 36 | 58 | 2 | 29 | 2 | 2/0 | 8.450 | 5.920 | 2 |
+| lib/compress/system.lua | 10952 | 1 | 33 | 5 | 0 | 10 | 0 | 0/0 | 4.501 | 0.513 | 0 |
+| lib/actor/init.lua | 22525 | 1 | 34 | 9 | 1 | 14 | 1 | 1/0 | 5.584 | 1.865 | 1 |
+| lib/platform/apps/finance/views.lua | 31368 | 0 | 36 | 19 | 2 | 15 | 2 | 2/0 | 5.076 | 6.299 | 2 |
+| lib/exec/make_api.lua | 10651 | 0 | 31 | 5 | 0 | 4 | 0 | 0/0 | 1.022 | 0.309 | 0 |
+| lib/exec/help.lua | 16574 | 1 | 32 | 14 | 0 | 8 | 0 | 0/0 | 1.742 | 0.352 | 0 |
+| lib/columnar/init.lua | 12601 | 1 | 31 | 9 | 0 | 7 | 0 | 0/0 | 1.481 | 0.300 | 0 |
+| lib/bookkeeping/import_qif.lua | 13482 | 0 | 31 | 2 | 0 | 6 | 0 | 0/0 | 0.740 | 0.312 | 0 |
+| lib/platform/session_store/init.lua | 9183 | 1 | 31 | 18 | 3 | 3 | 3 | 3/0 | 0.960 | 6.578 | 3 |
+| lib/platform/audit/init.lua | 10328 | 1 | 30 | 13 | 2 | 7 | 3 | 3/0 | 0.938 | 3.900 | 3 |
+| lib/roman_numeral/init.lua | 16452 | 1 | 31 | 11 | 2 | 7 | 2 | 2/0 | 2.921 | 4.846 | 2 |
+| lib/pid/init.lua | 7870 | 1 | 38 | 3 | 0 | 10 | 0 | 0/0 | 4.611 | 0.400 | 0 |
+| lib/dsp/init.lua | 14997 | 1 | 34 | 3 | 0 | 16 | 0 | 0/0 | 5.068 | 0.543 | 0 |
+| lib/ai/providers/openai.lua | 863 | 1 | 36 | 2 | 0 | 4 | 0 | 0/0 | 0.321 | 0.258 | 0 |
+| lib/type/static/solve.lua | 221816 | 1 | 45 | 60 | 0 | 8 | 0 | 0/0 | 15.123 | 2.453 | 0 |
+| lib/type/analysis/crescent_slice_parse.lua | 55409 | 0 | 33 | 63 | 2 | 32 | 2 | 2/0 | 5.079 | 4.626 | 2 |
+| lib/sscanf/init.lua | 16850 | 1 | 35 | 15 | 1 | 1 | 1 | 1/0 | 4.002 | 6.040 | 1 |
+| lib/platform/caps/create_instance.lua | 9047 | 1 | 30 | 10 | 1 | 3 | 1 | 1/0 | 0.940 | 0.879 | 1 |
+| lib/platform/apps/system_dashboard/server.lua | 30949 | 1 | 35 | 43 | 1 | 14 | 2 | 2/0 | 3.776 | 1.687 | 2 |
+| lib/ljsocket/init.lua | 40364 | 1 | 34 | 30 | 0 | 6 | 0 | 0/0 | 5.643 | 0.790 | 0 |
+| lib/http/server.lua | 13123 | 1 | 33 | 6 | 0 | 2 | 0 | 0/0 | 1.820 | 0.555 | 0 |
+| lib/ed25519/init.lua | 31093 | 1 | 31 | 11 | 3 | 9 | 4 | 4/0 | 19.088 | 6.320 | 4 |
+| lib/argon2/init.lua | 37795 | 1 | 33 | 33 | 1 | 13 | 1 | 1/0 | 4.499 | 3.552 | 1 |
+| lib/struct/init.lua | 16042 | 1 | 35 | 32 | 0 | 1 | 0 | 0/0 | 2.720 | 0.671 | 0 |
+| lib/pdf/object.lua | 21535 | 0 | 29 | 22 | 1 | 5 | 2 | 2/0 | 6.254 | 2.106 | 2 |
+| lib/oauth2/init.lua | 26366 | 1 | 33 | 23 | 1 | 14 | 1 | 1/0 | 2.277 | 2.299 | 1 |
+
+`v3_exit`/`v3_ms` are unchanged in kind from run 1 (v3 baseline was not touched by this work) —
+reproduced here from the same measurement run for a complete side-by-side table; still
+process-startup-dominated at these file sizes, still not a throughput measurement (see run 1's
+"Timing methodology note", unchanged and still applicable).
+
+### New judgments — truth check
+
+7 files gained judgments that did not exist in run 1 (cross-checked against run 1's per-file
+judgment counts above): `lib/platform/daemon/init.lua` (0→2), `lib/actor/init.lua` (0→1),
+`lib/platform/apps/finance/views.lua` (0→2), `lib/ed25519/init.lua` (2→4). Total new judgments:
+2 + 1 + 2 + 2 = **7** (20 + 7 = 27, matching the aggregate delta). All other files' judgment
+counts are unchanged from run 1 (including files that already had judgments in run 1 —
+`session_store`, `audit`, `roman_numeral`, `crescent_slice_parse`, `sscanf`, `create_instance`,
+`system_dashboard/server`, `argon2`, `pdf/object`, `oauth2` — none of these gained a NEW
+judgment; their existing local-sourced judgments are unaffected and unchanged).
+
+**This corpus produced only 7 new judgments, fewer than the 20-judgment minimum sample size
+requested.** All 7 are hand-verified below rather than padding the sample with already-verified
+run-1 judgments (which would not test anything new). This is reported as a corpus-size fact, not
+worked around.
+
+| # | file | location (manual) | claimed | branch | verdict |
+|---|---|---|---|---|---|
+| 1 | lib/platform/daemon/init.lua | L99-102, `--: (string \| nil) -> string; local function norm_host(h) if not h then return "" end ...` | `h` is falsy (nil) inside the body | match | TRUE |
+| 2 | lib/platform/daemon/init.lua | L787-789, `--: (string \| nil) -> session_record \| nil; local function session_get(sid) if not sid then return nil end ...` | `sid` is falsy (nil) inside the body | match | TRUE |
+| 3 | lib/actor/init.lua | L39-53 (method), `--: (ActorCtxShape, number\|nil) -> unknown; function ActorCtx:receive(timeout_ms) ... if timeout_ms then deadline = clock_fn() + timeout_ms / 1000.0 end` (implicit `self` occupies parameter index 0 for a `:`-method; `timeout_ms` is index 1 — non-zero-index parameter, exercising the addressing fix directly) | `timeout_ms` is "rest of falsy" (number) inside the body (no else branch, so only the rest citation exists) | rest | TRUE |
+| 4 | lib/platform/apps/finance/views.lua | L107-109, `--: (View, string \| nil) -> (); local function set_error(view, err) if err ~= nil then view.error = err end end` (`err` at parameter index 1) | `err` is non-nil (string) inside the body | rest | TRUE |
+| 5 | lib/platform/apps/finance/views.lua | L668-682, `--: (AppApi, string \| nil) -> View; M.report_balance_sheet = function(app, as_of_date) ... if as_of_date ~= nil then local bs, err = app.get_balance_sheet(as_of_date) ...` (assign-stmt func-expr; `as_of_date` at parameter index 1) | `as_of_date` is non-nil (string) inside the body | rest | TRUE (`app.get_balance_sheet` and `#as_of_date`-shaped uses are consistent with a string) |
+| 6 | lib/ed25519/init.lua | L51-60, `--: (string \| nil) -> (string, string) \| (nil, string); local function keypair(seed) if seed then ... else local ret = lib.crypto_sign_ed25519_keypair(_pk, _sk) ... end end` | `seed` is falsy (nil) inside the `else` body | match | TRUE |
+| 7 | lib/ed25519/init.lua | same site, `then` body (`if #seed ~= 32 then ... end; lib.crypto_sign_ed25519_seed_keypair(_pk, _sk, seed)`) | `seed` is "rest of falsy" (string) inside the `then` body | rest | TRUE (`#seed` and the FFI call both require a string) |
+
+**7/7 verified TRUE. No wrong judgment found.** Row 3 (`timeout_ms`, an `ActorCtx:receive`
+method) is the load-bearing case for the addressing-bug fix described above: `self` (implicit,
+from the `:`-method syntax) occupies parameter index 0, so `timeout_ms` is tracked at index 1 —
+exactly the case a hardcoded `local_name_path(_, 0)` would have either misaddressed or failed to
+replay. It replayed green, over real corpus code, not just the synthetic regression test added
+to `prover_test.lua`.
+
+### Wall-clock comparison
+
+Run 1 total `analyze_ms` (summed): 105.471ms. Run 2: 124.725ms (+18.3%, in-process pass-1
+timing over the same 27 files — more work per file now that parameter signatures are parsed).
+Run 1 total `emit_ms` (summed, includes inline replay): 72.736ms. Run 2: 64.903ms (variance
+between runs on this timing scale is dominated by `os.clock()` resolution and system noise at
+sub-millisecond-to-low-double-digit-millisecond magnitudes per file, not attributed to a specific
+code change — see run 1's own "Timing methodology note" for the same caveat applied to
+`analyze_ms`/`emit_ms` generally). `v3_ms` (the v3 baseline) is unaffected by this work, still in
+the same 29-45ms process-startup-dominated band as run 1.
