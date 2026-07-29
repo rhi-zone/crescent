@@ -660,6 +660,26 @@ cleanroom+adjudication pattern — same-author tests (510 assertions)
 missed all 7 divergences; the spec-first cleanroom found 13 spec gaps
 before writing code and implemented clean.
 
+### Read-only observation entry point (owner-ratified)
+
+The canonical replayer gains a **read-only OBSERVATION entry point**
+alongside root-strict acceptance — surfaced by the dependent port: four
+theory tests legitimately observe interior derivation state (taint and
+open-hypothesis sets of deliberately-open derivations), which a
+root-only surface cannot express.
+
+- **Semantics:** returns the already-ratified per-node computed triple
+  `(conclusion, taint set, open-hypothesis set)`, with the open set in
+  plain view.
+- **Carries NO acceptance** — no flag or result shape mistakable for a
+  verdict. Root-strict replay remains the sole acceptance channel.
+- **Same memoization and config-hash keying** — same bottom-up
+  computation, stopped before root checks; no separate computation path.
+- **Rationale recorded:** this exposes ratified computation, it does not
+  add semantics.
+- The prior single-entry-point shape in the cleanroom build was an
+  implementation choice under spec delegation, now superseded.
+
 ---
 
 ## Explicitly open (flagged, not settled — do not present as decided)
