@@ -536,13 +536,25 @@ unchanged by this plan record:
 - Tier-1 proof-restructure proposal's five forks
   (`docs/typechecker-v10-proof-restructure-proposal.md`, commit
   `be6b8f71`).
-- `ssub.v` proof-script fix (diagnosed: `decide_rsub_fuel_sound` at
-  `ssub.v:1381`, tactic-time blowup from a blind 121-case
-  destruct+`first[]` search; fix options recorded in the diagnosis
-  report).
 - Reality-bridge tier 2.
 - Coverage-formalization tier 3.
 - The compositionality-canary charter wording (strict vs permissive).
+
+### Completed (un-parked)
+
+- **`ssub.v` proof-script fix — completed at commit `d8b53036`.**
+  Formerly parked as: diagnosed `decide_rsub_fuel_sound` at
+  `ssub.v:1381`, tactic-time blowup from a blind 121-case
+  destruct+`first[]` search. Root cause confirmed structurally: the
+  original destructed the full 121-goal cross product though only the
+  four ref-head corners genuinely case-split on the pair. Fix destructs
+  `a` alone, delegates nine constructors in one step, sub-destructs `b`
+  only under `BRef`/`BAnyRef`, rewritten in the file's own
+  disciplined-bullet style. `ssub.v`: >320s hang → ~9.7s clean;
+  downstream chain verified (`check.v` ~8.1s, `bridge_exec_oracle.v`
+  ~0.2s); theorem statement byte-identical, proof script only. The full
+  v9 proof chain now compiles again for the first time in the repo's
+  recorded history, under Rocq 9.0.1.
 
 ---
 
