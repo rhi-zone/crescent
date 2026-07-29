@@ -11,7 +11,7 @@ local prover_narrow = require("lib.type.v10_kernel.pilot.prover_narrow")
 local function analyze_src(src)
 	local parser = parse_mod.parse(src, "<test>")
 	local stats = prover_narrow.new_stats()
-	local root, err = prover_narrow.analyze(parser, stats)
+	local root, err = prover_narrow.analyze(parser, stats, src)
 	return root, stats, err
 end
 
@@ -269,6 +269,156 @@ local a, b --: string | nil
 		T.eq(stats.guards_skipped["elseif chain not supported (no single addressable rest-branch point)"], nil)
 		T.eq(stats.guards_found, 11)
 		T.eq(stats.guards_handled, 2)
+	end)
+
+	T.it("parameter fact: type(x) == \"string\" guard on a function's own (sole) parameter", function()
+		local root, stats = analyze_src([[
+--: (string | nil) -> nil
+local function f(x)
+  if type(x) == "string" then
+    local y = 1
+  else
+    local z = 2
+  end
+end
+]])
+		T.eq(stats.guards_found, 1)
+		T.eq(stats.guards_handled, 1)
+		local fn = root.events[1]
+		T.eq(fn.kind, "nested_scope")
+		local ge = find_guard(fn.events)
+		T.ok(ge)
+		T.eq(ge.var_kind, "param")
+		T.eq(ge.var_index, 0)
+		T.eq(ge.target, "string")
+		T.eq(ge.then_is_match, true)
+	end)
+
+	T.it("parameter fact: nil-check guard on the SECOND (non-zero-index) parameter", function()
+		local root, stats = analyze_src([[
+--: (integer, string | nil) -> nil
+local function g(n, s)
+  if s == nil then
+    local y = 1
+  end
+end
+]])
+		T.eq(stats.annotations_parsed, 1) -- only `s`'s slice is a six-tag union; `n`'s (`integer`) is not
+		T.eq(stats.guards_handled, 1)
+		local fn = root.events[1]
+		local ge = find_guard(fn.events)
+		T.ok(ge)
+		T.eq(ge.var_kind, "param")
+		T.eq(ge.var_index, 1)
+		T.eq(ge.target, "nil")
+		T.eq(ge.then_is_match, true)
+	end)
+
+	T.it("parameter fact: bare truthiness guard on a parameter", function()
+		local root, stats = analyze_src([[
+--: (string | nil) -> nil
+local function h(x)
+  if x then
+    local y = 1
+  end
+end
+]])
+		T.eq(stats.guards_handled, 1)
+		local fn = root.events[1]
+		local ge = find_guard(fn.events)
+		T.ok(ge)
+		T.eq(ge.var_kind, "param")
+		T.eq(ge.target, "falsy")
+		T.eq(ge.then_is_match, false)
+	end)
+
+	T.it("nested-function shadowing: an inner function's own same-named parameter shadows the "
+		.. "outer parameter's fact -- each guard narrows using only its own innermost binding", function()
+		local root, stats = analyze_src([[
+--: (string | nil) -> nil
+local function outer(x)
+  --: (number | boolean) -> nil
+  local function inner(x)
+    if type(x) == "number" then
+      local y = 1
+    end
+  end
+  if x == nil then
+    local z = 2
+  end
+end
+]])
+		T.eq(stats.guards_found, 2)
+		T.eq(stats.guards_handled, 2)
+		local outer_fn = root.events[1]
+		T.eq(outer_fn.kind, "nested_scope")
+		-- The outer function's own body: inner's nested_scope event, then the
+		-- outer guard on outer's own `x`.
+		local outer_guard = find_guard(outer_fn.events)
+		T.ok(outer_guard)
+		T.eq(outer_guard.var_index, 0)
+		T.eq(outer_guard.target, "nil") -- outer's `x` is `string | nil`
+		local inner_fn = nil
+		for _, e in ipairs(outer_fn.events) do
+			if e.kind == "nested_scope" then inner_fn = e end
+		end
+		T.ok(inner_fn, "expected inner function's own nested_scope event")
+		if inner_fn then
+			local inner_guard = find_guard(inner_fn.events)
+			T.ok(inner_guard)
+			T.eq(inner_guard.target, "number") -- inner's OWN `x` is `number | boolean`, not outer's
+		end
+	end)
+
+	T.it("nested-function isolation: a function with no matching parameter never sees an outer "
+		.. "function's tracked fact (no ambient-scope leakage)", function()
+		local root, stats = analyze_src([[
+--: (string | nil) -> nil
+local function outer2(x)
+  local function inner2()
+    if type(x) == "string" then
+      local y = 1
+    end
+  end
+end
+]])
+		T.eq(stats.guards_found, 1)
+		T.eq(stats.guards_handled, 0)
+		local total_skipped = 0
+		for _, n in pairs(stats.guards_skipped) do total_skipped = total_skipped + n end
+		T.eq(total_skipped, 1)
+	end)
+
+	T.it("vararg function: parameter/signature attribution is wholesale-skipped, not guessed", function()
+		local _, stats = analyze_src([[
+--: (string | nil, ...) -> nil
+local function v(x, ...)
+  if type(x) == "string" then
+    local y = 1
+  end
+end
+]])
+		T.eq(stats.guards_found, 1)
+		T.eq(stats.guards_handled, 0)
+		local total = 0
+		for _, n in pairs(stats.annotations_skipped) do total = total + n end
+		T.eq(total, 1)
+	end)
+
+	T.it("signature/parameter-count mismatch: wholesale-skipped, not partially attributed", function()
+		local _, stats = analyze_src([[
+--: (string | nil) -> nil
+local function m(a, b)
+  if type(a) == "string" then
+    local y = 1
+  end
+end
+]])
+		T.eq(stats.guards_found, 1)
+		T.eq(stats.guards_handled, 0)
+		local total = 0
+		for _, n in pairs(stats.annotations_skipped) do total = total + n end
+		T.eq(total, 1)
 	end)
 end)
 

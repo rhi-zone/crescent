@@ -51,9 +51,24 @@
 --                        (order chosen to match source order: body appears
 --                        before the test textually in `repeat ... until`.)
 --   NODE_DO_STMT         child 0 = body block
---   NODE_FUNC_DECL       child 0 = body block (params/name are NOT
---                        addressed — out of scope; see prover_narrow.lua)
---   NODE_FUNC_EXPR       child 0 = body block
+--   NODE_FUNC_DECL       child 0..np-1 = the np declared parameters, in
+--                        left-to-right source order (same convention as
+--                        NODE_LOCAL_STMT's own name-indexing: bare intern
+--                        ids, not AST nodes, so this range addresses
+--                        identity only — see `M.func_param_path` below).
+--                        child np       = the body block (name is NOT
+--                        addressed — out of scope, same as before; see
+--                        prover_narrow.lua). Injective: every param index
+--                        is < np, and np is never < np, so the body's own
+--                        index can never collide with a param's index, nor
+--                        can two params collide with each other (distinct
+--                        0-based indices). See `M.func_body_index` below —
+--                        this generalizes the old fixed `M.FUNC_BODY_INDEX
+--                        = 0` constant (removed; np=0, the no-params case,
+--                        is now simply `func_body_index(0) = 0`, the same
+--                        value as before for that case).
+--   NODE_FUNC_EXPR       child 0..np-1 = params (same convention as
+--                        NODE_FUNC_DECL above), child np = body block.
 --   "a block" (a parser (start,len) statement-list belonging to one of the
 --   owner slots above) is NOT its own addressable node distinct from its
 --   owner slot's child index — the block's OWN statements are numbered as
@@ -202,13 +217,38 @@ M.WHILE_BODY_INDEX = 1
 M.REPEAT_BODY_INDEX = 0
 M.REPEAT_TEST_INDEX = 1
 M.DO_BODY_INDEX = 0
-M.FUNC_BODY_INDEX = 0
+
+-- A function's body-block child index: `num_params` (params occupy children
+-- 0..num_params-1, per the header table; the body immediately follows,
+-- exactly like `if_else_index` follows the last if-clause). Generalizes the
+-- old fixed `M.FUNC_BODY_INDEX = 0` constant (removed): `func_body_index(0)
+-- == 0`, the same value the old constant held for the (previously only
+-- supported) no-params case.
+--: (num_params: integer) -> integer
+function M.func_body_index(num_params) return num_params end
 
 -- A local variable's declaration-site identity path: child `name_index`
 -- (0-based, left-to-right) of the NODE_LOCAL_STMT's own path.
 --: (addr_ops: AddrOps, local_stmt_path: Path, name_index: integer) -> (Path | nil, string | nil)
 function M.local_name_path(addr_ops, local_stmt_path, name_index)
 	return M.child(addr_ops, local_stmt_path, name_index)
+end
+
+-- A function parameter's declaration-site identity path: child `param_index`
+-- (0-based, left-to-right) of the NODE_FUNC_DECL/NODE_FUNC_EXPR's own path
+-- (see header table). Structurally identical construction to
+-- `M.local_name_path` (both are just `M.child` at a variable index) but
+-- kept as a separate named helper — same discipline as `local_name_path`
+-- vs `local_stmt_init_path` above being distinct helpers despite similar
+-- shapes — because the two address conceptually distinct slots (a
+-- function's own parameter list vs a local statement's declared names) and
+-- callers (prover.lua's pass 2) must be able to tell which addressing rule
+-- applies to a given tracked variable (see prover_narrow.lua's `ScopeVar`
+-- `kind` field). Injective against a same-function body path per
+-- `M.func_body_index`'s own argument above.
+--: (addr_ops: AddrOps, func_path: Path, param_index: integer) -> (Path | nil, string | nil)
+function M.func_param_path(addr_ops, func_path, param_index)
+	return M.child(addr_ops, func_path, param_index)
 end
 
 -- A local statement's j-th init expression (0-based, left-to-right): child

@@ -183,6 +183,65 @@ local x --: integer | nil
 		T.eq(total, 1)
 	end)
 
+	T.it("parameter fact: type(x) == \"string\" guard on a function's own parameter replays green", function()
+		local result, err = prover.analyze_file([[
+--: (string | nil) -> nil
+local function f(x)
+  if type(x) == "string" then
+    local y = 1
+  else
+    local z = 2
+  end
+end
+]], "<test>")
+		T.ok(result, err)
+		T.eq(result.stats.guards_handled, 1)
+		T.eq(result.stats.certificates_emitted, 2)
+		T.eq(result.stats.replay_pass, 2)
+		T.eq(result.stats.replay_fail, 0)
+	end)
+
+	T.it("parameter fact: nil-check guard on the SECOND (non-zero-index) parameter replays green -- "
+		.. "regression test for the addressing fix (a hardcoded index-0 identity path would either "
+		.. "misaddress this parameter or fail replay outright)", function()
+		local result, err = prover.analyze_file([[
+--: (integer, string | nil) -> nil
+local function g(n, s)
+  if s == nil then
+    local y = 1
+  end
+end
+]], "<test>")
+		T.ok(result, err)
+		T.eq(result.stats.guards_handled, 1)
+		T.eq(result.stats.certificates_emitted, 1)
+		T.eq(result.stats.replay_pass, 1)
+		T.eq(result.stats.replay_fail, 0)
+	end)
+
+	T.it("nested-function shadowing: outer and inner parameters of the same name replay independently, "
+		.. "each against its own innermost fact", function()
+		local result, err = prover.analyze_file([[
+--: (string | nil) -> nil
+local function outer(x)
+  --: (number | boolean) -> nil
+  local function inner(x)
+    if type(x) == "number" then
+      local y = 1
+    end
+  end
+  if x == nil then
+    local z = 2
+  end
+end
+]], "<test>")
+		T.ok(result, err)
+		T.eq(result.stats.guards_handled, 2)
+		T.eq(result.stats.certificates_emitted, 2) -- outer: match(nil) only (no else); inner: match(number) only (no else)
+		T.eq(result.stats.replay_pass, 2)
+		T.eq(result.stats.replay_fail, 0)
+	end)
+
 	T.it("real file end-to-end: lib/roman_numeral/init.lua yields nonzero judgments, all replay green", function()
 		local f = io.open("lib/roman_numeral/init.lua", "r")
 		T.ok(f)

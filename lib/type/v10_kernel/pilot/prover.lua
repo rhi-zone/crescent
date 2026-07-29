@@ -112,7 +112,8 @@ local M = {}
 -- truthy checks. See TODO.md.
 --:: LocalFactEvent = { kind: "local_fact", name_id: integer, path: integer[], members: string[] }
 --:: GuardEvent = {
---::   kind: "guard", var_name_id: integer, var_local_stmt_path: integer[],
+--::   kind: "guard", var_name_id: integer, var_kind: "local" | "param",
+--::   var_root_path: integer[], var_index: integer,
 --::   target: string, guard_expr_path: integer[],
 --::   then_is_match: boolean,
 --::   then_path: integer[], then_events: unknown[],
@@ -236,6 +237,23 @@ local function path_of(addr_ops, indices)
 	return p
 end
 
+-- A tracked variable's identity path, dispatched on `ge.var_kind` (see
+-- prover_narrow.lua's `ScopeVar` header note): a "local" fact's identity
+-- path is child `var_index` of its NODE_LOCAL_STMT's own path
+-- (`local_name_path`); a "param" fact's identity path is child `var_index`
+-- of its NODE_FUNC_DECL/NODE_FUNC_EXPR's own path (`func_param_path`) --
+-- structurally the same `M.child` call but over different path
+-- roots/semantics, so this dispatch (not a hardcoded index-0 local-only
+-- call) is required for a parameter at any position other than 0 to
+-- address correctly.
+--: (AddrOps, Term, GuardEvent) -> (Term | nil, string | nil)
+local function var_identity_path(addr_ops, root_path, ge)
+	if ge.var_kind == "param" then
+		return prover_addr.func_param_path(addr_ops, root_path, ge.var_index)
+	end
+	return prover_addr.local_name_path(addr_ops, root_path, ge.var_index)
+end
+
 --:: EmitCtx = {
 --::   addr_ops: AddrOps, file_id: Term, vocab: NarrowVocab, ax_initial: AxiomDecl,
 --::   rp: Replayer, stats: Stats, judgments: ReplayResult[],
@@ -312,13 +330,13 @@ emit_events = function(ectx, events, facts)
 					rest_path, rest_events = ge.then_path, ge.then_events
 				end
 
-				local stmt_path, sperr = path_of(addr_ops, ge.var_local_stmt_path)
+				local root_path, rperr = path_of(addr_ops, ge.var_root_path)
 				local target_term, tterr = target_term_of(vocab, target)
-				if stmt_path == nil or target_term == nil then
+				if root_path == nil or target_term == nil then
 					bump(ectx.stats.emission_skipped, "failed to build var path / target term: "
-						.. tostring(sperr or tterr))
+						.. tostring(rperr or tterr))
 				else
-					local var_path, vperr = prover_addr.local_name_path(addr_ops, stmt_path, 0)
+					local var_path, vperr = var_identity_path(addr_ops, root_path, ge)
 					if var_path == nil then
 						bump(ectx.stats.emission_skipped, "failed to build var path / target term: "
 							.. tostring(vperr))
@@ -442,7 +460,7 @@ function M.analyze_file(source, file_path, opts)
 	-- is populated by copying pass 1's fields in afterward, not by handing
 	-- pass 1 a record it doesn't recognize.
 	local pass1_stats = prover_narrow.new_stats()
-	local root, aerr = prover_narrow.analyze(parser, pass1_stats)
+	local root, aerr = prover_narrow.analyze(parser, pass1_stats, source)
 	if not root then return nil, aerr end
 	local t1 = now_ms(clock_fn)
 

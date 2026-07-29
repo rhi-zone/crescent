@@ -143,6 +143,62 @@
 -- (`local a, b --: ...`) are not supported (skipped, reason recorded):
 -- there is no way to determine which name a single trailing annotation
 -- describes.
+--
+-- ── Function-parameter facts ─────────────────────────────────────────────
+--
+-- Crescent has no per-parameter `--:` syntax (`function(x --: T)` is
+-- invalid/silently-wrong per docs/typechecker-reference.md's "Annotation
+-- syntax" section) — the only way to type a parameter is a preceding-line
+-- function-type annotation, `--: (T1, T2, ...) -> R`, positionally matched
+-- to the function's own parameter list. This pass locates that annotation
+-- the SAME way the real typechecker does (`lib/type/static/constrain.lua`'s
+-- `get_ann`/`collect_preceding_run`): an inline (same-line-as-the-function)
+-- annotation takes priority; otherwise scan backward from the function
+-- node's own line, transparently skipping blank/comment-only source lines,
+-- collecting a run of consecutive `ANN_TYPE` entries. Unlike the real
+-- checker's `collect_preceding_run`, this pass does NOT merge multiple
+-- consecutive entries into an overload intersection — an overload signature
+-- is ambiguous for positional per-parameter attribution (which alternative
+-- would a given position's type come from?), so 2+ consecutive entries are
+-- skipped wholesale (reason recorded), matching the multi-name-local
+-- wholesale-skip discipline above. For `local f = function(...) ... end` /
+-- `f = function(...) ... end`, the annotation is looked up relative to the
+-- FUNC_EXPR node's own `line` field (matching
+-- `constrain.lua`'s `ExprRule[NODE_FUNC_EXPR]`, which calls `get_ann(ctx,
+-- n.line)` on the func-expr node itself, not the enclosing statement) — in
+-- practice the same physical source line for this dominant style, but using
+-- the func-expr's own line keeps this pass consistent with the real
+-- checker's rule rather than a coincidentally-equal approximation of it.
+--
+-- The signature string is parsed by a separate, lightweight parser
+-- (`parse_param_type_slices`, parallel to `parse_annotation_members` — NOT
+-- coupled to `lib/type/static/ann.lua`'s arena-based resolver, same
+-- decoupling as the existing local-annotation parser): it splits only the
+-- top-level (depth-0) commas of the parenthesized parameter list, handing
+-- each parameter's full raw slice to the EXISTING `parse_annotation_members`
+-- unsplit. A parameter type containing `|` is thus parsed correctly (it's
+-- one slice); a parameter type containing nested parens/braces (a table or
+-- function type — out of six-tag-union scope) is ALSO captured as one
+-- whole slice, then rejected wholesale by `parse_annotation_members`
+-- itself (its existing "not one of the six type() classes" rejection) —
+-- no separate nested-shape check is needed. A slice count mismatch against
+-- the function's actual declared parameter count is a wholesale skip (the
+-- signature can't be positionally trusted at all in that case). Vararg
+-- functions (`FLAG_VARARG`) are a wholesale skip too: the arrow form's
+-- relationship to a trailing `...` is not something this pilot attributes
+-- positions through — see `param_scope`.
+--
+-- ── Scoping correctness ──────────────────────────────────────────────────
+--
+-- A parameter's fact holds only within its OWN function body: `param_scope`
+-- always builds a FRESH `{}` scope (never the caller's ambient scope) from
+-- ONLY that function's own qualifying parameters, exactly mirroring how a
+-- function body's scope has always been analyzed here (`fresh_scope =
+-- true`, starting from `{}`) — a nested function's own same-named parameter
+-- (or local) therefore shadows an outer tracked fact by construction: the
+-- outer scope is never consulted when building the inner function's own
+-- scope, and the inner function's own guard on its own parameter narrows
+-- using only the inner `ScopeVar` entry for that name.
 
 local defs = require("lib.type.static.defs")
 local intern_mod = require("lib.type.static.intern")
@@ -160,14 +216,24 @@ local M = {}
 --::   lists: ListPool,
 --::   pool: Pool,
 --::   lexer: { annotations: { [integer]: { kind: integer, content: string } } },
+--::   source_lines: string[],
 --:: }
---:: ScopeVar = { local_stmt_path: integer[], name_index: integer, members: string[] }
+-- `kind` discriminates two DISTINCT addressing shapes a tracked variable's
+-- identity path can have (see prover_addr.lua's header and
+-- `M.func_param_path` vs `M.local_name_path`): "local" — `root_path` is a
+-- NODE_LOCAL_STMT's own path, `index` is its declared-name index (always 0,
+-- multi-name locals unsupported); "param" — `root_path` is a
+-- NODE_FUNC_DECL/NODE_FUNC_EXPR's own path, `index` is the parameter's
+-- 0-based position. Pass 2 (prover.lua) branches on `kind` to call the
+-- matching `prover_addr` helper with `index` (no longer a hardcoded 0).
+--:: ScopeVar = { kind: "local" | "param", root_path: integer[], index: integer, members: string[] }
 --:: Scope = { [integer]: ScopeVar }
 --:: Stats = { guards_found: integer, guards_handled: integer, guards_skipped: { [string]: integer }, annotations_parsed: integer, annotations_skipped: { [string]: integer } }
 
 --:: LocalFactEvent = { kind: "local_fact", name_id: integer, path: integer[], members: string[] }
 --:: GuardEvent = {
---::   kind: "guard", var_name_id: integer, var_local_stmt_path: integer[],
+--::   kind: "guard", var_name_id: integer, var_kind: "local" | "param",
+--::   var_root_path: integer[], var_index: integer,
 --::   target: string, guard_expr_path: integer[],
 --::   then_is_match: boolean,
 --::   then_path: integer[], then_events: Event[],
@@ -199,6 +265,7 @@ local LIT_NIL    = defs.LIT_NIL
 local LIT_STRING = defs.LIT_STRING
 
 local FLAG_HAS_ELSE = defs.FLAG_HAS_ELSE
+local FLAG_VARARG   = defs.FLAG_VARARG
 
 local SIX_TAGS = { ["nil"] = true, boolean = true, number = true, string = true, table = true, ["function"] = true }
 
@@ -250,6 +317,190 @@ local function parse_annotation_members(content)
 	return members, nil
 end
 
+-- Split `source` into a 1-indexed array of lines (no trailing newline in
+-- any entry). Mirrors `lib/type/static/errors.lua`'s `set_source` line-split
+-- exactly (same edge-case handling: a final line with no trailing newline
+-- is still captured) so line numbers used by `find_preceding_func_annotation`
+-- below agree with the same numbering the lexer/parser already use.
+--: (string) -> string[]
+local function split_source_lines(source)
+	local lines = {} --[[: string[] ]]
+	local i = 1
+	local len = #source
+	while i <= len do
+		local nl = source:find("\n", i, true)
+		if nl then
+			lines[#lines + 1] = source:sub(i, nl - 1)
+			i = nl + 1
+		else
+			lines[#lines + 1] = source:sub(i)
+			break
+		end
+	end
+	return lines
+end
+
+--: (string) -> boolean
+local function is_blank_or_comment_line(line_text)
+	return line_text:match("^%s*$") ~= nil or line_text:match("^%s*%-%-") ~= nil
+end
+
+-- Locate the `--: (T1, ...) -> R` annotation for a function statement at
+-- `decl_line`, using the SAME line-association rule as
+-- `lib/type/static/constrain.lua`'s `get_ann`/`collect_preceding_run` (see
+-- this module's header, "Function-parameter facts"): inline (same-line)
+-- annotation takes priority; otherwise scan backward from `decl_line - 1`,
+-- transparently skipping blank/comment-only lines, collecting a run of
+-- consecutive ANN_TYPE entries. Does NOT merge multiple entries into an
+-- overload intersection (unlike `collect_preceding_run`) — 2+ consecutive
+-- entries is skipped wholesale as an ambiguous overload for positional
+-- attribution; 0 is "no annotation" (not a skip, just nothing to attribute).
+--: (Ctx, integer, Stats) -> { kind: integer, content: string } | nil
+local function find_preceding_func_annotation(ctx, decl_line, stats)
+	local inline = ctx.lexer.annotations[decl_line]
+	if inline and inline.kind == defs.ANN_TYPE then return inline end
+	local ann_lines = {} --[[: integer[] ]]
+	local scan = decl_line - 1
+	while scan >= 1 do
+		local a = ctx.lexer.annotations[scan]
+		if a and a.kind == defs.ANN_TYPE then
+			ann_lines[#ann_lines + 1] = scan
+			scan = scan - 1
+		elseif not a and ctx.source_lines[scan] and is_blank_or_comment_line(ctx.source_lines[scan]) then
+			scan = scan - 1
+		else
+			break
+		end
+	end
+	if #ann_lines == 0 then return nil end
+	if #ann_lines > 1 then
+		bump_ann_skip(stats, "multiple preceding-line function-type annotations (overload) not supported "
+			.. "for positional parameter attribution")
+		return nil
+	end
+	return ctx.lexer.annotations[ann_lines[1]]
+end
+
+-- Parse a `(T1, T2, ...) -> R` function-type annotation's raw content into
+-- an ordered list of per-parameter raw type strings (the return type R is
+-- never parsed — this pilot has no use for it). Splits the parenthesized
+-- parameter list on TOP-LEVEL (depth-0) commas only, tracked over nested
+-- parens/braces, so a parameter type containing `|` is captured whole (one
+-- slice) and a parameter type containing nested parens/braces is ALSO
+-- captured whole rather than mis-split on an inner comma — it is then
+-- rejected by `parse_annotation_members` itself (not one of the six
+-- classes), no separate nested-shape check needed here. See header.
+--: (string) -> (string[] | nil, string | nil)
+local function parse_param_type_slices(content)
+	local s = content:match("^%s*(.-)%s*$") or content
+	if s:sub(1, 1) ~= "(" then
+		return nil, "function annotation is not in '(T1, ...) -> R' form"
+	end
+	local depth = 0
+	local close_idx = nil --[[: integer | nil ]]
+	for i = 1, #s do
+		local c = s:sub(i, i)
+		if c == "(" or c == "{" then
+			depth = depth + 1
+		elseif c == ")" or c == "}" then
+			depth = depth - 1
+			if depth == 0 then
+				close_idx = i
+				break
+			end
+		end
+	end
+	if not close_idx then return nil, "unbalanced parens in function annotation" end
+	local after = s:sub(close_idx + 1):match("^%s*(.-)%s*$") or ""
+	if after:sub(1, 2) ~= "->" then
+		return nil, "function annotation missing '->' after parameter list"
+	end
+	local inner = s:sub(2, close_idx - 1)
+	if inner:match("^%s*$") then return {}, nil end
+	local slices = {} --[[: string[] ]]
+	local depth2 = 0
+	local start = 1
+	for i = 1, #inner do
+		local c = inner:sub(i, i)
+		if c == "(" or c == "{" then
+			depth2 = depth2 + 1
+		elseif c == ")" or c == "}" then
+			depth2 = depth2 - 1
+		elseif c == "," and depth2 == 0 then
+			slices[#slices + 1] = inner:sub(start, i - 1)
+			start = i + 1
+		end
+	end
+	slices[#slices + 1] = inner:sub(start)
+	return slices, nil
+end
+
+-- Build the scope a function body's own analysis starts from, AND the
+-- `local_fact`-shaped events pass 2 needs to learn about those same facts
+-- (see header, "Function-parameter facts" / "Scoping correctness"). Pass 2
+-- (prover.lua's `emit_events`) builds its own `facts` table PURELY by
+-- walking `local_fact` events -- it never reads `scope` (a pass-1-only
+-- bookkeeping structure) -- so a qualifying parameter needs its own
+-- `local_fact` event (mirroring NODE_LOCAL_STMT's own local-fact event
+-- alongside its `scope[name_id] = ...` population) or pass 2 would silently
+-- treat every guard on it as an untracked-variable skip. ALWAYS a fresh `{}`
+-- scope populated with ONLY this function's own qualifying parameters —
+-- never the caller's ambient scope.
+--: (Ctx, integer[], integer, integer, integer, boolean, Stats) -> (Scope, LocalFactEvent[])
+local function param_scope(ctx, func_path, ps, pl, decl_line, has_vararg, stats)
+	local scope = {} --[[: Scope ]]
+	local fact_events = {} --[[: LocalFactEvent[] ]]
+	if pl == 0 then return scope, fact_events end
+	if has_vararg then
+		bump_ann_skip(stats, "vararg function: positional parameter/signature attribution out of scope")
+		return scope, fact_events
+	end
+	local ann = find_preceding_func_annotation(ctx, decl_line, stats)
+	if not ann then return scope, fact_events end
+	local slices, perr = parse_param_type_slices(ann.content)
+	if not slices then
+		bump_ann_skip(stats, perr or "function annotation not in '(T1, ...) -> R' form")
+		return scope, fact_events
+	end
+	if #slices ~= pl then
+		bump_ann_skip(stats, "function signature parameter count (" .. #slices
+			.. ") does not match declared parameter count (" .. pl .. ")")
+		return scope, fact_events
+	end
+	for i = 0, pl - 1 do
+		local raw = slices[i + 1]
+		local slice = raw:match("^%s*(.-)%s*$") or raw
+		local members, merr = parse_annotation_members(slice)
+		if not members then
+			bump_ann_skip(stats, "parameter " .. i .. ": " .. (merr or "unparseable annotation"))
+		else
+			stats.annotations_parsed = stats.annotations_parsed + 1
+			if #members >= 2 then
+				local name_id = ctx.lists:get(ps + i)
+				local param_path = extend_path(func_path, i)
+				scope[name_id] = { kind = "param", root_path = func_path, index = i, members = members }
+				fact_events[#fact_events + 1] = {
+					kind = "local_fact", name_id = name_id, path = param_path, members = members,
+				}
+			end
+		end
+	end
+	return scope, fact_events
+end
+
+-- Splice a function's own parameter `local_fact` events in FRONT of its
+-- body's own event list (parameters are bound before any body statement
+-- runs, so their facts precede the body's own events in the same sense a
+-- local's own `local_fact` event precedes what follows it in its block).
+--: (LocalFactEvent[], Event[]) -> Event[]
+local function prepend_facts(fact_events, body_events)
+	if #fact_events == 0 then return body_events end
+	local out = {} --[[: Event[] ]]
+	for _, fe in ipairs(fact_events) do out[#out + 1] = fe end
+	for _, e in ipairs(body_events) do out[#out + 1] = e end
+	return out
+end
+
 -- Strip at most one leading `not`. Returns (inner_node_id, negated).
 --: (Ctx, integer) -> (integer, boolean)
 local function strip_not(ctx, nid)
@@ -261,7 +512,11 @@ local function strip_not(ctx, nid)
 end
 
 --:: GuardExtract = { var_name_id: integer, target: string, then_is_match: boolean }
---:: GuardHit = { var_name_id: integer, var_local_stmt_path: integer[], target: string, guard_expr_path: integer[], then_is_match: boolean }
+--:: GuardHit = {
+--::   var_name_id: integer, var_kind: "local" | "param",
+--::   var_root_path: integer[], var_index: integer,
+--::   target: string, guard_expr_path: integer[], then_is_match: boolean,
+--:: }
 
 -- `ident_side == nil` / `ident_side ~= nil`, given a fixed operand
 -- assignment (caller tries both orderings).
@@ -367,7 +622,7 @@ local function try_guard_event(ctx, test_path, test_nid, scope, stats)
 
 	local sv = scope[g.var_name_id]
 	if not sv then
-		bump_skip(stats, "guarded variable not a tracked annotated local")
+		bump_skip(stats, "guarded variable not a tracked annotated local or parameter")
 		return nil
 	end
 	if #sv.members < 2 then
@@ -393,7 +648,9 @@ local function try_guard_event(ctx, test_path, test_nid, scope, stats)
 
 	return {
 		var_name_id = g.var_name_id,
-		var_local_stmt_path = sv.local_stmt_path,
+		var_kind = sv.kind,
+		var_root_path = sv.root_path,
+		var_index = sv.index,
 		target = g.target,
 		guard_expr_path = test_path,
 		then_is_match = g.then_is_match,
@@ -470,8 +727,8 @@ local function analyze_if_chain(ctx, stmt_path, clauses_start, clauses_len, else
 	local rest_scope = copy_scope(scope)
 	local sv = scope[ge.var_name_id]
 	local rest_members = member_set_without(sv.members, member_removed_by(ge.target)) or {}
-	matched_scope[ge.var_name_id] = { local_stmt_path = sv.local_stmt_path, name_index = 0, members = { ge.target } }
-	rest_scope[ge.var_name_id] = { local_stmt_path = sv.local_stmt_path, name_index = 0, members = rest_members }
+	matched_scope[ge.var_name_id] = { kind = sv.kind, root_path = sv.root_path, index = sv.index, members = { ge.target } }
+	rest_scope[ge.var_name_id] = { kind = sv.kind, root_path = sv.root_path, index = sv.index, members = rest_members }
 
 	local then_scope, cont_scope
 	if ge.then_is_match then
@@ -488,7 +745,9 @@ local function analyze_if_chain(ctx, stmt_path, clauses_start, clauses_len, else
 	local guard_event = {
 		kind = "guard",
 		var_name_id = ge.var_name_id,
-		var_local_stmt_path = ge.var_local_stmt_path,
+		var_kind = ge.var_kind,
+		var_root_path = ge.var_root_path,
+		var_index = ge.var_index,
 		target = ge.target,
 		guard_expr_path = ge.guard_expr_path,
 		then_is_match = ge.then_is_match,
@@ -533,7 +792,7 @@ analyze_block = function(ctx, block_path, stmt_start, stmt_len, scope, stats)
 						stats.annotations_parsed = stats.annotations_parsed + 1
 						if #members >= 2 then
 							local name_id = ctx.lists:get(n.data[0])
-							scope[name_id] = { local_stmt_path = stmt_path, name_index = 0, members = members }
+							scope[name_id] = { kind = "local", root_path = stmt_path, index = 0, members = members }
 							events[#events + 1] = {
 								kind = "local_fact", name_id = name_id, path = stmt_path, members = members,
 							} --[[: Event ]]
@@ -543,20 +802,27 @@ analyze_block = function(ctx, block_path, stmt_start, stmt_len, scope, stats)
 			end
 			-- `local f = function(...) ... end`: a single-name local whose sole
 			-- init expression is a func-expr is treated exactly like
-			-- NODE_FUNC_DECL (own independent, empty-initial-scope analysis) --
-			-- see header note on the two func-defining shapes this pilot walks.
-			-- The func-expr gets its OWN path (child names_len+0 of the
-			-- local-stmt path, per prover_addr.lua's M.local_stmt_init_path),
-			-- distinct from the statement's own path; its body is then child 0
-			-- of THAT path (NODE_FUNC_EXPR's own rule), not of stmt_path
-			-- directly — this is the injectivity fix (see prover_addr.lua).
+			-- NODE_FUNC_DECL (own independent scope analysis, now seeded with
+			-- any qualifying parameter facts via `param_scope` -- see header,
+			-- "Function-parameter facts") -- see header note on the two
+			-- func-defining shapes this pilot walks. The func-expr gets its OWN
+			-- path (child names_len+0 of the local-stmt path, per
+			-- prover_addr.lua's M.local_stmt_init_path), distinct from the
+			-- statement's own path; its body is then child `pl` of THAT path
+			-- (NODE_FUNC_EXPR's own rule, params occupying children 0..pl-1),
+			-- not of stmt_path directly — this is the injectivity fix (see
+			-- prover_addr.lua).
 			if names_len == 1 and n.data[3] == 1 then
 				local init_nid = ctx.lists:get(n.data[2])
 				local init_n = ctx.nodes:get(init_nid)
 				if init_n.kind == NODE_FUNC_EXPR then
 					local func_expr_path = extend_path(stmt_path, names_len + 0)
-					local body_path = extend_path(func_expr_path, 0)
-					local sub = analyze_block(ctx, body_path, init_n.data[2], init_n.data[3], {}, stats)
+					local ps, pl = init_n.data[0], init_n.data[1]
+					local has_vararg = band(init_n.flags, FLAG_VARARG) ~= 0
+					local fscope, ffacts = param_scope(ctx, func_expr_path, ps, pl, init_n.line, has_vararg, stats)
+					local body_path = extend_path(func_expr_path, pl)
+					local sub = analyze_block(ctx, body_path, init_n.data[2], init_n.data[3], fscope, stats)
+					sub = prepend_facts(ffacts, sub)
 					events[#events + 1] = { kind = "nested_scope", path = body_path, events = sub, fresh_scope = true }
 				end
 			end
@@ -576,16 +842,18 @@ analyze_block = function(ctx, block_path, stmt_start, stmt_len, scope, stats)
 				local sv = scope[ge.var_name_id]
 				local rest_members = member_set_without(sv.members, member_removed_by(ge.target)) or {}
 				if ge.then_is_match then
-					body_scope[ge.var_name_id] = { local_stmt_path = sv.local_stmt_path, name_index = 0, members = { ge.target } }
+					body_scope[ge.var_name_id] = { kind = sv.kind, root_path = sv.root_path, index = sv.index, members = { ge.target } }
 				else
-					body_scope[ge.var_name_id] = { local_stmt_path = sv.local_stmt_path, name_index = 0, members = rest_members }
+					body_scope[ge.var_name_id] = { kind = sv.kind, root_path = sv.root_path, index = sv.index, members = rest_members }
 				end
 				local body_events = analyze_block(ctx, body_path, n.data[1], n.data[2], body_scope, stats)
 				stats.guards_handled = stats.guards_handled + 1
 				events[#events + 1] = {
 					kind = "guard",
 					var_name_id = ge.var_name_id,
-					var_local_stmt_path = ge.var_local_stmt_path,
+					var_kind = ge.var_kind,
+					var_root_path = ge.var_root_path,
+					var_index = ge.var_index,
 					target = ge.target,
 					guard_expr_path = ge.guard_expr_path,
 					then_is_match = ge.then_is_match,
@@ -610,8 +878,12 @@ analyze_block = function(ctx, block_path, stmt_start, stmt_len, scope, stats)
 			events[#events + 1] = { kind = "nested_scope", path = body_path, events = sub, fresh_scope = false }
 
 		elseif kind == NODE_FUNC_DECL then
-			local body_path = extend_path(stmt_path, 0)
-			local sub = analyze_block(ctx, body_path, n.data[3], n.data[4], {}, stats)
+			local ps, pl = n.data[1], n.data[2]
+			local has_vararg = band(n.flags, FLAG_VARARG) ~= 0
+			local fscope, ffacts = param_scope(ctx, stmt_path, ps, pl, n.line, has_vararg, stats)
+			local body_path = extend_path(stmt_path, pl)
+			local sub = analyze_block(ctx, body_path, n.data[3], n.data[4], fscope, stats)
+			sub = prepend_facts(ffacts, sub)
 			events[#events + 1] = { kind = "nested_scope", path = body_path, events = sub, fresh_scope = true }
 
 		elseif kind == NODE_ASSIGN_STMT then
@@ -629,16 +901,20 @@ analyze_block = function(ctx, block_path, stmt_start, stmt_len, scope, stats)
 			-- path, per prover_addr.lua's M.assign_stmt_init_path — targets
 			-- are unaddressed so the RHS expression occupies child 0
 			-- directly), distinct from the statement's own path; its body is
-			-- then child 0 of THAT path (NODE_FUNC_EXPR's own rule), not of
-			-- stmt_path directly — this is the injectivity fix (see
-			-- prover_addr.lua).
+			-- then child `pl` of THAT path (NODE_FUNC_EXPR's own rule, params
+			-- occupying children 0..pl-1), not of stmt_path directly — this
+			-- is the injectivity fix (see prover_addr.lua).
 			if n.data[1] == 1 and n.data[3] == 1 then
 				local init_nid = ctx.lists:get(n.data[2])
 				local init_n = ctx.nodes:get(init_nid)
 				if init_n.kind == NODE_FUNC_EXPR then
 					local func_expr_path = extend_path(stmt_path, 0)
-					local body_path = extend_path(func_expr_path, 0)
-					local sub = analyze_block(ctx, body_path, init_n.data[2], init_n.data[3], {}, stats)
+					local ps, pl = init_n.data[0], init_n.data[1]
+					local has_vararg = band(init_n.flags, FLAG_VARARG) ~= 0
+					local fscope, ffacts = param_scope(ctx, func_expr_path, ps, pl, init_n.line, has_vararg, stats)
+					local body_path = extend_path(func_expr_path, pl)
+					local sub = analyze_block(ctx, body_path, init_n.data[2], init_n.data[3], fscope, stats)
+					sub = prepend_facts(ffacts, sub)
 					events[#events + 1] = { kind = "nested_scope", path = body_path, events = sub, fresh_scope = true }
 				end
 			end
@@ -650,14 +926,24 @@ end
 -- Analyze one already-parsed file (see lib/type/static/parse.lua). Returns
 -- the chunk's own top-level event list, as a NestedScopeEvent-shaped
 -- record so callers can treat every scope root (chunk + each function
--- found) uniformly.
---: (unknown, Stats) -> (NestedScopeEvent | nil, string | nil)
-function M.analyze(parser, stats)
+-- found) uniformly. `source` is the SAME source text the caller already
+-- passed to `lib.type.static.parse.parse` to build `parser` -- required to
+-- replicate the real typechecker's preceding-line annotation line-
+-- association rule (blank/comment-only line skipping; see header,
+-- "Function-parameter facts" and `find_preceding_func_annotation`).
+--: (unknown, Stats, string) -> (NestedScopeEvent | nil, string | nil)
+function M.analyze(parser, stats, source)
 	if type(parser) ~= "table" then
 		return nil, "prover_narrow.analyze: parser must be a lib.type.static.parse result table"
 	end
+	if type(source) ~= "string" then
+		return nil, "prover_narrow.analyze: source must be the string passed to parse.parse"
+	end
 	local pr = parser --[[: { nodes: ASTNodeArena, lists: ListPool, pool: Pool, root: integer, lexer: { annotations: { [integer]: { kind: integer, content: string } } } } ]]
-	local ctx = { nodes = pr.nodes, lists = pr.lists, pool = pr.pool, lexer = pr.lexer }
+	local ctx = {
+		nodes = pr.nodes, lists = pr.lists, pool = pr.pool, lexer = pr.lexer,
+		source_lines = split_source_lines(source),
+	}
 	local root_node = pr.nodes:get(pr.root)
 	local root_path = {} --[[: integer[] ]]
 	local events = analyze_block(ctx, root_path, root_node.data[0], root_node.data[1], {}, stats)
