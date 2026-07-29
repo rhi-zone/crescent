@@ -852,6 +852,14 @@ end
 -- Queries: SQLite only, no yjs involved
 -- ---------------------------------------------------------------------------
 
+--- The full chart of accounts. See lib.bookkeeping.account.list.
+--: Bridge -> (unknown | nil, string | nil)
+M.list_accounts = function(bridge)
+  local _j, chart, _bc, lerr = store.load(bridge.db)
+  if chart == nil then return nil, "bridge.list_accounts: " .. tostring(lerr) end
+  return account.list(chart)
+end
+
 --- The full ledger (all periods): per-account, per-currency transaction
 -- history with running balances. See lib.bookkeeping.ledger.build.
 --: Bridge -> (unknown | nil, string | nil)
@@ -859,6 +867,35 @@ M.get_ledger = function(bridge)
   local j, _chart, _bc, lerr = store.load(bridge.db)
   if j == nil then return nil, "bridge.get_ledger: " .. tostring(lerr) end
   return ledger_mod.build(j)
+end
+
+--- Every posted entry across every period currently in SQLite, each tagged
+-- with the period_id it was posted under (WireEntry has no period_id field
+-- of its own -- see this file's header comment on why period membership
+-- lives only as a SQLite column, never on the in-memory entry record -- so
+-- any caller needing "which period is entry X in", e.g. to call
+-- M.void_entry/M.delete_entry, has to get it from here rather than from
+-- M.get_ledger, whose ledger_row shape also carries no period_id). Entries
+-- are returned in no particular cross-period order; sort by `date` at the
+-- call site if a specific order is required.
+--: Bridge -> ({ [number]: { period_id: string, entry: JournalEntry } } | nil, string | nil)
+M.list_entries = function(bridge)
+  local period_ids, perr = known_period_ids(bridge.db)
+  if period_ids == nil then return nil, "bridge.list_entries: " .. tostring(perr) end
+  if type(period_ids) ~= "table" then return nil, "bridge.list_entries: internal invariant: known_period_ids returned a non-table" end
+  local ids = period_ids --[[: { [number]: string } ]]
+
+  local out = {} --: { [number]: { period_id: string, entry: JournalEntry } }
+  for i = 1, #ids do
+    local pid = ids[i]
+    local j, _chart, _bc, lerr = store.load_period(bridge.db, pid)
+    if j == nil then return nil, "bridge.list_entries: load_period(" .. pid .. "): " .. tostring(lerr) end
+    local entries = journal.list(j)
+    for k = 1, #entries do
+      out[#out + 1] = { period_id = pid, entry = entries[k] }
+    end
+  end
+  return out
 end
 
 --- The trial balance (all periods). See lib.bookkeeping.trial_balance.build.

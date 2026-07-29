@@ -1,0 +1,26 @@
+{
+  "name": "finance",
+  "version": "0.1.0",
+  "meta": { "tags": ["finance", "bookkeeping", "ledger"] },
+  "default_entry": "headless",
+  "entry": {
+    "headless": {
+      "main": "init.lua",
+      "caps": {
+        "db": { "type": "db", "allow_write": true, "reason": "Source of truth for the chart of accounts, periods, and journal entries (lib.bookkeeping.store, via the finance bridge)." }
+      }
+    },
+    "tui": {
+      "main": "tui.lua",
+      "caps": {
+        "db": { "type": "db", "allow_write": true, "reason": "Source of truth for the chart of accounts, periods, and journal entries (lib.bookkeeping.store, via the finance bridge)." }
+      }
+    },
+    "dom": {
+      "main": "dom.lua",
+      "caps": {
+        "db": { "type": "db", "allow_write": true, "reason": "Source of truth for the chart of accounts, periods, and journal entries (lib.bookkeeping.store, via the finance bridge)." }
+      }
+    }
+  }
+}
