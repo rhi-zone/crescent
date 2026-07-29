@@ -132,7 +132,14 @@ local sample_doc = doc_registry.accounts_doc(sample_reg)
 --:: }
 --:: SyncManagerCap = { broadcast_change: (unknown, string, string) -> (true | nil, string | nil), ... }
 --:: BridgeOpts = { registry: Registry, db: DbCap, sync_manager?: SyncManagerCap, book_currency?: string }
---:: Bridge = { registry: Registry, db: DbCap, sync_manager: SyncManagerCap | nil, book_currency: string }
+-- `_next_entry_id` backs next_entry_id (below): an in-process counter this
+-- bridge instance owns, so every entry/reversing-entry id it generates is
+-- unique across every period this bridge instance posts into, not just
+-- within whichever single period_id's freshly-loaded in-memory journal
+-- happens to be in scope for one call -- see next_entry_id's own comment
+-- for why that per-call journal can't be trusted to hand out globally
+-- unique ids itself.
+--:: Bridge = { registry: Registry, db: DbCap, sync_manager: SyncManagerCap | nil, book_currency: string, _next_entry_id: number }
 
 --:: WireLine = { account_id: string, amount: number, currency: string, rate: number | nil }
 --:: WireEntry = { id: string | nil, date: string, description: string, lines: { [number]: WireLine } }
@@ -308,10 +315,11 @@ M.new = function(opts)
   end
 
   return {
-    registry      = opts.registry,
-    db            = db,
-    sync_manager  = opts.sync_manager,
-    book_currency = book_currency,
+    registry       = opts.registry,
+    db             = db,
+    sync_manager   = opts.sync_manager,
+    book_currency  = book_currency,
+    _next_entry_id = 0,
   }
 end
 
@@ -474,6 +482,31 @@ local function entry_is_new(j, id)
   return journal.get(j, id) == nil
 end
 
+-- Generates an entry id unique enough to survive being posted into SQLite's
+-- single, globally-unique `journal_entries.id` column (see store.lua's
+-- schema) from any period this bridge instance posts into. Needed because
+-- journal.post's own auto-id ("1", "2", ... -- see that function's own
+-- comment) is unique only within whichever single in-memory journal object
+-- it's handed, but M.post_entry/M.void_entry each load a *fresh* journal
+-- scoped to one period_id per call (store.load_period) -- so two different
+-- periods' first auto-id'd entries would otherwise both be "1" and collide
+-- on insert (confirmed by a real multi-period import hitting exactly this
+-- "UNIQUE constraint failed: journal_entries.id"). Combines this bridge
+-- instance's registry client_id (stable per replica, already how this
+-- codebase distinguishes replicas -- see lib/platform/apps/finance/init.lua's
+-- own client_id default) with the same os.time()+math.random() combination
+-- lib/platform/caps/self.lua already uses for its own id generation, plus
+-- an in-process monotonic counter (`bridge._next_entry_id`) so two ids
+-- generated within the same bridge instance in the same second can never
+-- collide even if math.random() alone did.
+--: Bridge -> string
+local function next_entry_id(bridge)
+  bridge._next_entry_id = bridge._next_entry_id + 1
+  local client_id = bridge.registry.client_id
+  local client_part = client_id == nil and 0 or client_id
+  return string.format("%d-%d-%d-%d", client_part, os.time(), bridge._next_entry_id, math.random(1, 1073741824))
+end
+
 -- TYPECHECKER WORKAROUND: the natural code inlines this directly in
 -- M.post_entry/M.apply_remote_entries (both already have several other
 -- multi-return calls in scope: store.load_period, store.save_period,
@@ -542,7 +575,16 @@ M.post_entry = function(bridge, period_id, entry_data)
   if j == nil then return nil, "bridge.post_entry: " .. tostring(lerr) end
   if chart == nil then return nil, "bridge.post_entry: " .. tostring(lerr) end
 
-  local entry, perr = post_wire_entry(j, chart, entry_data)
+  -- Always resolve to a bridge-generated id when the caller didn't supply
+  -- one -- see next_entry_id's own comment for why this bridge can't let
+  -- journal.post fall back to its own per-journal auto-id here.
+  local entry_id = entry_data.id
+  if entry_id == nil then entry_id = next_entry_id(bridge) end
+  local entry_data_with_id = {
+    id = entry_id, date = entry_data.date, description = entry_data.description, lines = entry_data.lines,
+  }
+
+  local entry, perr = post_wire_entry(j, chart, entry_data_with_id)
   if entry == nil then return nil, "bridge.post_entry: " .. tostring(perr) end
 
   local saved, serr = store.save_period(bridge.db, j, chart, period_id)
@@ -570,7 +612,9 @@ M.void_entry = function(bridge, period_id, entry_id, void_date)
   if j == nil then return nil, "bridge.void_entry: " .. tostring(lerr) end
   if chart == nil then return nil, "bridge.void_entry: " .. tostring(lerr) end
 
-  local reversing, verr = journal.void_entry(j, chart, entry_id, void_date)
+  -- Same "must not let journal.post fall back to its own per-journal
+  -- auto-id" reasoning as M.post_entry -- see next_entry_id's own comment.
+  local reversing, verr = journal.void_entry(j, chart, entry_id, void_date, next_entry_id(bridge))
   if reversing == nil then return nil, "bridge.void_entry: " .. tostring(verr) end
 
   local saved, serr = store.save_period(bridge.db, j, chart, period_id)

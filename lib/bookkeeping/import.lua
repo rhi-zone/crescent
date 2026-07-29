@@ -91,7 +91,15 @@ local M = {}
 --::   csv_opts: { separator: string | nil, quote: string | nil } | nil,
 --:: }
 --:: row_error = { row: number, message: string }
---:: import_result = { entries: { [number]: journal_entry }, errors: { [number]: row_error } }
+-- `row` is the entry's 1-based source position (CSV data row, OFX <STMTTRN>
+-- block, or QIF record — whatever the caller's `rows` array element index
+-- was), the same numbering space `row_error.row` already uses. Callers that
+-- route entries elsewhere after parsing (e.g. one entry per destination
+-- period) need this to report a post-parse failure against the same
+-- source-row numbering a parse-time failure would have used — see
+-- lib/platform/apps/finance/import.lua for that consumer.
+--:: dated_entry = { row: number, entry: journal_entry }
+--:: import_result = { entries: { [number]: dated_entry }, errors: { [number]: row_error } }
 
 -- Default amount-string normalizer: trims surrounding whitespace and strips
 -- thousands-separator commas ("1,234.56" -> "1234.56"). Does not treat
@@ -248,7 +256,7 @@ M.rows_to_entries = function(rows, journal_, chart, opts)
   local parse_date     = opts.parse_date or default_parse_date
   local parse_amount   = opts.parse_amount or default_parse_amount
 
-  local entries = {} --: { [number]: journal_entry }
+  local entries = {} --: { [number]: dated_entry }
   local errors  = {} --: { [number]: row_error }
 
   for i = 1, #rows do
@@ -276,7 +284,7 @@ M.rows_to_entries = function(rows, journal_, chart, opts)
       if not entry then
         errors[#errors + 1] = { row = i, message = tostring(post_err) }
       else
-        entries[#entries + 1] = entry
+        entries[#entries + 1] = { row = i, entry = entry }
       end
     end
   end

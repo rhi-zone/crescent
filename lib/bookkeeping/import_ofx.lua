@@ -72,7 +72,12 @@ local M = {}
 --:: journal_entry = { id: string, date: string, description: string, lines: { [number]: journal_line } }
 --:: bookkeeping_journal = { book_currency: string, entries: { [number]: journal_entry }, _by_id: { [string]: journal_entry }, _next_id: number }
 --:: row_error = { row: number, message: string }
---:: import_result = { entries: { [number]: journal_entry }, errors: { [number]: row_error } }
+-- `row` is the entry's 1-based position among this file's own parsed
+-- <STMTTRN> blocks (the same numbering `row_error.row` and the truncation
+-- error already use) -- see lib/bookkeeping/import.lua's matching
+-- restatement for why a caller needs this.
+--:: dated_entry = { row: number, entry: journal_entry }
+--:: import_result = { entries: { [number]: dated_entry }, errors: { [number]: row_error } }
 
 --:: ofx_opts = {
 --::   bank_account: string, contra_account: string, currency: string,

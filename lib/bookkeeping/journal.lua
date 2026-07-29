@@ -262,8 +262,21 @@ end
 -- Reversal lines carry the original line's `rate` unchanged, so a
 -- multi-currency line reverses using the same exchange rate it was
 -- originally posted at (not a rate looked up fresh for `void_date`).
---: (journal, chart, string, string) -> (entry | nil, string | nil)
-M.void_entry = function(journal, chart, entry_id, void_date)
+--
+-- `reversing_id`, if given, is used as the reversing entry's id instead of
+-- this journal's own auto-assigned "1", "2", ... counter (see M.post's own
+-- comment: that counter is unique only within this in-memory journal, not
+-- globally). A caller that loads a *fresh* journal per call -- e.g.
+-- lib.platform.apps.finance.bridge, which loads one period at a time and
+-- persists every period's entries into a single, globally-id-unique SQLite
+-- table -- cannot rely on that counter across separate calls, since two
+-- fresh journals (e.g. two different periods) each start counting at "1"
+-- and would otherwise collide once persisted; such a caller supplies its
+-- own globally-unique `reversing_id` instead. Omitting it (nil) preserves
+-- the original auto-assigned behavior for direct lib.bookkeeping callers
+-- that keep one journal alive for their whole session.
+--: (journal, chart, string, string, string | nil) -> (entry | nil, string | nil)
+M.void_entry = function(journal, chart, entry_id, void_date, reversing_id)
   local orig = journal._by_id[entry_id]
   if not orig then
     return nil, "journal.void_entry: unknown entry id: " .. tostring(entry_id)
@@ -277,7 +290,7 @@ M.void_entry = function(journal, chart, entry_id, void_date)
   end
 
   return M.post(journal, chart, {
-    id          = nil,
+    id          = reversing_id,
     date        = void_date,
     description = "Void of entry " .. entry_id .. ": " .. orig.description,
     lines       = reversing_lines,
