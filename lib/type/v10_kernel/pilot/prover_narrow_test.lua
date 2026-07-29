@@ -130,6 +130,76 @@ end
 		T.eq(inner.target, "string")
 	end)
 
+	T.it("elseif chain: each clause narrows its own body, rest chains to the next clause's test, "
+		.. "final rest chains to the trailing else", function()
+		local root, stats = analyze_src([[
+local x --: string | number | boolean
+if type(x) == "string" then
+  local y = 1
+elseif type(x) == "number" then
+  local z = 2
+else
+  local w = 3
+end
+]])
+		-- Only the two actual clause tests are "guards" in the stats sense --
+		-- the trailing `else` has no test of its own to find/handle (see
+		-- header, "Elseif chains").
+		T.eq(stats.guards_found, 2)
+		T.eq(stats.guards_handled, 2)
+
+		local outer = find_guard(root.events)
+		T.ok(outer)
+		T.eq(outer.target, "string")
+		T.eq(outer.then_is_match, true)
+		T.ok(outer.else_events)
+		T.eq(#outer.else_events, 1)
+
+		-- Clause 1's own GuardEvent is the SOLE element of clause 0's "rest"
+		-- events list -- this is what makes pass 2's chaining detection
+		-- (`peek_next_target`, first-element-only) recognize it, exactly
+		-- like a hand-nested if/else would.
+		local inner = outer.else_events[1]
+		T.eq(inner.kind, "guard")
+		T.eq(inner.target, "number")
+		T.eq(inner.then_is_match, true)
+		T.ok(inner.else_events)
+		-- Clause 1's "rest" chains to the trailing else block's OWN flat
+		-- events (unwrapped -- pass 2's rule-citation fork isolates it,
+		-- matching the single-clause if/else convention exactly).
+		T.eq(#inner.else_events, 0) -- `local w = 3` has no `--:` annotation, so no event
+	end)
+
+	T.it("elseif chain: an ineligible middle clause falls back to nested_scope for its own body "
+		.. "but does not break the surrounding clauses' own eligibility", function()
+		local root, stats = analyze_src([[
+local x --: string | number | table
+if type(x) == "string" then
+  local y = 1
+elseif x.foo == 1 then
+  local z = 2
+elseif type(x) == "table" then
+  local w = 3
+end
+]])
+		T.eq(stats.guards_found, 2) -- `x.foo == 1` is not a recognized guard shape at all
+		T.eq(stats.guards_handled, 2)
+		local outer = find_guard(root.events)
+		T.ok(outer)
+		T.eq(outer.target, "string")
+		T.ok(outer.else_events)
+		-- The ineligible clause's own nested_scope wrapper occupies the
+		-- FIRST slot (so pass 2 correctly does NOT treat clause 2 as
+		-- chained through it -- see header, "Chaining"), with clause 2's
+		-- own GuardEvent as a second, later sibling.
+		T.eq(outer.else_events[1].kind, "nested_scope")
+		local found_inner = false
+		for _, e in ipairs(outer.else_events) do
+			if e.kind == "guard" and e.target == "table" then found_inner = true end
+		end
+		T.ok(found_inner, "expected clause 2's own guard event to still be present")
+	end)
+
 	T.it("skipped construct: guard over a plain 'boolean' union is counted, not silently dropped", function()
 		local root, stats = analyze_src([[
 local ok --: boolean | nil
@@ -175,6 +245,30 @@ local a, b --: string | nil
 		local root, stats = analyze_src(src)
 		T.ok(stats.guards_handled >= 1, "expected at least one handled guard in lib/roman_numeral/init.lua")
 		T.ok(root)
+	end)
+
+	T.it("real file: lib/roman_numeral/init.lua no longer records any "
+		.. "'elseif chain not supported' skip (elseif chains are now analyzed, not blanket-skipped)", function()
+		local f = io.open("lib/roman_numeral/init.lua", "r")
+		T.ok(f)
+		if not f then return end
+		local src = f:read("*a")
+		f:close()
+		T.ok(src)
+		if not src then return end
+		local _, stats = analyze_src(src)
+		-- The file's 5 elseif chains (verified by direct inspection) never
+		-- use one of the three recognized guard shapes on their clause
+		-- tests (they compare plain values -- `mod10 == 1`, `style ==
+		-- "additive"` -- not `type(x)`/nil-check/truthiness on a tracked
+		-- annotated union local), so this drop is NOT accompanied by a
+		-- guards_found/guards_handled increase for THIS file -- the skip
+		-- reason simply no longer applies because the blanket
+		-- clauses_len~=1 bump is gone, not because these particular
+		-- clauses newly qualify.
+		T.eq(stats.guards_skipped["elseif chain not supported (no single addressable rest-branch point)"], nil)
+		T.eq(stats.guards_found, 11)
+		T.eq(stats.guards_handled, 2)
 	end)
 end)
 

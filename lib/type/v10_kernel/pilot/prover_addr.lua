@@ -36,13 +36,14 @@
 --                        child 2*N   = the `else` block (N = number of
 --                                      clauses), IFF FLAG_HAS_ELSE is set;
 --                                      absent otherwise.
---                        (This prover only ever extracts a guard from an
---                        if-statement with exactly one clause, N=1 — see
---                        prover_narrow.lua. The general indexing above is
---                        still declared so every if-statement gets a
---                        stable, well-defined path even when a nested
---                        guard sits inside an unsupported elseif chain we
---                        merely walk through without extracting a guard.)
+--                        (This prover extracts a guard from EACH clause of
+--                        an if-statement, including elseif chains (N>1) —
+--                        see prover_narrow.lua's "Elseif chains" section.
+--                        A clause whose own test isn't one of the three
+--                        recognized guard shapes still gets a stable,
+--                        well-defined path via the indexing above; its
+--                        body is merely walked through without extracting
+--                        a guard, same as always.)
 --   NODE_WHILE_STMT      child 0 = test expression
 --                        child 1 = body block
 --   NODE_REPEAT_STMT     child 0 = body block

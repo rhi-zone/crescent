@@ -162,6 +162,8 @@ M.new = function(opts)
   local function add_period(id, meta) return doc_registry.add_period(registry, id, meta) end
   --: (string) -> (true | nil, string | nil)
   local function set_active_period(id) return doc_registry.set_active_period(registry, id) end
+  --: () -> (string | nil)
+  local function active_period() return doc_registry.active_period(registry) end
 
   --: () -> (unknown | nil, string | nil)
   local function get_ledger() return bridge_mod.get_ledger(bridge) end
@@ -189,6 +191,7 @@ M.new = function(opts)
     list_periods = list_periods,
     add_period = add_period,
     set_active_period = set_active_period,
+    active_period = active_period,
 
     get_ledger = get_ledger,
     get_trial_balance = get_trial_balance,

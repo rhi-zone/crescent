@@ -50,6 +50,23 @@
 -- ORIGINAL (unforked) table -- mirroring prover_narrow.lua's own
 -- copy-on-branch-entry discipline exactly, so nothing narrowed inside one
 -- branch leaks into an unrelated sibling.
+--
+-- ── Elseif chains needed NO changes here ────────────────────────────────────
+--
+-- prover_narrow.lua's pass 1 represents an elseif chain as a right-nested
+-- chain of ordinary `GuardEvent`s (see that module's "Elseif chains"
+-- section) -- the SAME shape this module already builds certificates over
+-- for a hand-nested `if g1 then B1 else if g2 then B2 else B3 end end`.
+-- This `emit_events` guard-handling branch below is already fully generic
+-- over what `match_events`/`rest_events` contain: it forks `facts` once via
+-- `copy_facts` before recursing into either, and `peek_next_target`
+-- already detects "the immediate next sibling is a guard on the same
+-- variable" by inspecting `events[1]`'s `kind`, with no assumption that the
+-- nesting came from a literal nested `if` statement rather than a
+-- synthetic elseif-chain wrapper. So an elseif chain replays via exactly
+-- the same two rule citations (`narrow-select-match`/`-rest`) per clause,
+-- re-cited once per clause exactly like a hand-nested chain would be --
+-- zero new code needed in this module.
 
 local ta = require("lib.type.v10_cleanroom.term_algebra")
 local rl = require("lib.type.v10_cleanroom.replayer")

@@ -109,6 +109,54 @@ end
 		T.eq(result.stats.replay_fail, 0)
 	end)
 
+	T.it("elseif chain: three clauses replay to four green judgments (match+rest per clause)", function()
+		local result, err = prover.analyze_file([[
+local x --: string | number | boolean
+if type(x) == "string" then
+  local y = 1
+elseif type(x) == "number" then
+  local z = 2
+else
+  local w = 3
+end
+]], "<test>")
+		T.ok(result, err)
+		T.eq(result.stats.guards_handled, 2)
+		-- clause 0: match(string) + rest -> chains into clause 1's own test;
+		-- clause 1: match(number) + rest -> chains into the trailing else.
+		T.eq(result.stats.certificates_emitted, 4)
+		T.eq(result.stats.replay_pass, 4)
+		T.eq(result.stats.replay_fail, 0)
+		T.eq(#result.judgments, 4)
+	end)
+
+	T.it("elseif chain: an ineligible middle clause is conservatively skipped by pass 2 "
+		.. "(not chained through), not silently mishandled", function()
+		local result, err = prover.analyze_file([[
+local x --: string | number | table
+if type(x) == "string" then
+  local y = 1
+elseif x.foo == 1 then
+  local z = 2
+elseif type(x) == "table" then
+  local w = 3
+end
+]], "<test>")
+		T.ok(result, err)
+		T.eq(result.stats.guards_handled, 2)
+		-- clause 0: match+rest (2, both green). clause 2 (last, no else): a
+		-- lone match citation, whose union ordering wasn't positioned by
+		-- the (ineligible, hence non-chaining) clause 1 -- replay correctly
+		-- REJECTS it (structural TA mismatch), recorded via
+		-- emission_skipped, not silently dropped or accepted unsoundly.
+		T.eq(result.stats.certificates_emitted, 3)
+		T.eq(result.stats.replay_pass, 2)
+		T.eq(result.stats.replay_fail, 1)
+		local total_emission_skipped = 0
+		for _, n in pairs(result.stats.emission_skipped) do total_emission_skipped = total_emission_skipped + n end
+		T.eq(total_emission_skipped, 1)
+	end)
+
 	T.it("skipped construct: truthiness guard over a plain 'boolean' union is counted, not silently dropped", function()
 		local result, err = prover.analyze_file([[
 local ok --: boolean | nil

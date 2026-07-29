@@ -25,14 +25,9 @@
 --      pilot's guard forms never nest `not` more than once in the cases
 --      this scope covers.
 --
--- Guarded statement kinds: `if` with EXACTLY ONE clause (no `elseif` — an
--- if-statement with elseif clauses is walked into for NESTED unrelated
--- guards, but its own leading test is never extracted as a guard: with
--- elseif present there is no single "rest" AST branch to address, only a
--- further test, and this pilot's addressing model has no CFG/join-point
--- notion to fall back on — flagged, matching flow_narrow_v1's own
--- documented "no side condition, no CFG" scope), and `while` (only the
--- body branch is addressable; there is no AST node for "the loop was never
+-- Guarded statement kinds: `if` with any number of clauses (`elseif` chains
+-- ARE supported — see "Elseif chains" below), and `while` (only the body
+-- branch is addressable; there is no AST node for "the loop was never
 -- entered", so only whichever rule matches "body executed" is ever cited).
 -- `repeat...until` bodies are walked into (for nested unrolated guards) but
 -- the until-test itself never gates a guard: the body runs unconditionally
@@ -41,6 +36,68 @@
 -- scope for this pilot — flagged, not silently mishandled: no events are
 -- ever generated for code that is only reachable through a for-loop body).
 --
+-- ── Elseif chains ────────────────────────────────────────────────────────
+--
+-- prover_addr.lua's addressing contract already models an N-clause
+-- if-statement injectively (child `2k`/`2k+1` per clause, child `2N` the
+-- trailing else) — this was true before this pilot supported elseif
+-- narrowing at all. What was missing was purely analysis, not addressing:
+-- each clause's guard (if recognized) narrows its OWN body's entry scope
+-- exactly like the single-clause case already did (`narrow-select-match`),
+-- and the negation ("rest") flows FORWARD to become the base scope clause
+-- k+1's guard test is evaluated against, chaining down to the trailing
+-- else (if present) after the last clause — the SAME `narrow-select-rest`
+-- citation the single-clause if/else case already made, just re-cited once
+-- per clause rather than once total (see flow_narrow_v1.lua's own note:
+-- "Peeling one binary layer via narrow-select-rest and re-citing the same
+-- rule against the resulting (still possibly-union) type is how
+-- arbitrary-width unions are narrowed" — an elseif chain is exactly this
+-- peeling, one clause per union member removed).
+--
+-- Event-tree shape (a design decision, not a rule/judgment change — see
+-- flow_narrow_v1.lua's rule table, unchanged): NO new Event kind was
+-- introduced. An elseif chain is represented as a right-nested chain of
+-- ordinary `GuardEvent`s, exactly the shape prover_narrow.lua would already
+-- produce for hand-nested `if g1 then B1 else if g2 then B2 else B3 end
+-- end` Lua source — clause k's `GuardEvent` has `then_path`/`then_events`
+-- addressing its own body (child `2k+1`) as before, and its
+-- `else_path`/`else_events` addressing EITHER clause k+1's test expression
+-- (child `2(k+1)`) with `else_events = { <clause k+1's own GuardEvent> }`
+-- (when there IS a next clause), OR the trailing else block (child `2N`)
+-- with its actual flat statement events (when clause k is the last
+-- clause). This was the more natural of the two options considered (the
+-- alternative — widening `GuardEvent` to an N-ary shape with a list of
+-- clauses — would need a NEW field shape threaded through prover.lua's
+-- pass 2 for no semantic gain, since the rules cited are already exactly
+-- the nested-if shape's two per clause); reusing the existing shape means
+-- prover.lua's pass 2 needs NO changes at all (see that module's own note
+-- at its `emit_events` guard-handling site) — its existing recursive
+-- match/rest-branch forking, and its existing `peek_next_target`
+-- immediate-next-statement chaining detection, already handle exactly this
+-- nesting, because it is literally the same shape as manually-nested ifs.
+-- `else_path`/`else_events` are therefore reused for a purpose beyond the
+-- literal `else` keyword's block when they address a next clause's test
+-- instead — flagged here since the field names alone don't convey it.
+--
+-- Per-clause eligibility: a clause whose test isn't one of the three
+-- recognized guard shapes (see `try_guard_event`) falls back to the SAME
+-- "nested_scope, not chained" walk-through the single-clause case already
+-- used when its lone guard was unrecognized — for THAT clause's own body
+-- only. Clauses before/after an ineligible one in the same chain are still
+-- processed on their own merits: the chain does not abort at the first
+-- unrecognized test. An ineligible clause's own body IS wrapped in a fresh
+-- `nested_scope` (needed since, unlike an eligible clause's `GuardEvent`,
+-- there is no enclosing rule citation to fork scope for it in pass 2); its
+-- onward continuation (further clauses, or the trailing else) is spliced
+-- as further sibling events UNWRAPPED when a further clause follows (that
+-- clause's own body is self-isolating one way or the other, recursively),
+-- but the trailing else block specifically — reached with no eligible
+-- clause anywhere in between — IS wrapped in its own `nested_scope` before
+-- being spliced as a sibling: unlike a clause-to-clause transition (no new
+-- lexical block), the trailing else block IS a new lexical block, and
+-- splicing its raw statement events as bare siblings of the enclosing
+-- block would leak any locals it declares past the if-statement.
+--
 -- No control-flow/fall-through inference: an `if` with no `else` (or a
 -- `while`) contributes narrowing ONLY inside the branch/body that actually
 -- has an AST block; nothing is asserted about the code textually following
@@ -48,7 +105,16 @@
 -- addressing choice — "AST-node-only, implicit entry/exit" — has no point
 -- for "after the loop" or "after a non-diverging if with no else").
 --
--- Chaining: a SECOND guard on the same variable is only recognized as a
+-- Chaining: this is also exactly the mechanism an elseif chain uses (see
+-- "Elseif chains" above) — clause k+1's `GuardEvent`, when eligible, is
+-- placed as the sole (first) element of clause k's "rest" events list, so
+-- it is detected as chained by construction; when clause k+1 is ineligible
+-- its own `nested_scope` wrapper occupies that first-element slot instead,
+-- which correctly means a clause k+2 further down the chain is NOT
+-- detected as chained through the ineligible k+1 (conservative, matching
+-- the general rule below).
+--
+-- A SECOND guard on the same variable is only recognized as a
 -- continuation of the first ("chained") when it is the IMMEDIATE first
 -- statement inside the enclosing guard's "rest" branch (never the "match"
 -- branch — a match branch narrows to one member and nothing in this
@@ -289,8 +355,12 @@ end
 -- resolved GuardHit, or nil (+ records a skip stat) if ineligible. Does NOT
 -- build the Event itself -- the caller (analyze_block) owns branch/scope
 -- bookkeeping, which differs between if (two branches) and while (one).
+-- `test_path` is the test expression's OWN path (the caller computes it --
+-- for an if-clause k this is child `2k` of the if-stmt path per
+-- prover_addr.lua's addressing contract, NOT always child 0; only a
+-- single-clause if or a while happens to have its test at child 0).
 --: (Ctx, integer[], integer, Scope, Stats) -> GuardHit | nil
-local function try_guard_event(ctx, stmt_path, test_nid, scope, stats)
+local function try_guard_event(ctx, test_path, test_nid, scope, stats)
 	local g = extract_guard(ctx, test_nid)
 	if not g then return nil end
 	stats.guards_found = stats.guards_found + 1
@@ -325,15 +395,123 @@ local function try_guard_event(ctx, stmt_path, test_nid, scope, stats)
 		var_name_id = g.var_name_id,
 		var_local_stmt_path = sv.local_stmt_path,
 		target = g.target,
-		guard_expr_path = extend_path(stmt_path, 0),
+		guard_expr_path = test_path,
 		then_is_match = g.then_is_match,
 	}
+end
+
+-- Forward-declared: analyze_block and analyze_if_chain are mutually
+-- recursive (a clause/else body is analyzed via analyze_block; an
+-- if-statement inside analyze_block is analyzed via analyze_if_chain,
+-- which itself recurses into analyze_block for clause/else bodies and
+-- into itself for the next clause -- see "Elseif chains" in the header).
+local analyze_block --: ((Ctx, integer[], integer, integer, Scope, Stats) -> Event[]) | nil
+
+-- Build the events for "clause `c` onward" of an if-statement (clause `c`
+-- itself, then whatever follows it: clause `c+1`, ..., the trailing else).
+-- Returns (path, events): `events` is what the CALLER (either this same
+-- function recursing for clause c-1, or analyze_block for the whole
+-- if-statement at c=0) should splice in at its own level; `path` is the
+-- address the events would be entered at (clause c's own test path if
+-- there IS a clause c, else the trailing else block's path, or nil if
+-- there is neither) -- used by an ELIGIBLE clause c-1 as its own
+-- `else_path` (see header). See the header's "Elseif chains" section for
+-- the full reasoning, including why the ineligible-clause branch wraps the
+-- trailing else in its own `nested_scope` but not a further eligible/
+-- ineligible clause.
+--: (Ctx, integer[], integer, integer, integer, integer, boolean, integer, Scope, Stats) -> (integer[] | nil, Event[])
+local function analyze_if_chain(ctx, stmt_path, clauses_start, clauses_len, else_start, else_len, has_else, c, scope, stats)
+	if not analyze_block then return nil, {} end
+	if c >= clauses_len then
+		if not has_else then return nil, {} end
+		local else_path = extend_path(stmt_path, 2 * clauses_len)
+		local events = analyze_block(ctx, else_path, else_start, else_len, scope, stats)
+		return else_path, events
+	end
+
+	local clause_nid = ctx.lists:get(clauses_start + c)
+	local cl = ctx.nodes:get(clause_nid)
+	local test_path = extend_path(stmt_path, 2 * c)
+	local body_path = extend_path(stmt_path, 2 * c + 1)
+
+	local ge = try_guard_event(ctx, test_path, cl.data[0], scope, stats)
+	if not ge then
+		-- Not a recognized guard shape: walk this clause's own body for
+		-- nested unrelated guards (unnarrowed scope copy -- matches the
+		-- single-clause "ineligible" case), then continue the chain
+		-- onward with the scope UNCHANGED (this test told us nothing
+		-- about the variable). Clauses before/after an ineligible one are
+		-- still processed on their own merits (see header).
+		local sub = analyze_block(ctx, body_path, cl.data[1], cl.data[2], copy_scope(scope), stats)
+		local rest_events = { { kind = "nested_scope", path = body_path, events = sub, fresh_scope = false } } --[[: Event[] ]]
+		local cont_path, cont_events = analyze_if_chain(
+			ctx, stmt_path, clauses_start, clauses_len, else_start, else_len, has_else, c + 1, scope, stats)
+		if c + 1 >= clauses_len then
+			-- The recursion just returned the trailing else (or nothing):
+			-- a genuinely NEW lexical block, unlike a clause-to-clause
+			-- transition -- must get its own nested_scope wrap before
+			-- being spliced as a bare sibling here (else a local declared
+			-- inside the else block would leak into this list's ambient
+			-- scope/facts, visible to code after the whole if-statement).
+			if cont_path then
+				rest_events[#rest_events + 1] = { kind = "nested_scope", path = cont_path, events = cont_events, fresh_scope = false }
+			end
+		else
+			-- A further clause follows; its own body is already isolated
+			-- (its own GuardEvent fork if eligible, or its own
+			-- nested_scope wrap if not, per this same function,
+			-- recursively) -- safe to splice its events directly.
+			for _, e in ipairs(cont_events) do rest_events[#rest_events + 1] = e end
+		end
+		return cont_path, rest_events
+	end
+
+	local matched_scope = copy_scope(scope)
+	local rest_scope = copy_scope(scope)
+	local sv = scope[ge.var_name_id]
+	local rest_members = member_set_without(sv.members, member_removed_by(ge.target)) or {}
+	matched_scope[ge.var_name_id] = { local_stmt_path = sv.local_stmt_path, name_index = 0, members = { ge.target } }
+	rest_scope[ge.var_name_id] = { local_stmt_path = sv.local_stmt_path, name_index = 0, members = rest_members }
+
+	local then_scope, cont_scope
+	if ge.then_is_match then
+		then_scope, cont_scope = matched_scope, rest_scope
+	else
+		then_scope, cont_scope = rest_scope, matched_scope
+	end
+
+	local then_events = analyze_block(ctx, body_path, cl.data[1], cl.data[2], then_scope, stats)
+	local cont_path, cont_events = analyze_if_chain(
+		ctx, stmt_path, clauses_start, clauses_len, else_start, else_len, has_else, c + 1, cont_scope, stats)
+
+	stats.guards_handled = stats.guards_handled + 1
+	local guard_event = {
+		kind = "guard",
+		var_name_id = ge.var_name_id,
+		var_local_stmt_path = ge.var_local_stmt_path,
+		target = ge.target,
+		guard_expr_path = ge.guard_expr_path,
+		then_is_match = ge.then_is_match,
+		then_path = body_path,
+		then_events = then_events,
+		-- else_path/else_events, when cont_path is non-nil, address either
+		-- the NEXT clause's test (else_events = a singleton list holding
+		-- that clause's own GuardEvent) or the trailing else block (when
+		-- this is the last clause) -- see header, "Elseif chains". Either
+		-- way this GuardEvent's own citation in pass 2 forks scope before
+		-- descending into else_events, so no extra wrap is needed here
+		-- regardless of which of the two `cont_events` actually is.
+		else_path = cont_path,
+		else_events = cont_path and cont_events or nil,
+	} --[[: Event ]]
+	return test_path, { guard_event }
 end
 
 -- Analyze a statement list (a "block" per prover_addr.lua's addressing
 -- contract: the statements at indices 0..len-1 of `block_path`).
 --: (Ctx, integer[], integer, integer, Scope, Stats) -> Event[]
-local function analyze_block(ctx, block_path, stmt_start, stmt_len, scope, stats)
+analyze_block = function(ctx, block_path, stmt_start, stmt_len, scope, stats)
+	if not analyze_block then return {} end
 	local events = {} --[[: Event[] ]]
 	for i = 0, stmt_len - 1 do
 		local nid = ctx.lists:get(stmt_start + i)
@@ -386,71 +564,13 @@ local function analyze_block(ctx, block_path, stmt_start, stmt_len, scope, stats
 		elseif kind == NODE_IF_STMT then
 			local clauses_len = n.data[1]
 			local has_else = band(n.flags, FLAG_HAS_ELSE) ~= 0
-			if clauses_len ~= 1 then
-				bump_skip(stats, "elseif chain not supported (no single addressable rest-branch point)")
-				-- Still walk each clause body + else body for nested unrelated guards.
-				for c = 0, clauses_len - 1 do
-					local clause_nid = ctx.lists:get(n.data[0] + c)
-					local cl = ctx.nodes:get(clause_nid)
-					local body_path = extend_path(stmt_path, 2 * c + 1)
-					local sub = analyze_block(ctx, body_path, cl.data[1], cl.data[2], copy_scope(scope), stats)
-					events[#events + 1] = { kind = "nested_scope", path = body_path, events = sub, fresh_scope = false }
-				end
-				if has_else then
-					local else_path = extend_path(stmt_path, 2 * clauses_len)
-					local sub = analyze_block(ctx, else_path, n.data[2], n.data[3], copy_scope(scope), stats)
-					events[#events + 1] = { kind = "nested_scope", path = else_path, events = sub, fresh_scope = false }
-				end
-			else
-				local clause_nid = ctx.lists:get(n.data[0])
-				local cl = ctx.nodes:get(clause_nid)
-				local then_path = extend_path(stmt_path, 1)
-				local else_path = extend_path(stmt_path, 2) -- meaningful only when has_else
-
-				local ge = try_guard_event(ctx, stmt_path, cl.data[0], scope, stats)
-				if ge then
-					local then_scope = copy_scope(scope)
-					local else_scope = copy_scope(scope)
-					local sv = scope[ge.var_name_id]
-					local rest_members = member_set_without(sv.members, member_removed_by(ge.target)) or {}
-					if ge.then_is_match then
-						then_scope[ge.var_name_id] = { local_stmt_path = sv.local_stmt_path, name_index = 0, members = { ge.target } }
-						else_scope[ge.var_name_id] = { local_stmt_path = sv.local_stmt_path, name_index = 0, members = rest_members }
-					else
-						then_scope[ge.var_name_id] = { local_stmt_path = sv.local_stmt_path, name_index = 0, members = rest_members }
-						else_scope[ge.var_name_id] = { local_stmt_path = sv.local_stmt_path, name_index = 0, members = { ge.target } }
-					end
-					local then_events = analyze_block(ctx, then_path, cl.data[1], cl.data[2], then_scope, stats)
-					local else_events --[[: Event[] | nil ]] = nil
-					if has_else then
-						else_events = analyze_block(ctx, else_path, n.data[2], n.data[3], else_scope, stats)
-					end
-					stats.guards_handled = stats.guards_handled + 1
-					events[#events + 1] = {
-						kind = "guard",
-						var_name_id = ge.var_name_id,
-						var_local_stmt_path = ge.var_local_stmt_path,
-						target = ge.target,
-						guard_expr_path = ge.guard_expr_path,
-						then_is_match = ge.then_is_match,
-						then_path = then_path,
-						then_events = then_events,
-						else_path = has_else and else_path or nil,
-						else_events = else_events,
-					} --[[: Event ]]
-				else
-					local sub_then = analyze_block(ctx, then_path, cl.data[1], cl.data[2], copy_scope(scope), stats)
-					events[#events + 1] = { kind = "nested_scope", path = then_path, events = sub_then, fresh_scope = false }
-					if has_else then
-						local sub_else = analyze_block(ctx, else_path, n.data[2], n.data[3], copy_scope(scope), stats)
-						events[#events + 1] = { kind = "nested_scope", path = else_path, events = sub_else, fresh_scope = false }
-					end
-				end
-			end
+			local _, chain_events = analyze_if_chain(
+				ctx, stmt_path, n.data[0], clauses_len, n.data[2], n.data[3], has_else, 0, scope, stats)
+			for _, e in ipairs(chain_events) do events[#events + 1] = e end
 
 		elseif kind == NODE_WHILE_STMT then
 			local body_path = extend_path(stmt_path, 1)
-			local ge = try_guard_event(ctx, stmt_path, n.data[0], scope, stats)
+			local ge = try_guard_event(ctx, extend_path(stmt_path, 0), n.data[0], scope, stats)
 			if ge then
 				local body_scope = copy_scope(scope)
 				local sv = scope[ge.var_name_id]
