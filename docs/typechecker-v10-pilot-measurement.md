@@ -833,3 +833,176 @@ REPO=/home/me/git/rhizone/crescent
 "$REPO/bin/cr" run /tmp/v10_parity/measure_run3.lua "$REPO"
 "$REPO/bin/cr" run /tmp/v10_parity/identify_run4_pairs.lua "$REPO"
 ```
+
+## Run 5 — assignment transfer from an annotated-call RHS (commits `464964f8`, `0dae97e6`)
+
+Measured against commit `0dae97e6` ("v10 prover — assignment transfer from an annotated-call
+RHS"), HEAD at measurement time; theory content landed one commit earlier (`464964f8`, "v10
+fixpoint theory — assign-call-transfer (v4 bump)"). `bin/cr test lib/type/v10_kernel/pilot/`
+9/9 files green, 402 assertions (up from run 4's 356 — new hand-built certificate tests for
+`assign-call-transfer` in `fixpoint_v1_test.lua`, new taxonomy fixtures in
+`fixpoint_prover_test.lua`, both enumerated below). `bin/cr test lib/type/v10_cleanroom/` 3/3
+files green, 1044 assertions (unchanged — not touched). Both reconfirmed at this HEAD. No pilot
+source was modified to produce the measurement numbers below (the two commits above are the
+FEATURE work itself, landed and tested before measuring); the run-3 driver scripts
+(`/tmp/v10_parity/measure_run3.lua`, `/tmp/v10_parity/scan_loops_run3.lua`) were reused
+UNCHANGED against this HEAD — `fixpoint_prover.analyze_file`'s call signature and stats shape
+are unchanged, so no driver edits were needed at all.
+
+**What run 5 adds:** per
+`docs/typechecker-v10-fixpoint-proposal.md`'s assignment-transfer scope (§2) and this
+extension's own brief (assignment transfer from an annotated-call RHS — the gap runs 3-4's own
+reports identified as the reason every real certificate was persistence-only), `fixpoint_v1.lua`
+gained one additive operator/axiom/rule (`assign_call`/`pilot-assign-call-facts-v1`/
+`assign-call-transfer`, `narrow-pilot-v1` v3→v4), and `fixpoint_prover.lua`'s loop-body walk now
+attempts this rule for a bare-identifier, non-method call RHS whose callee resolves, STATICALLY
+AND LOCALLY, to a same-file chunk-top-level function declaration with a resolvable `--:
+(T1,...) -> R` annotation whose `R` parses as a single six-tag-vocabulary value. See
+`lib/type/v10_kernel/pilot/fixpoint_prover.lua`'s own header for the full taxonomy and the one
+reported, NOT-closed scope limit (callee-name shadowing is checked only within the current
+block, not the full enclosing lexical chain — sound for the tracked variable `X` itself, which
+`prover_narrow.lua` already resolves globally, but not fully sound for an arbitrary callee name,
+which has no such upstream resolution; no case triggering this was found in this corpus).
+
+**A pre-existing latent bug was found and fixed during this work** (not part of the original
+task scope, in-scope because it directly blocked this extension's own multi-member-return
+fixture): `suffix_union`/`build_declared_union` (`fixpoint_prover.lua`, dating to run 3's own
+commit `4a741cae`) were left-associated in their actual implementation despite their own doc
+comments already claiming "right-associated" — invisible through runs 1–4's entire measurement
+history because every real-corpus certificate and every hand-built theory test to date used
+only a 2-member declared union, where a left fold and a right fold produce the identical single
+`ty_union` term (the bug only manifests at 3+ members). This session's own first 3-member-union
+fixture (`get_opt` returning `string | nil` transferred into a `string | nil | number` invariant)
+was the first thing in this codebase's history to exercise it, surfacing a real replay rejection
+("metavariable 'Tinv' bound to two different terms"). Fixed by folding both functions from the
+last member backward, matching `build_ty_sub_to_union`'s own trans-chaining requirement.
+
+### Corpus
+
+Identical to run 3/4's own scan: re-ran `scan_loops_run3.lua` (unchanged) over all `lib/**/*.lua`
+(997 files, same exclusions). Result: **997/997 parsed, 376 files contain a while-loop, 24 have
+a tracked variable in scope at one — the exact same 24-file list, byte-for-byte, as runs 3/4**
+(diffed directly: `run5_files.txt` against the file list runs 3/4 report). **Zero newly-eligible
+files** — expected, and confirmed rather than assumed: call-RHS transfer does not change
+`loop_vars_attempted` eligibility at all (that is entirely `prover_narrow.lua`'s own
+`--:`-annotated scope-tracking pass, untouched by this work) — only whether an
+ALREADY-attempted pair certifies or skips could move, exactly the same structural point run 4's
+own report made about its own (different) extension.
+
+Final corpus: same 48 files as runs 3/4 (27 from runs 1–2 + 21 run-3 additions), 1,698,092
+combined bytes (unchanged).
+
+### Aggregate results
+
+Narrowing metrics (guards/annotations/certificates) are IDENTICAL to runs 3/4 (this change
+touches no narrowing code) — confirmed by direct re-run, not assumed: guards found 1239, handled
+35, annotations parsed 458, certs 40, replay 40/0, judgments 40 — all byte-identical to run
+3/4's own reported numbers. Loop-invariant metrics, side by side:
+
+| metric | run 4 (48 files) | run 5 (48 files) | delta |
+|---|---:|---:|---:|
+| while-loops found | 199 | 199 | 0 |
+| (loop, var) pairs attempted | 48 | 48 | 0 |
+| **(loop, var) pairs certified (root-accepted)** | **12** | **12** | **0** |
+| loop-invariant judgments (root-replayed) | 12 | 12 | 0 |
+| loop-invariant replay failures | 0 | 0 | 0 |
+
+**The headline number is 12 — unchanged from run 4. Zero new mutation-class certificates on
+this real corpus.** Per-file certified counts are byte-identical to run 4's own breakdown
+(`lib/type/static/constrain.lua` 6, `lib/type/static/env.lua` 2,
+`lib/unified/remark_github/init.lua` 2, `lib/async_queue/init.lua` 1,
+`lib/type/v9/annot/init.lua` 1 — same 5 files, same counts, re-confirmed by direct re-run of the
+per-file table, not carried forward from run 4's report). **All 12 remain persistence-only** —
+this is not a coincidental equal total masking a compositional change (one call-RHS gain
+offsetting one other loss); it is proven by a stronger fact below (skip-reason parity), not
+merely inferred from the total matching.
+
+### Loop skip-reason breakdown, with run-4 comparison
+
+199 loops − 159 no-tracked-var loops = 40 loops with at least one tracked variable, carrying 48
+(loop, var) pairs; 12 certified + 36 skipped = 48 ✓ (unchanged from run 4).
+
+| reason | run 4 | run 5 | delta |
+|---|---:|---:|---:|
+| `no tracked variable in scope at this loop` (per loop) | 159 | 159 | 0 |
+| `control-flow statement breaks persistence chaining (out of scope)` (per pair) | 28 | 28 | 0 |
+| `elseif chain in loop body not yet supported for branch-join chaining (out of scope)` (per pair) | 6 | 6 | 0 |
+| `multi-target/multi-value assignment to the invariant variable (out of scope)` | 2 | 2 | 0 |
+| `copy source not independently established at the assign point` | 0 | 0 | 0 |
+| `assignment RHS out of scope (not literal, bare-identifier copy, or annotated same-file call)` | 0 (n/a, older wording) | 0 | — |
+| `method call callee out of scope (not statically resolvable)` (NEW bucket, v5) | — | 0 | — |
+| `computed callee (not a bare identifier, not statically resolvable)` (NEW bucket, v5) | — | 0 | — |
+| `callee identifier locally shadowed within the loop body ...` (NEW bucket, v5) | — | 0 | — |
+| `callee is not a same-file top-level function declaration (unresolvable)` (NEW bucket, v5) | — | 0 | — |
+| `callee name has multiple same-file top-level declarations (ambiguous, not resolvable)` (NEW bucket, v5) | — | 0 | — |
+| `callee has no resolvable function-type annotation` (NEW bucket, v5) | — | 0 | — |
+| `callee has multiple preceding function-type annotations (overload) ...` (NEW bucket, v5) | — | 0 | — |
+| `callee annotation is not in '(T1, ...) -> R' form` (NEW bucket, v5) | — | 0 | — |
+| `callee return annotation: unsupported annotation member ...` (NEW bucket, v5) | — | 0 | — |
+| `callee return annotation declares multiple return values (first-value-only scope)` (NEW bucket, v5) | — | 0 | — |
+| `reassigned type not a member of the declared invariant` | 0 | 0 | 0 |
+| `empty loop body: no persistence chain from loop head to back edge under this theory` | 0 | 0 | 0 |
+| replay rejected an emitted certificate | 0 | 0 | 0 |
+
+**Every one of run 5's nine NEW taxonomy buckets reads zero on this real corpus.** This is the
+sharpest form of the finding: it is not merely that no NEW certificate resulted (the headline
+12=12 above) — no (loop, var) pair in this 48-file corpus ever even REACHED an
+`assign_call`-eligible call-RHS assignment statement at all. Every one of the 36 real skips this
+run still decomposes exactly as run 4 reported (28 control-flow, 6 elseif-chain, 2
+multi-target) — the SAME upstream gaps (nested control flow, elseif chains) that blocked
+persistence-chaining in run 4 block it identically here, before the walk ever reaches a
+bare `X = <call>` assignment statement to test against the new rule. This proves (not merely
+suggests, since a skip-reason COUNT moving would have been the observable signature of any
+change) that zero pairs changed outcome in either direction: no regression, and no new
+certificate, composed from the exact same mechanism as run 4's own 12.
+
+### Truth check
+
+**Zero new loop-invariant judgments exist to verify.** The measurement's own instruction (every
+new real-corpus invariant hand-verified individually, mutation-class ones checked against the
+mutation and the callee's own annotation cross-checked against the callee's body) applies to
+NEW invariants; there are none. This is the measured-zero outcome the extension's own brief
+named up front as an equally valid finding to a nonzero one ("Expected outcome either way is the
+finding: mutation-class certificates on real code, or a measured zero saying real loops don't
+assign from same-file annotated callees"). The 12 pre-existing (run-4) certificates are
+unaffected (same files, same counts, same skip-reason totals) and were already hand-verified in
+run 4's own truth-check table — not re-verified here (nothing about them changed).
+
+**Root cause of the zero, stated plainly (not merely "gap remains," but WHY, to the extent this
+corpus reveals it):** of the 48 attempted (loop, var) pairs, 34/36 skips (28 control-flow + 6
+elseif-chain) never reach the loop body's OWN top-level statement list far enough to test an
+assignment's RHS shape at all — they abandon the persistence/join chain at a NESTED
+`if`/`while`/`for`/`return`/`break` or an elseif chain first. The remaining 2 skips
+(multi-target assignment) DO reach an assignment to the tracked variable, but its shape (2+
+targets or 2+ values) is excluded before the RHS is even inspected. **Zero of the 48 pairs ever
+present a single-target, single-value assignment to the tracked variable with a call RHS at
+the loop body's own top level** — the exact shape this extension was built to transfer. This is
+a materially narrower finding than "callees aren't resolvable" or "annotations are missing": on
+this corpus, the call-RHS transfer mechanism was never even given a candidate to accept or
+reject. Widening `seq-persist`'s own control-flow scope (nested loops/conditionals, elseif
+chains — already-known, already-documented gaps from runs 3/4) is the prerequisite for this
+extension to ever be exercised on this corpus at all, not a matter of this extension's own scope
+of RHS-shape coverage.
+
+### Wall-clock
+
+Summed over 48 files: `parse_ms` 148.5 (run 4: 155.2), `pass1_ms` 34.2 (run 4: 32.0),
+`fixpoint_total_ms` 525.2 (run 4: 483.8, +8.6%) — a modest rise, consistent with more work
+attempted per (loop, var) pair even on a path that ultimately skips (building the chunk-top-level
+function-name index once per file, and — for the 2 multi-target-assignment pairs specifically —
+now probing the RHS-shape branch further before abandoning) rather than any complexity blowup;
+no file exceeded the 30s per-file `bin/cr check` timeout. `v3_ms` continues to sit outside runs
+1–2's original "process-startup-dominated" band (same divergence run 3 already flagged and left
+uninvestigated, out of this measurement's own scope — not re-investigated here either).
+
+### Reproduction
+
+Drivers (disposable, not part of the repo, all under `/tmp/v10_parity/`): `scan_loops_run3.lua`
+and `measure_run3.lua`, BOTH reused completely unchanged from run 3 (no driver edits were needed
+for this run — `fixpoint_prover.analyze_file`'s external shape is unchanged). Run via:
+
+```sh
+REPO=/home/me/git/rhizone/crescent
+"$REPO/bin/cr" run /tmp/v10_parity/scan_loops_run3.lua "$REPO"
+"$REPO/bin/cr" run /tmp/v10_parity/measure_run3.lua "$REPO"
+```

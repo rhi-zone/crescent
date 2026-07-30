@@ -6,6 +6,57 @@ Bench machine: AMD Ryzen 7 5700G, LuaJIT 2.1.1741730670, NixOS Linux 6.12.67.
 
 ---
 
+## 2026-07-30: v10 fixpoint prover — assignment transfer from an annotated-call RHS, real-corpus measurement (run 5)
+
+Full report: `docs/typechecker-v10-pilot-measurement.md`, "## Run 5" section. Baseline commit
+`1a491500` (run 4, below); theory commit `464964f8` ("v10 fixpoint theory — assign-call-transfer
+(v4 bump)"); prover commit and HEAD at measurement time: `0dae97e6` ("v10 prover — assignment
+transfer from an annotated-call RHS"). Same 48-file / 1,698,092-byte corpus as runs 3/4
+(re-confirmed via an unchanged re-run of `scan_loops_run3.lua`: 24/997 eligible files,
+byte-identical file list — zero newly-eligible files, expected and confirmed rather than
+assumed, since eligibility comes from `prover_narrow.lua`'s scope-tracking, untouched by this
+change). `bin/cr test lib/type/v10_kernel/pilot/` 9/9 files green, 402 assertions (up from run
+4's 356); `bin/cr test lib/type/v10_cleanroom/` 3/3 files green, 1044 assertions — both
+reconfirmed at this HEAD. Drivers: run 3's `measure_run3.lua`/`scan_loops_run3.lua` reused
+completely unchanged (no driver edits needed — `fixpoint_prover.analyze_file`'s external shape
+is unchanged). No pilot source modified to produce the measurement numbers (the two commits
+above are the feature work itself, landed and tested first).
+
+**Headline: 12 root-accepted loop-invariant certificates — unchanged from run 4's 12. Zero new
+mutation-class certificates on this real corpus**, and the zero is airtight, not merely a
+matching total: EVERY one of run 5's 9 new taxonomy skip-reason buckets (method-call callee,
+computed callee, shadowed callee, unresolvable callee, ambiguous top-level name, unannotated
+callee, ambiguous overload, malformed annotation form, out-of-vocabulary/multi-return return
+type) reads **zero** on this corpus, and every one of run 4's own skip-reason counts (159
+no-tracked-var, 28 control-flow, 6 elseif-chain, 2 multi-target) is byte-identical to run 5's.
+Root cause, stated plainly: of the 48 attempted (loop, var) pairs, 34/36 skips never reach the
+loop body's own top-level statement list far enough to test an assignment's RHS shape at all
+(abandoned earlier at nested control-flow or an elseif chain); the remaining 2 (multi-target
+assignment) reach an assignment to the tracked variable but are excluded by target/value count
+before the RHS is inspected. **Zero of the 48 pairs present a single-target, single-value
+assignment to the tracked variable with a call RHS at the loop body's own top level** — the
+extension was never given a real candidate to accept or reject on this corpus. Widening
+`seq-persist`'s own control-flow scope (already-known gaps from runs 3/4) is the prerequisite
+for this extension to be exercised here at all, not a shortfall of this extension's own RHS-shape
+coverage.
+
+**Bugfix found and fixed in the same work** (blocked this extension's own multi-member-return
+fixture, not previously exercised by any real-corpus certificate or hand-built test through runs
+1–4): `suffix_union`/`build_declared_union` (`fixpoint_prover.lua`, from run 3's `4a741cae`)
+were left-associated in implementation despite already-existing doc comments claiming
+"right-associated" — invisible because every 2-member declared union (the only size ever
+exercised to date) produces the identical single `ty_union` term under either fold direction.
+Fixed by folding from the last member backward. No real-corpus certificate was affected (all
+have 2-member invariants); a synthetic 3-member fixture added in this session is what surfaced
+it.
+
+Wall-clock, summed over 48 files: `parse_ms` 148.5 (run 4: 155.2), `pass1_ms` 34.2 (run 4:
+32.0), `fixpoint_total_ms` 525.2 (run 4: 483.8, +8.6% — more work attempted per pair even on a
+skip path: the chunk-top-level function-name index build, plus extra RHS-shape probing on the 2
+multi-target pairs; not a complexity blowup, no file near the 30s per-file timeout).
+
+---
+
 ## 2026-07-30: v10 fixpoint prover — if/else branch-join control-flow chaining, real-corpus measurement (run 4)
 
 Full report: `docs/typechecker-v10-pilot-measurement.md`, "## Run 4" section. Baseline commit
