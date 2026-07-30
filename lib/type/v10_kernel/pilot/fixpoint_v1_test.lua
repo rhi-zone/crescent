@@ -176,7 +176,7 @@ T.describe("fixpoint-v1", function()
 		T.ok(vocab, err)
 		if vocab == nil then return end
 		T.eq(vocab.signature.name, "narrow-pilot-v1")
-		T.eq(vocab.signature.version, 3)
+		T.eq(vocab.signature.version, 4)
 		T.eq(vocab.signature.sorts.point, addr_sig.sorts.point)
 		T.eq(vocab.signature.sorts.path, addr_sig.sorts.path)
 	end)
@@ -309,6 +309,31 @@ T.describe("fixpoint-v1", function()
 				bindings = { Pa = p_assign, X = var_path, Y = other_path } } --[[: CertNode ]]
 			local node = { kind = "rule", rule = vocab.rule_assign_copy_transfer, premises = { fact, hyp } } --[[: CertNode ]]
 			local result, err = rl.observe(rp, node)
+			T.eq(result, nil)
+			T.ok(err)
+		end)
+
+		-- v4: assignment transfer from an annotated-call RHS (module header).
+		T.it("assign-call-transfer replays: x : string|nil at the assign point", function()
+			local ty_string = must_term(vocab.TyOf(must_term(vocab.tag_string())))
+			local ret_ty = must_term(vocab.TyUnion(ty_string, ty_nil))
+			local fact = { kind = "axiom", axiom = vocab.ax_assign_call_facts,
+				bindings = { Pa = p_assign, X = var_path, T = ret_ty } } --[[: CertNode ]]
+			local node = { kind = "rule", rule = vocab.rule_assign_call_transfer, premises = { fact } } --[[: CertNode ]]
+			local result, err = rl.replay(rp, node)
+			T.ok(result, err)
+			if result == nil then return end
+			T.ok(ta.equal(result.conclusion, must_term(vocab.HoldsAt(p_assign, var_path, ret_ty))))
+		end)
+
+		T.it("assign-call-transfer rejects a malformed premise citation (wrong judgment shape)", function()
+			-- Cite the literal-facts axiom (wrong judgment op, and wrong sort
+			-- for its third argument -- prim_tag, not ty) as if it were the
+			-- call-facts premise the rule declares.
+			local fact = { kind = "axiom", axiom = vocab.ax_assign_literal_facts,
+				bindings = { Pa = p_assign, X = var_path, Tag = must_term(vocab.tag_nil()) } } --[[: CertNode ]]
+			local node = { kind = "rule", rule = vocab.rule_assign_call_transfer, premises = { fact } } --[[: CertNode ]]
+			local result, err = rl.replay(rp, node)
 			T.eq(result, nil)
 			T.ok(err)
 		end)
@@ -527,6 +552,106 @@ T.describe("fixpoint-v1", function()
 				kind = "rule", rule = vocab.rule_loop_invariant_discharge,
 				premises = { p0, r2, p2, p3, bad_p4 },
 				discharge = { [1] = { h1 } },
+			} --[[: CertNode ]]
+			local result, err = rl.replay(rp, bad_root)
+			T.eq(result, nil)
+			T.ok(err)
+		end)
+	end)
+
+	-- v4 mutation-class certificate: the loop body genuinely REASSIGNS the
+	-- tracked variable via a call-RHS (not merely persisting it untouched,
+	-- unlike every one of run 3/4's real-corpus certificates —
+	-- docs/typechecker-v10-pilot-measurement.md's own reported finding this
+	-- extension targets). Synthetic loop:
+	--   local x --: nil|number       -- pre_loop decl at exit({0})
+	--   while <test> do
+	--       x = get_num()             -- body's ONLY statement; `get_num`'s
+	--                                 -- declared return type is `number`
+	--                                 -- (a same-file, statically/locally
+	--                                 -- resolvable callee, per the brief's
+	--                                 -- scope) -- assign-call-transfer,
+	--                                 -- no seq-persist stitch needed (the
+	--                                 -- rule is single-premise, same as
+	--                                 -- assign-literal-transfer -- it never
+	--                                 -- reads a prior fact).
+	--   end
+	-- `h1` (the assumed invariant hypothesis) is intentionally NOT built at
+	-- all here: since assign-call-transfer never depends on a prior
+	-- `holds_at` fact, the back-edge subderivation (premise 2, P1) never
+	-- traces back to any hypothesis leaf -- discharge would be VACUOUS
+	-- (exactly the `h1_live = false` reading fixpoint_prover.lua's own real
+	-- code documents for every reassigning statement, literal or call
+	-- alike) -- so the root certificate below OMITS the `discharge` field
+	-- entirely, mirroring that module's own vacuous-discharge shape.
+	T.describe("loop-invariant-discharge: mutation-class certificate with a call-RHS (v4)", function()
+		local s = setup()
+		local vocab, rp, ax_initial = s.vocab, s.rp, s.ax_initial
+		local ty_nil = must_term(vocab.TyOf(must_term(vocab.tag_nil())))
+		local ty_number = must_term(vocab.TyOf(must_term(vocab.tag_number())))
+		local ty_string = must_term(vocab.TyOf(must_term(vocab.tag_string())))
+		local tinv = must_term(vocab.TyUnion(ty_nil, ty_number))
+
+		local while_path = { 1 }
+		local body_path = { 1, 1 } -- WHILE_BODY_INDEX = 1
+		local lh = entry(body_path)
+		local be = exit({ 1, 1, 0 }) -- exit of the body's only statement (`x = get_num()`)
+		local pre_loop = exit({ 0 }) -- the preceding `local x --: nil|number` decl
+
+		--: () -> CertNode
+		local function build_root()
+			local a_call = { kind = "axiom", axiom = vocab.ax_assign_call_facts,
+				bindings = { Pa = be, X = var_path, T = ty_number } } --[[: CertNode ]]
+			local p1 = { kind = "rule", rule = vocab.rule_assign_call_transfer, premises = { a_call } } --[[: CertNode ]]
+
+			local p0 = { kind = "axiom", axiom = vocab.ax_loop_facts, bindings = { LH = lh, BE = be } } --[[: CertNode ]]
+			-- ty_sub(number, nil|number) via ty-sub-union-here-right: `number`
+			-- is the union's own literal SECOND operand (Tinv = ty_union(nil,
+			-- number)), matching the "ty-sub-union-here-right" theory test
+			-- above verbatim (same bindings shape).
+			local p2 = { kind = "axiom", axiom = vocab.ax_ty_sub_union_here_right,
+				bindings = { X = ty_nil, B = ty_number } } --[[: CertNode ]]
+			local p3 = { kind = "axiom", axiom = ax_initial, bindings = { P = pre_loop, X = var_path, T = tinv } } --[[: CertNode ]]
+			local p4 = { kind = "axiom", axiom = vocab.ax_ty_sub_refl, bindings = { A = tinv } } --[[: CertNode ]]
+
+			return {
+				kind = "rule", rule = vocab.rule_loop_invariant_discharge,
+				premises = { p0, p1, p2, p3, p4 },
+				-- no `discharge` field: h1 was never introduced at all (see
+				-- note above) -- vacuous, legal per the theory.
+			} --[[: CertNode ]]
+		end
+
+		T.it("ROOT-ACCEPTS via M.replay: x : nil|number holds at the loop head, body reassigns via a call", function()
+			local root = build_root()
+			local result, err = rl.replay(rp, root)
+			T.ok(result, err)
+			if result == nil then return end
+			T.ok(ta.equal(result.conclusion, must_term(vocab.HoldsAt(lh, var_path, tinv))))
+		end)
+
+		T.it("rejects (malformed) when the callee's declared return type is not a member of the invariant", function()
+			-- `get_num`'s declared return retargeted to `string` (not a
+			-- member of `nil|number`) -- no `ty_sub(string, nil|number)`
+			-- citation exists (neither union-here axiom's pattern matches:
+			-- `string` is neither the union's own first nor second literal
+			-- operand), so the malformed root cannot even be built with a
+			-- VALID p2 -- demonstrated here by citing the WRONG axiom
+			-- (union-here-right over the actual members, which forces
+			-- `B = ty_number`, not `ty_string`) so replay's own `match_into`
+			-- rejects the mismatch between what P1 actually concluded
+			-- (`Tp = ty_string`) and what P2 was cited to assert.
+			local a_call = { kind = "axiom", axiom = vocab.ax_assign_call_facts,
+				bindings = { Pa = be, X = var_path, T = ty_string } } --[[: CertNode ]]
+			local p1 = { kind = "rule", rule = vocab.rule_assign_call_transfer, premises = { a_call } } --[[: CertNode ]]
+			local p0 = { kind = "axiom", axiom = vocab.ax_loop_facts, bindings = { LH = lh, BE = be } } --[[: CertNode ]]
+			local p2 = { kind = "axiom", axiom = vocab.ax_ty_sub_union_here_right,
+				bindings = { X = ty_nil, B = ty_number } } --[[: CertNode ]]
+			local p3 = { kind = "axiom", axiom = ax_initial, bindings = { P = pre_loop, X = var_path, T = tinv } } --[[: CertNode ]]
+			local p4 = { kind = "axiom", axiom = vocab.ax_ty_sub_refl, bindings = { A = tinv } } --[[: CertNode ]]
+			local bad_root = {
+				kind = "rule", rule = vocab.rule_loop_invariant_discharge,
+				premises = { p0, p1, p2, p3, p4 },
 			} --[[: CertNode ]]
 			local result, err = rl.replay(rp, bad_root)
 			T.eq(result, nil)

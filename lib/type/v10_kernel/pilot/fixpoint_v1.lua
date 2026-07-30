@@ -3,12 +3,64 @@
 -- Fixpoint-certificate THEORY — pilot step 3, further theory content
 -- (docs/typechecker-v10-fixpoint-proposal.md, accepted commit 141cf0cc,
 -- amended commit a7823a55 — the sequential-flow + zero-premise-rule-
--- retraction addendum). Declares `{ name = "narrow-pilot-v1", version = 3 }`:
--- v2's op set (flow_narrow_v1.lua: tags/ty_of/ty_union/holds_at/
--- guard_selects) UNCHANGED, plus every additive operator this proposal
--- introduces — the same v1->v2 versioning discipline (additive-only, one
--- signature per module bump, object identity is name+version so v1/v2's own
--- modules and tests are untouched).
+-- retraction addendum). Declares `{ name = "narrow-pilot-v1", version = 4 }`:
+-- v3's op set (v2's tags/ty_of/ty_union/holds_at/guard_selects, plus v3's
+-- assign_literal/assign_copies/loop_edge/cf_join/stmt_seq/stmt_preserves)
+-- UNCHANGED, plus ONE additive operator (`assign_call`) — the same
+-- v1->v2->v3 versioning discipline (additive-only, one signature per module
+-- bump, object identity is name+version so v1/v2/v3's own modules and tests
+-- are untouched).
+--
+-- ── v3->v4: assignment transfer from an annotated-call RHS ──────────────────
+--
+-- Per the orchestrating brief (assignment-transfer-from-annotated-call-RHS
+-- extension — measured gap keeping mutation-class loop invariants at zero
+-- on real code, docs/typechecker-v10-pilot-measurement.md runs 3-4): a NEW
+-- reality-boundary fact, "the call at path P has a callee whose declared
+-- return annotation is type T," entering via the SAME schematic-axiom idiom
+-- as `assign_literal`/`assign_copies` (§2 of the proposal) — one new
+-- operator, one new axiom, one new transfer rule, mirroring
+-- `assign_literal`'s own shape as closely as possible.
+--
+-- `assign_call(assign_point: point, var: path, ret_ty: ty) : judgment` —
+-- "the parser saw a call expression whose callee resolves, STATICALLY AND
+-- LOCALLY (a directly-named same-file local/module function whose `--:`
+-- return annotation parses within the pilot's six-tag-plus-union
+-- vocabulary, single return value only), to declared return type `ret_ty`,
+-- assigned to `var` at `assign_point`."
+--
+-- **Deliberate divergence from `assign_literal`'s own shape, documented, not
+-- silent:** `assign_literal`'s third argument is sort `prim_tag` (a literal
+-- has exactly one primitive tag); `assign_call`'s third argument is sort
+-- `ty` directly (a callee's declared return annotation can itself be a
+-- multi-member union, e.g. `string | nil` — not reducible to one
+-- `prim_tag`). This is why the transfer rule below needs no `ty_of(...)`
+-- wrapping in its conclusion (unlike `assign-literal-transfer`), the one
+-- structural difference from mirroring `assign_literal` exactly.
+--
+-- Reality-boundary axiom: `pilot-assign-call-facts-v1`, pattern
+-- `assign_call(Pa, X, T)`, fully schematic over all three — same idiom as
+-- `pilot-assign-literal-facts-v1`/`pilot-assign-copy-facts-v1`, no
+-- discharge form. Trust rationale, stated plainly per the brief: the
+-- callee's OWN annotation is trusted as an axiom instance here exactly as
+-- every other reality-boundary fact in this theory trusts what the parser
+-- saw — it is what the eventual full checker would separately verify by
+-- typechecking the callee's own body against its declared signature; this
+-- pilot does not re-derive that, it cites it.
+--
+-- Transfer rule: `assign-call-transfer`, premises `{ assign_call(Pa,X,T) }`
+-- ⊢ `holds_at(Pa,X,T)`. `declare_rule` validity: premise metas `{Pa,X,T}` ⊇
+-- conclusion metas `{Pa,X,T}` — identical shape to `assign-literal-transfer`
+-- (single-premise rule wrapping its own axiom fact), no point-binding gap
+-- (`Pa` is the axiom's own first bound argument, same as every other
+-- assign-*-transfer rule).
+--
+-- Prover-side callee resolution (walking the AST to decide whether an
+-- `assign_call` axiom citation is even licensed — never guessed, always
+-- structurally verified from the parse) is pilot step 4
+-- (fixpoint_prover.lua), not this module's concern; this module declares
+-- the theory only, exactly matching v3's own division of labor for
+-- `assign_literal`/`assign_copies`.
 --
 -- fable-delegation-tier throughout, per the core design's pilot-execution
 -- delegation note — every choice here is a delegated-execution decision,
@@ -92,10 +144,13 @@ local M = {}
 --::   ax_ty_sub_union_here_right: AxiomDecl,
 --::   rule_ty_sub_trans: RuleDecl,
 --::   rule_ty_sub_union_of_subsets: RuleDecl,
+--::   AssignCall: (p: Term, x: Term, t: Term) -> (Term | nil, string | nil),
 --::   ax_assign_literal_facts: AxiomDecl,
 --::   ax_assign_copy_facts: AxiomDecl,
+--::   ax_assign_call_facts: AxiomDecl,
 --::   rule_assign_literal_transfer: RuleDecl,
 --::   rule_assign_copy_transfer: RuleDecl,
+--::   rule_assign_call_transfer: RuleDecl,
 --::   ax_loop_facts: AxiomDecl,
 --::   rule_loop_invariant_discharge: RuleDecl,
 --::   ax_cf_join_facts: AxiomDecl,
@@ -127,7 +182,7 @@ function M.declare_vocabulary(registry, addr_sig)
 
 	local sig, sig_err = ta.declare_signature({
 		name = "narrow-pilot-v1",
-		version = 3,
+		version = 4,
 		sorts = { "prim_tag", "ty", "judgment" },
 		imports = { { from = sig_in, sorts = { "point", "path" } } },
 		ops = {
@@ -160,6 +215,13 @@ function M.declare_vocabulary(registry, addr_sig)
 			assign_copies = {
 				result = "judgment",
 				args = { { sort = "point" }, { sort = "path" }, { sort = "path" } },
+			},
+			-- v4: assignment transfer from an annotated-call RHS (`ret_ty` is
+			-- sort `ty`, not `prim_tag` — see module header's documented
+			-- divergence from `assign_literal`'s own shape).
+			assign_call = {
+				result = "judgment",
+				args = { { sort = "point" }, { sort = "path" }, { sort = "ty" } },
 			},
 
 			-- §3: loop-invariant point-binding syntax fact.
@@ -196,6 +258,8 @@ function M.declare_vocabulary(registry, addr_sig)
 	local function AssignLiteral(p, x, tag) return ta.build(ops.assign_literal, { p, x, tag }) end
 	--: (p: Term, x: Term, y: Term) -> (Term | nil, string | nil)
 	local function AssignCopies(p, x, y) return ta.build(ops.assign_copies, { p, x, y }) end
+	--: (p: Term, x: Term, t: Term) -> (Term | nil, string | nil)
+	local function AssignCall(p, x, t) return ta.build(ops.assign_call, { p, x, t }) end
 	--: (lh: Term, be: Term) -> (Term | nil, string | nil)
 	local function LoopEdge(lh, be) return ta.build(ops.loop_edge, { lh, be }) end
 	--: (pa: Term, pb: Term, pj: Term) -> (Term | nil, string | nil)
@@ -386,6 +450,30 @@ function M.declare_vocabulary(registry, addr_sig)
 	})
 	if not rule_assign_copy_transfer then return nil, act_err end
 
+	-- v4: assignment transfer from an annotated-call RHS (module header).
+	-- Reuses `pa_pt`/`x_assign` (already bound above); `t_assign` (sort
+	-- `ty`, already bound above for assign-copy-transfer) is reused
+	-- unchanged as the shared metavariable here too — a fresh `ta.meta("T",
+	-- ty_sort)` would be an equally-valid but redundant alternative (meta
+	-- names are per-declaration-call, not globally namespaced — see this
+	-- file's own repeated reuse of the string name "X" across unrelated
+	-- rule sections).
+	local assign_call_pat = AssignCall(pa_pt, x_assign, t_assign)
+	if not assign_call_pat then return nil, "declare_vocabulary: failed to build assign_call pattern" end
+	local ax_assign_call_facts, acaf_err = replayer.declare_axiom(registry, {
+		name = "pilot-assign-call-facts-v1", version = 1, pattern = assign_call_pat,
+	})
+	if not ax_assign_call_facts then return nil, acaf_err end
+
+	local call_holds_x = HoldsAt(pa_pt, x_assign, t_assign)
+	if not call_holds_x then return nil, "declare_vocabulary: failed to build assign-call-transfer conclusion" end
+	local rule_assign_call_transfer, act2_err = replayer.declare_rule(registry, {
+		name = "assign-call-transfer", version = 1,
+		premises = { assign_call_pat },
+		conclusion = call_holds_x,
+	})
+	if not rule_assign_call_transfer then return nil, act2_err end
+
 	-- ── §3: loop-invariant discharge ─────────────────────────────────────────
 	local lh = ta.meta("LH", point_sort)
 	local be = ta.meta("BE", point_sort)
@@ -497,7 +585,7 @@ function M.declare_vocabulary(registry, addr_sig)
 	return {
 		signature = sig,
 		HoldsAt = HoldsAt, TySub = TySub, TyOf = TyOf, TyUnion = TyUnion, GuardSelects = GuardSelects,
-		AssignLiteral = AssignLiteral, AssignCopies = AssignCopies,
+		AssignLiteral = AssignLiteral, AssignCopies = AssignCopies, AssignCall = AssignCall,
 		LoopEdge = LoopEdge, CfJoin = CfJoin, StmtSeq = StmtSeq, StmtPreserves = StmtPreserves,
 		tag_nil = tag_nil, tag_boolean = tag_boolean, tag_true = tag_true, tag_false = tag_false,
 		tag_number = tag_number, tag_string = tag_string, tag_table = tag_table, tag_function = tag_function,
@@ -512,8 +600,10 @@ function M.declare_vocabulary(registry, addr_sig)
 		rule_ty_sub_union_of_subsets = rule_ty_sub_union_of_subsets,
 		ax_assign_literal_facts = ax_assign_literal_facts,
 		ax_assign_copy_facts = ax_assign_copy_facts,
+		ax_assign_call_facts = ax_assign_call_facts,
 		rule_assign_literal_transfer = rule_assign_literal_transfer,
 		rule_assign_copy_transfer = rule_assign_copy_transfer,
+		rule_assign_call_transfer = rule_assign_call_transfer,
 		ax_loop_facts = ax_loop_facts,
 		rule_loop_invariant_discharge = rule_loop_invariant_discharge,
 		ax_cf_join_facts = ax_cf_join_facts,
