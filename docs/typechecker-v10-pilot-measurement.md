@@ -439,3 +439,243 @@ sub-millisecond-to-low-double-digit-millisecond magnitudes per file, not attribu
 code change — see run 1's own "Timing methodology note" for the same caveat applied to
 `analyze_ms`/`emit_ms` generally). `v3_ms` (the v3 baseline) is unaffected by this work, still in
 the same 29-45ms process-startup-dominated band as run 1.
+
+## Run 3 — loop-invariant certificates (commit `4a741cae`)
+
+Measured against commit `4a741cae` ("v10 fixpoint prover — loop-invariant certificates from
+real source (Phase 3)"), which is both the pilot-code commit and HEAD at measurement time.
+`bin/cr test lib/type/v10_kernel/pilot/` 9/9 files green, 338 assertions (up from run 2's 249 —
+`fixpoint_v1_test.lua` (Phase 2) and `fixpoint_prover_test.lua` (Phase 3) added since).
+`bin/cr test lib/type/v10_cleanroom/` 3/3 files green, 1044 assertions (unchanged — not touched
+by Phase 3). Both reconfirmed at this HEAD. No pilot source was modified to produce these
+numbers; drivers are disposable scripts outside the repo (`/tmp/v10_parity/scan_loops_run3.lua`,
+`measure_run3.lua`, `probe_certified_run3.lua`).
+
+What run 3 adds over runs 1–2: `fixpoint_prover.analyze_file` (new in `4a741cae`) attempts a
+`loop-invariant-discharge` certificate for every `NODE_WHILE_STMT` × every tracked
+six-tag-union local/parameter in scope at it, root-replayed via `M.replay` (root-strict, not
+`M.observe`). The narrowing prover (`prover.analyze_file`) is measured alongside, unchanged,
+for run-1/2 comparability.
+
+### Corpus
+
+Runs 1–2's 27 files, plus every additional file found by an exact full-tree scan: ran the real
+`fixpoint_prover.analyze_file` over all `lib/**/*.lua` (997 files; same exclusions as run 1 —
+`lib/type/v10_kernel/`, `lib/type/v10_cleanroom/`, `*_test.lua`) and kept every file with
+`loop_vars_attempted > 0` (a tracked union-annotated variable in scope at a while-loop). This
+is the prover's own tracking rule applied verbatim, not a grep heuristic. Scan result: 376/997
+files contain at least one while-loop; **24** have a tracked variable in scope at one. Three
+(`lib/actor/init.lua`, `lib/platform/audit/init.lua`, `lib/struct/init.lua`) were already in
+the run-1/2 corpus; the **21 additions**:
+
+`lib/async_queue/init.lua`, `lib/bencode/init.lua`, `lib/bookkeeping/store.lua`,
+`lib/cli/init.lua`, `lib/email/init.lua`, `lib/format/yaml/init.lua`, `lib/pdf/filter.lua`,
+`lib/pdf/form.lua`, `lib/platform/apps/charactercardv2/server.lua`,
+`lib/platform/apps/finance/tui.lua`, `lib/platform/caps/http_client.lua`,
+`lib/platform/caps/shared_db.lua`, `lib/stream/init.lua`, `lib/string_ext/init.lua`,
+`lib/string_template/init.lua`, `lib/type/static/constrain.lua`, `lib/type/static/env.lua`,
+`lib/type/static/errors.lua`, `lib/type/static/unify.lua`, `lib/type/v9/annot/init.lua`,
+`lib/unified/remark_github/init.lua`.
+
+Final corpus: 48 files, 1,698,092 combined bytes.
+
+### Aggregate results
+
+Narrowing (run-1/2-comparable) and loop-invariant metrics, side by side. The 27 run-1/2 files'
+narrowing subtotals are IDENTICAL to run 2 (guards found 546, handled 23, annotations parsed
+284, certificates 27, replay 27/0) — Phase 3's only change to the narrowing path
+(`prover_narrow.lua` emitting an additional `while_loop` event that `prover.lua` ignores)
+altered no narrowing behavior. Checked by summing the per-file table below over those 27 rows.
+
+| metric | run 2 (27 files) | run 3 (48 files) |
+|---|---:|---:|
+| guards found | 546 | 1239 |
+| guards handled | 23 | 35 |
+| guards skipped | 523 | 1204 |
+| annotations parsed | 284 | 458 |
+| annotations skipped | 757 | 2061 |
+| narrowing certificates emitted | 27 | 40 |
+| narrowing replay pass / fail | 27 / 0 | 40 / 0 |
+| narrowing judgments | 27 | 40 |
+| **while-loops found** | — | **199** |
+| **(loop, var) pairs attempted** | — | **48** |
+| **(loop, var) pairs certified (root-accepted)** | — | **7** |
+| **loop-invariant judgments (root-replayed)** | — | **7** |
+| loop-invariant replay failures | — | 0 |
+
+**The headline number is 7**: seven root-accepted loop-invariant certificates over real,
+unmodified corpus code, in 3 files (`lib/type/static/constrain.lua` 3,
+`lib/type/static/env.lua` 2, `lib/unified/remark_github/init.lua` 2). Zero replay failures —
+every certificate the prover chose to emit was accepted root-strict.
+
+Guard-skip reasons (narrowing, 1204 total): 1202x `guarded variable not a tracked annotated
+local or parameter` (same dominant reason as runs 1–2); 2x `truthiness guard unsupported:
+declared union includes plain 'boolean'` — the first real-corpus occurrence of this documented
+scope limit (runs 1–2 explicitly noted it never fired in their corpus); both from
+`lib/type/static/constrain.lua`, a run-3 corpus addition, so runs 1–2's statement remains true
+of their own corpus. Annotation-skip reasons: same taxonomy as run 2 (six-tag rejections
+dominate, whole-annotation and per-parameter), no new categories. `emission_skipped`
+(narrowing): 0, same as runs 1–2.
+
+### Loop skip-reason breakdown
+
+`loop_vars_attempted` counts (loop, var) pairs; `no tracked variable in scope` counts loops.
+199 loops − 159 no-tracked-var loops = 40 loops with at least one tracked variable, carrying
+48 (loop, var) pairs; 7 certified + 41 skipped = 48 ✓.
+
+| reason | count |
+|---|---:|
+| `no tracked variable in scope at this loop` (per loop) | 159 |
+| `control-flow statement breaks persistence chaining (out of scope)` (per pair) | 41 |
+| `copy source not independently established at the assign point` | 0 |
+| `assignment RHS out of scope (not literal or bare-identifier copy)` | 0 |
+| `multi-target/multi-value assignment to the invariant variable (out of scope)` | 0 |
+| `empty loop body: no persistence chain from loop head to back edge under this theory` | 0 |
+| `reassigned type not a member of the declared invariant` | 0 |
+| replay rejected an emitted certificate | 0 |
+
+Every real-corpus skip is one of two reasons. All 41 in-body skips are control-flow (an
+`if`/`while`/`for`/`return`/`break` at the loop body's own top level) — the conservative
+persistence rule from the Phase-3 §8.3 doc correction. The assignment-shaped skip reasons
+(copy/RHS/multi-target), the empty-body edge case, and the documented
+`tag_true`/`tag_false`-vs-`tag_boolean` literal mismatch never occurred naturally; they are
+exercised only by `fixpoint_prover_test.lua`'s fixtures. **Consequence for the two parked
+scope reductions** (assign-copy-transfer unreachability under the corrected `Pa` convention;
+vacuous-discharge reasoning): their real-corpus coverage cost in this measurement is **zero**
+— no (loop, var) pair was lost to a copy-RHS or literal-reassignment case; every lost pair
+died on control-flow chaining, which is a different (and larger) gap.
+
+All 7 certified pairs are **persistence-only** invariants (the body never touches the tracked
+variable; `ty_sub` closed by `ty-sub-refl`): the `assign-literal-transfer` path produced zero
+real-corpus certificates and is exercised only by the test fixture. Stated plainly: on this
+corpus, the entire assignment-transfer half of the fixpoint theory (§2) went unused; the
+certificates that exist stand on `seq-persist` + `loop-invariant-discharge` +
+`pilot-initial-facts-v1` alone.
+
+### Per-file table
+
+Columns as in runs 1–2, plus loop metrics. `parse_ms`/`pass1_ms` are separately-timed direct
+calls to the same parse/pass-1 code `fixpoint_prover.analyze_file` runs internally;
+`fixTotal_ms` is the whole `fixpoint_prover.analyze_file` call (which re-runs parse + pass 1
+internally, so `fixTotal_ms` INCLUDES its own parse/pass-1 cost; the separate columns are for
+scale, not exact decomposition — separate invocations, so JIT/cache state differs).
+
+| file | bytes | v3_exit | v3_ms | gF | gH | annP | certs | rP/rF | analyze_ms | emit_ms | judg | loops | lvAtt | lvCert | parse_ms | pass1_ms | fixTotal_ms |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| lib/dice/init.lua | 21129 | 1 | 339 | 27 | 0 | 36 | 0 | 0/0 | 14.081 | 0.938 | 0 | 3 | 0 | 0 | 10.124 | 1.900 | 14.244 |
+| lib/platform/daemon/init.lua | 71669 | 1 | 642 | 58 | 2 | 29 | 2 | 2/0 | 17.472 | 15.852 | 2 | 0 | 0 | 0 | 6.592 | 1.706 | 10.690 |
+| lib/compress/system.lua | 10952 | 1 | 143 | 5 | 0 | 10 | 0 | 0/0 | 9.284 | 0.643 | 0 | 0 | 0 | 0 | 4.450 | 0.555 | 4.527 |
+| lib/actor/init.lua | 22525 | 1 | 228 | 9 | 1 | 14 | 1 | 1/0 | 9.757 | 7.324 | 1 | 3 | 4 | 0 | 4.243 | 1.075 | 47.912 |
+| lib/platform/apps/finance/views.lua | 31368 | 0 | 250 | 19 | 2 | 15 | 2 | 2/0 | 6.679 | 12.868 | 2 | 0 | 0 | 0 | 4.897 | 1.159 | 4.901 |
+| lib/exec/make_api.lua | 10651 | 0 | 197 | 5 | 0 | 4 | 0 | 0/0 | 2.546 | 0.512 | 0 | 1 | 0 | 0 | 1.485 | 0.414 | 2.948 |
+| lib/exec/help.lua | 16574 | 1 | 249 | 14 | 0 | 8 | 0 | 0/0 | 3.832 | 0.995 | 0 | 4 | 0 | 0 | 2.963 | 0.745 | 9.615 |
+| lib/columnar/init.lua | 12601 | 1 | 177 | 9 | 0 | 7 | 0 | 0/0 | 2.631 | 0.717 | 0 | 0 | 0 | 0 | 1.645 | 0.421 | 2.890 |
+| lib/bookkeeping/import_qif.lua | 13482 | 0 | 203 | 2 | 0 | 6 | 0 | 0/0 | 5.908 | 2.493 | 0 | 1 | 0 | 0 | 3.705 | 0.424 | 4.741 |
+| lib/platform/session_store/init.lua | 9183 | 1 | 236 | 18 | 3 | 3 | 3 | 3/0 | 3.641 | 12.037 | 3 | 0 | 0 | 0 | 1.831 | 0.459 | 2.200 |
+| lib/platform/audit/init.lua | 10328 | 1 | 240 | 13 | 2 | 7 | 3 | 3/0 | 3.360 | 12.498 | 3 | 2 | 2 | 0 | 1.264 | 0.586 | 13.812 |
+| lib/roman_numeral/init.lua | 16452 | 1 | 266 | 11 | 2 | 7 | 2 | 2/0 | 6.147 | 3.982 | 2 | 0 | 0 | 0 | 2.940 | 0.808 | 3.556 |
+| lib/pid/init.lua | 7870 | 1 | 137 | 3 | 0 | 10 | 0 | 0/0 | 2.519 | 0.573 | 0 | 0 | 0 | 0 | 1.213 | 0.394 | 5.257 |
+| lib/dsp/init.lua | 14997 | 1 | 196 | 3 | 0 | 16 | 0 | 0/0 | 6.766 | 0.511 | 0 | 1 | 0 | 0 | 2.048 | 0.366 | 2.792 |
+| lib/ai/providers/openai.lua | 863 | 1 | 160 | 2 | 0 | 4 | 0 | 0/0 | 0.509 | 0.526 | 0 | 0 | 0 | 0 | 0.186 | 0.044 | 2.738 |
+| lib/type/static/solve.lua | 221816 | 1 | 1706 | 60 | 0 | 8 | 0 | 0/0 | 13.559 | 2.511 | 0 | 14 | 0 | 0 | 17.751 | 2.797 | 10.974 |
+| lib/type/analysis/crescent_slice_parse.lua | 55409 | 0 | 207 | 63 | 2 | 32 | 2 | 2/0 | 6.816 | 3.255 | 2 | 16 | 0 | 0 | 2.925 | 0.776 | 5.943 |
+| lib/sscanf/init.lua | 16850 | 1 | 104 | 15 | 1 | 1 | 1 | 1/0 | 2.210 | 1.933 | 1 | 8 | 0 | 0 | 1.751 | 0.546 | 3.105 |
+| lib/platform/caps/create_instance.lua | 9047 | 1 | 125 | 10 | 1 | 3 | 1 | 1/0 | 5.574 | 2.051 | 1 | 0 | 0 | 0 | 1.818 | 0.223 | 2.500 |
+| lib/platform/apps/system_dashboard/server.lua | 30949 | 1 | 191 | 43 | 1 | 14 | 2 | 2/0 | 8.809 | 5.413 | 2 | 1 | 0 | 0 | 3.697 | 0.831 | 5.393 |
+| lib/ljsocket/init.lua | 40364 | 1 | 162 | 30 | 0 | 6 | 0 | 0/0 | 4.961 | 0.564 | 0 | 1 | 0 | 0 | 2.893 | 1.936 | 5.373 |
+| lib/http/server.lua | 13123 | 1 | 137 | 6 | 0 | 2 | 0 | 0/0 | 1.633 | 0.426 | 0 | 1 | 0 | 0 | 0.776 | 0.202 | 1.931 |
+| lib/ed25519/init.lua | 31093 | 1 | 123 | 11 | 3 | 9 | 4 | 4/0 | 10.437 | 9.273 | 4 | 1 | 0 | 0 | 6.565 | 0.979 | 4.998 |
+| lib/argon2/init.lua | 37795 | 1 | 135 | 33 | 1 | 13 | 1 | 1/0 | 5.091 | 1.709 | 1 | 0 | 0 | 0 | 4.687 | 2.115 | 4.368 |
+| lib/struct/init.lua | 16042 | 1 | 90 | 32 | 0 | 1 | 0 | 0/0 | 2.367 | 0.342 | 0 | 2 | 2 | 0 | 1.313 | 0.550 | 6.539 |
+| lib/pdf/object.lua | 21535 | 0 | 91 | 22 | 1 | 5 | 2 | 2/0 | 3.304 | 5.387 | 2 | 10 | 0 | 0 | 1.425 | 0.537 | 2.004 |
+| lib/oauth2/init.lua | 26366 | 1 | 124 | 23 | 1 | 14 | 1 | 1/0 | 11.013 | 2.442 | 1 | 7 | 0 | 0 | 6.716 | 3.613 | 4.266 |
+| lib/async_queue/init.lua | 17384 | 1 | 99 | 7 | 1 | 11 | 2 | 2/0 | 3.440 | 4.009 | 2 | 5 | 3 | 0 | 1.522 | 0.402 | 6.733 |
+| lib/bencode/init.lua | 6400 | 1 | 68 | 10 | 0 | 3 | 0 | 0/0 | 1.596 | 1.177 | 0 | 2 | 1 | 0 | 2.563 | 0.701 | 1.666 |
+| lib/bookkeeping/store.lua | 31286 | 0 | 129 | 60 | 0 | 8 | 0 | 0/0 | 2.151 | 0.555 | 0 | 4 | 2 | 0 | 5.516 | 1.974 | 8.278 |
+| lib/cli/init.lua | 17076 | 1 | 108 | 9 | 0 | 6 | 0 | 0/0 | 4.524 | 0.342 | 0 | 2 | 2 | 0 | 2.235 | 0.756 | 7.846 |
+| lib/email/init.lua | 31028 | 1 | 146 | 30 | 2 | 23 | 2 | 2/0 | 5.012 | 3.920 | 2 | 4 | 1 | 0 | 2.725 | 0.782 | 5.301 |
+| lib/format/yaml/init.lua | 37504 | 1 | 96 | 48 | 0 | 5 | 0 | 0/0 | 7.619 | 0.669 | 0 | 21 | 1 | 0 | 2.789 | 1.588 | 18.133 |
+| lib/pdf/filter.lua | 21131 | 0 | 85 | 36 | 1 | 10 | 1 | 1/0 | 3.765 | 5.184 | 1 | 8 | 1 | 0 | 1.657 | 0.596 | 4.752 |
+| lib/pdf/form.lua | 23902 | 0 | 119 | 43 | 1 | 11 | 1 | 1/0 | 2.222 | 2.355 | 1 | 7 | 3 | 0 | 1.146 | 0.460 | 7.851 |
+| lib/platform/apps/charactercardv2/server.lua | 140228 | 1 | 833 | 162 | 2 | 23 | 2 | 2/0 | 14.252 | 3.825 | 2 | 2 | 2 | 0 | 15.415 | 2.527 | 24.111 |
+| lib/platform/apps/finance/tui.lua | 13973 | 0 | 158 | 17 | 0 | 4 | 0 | 0/0 | 2.881 | 0.259 | 0 | 1 | 1 | 0 | 0.932 | 0.281 | 14.423 |
+| lib/platform/caps/http_client.lua | 26583 | 1 | 179 | 59 | 0 | 9 | 0 | 0/0 | 3.073 | 0.470 | 0 | 10 | 2 | 0 | 1.692 | 0.445 | 2.495 |
+| lib/platform/caps/shared_db.lua | 21947 | 1 | 157 | 11 | 0 | 2 | 0 | 0/0 | 4.219 | 1.806 | 0 | 2 | 2 | 0 | 9.341 | 0.422 | 4.395 |
+| lib/stream/init.lua | 15362 | 1 | 99 | 18 | 2 | 7 | 2 | 2/0 | 3.663 | 3.333 | 2 | 15 | 2 | 0 | 1.329 | 0.293 | 5.386 |
+| lib/string_ext/init.lua | 10261 | 0 | 81 | 7 | 1 | 6 | 1 | 1/0 | 1.637 | 3.217 | 1 | 5 | 1 | 0 | 0.739 | 0.217 | 2.769 |
+| lib/string_template/init.lua | 10867 | 1 | 72 | 7 | 0 | 5 | 0 | 0/0 | 2.545 | 0.297 | 0 | 1 | 1 | 0 | 0.683 | 0.179 | 4.813 |
+| lib/type/static/constrain.lua | 278721 | 1 | 1824 | 106 | 0 | 12 | 0 | 0/0 | 16.543 | 2.362 | 0 | 7 | 6 | 3 | 16.155 | 3.333 | 74.629 |
+| lib/type/static/env.lua | 65876 | 1 | 531 | 17 | 0 | 1 | 0 | 0/0 | 3.404 | 0.926 | 0 | 8 | 2 | 2 | 2.265 | 0.465 | 29.516 |
+| lib/type/static/errors.lua | 21211 | 1 | 127 | 9 | 0 | 14 | 0 | 0/0 | 4.709 | 2.222 | 0 | 2 | 1 | 0 | 1.366 | 0.292 | 3.134 |
+| lib/type/static/unify.lua | 77343 | 0 | 309 | 13 | 1 | 1 | 1 | 1/0 | 3.688 | 2.164 | 1 | 2 | 1 | 0 | 8.895 | 1.309 | 23.544 |
+| lib/type/v9/annot/init.lua | 26980 | 0 | 95 | 16 | 1 | 7 | 1 | 1/0 | 4.754 | 1.883 | 1 | 9 | 2 | 0 | 2.696 | 1.198 | 6.943 |
+| lib/unified/remark_github/init.lua | 11996 | 1 | 82 | 8 | 0 | 6 | 0 | 0/0 | 2.927 | 0.460 | 0 | 6 | 3 | 2 | 1.169 | 0.232 | 9.695 |
+
+### Truth check — all 7 loop-invariant judgments, individually verified
+
+Correlation methodology, same as run 1: a disposable parallel walk
+(`/tmp/v10_parity/probe_certified_run3.lua`) re-implements `fixpoint_prover`'s per-(loop, var)
+classification over pass 1's `while_loop` events, purely to attach source line + variable name
+to each attempt, then cross-checks its predicted certified count against the REAL
+`fixpoint_prover.analyze_file` stats per file — 3/3 files MATCH (predicted 3/2/2 = real 3/2/2).
+Each row was then hand-verified: opening the file, reading the loop, and checking the claim —
+`holds_at(entry_of(body), X, Tinv)`, i.e. the variable's declared union actually holds at the
+loop head on every iteration.
+
+All 7 are persistence-only certificates (the loop body never mentions the tracked variable),
+so each hand-check reduces to: (a) confirm no body statement assigns the variable (including
+shadowing subtleties), (b) confirm the variable is not assigned anywhere else in the function
+in a way that could put a non-union value in it at the loop head, and (c) confirm the declared
+annotation is the one claimed. Lua locals/parameters cannot alias, so (a)/(b) are decidable by
+reading the function.
+
+| # | file | location (manual) | variable / claimed invariant | verdict |
+|---|---|---|---|---|
+| 1 | lib/type/static/constrain.lua | L1481–1485, `while i < as + al - 1 do` (match-arm resolve loop inside `resolve_annotation_type`); body = two `arms[...] = resolve_annotation_type(...)` assigns + `i = i + 2` | `allow_unapplied : boolean\|nil` (parameter 3 of `resolve_annotation_type`, signature L840) holds at loop head every iteration | TRUE — body assigns only `arms` and `i`; the parameter is never assigned anywhere in the function (the file's own L825–829 comment: flip sites pass modified values to recursive calls instead of mutating) |
+| 2 | same loop | `in_match_arm : boolean\|nil` (parameter 4) | TRUE — same reasoning |
+| 3 | same loop | `in_func_ann : boolean\|nil` (parameter 5) | TRUE — same reasoning |
+| 4 | lib/type/static/env.lua | L901–905, `while i < is + il - 1 do` (indexer-substitution loop inside `substitute_inner`); body = two `new_indexers[...] = substitute_inner(...)` assigns + `i = i + 2` | `in_match_arm_subst : boolean\|nil` (parameter 5 of `substitute_inner`, signature L690) | TRUE — body assigns only `new_indexers` and `i`; parameter never assigned in the function (grep: no assignment anywhere) |
+| 5 | lib/type/static/env.lua | L1024–1028, `while i < as + al - 1 do` (match-arm substitution loop, same function); body = two `new_arms[...] = ...` assigns + `i = i + 2` | same variable | TRUE — same reasoning |
+| 6 | lib/unified/remark_github/init.lua | L127–128, `while j <= len and (s:byte(j) or 0) >= 48 and ... do j = j + 1 end` (bare-issue digit scan inside `find_next`); body = `j = j + 1` | `repo : string\|nil` (parameter 2 of `find_next`, signature L113) | TRUE — body assigns only `j`; `repo` is never assigned anywhere in the file |
+| 7 | lib/unified/remark_github/init.lua | L169–170, same digit-scan shape (cross-repo issue branch) | same variable | TRUE — same reasoning |
+
+**7/7 verified TRUE. No wrong judgment found.** Caveats, stated plainly: all 7 are
+persistence-only (`ty-sub-refl`) invariants over variables the loop body never touches — the
+weakest interesting form of the theory (no assignment transfer, no union-membership `ty_sub`
+chain exercised on real code); each carries the taint of `pilot-loop-facts-v1`,
+`pilot-stmt-seq-facts-v1`, `pilot-stmt-preserves-facts-v1`, `pilot-initial-facts-v1`, and
+`ty-sub-refl` (honest reality-boundary/structural-truth pricing, per the theory's design); and
+the entry fact is the `pilot-initial-facts-v1` annotation-trust citation at the loop head, not
+a derived fact from preceding code (the sequential-flow substrate for deriving it is §8.3's
+same-block straight-line case only, and no pre-loop straight-line derivation was attempted by
+this phase). 7 judgments is the entire real-corpus population at this commit, not a sample.
+
+### Wall-clock
+
+Summed over 48 files: narrowing `analyze_ms` 269.53, narrowing `emit_ms` 149.21 (both within
+run-2 per-byte expectations given the corpus roughly doubled in bytes); `parse_ms` 184.733,
+`pass1_ms` 44.613 (separately-timed direct calls); `fixpoint_total_ms` 456.63 (whole
+`fixpoint_prover.analyze_file` calls, each internally re-running parse + pass 1). The heaviest
+fixpoint file is `lib/type/static/constrain.lua` at 74.6ms (278KB, 7 loops, 6 attempted pairs,
+3 certificates with their seq-persist chains and observe-per-step replays).
+
+**v3 baseline divergence, flagged not explained**: `v3_ms` (`timeout 30 bin/cr check <file>`,
+same `date +%s%N`-around-subprocess methodology as runs 1–2) no longer sits in runs 1–2's
+narrow 29–45ms band — run 3 measured 68–1824ms over the same command shape, with the largest
+files clearly dominating (`solve.lua` 1706ms and `constrain.lua` 1824ms vs run 2's 45ms for
+the same `solve.lua`). The runs-1–2 "process-startup-dominated" characterization does NOT hold
+at this measurement. Contributing factors were not investigated (out of this measurement's
+scope); candidates include v3 checker changes between measurement dates and system state.
+The numbers are reported as measured; cross-run `v3_ms` comparisons should not be treated as a
+controlled series.
+
+### Reproduction
+
+Drivers (disposable, not part of the repo): `/tmp/v10_parity/scan_loops_run3.lua` (corpus
+scan), `/tmp/v10_parity/measure_run3.lua` (measurement), `/tmp/v10_parity/probe_certified_run3.lua`
+(truth-check correlation). Run via:
+
+```sh
+REPO=/home/me/git/rhizone/crescent
+"$REPO/bin/ld-musl-x86_64.so.1" "$REPO/bin/luajit-bin" /tmp/v10_parity/measure_run3.lua "$REPO"
+```

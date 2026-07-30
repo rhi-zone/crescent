@@ -6,6 +6,47 @@ Bench machine: AMD Ryzen 7 5700G, LuaJIT 2.1.1741730670, NixOS Linux 6.12.67.
 
 ---
 
+## 2026-07-30: v10 fixpoint prover — loop-invariant certificates, real-corpus measurement (run 3)
+
+Full report: `docs/typechecker-v10-pilot-measurement.md`, "## Run 3" section. Baseline commit
+`aa2f6155` (run 2, below); this measurement's code commit and HEAD: `4a741cae` ("v10 fixpoint
+prover — loop-invariant certificates from real source (Phase 3)"). Corpus: runs 1–2's 27 files
+plus 21 additions found by an exact full-tree scan (running the real
+`fixpoint_prover.analyze_file` over all 997 eligible `lib/**/*.lua` files and keeping every
+file with a tracked union-annotated variable in scope at a while-loop) — 48 files, 1,698,092
+bytes. `bin/cr test lib/type/v10_kernel/pilot/` 9/9 files green, 338 assertions;
+`bin/cr test lib/type/v10_cleanroom/` 3/3 files green, 1044 assertions — both reconfirmed at
+this HEAD. Drivers disposable (`/tmp/v10_parity/scan_loops_run3.lua`, `measure_run3.lua`,
+`probe_certified_run3.lua`), no pilot source modified to produce the numbers.
+
+**Headline: 7 root-accepted loop-invariant certificates** over real, unmodified corpus code
+(199 while-loops found; 48 (loop, var) pairs attempted; 7 certified, 0 replay failures) in 3
+files: `lib/type/static/constrain.lua` (3), `lib/type/static/env.lua` (2),
+`lib/unified/remark_github/init.lua` (2). All 7 hand-verified TRUE (full table in the report).
+All 7 are persistence-only (`ty-sub-refl`; the loop body never touches the variable) — the
+assignment-transfer half of the fixpoint theory produced zero real-corpus certificates. Skips:
+159x "no tracked variable in scope at this loop" (per loop), 41x "control-flow statement
+breaks persistence chaining" (per pair); every other documented skip reason (copy-RHS,
+non-literal RHS, multi-target, empty body, non-member reassignment, replay rejection) measured
+0 — the two parked Phase-3 scope reductions (assign-copy-transfer, vacuous-discharge) cost
+zero real-corpus coverage at this commit; the dominant in-body gap is control-flow chaining.
+
+**Narrowing regression check**: the 27 run-1/2 files' narrowing subtotals are identical to
+run 2 (guards found 546, handled 23, annotations parsed 284, certificates 27, replay 27/0) —
+Phase 3's additive `while_loop` event changed no narrowing behavior. 48-file narrowing totals:
+guards found 1239, handled 35, certificates 40, replay 40/0.
+
+**Wall-clock (summed, 48 files)**: narrowing analyze 269.53ms / emit 149.21ms; parse
+184.733ms; pass 1 44.613ms; `fixpoint_prover.analyze_file` total 456.63ms (each call
+internally re-runs parse + pass 1). Heaviest fixpoint file: `constrain.lua` 74.6ms (278KB,
+6 attempted pairs, 3 certificates). **v3 baseline divergence flagged, not explained**: `v3_ms`
+(same `date +%s%N` methodology) measured 68–1824ms vs runs 1–2's 29–45ms band on the same
+command shape (`solve.lua`: 45ms at run 2 → 1706ms at run 3); the "startup-dominated"
+characterization does not hold at this measurement; not investigated (out of measurement
+scope), so cross-run `v3_ms` comparison is not a controlled series.
+
+---
+
 ## 2026-07-30: v10 kernel narrowing pilot — parameter-sourced facts, real-corpus re-measurement (run 2)
 
 Full report: `docs/typechecker-v10-pilot-measurement.md`, "## Run 2" section. Baseline commit
