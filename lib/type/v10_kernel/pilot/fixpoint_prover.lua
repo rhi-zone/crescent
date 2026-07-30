@@ -153,24 +153,40 @@ local ta = require("lib.type.v10_cleanroom.term_algebra")
 local rl = require("lib.type.v10_cleanroom.replayer")
 local parse_mod = require("lib.type.static.parse")
 local defs = require("lib.type.static.defs")
+local intern_mod = require("lib.type.static.intern")
+local bit_mod = require("bit")
 local addr_v1 = require("lib.type.v10_kernel.pilot.addr_v1")
 local fixpoint_v1 = require("lib.type.v10_kernel.pilot.fixpoint_v1")
 local pilot_initial_facts_v1 = require("lib.type.v10_kernel.pilot.pilot_initial_facts_v1")
 local prover_narrow = require("lib.type.v10_kernel.pilot.prover_narrow")
 local prover_addr = require("lib.type.v10_kernel.pilot.prover_addr")
 
+local band = bit_mod.band
+
 local M = {}
 
 local NODE_LOCAL_STMT  = defs.NODE_LOCAL_STMT
 local NODE_ASSIGN_STMT = defs.NODE_ASSIGN_STMT
 local NODE_EXPR_STMT   = defs.NODE_EXPR_STMT
+local NODE_IF_STMT     = defs.NODE_IF_STMT
 local NODE_IDENTIFIER  = defs.NODE_IDENTIFIER
 local NODE_LITERAL     = defs.NODE_LITERAL
+local NODE_BINARY_EXPR = defs.NODE_BINARY_EXPR
+local NODE_UNARY_EXPR  = defs.NODE_UNARY_EXPR
+local NODE_CALL_EXPR   = defs.NODE_CALL_EXPR
+
+local OP_EQ  = defs.OP_EQ
+local OP_NE  = defs.OP_NE
+local OP_NOT = defs.OP_NOT
+
+local FLAG_HAS_ELSE = defs.FLAG_HAS_ELSE
 
 local LIT_STRING  = defs.LIT_STRING
 local LIT_NUMBER  = defs.LIT_NUMBER
 local LIT_BOOLEAN = defs.LIT_BOOLEAN
 local LIT_NIL     = defs.LIT_NIL
+
+local SIX_TAGS = { ["nil"] = true, boolean = true, number = true, string = true, table = true, ["function"] = true }
 
 -- Same `Ctx`/AST-arena shapes prover_narrow.lua declares (structural, not
 -- imported -- each module owns its own copy per the two-pass boundary's
@@ -178,7 +194,7 @@ local LIT_NIL     = defs.LIT_NIL
 --:: ASTNode = { kind: integer, flags: integer, line: integer, col: integer, data: { [integer]: integer } }
 --:: ASTNodeArena = { get: (ASTNodeArena, integer) -> ASTNode, ... }
 --:: ListPool = { get: (ListPool, integer) -> integer, ... }
---:: Ctx = { nodes: ASTNodeArena, lists: ListPool, pool: unknown, lexer: unknown, source_lines: string[] }
+--:: Ctx = { nodes: ASTNodeArena, lists: ListPool, pool: Pool, lexer: unknown, source_lines: string[] }
 
 --:: SkipCounts = { [string]: integer }
 --:: Stats = {
@@ -281,6 +297,26 @@ end
 -- `Tinv` is not actually a union at all -- out of scope for a loop
 -- invariant, since `try_guard_event`-style tracking requires 2+ members,
 -- but defended here regardless).
+-- Build the suffix union starting at `from` (Rest for union-here-left, or
+-- the base term for union-here-right's own `B`), i.e. the same
+-- right-associated spine `build_declared_union` builds, restricted to
+-- `members[from..]`. Standalone (not nested inside `build_ty_sub_to_union`)
+-- because the branch-join handling below (control-flow chaining) also needs
+-- it directly, to build a guard's own `Rest` term without going through a
+-- literal-reassignment's tag first.
+--: (FixpointVocab, string[], integer) -> (Term | nil, string | nil)
+local function suffix_union(vocab, members, from)
+	local term, err = tag_term_of(vocab, members[from])
+	if not term then return nil, err end
+	for i = from + 1, #members do
+		local next_term, nerr = tag_term_of(vocab, members[i])
+		if not next_term then return nil, nerr end
+		term, err = vocab.TyUnion(term, next_term)
+		if not term then return nil, err end
+	end
+	return term
+end
+
 --: (FixpointVocab, string, string[], Term) -> (CertNode | nil, string | nil)
 local function build_ty_sub_to_union(vocab, tag, members, tinv_term)
 	local tag_ty, tterr = tag_term_of(vocab, tag)
@@ -294,23 +330,6 @@ local function build_ty_sub_to_union(vocab, tag, members, tinv_term)
 	end
 	if #members == 1 then
 		return { kind = "axiom", axiom = vocab.ax_ty_sub_refl, bindings = { A = tag_ty } } --[[: CertNode ]]
-	end
-	-- Build the suffix union starting at `pos` (Rest for union-here-left),
-	-- i.e. the same right-associated spine `build_declared_union` builds,
-	-- restricted to members[pos..]. Needed to cite `ty-sub-union-here-left`
-	-- once at that suffix, or `ty-sub-union-here-right` once per member
-	-- strictly before `pos` (peeling `Rest` one layer per skipped member).
-	--: (integer) -> (Term | nil, string | nil)
-	local function suffix_union(from)
-		local term, err = tag_term_of(vocab, members[from])
-		if not term then return nil, err end
-		for i = from + 1, #members do
-			local next_term, nerr = tag_term_of(vocab, members[i])
-			if not next_term then return nil, nerr end
-			term, err = vocab.TyUnion(term, next_term)
-			if not term then return nil, err end
-		end
-		return term
 	end
 	local node = nil --[[: CertNode | nil ]]
 	local loop_start --[[: integer ]]
@@ -326,7 +345,7 @@ local function build_ty_sub_to_union(vocab, tag, members, tinv_term)
 			bindings = { X = prev_ty, B = tag_ty } } --[[: CertNode ]]
 		loop_start = pos - 2
 	else
-		local rest_term, rerr = suffix_union(pos + 1)
+		local rest_term, rerr = suffix_union(vocab, members, pos + 1)
 		if not rest_term then return nil, rerr end
 		node = { kind = "axiom", axiom = vocab.ax_ty_sub_union_here_left,
 			bindings = { A = tag_ty, Rest = rest_term } } --[[: CertNode ]]
@@ -339,7 +358,7 @@ local function build_ty_sub_to_union(vocab, tag, members, tinv_term)
 	-- re-cite" idiom. Invariant maintained by `node` on entry to each
 	-- iteration: `ty_sub(tag_ty, suffix_union(i+1))`.
 	for i = loop_start, 1, -1 do
-		local rest_term, rerr = suffix_union(i + 1)
+		local rest_term, rerr = suffix_union(vocab, members, i + 1)
 		if not rest_term then return nil, rerr end
 		local i_ty, ierr = tag_term_of(vocab, members[i])
 		if not i_ty then return nil, ierr end
@@ -456,6 +475,411 @@ local function declared_member_name_for_literal(tagname)
 	return tagname
 end
 
+-- Strip at most one leading `not`. Returns (inner_node_id, negated).
+-- Duplicated from prover_narrow.lua (small pure helper -- see this module's
+-- header, "Why a sibling module", on the two-pass precedent's own
+-- duplication discipline: this module already duplicates several such
+-- helpers from prover_narrow.lua/prover.lua rather than importing them).
+--: (Ctx, integer) -> (integer, boolean)
+local function strip_not(ctx, nid)
+	local n = ctx.nodes:get(nid)
+	if n.kind == NODE_UNARY_EXPR and n.data[0] == OP_NOT then
+		return n.data[1], true
+	end
+	return nid, false
+end
+
+--:: GuardHitFP = { var_name_id: integer, target: string, then_is_match: boolean }
+
+--: (ASTNode, ASTNode, integer) -> GuardHitFP | nil
+local function extract_nil_check_fp(ident_side, lit_side, op)
+	if ident_side.kind == NODE_IDENTIFIER and lit_side.kind == NODE_LITERAL and lit_side.data[0] == LIT_NIL then
+		return { var_name_id = ident_side.data[0], target = "nil", then_is_match = (op == OP_EQ) }
+	end
+	return nil
+end
+
+--: (Ctx, ASTNode, ASTNode, integer) -> GuardHitFP | nil
+local function extract_type_check_fp(ctx, call_side, lit_side, op)
+	if call_side.kind ~= NODE_CALL_EXPR then return nil end
+	if lit_side.kind ~= NODE_LITERAL or lit_side.data[0] ~= LIT_STRING then return nil end
+	if call_side.data[2] ~= 1 then return nil end
+	local callee = ctx.nodes:get(call_side.data[0])
+	if callee.kind ~= NODE_IDENTIFIER then return nil end
+	local callee_name = intern_mod.get(ctx.pool, callee.data[0])
+	if callee_name ~= "type" then return nil end
+	local arg_nid = ctx.lists:get(call_side.data[1])
+	local arg = ctx.nodes:get(arg_nid)
+	if arg.kind ~= NODE_IDENTIFIER then return nil end
+	local type_str = intern_mod.get(ctx.pool, lit_side.data[1])
+	if not type_str or not SIX_TAGS[type_str] then return nil end
+	return { var_name_id = arg.data[0], target = type_str, then_is_match = (op == OP_EQ) }
+end
+
+-- Extract one of the three in-scope guard shapes (`type(x)==`/`x==nil`/bare
+-- truthiness) from an if-clause's own test expression. Duplicated from
+-- prover_narrow.lua's `extract_guard` (same duplication discipline -- see
+-- this module's header). Returns nil if the test is not one of the three
+-- recognized shapes at all (not a skip -- simply not a guard).
+--: (Ctx, integer) -> GuardHitFP | nil
+local function extract_guard_fp(ctx, test_nid)
+	local inner_nid, negated = strip_not(ctx, test_nid)
+	local n = ctx.nodes:get(inner_nid)
+
+	if n.kind == NODE_IDENTIFIER then
+		return { var_name_id = n.data[0], target = "falsy", then_is_match = negated }
+	end
+
+	if n.kind ~= NODE_BINARY_EXPR then return nil end
+	local op = n.data[0]
+	if op ~= OP_EQ and op ~= OP_NE then return nil end
+	if negated then return nil end
+	local lhs = ctx.nodes:get(n.data[1])
+	local rhs = ctx.nodes:get(n.data[2])
+
+	local nil_check = extract_nil_check_fp(lhs, rhs, op) or extract_nil_check_fp(rhs, lhs, op)
+	if nil_check then return nil_check end
+
+	return extract_type_check_fp(ctx, lhs, rhs, op) or extract_type_check_fp(ctx, rhs, lhs, op)
+end
+
+-- The declared-union member name a guard's `target` removes: a truthiness
+-- guard's target is the marker "falsy" (not a literal member name), and it
+-- always removes "nil". Duplicated from prover_narrow.lua's own
+-- `member_removed_by`.
+--: (string) -> string
+local function member_removed_by_fp(target)
+	if target == "falsy" then return "nil" end
+	return target
+end
+
+--:: WalkState = {
+--::   node: CertNode, point: Term, term: Term, sub_node: CertNode, h1_live: boolean,
+--:: }
+
+local walk_stmts --: ((EmitCtx, Term, Term, integer, ScopeVar, Ctx, integer[], integer, integer, WalkState, boolean, boolean) -> (WalkState, boolean, string | nil)) | nil
+
+-- Walk a flat statement list -- the loop body itself (`allow_if = true`), or
+-- a single if/else branch's own body reached from there (`allow_if = false`
+-- -- one level of nesting only, see below) -- threading a running
+-- `WalkState` through each statement via the persistence/assignment-transfer
+-- rules this module's header documents. Returns the end state, or
+-- `ok = false` + a taxonomy-stable `fail_reason` on the first unrecognized/
+-- out-of-scope statement (chain abandoned there, honestly -- never a
+-- fabricated fact, per the fixpoint proposal's §8.3 correction).
+--
+-- ── Control-flow chaining (if/else), added here ──────────────────────────
+--
+-- A `NODE_IF_STMT` with exactly one clause (no elseif -- see below) is
+-- handled by deriving each branch's own fact independently, then merging via
+-- the fixpoint theory's join rule
+-- (docs/typechecker-v10-fixpoint-proposal.md §4, `cf_join`/`narrow-join`,
+-- already declared in fixpoint_v1.lua's v3 signature bump). Both branches
+-- are ALWAYS re-grounded fresh via `pilot-initial-facts-v1` asserting the
+-- DECLARED union `Tinv` at the if-statement's own point (`Pg =
+-- entry_of(if_stmt_path)`) -- this is always honest regardless of what
+-- narrower fact (if any) was already known for `X` entering the if, because
+-- `Tinv` is `X`'s SCOPE-WIDE declared type for its whole enclosing scope
+-- (see this module's own precedent for `PreLoop := LH`, and
+-- prover_narrow.lua's header on `--:` annotations being scope-wide, never
+-- merely describing an initial value) -- never a claim that some OTHER,
+-- narrower fact is what holds at that point. Consequence: `h1_live` is
+-- unconditionally severed (set false) the moment an if-statement is
+-- processed, regardless of its value entering the if -- the same
+-- degenerate/vacuous-discharge reading this module's header already
+-- documents for a literal reassignment, extended identically here (neither
+-- branch's own derivation traces back to `h1`; vacuous discharge is fully
+-- legal per the theory).
+--
+-- A guard on the tracked variable `X` narrows via `narrow-select-match`/
+-- `narrow-select-rest` (flow_narrow_v1's rules, unchanged in the v3
+-- signature bump) exactly as prover.lua's own existing narrowing prover
+-- does, reusing the SAME structural-first-member scope limit pilot has
+-- always had (prover_narrow.lua's own header: a guard only narrows when its
+-- target is the union's own STRUCTURALLY FIRST declared member -- since
+-- this module always re-grounds to `Tinv` in DECLARED member order, this is
+-- simply `guard target == sv.members[1]`). A guard recognized on a
+-- DIFFERENT variable, or whose target isn't the first declared member, or
+-- that isn't one of the three recognized shapes at all, or whose own
+-- variable reference is inside an already-shadowed region (see
+-- `already_shadowed` below), is NOT treated as an error -- it degrades to
+-- the UNGUARDED reading (both branches simply get `Tinv`, always honest,
+-- merely less precise) rather than aborting the chain.
+--
+-- Each branch's own body is walked via THIS SAME function with
+-- `allow_if = false`: a nested if/while/for/etc. inside a branch falls
+-- through to the SAME generic "control-flow statement breaks persistence
+-- chaining" reason as any other unrecognized top-level construct (one level
+-- of if/else chaining only, per the brief's own taxonomy: "nested if"
+-- defeats analysis). An `elseif` chain (`clauses_len > 1`) is ALSO a
+-- counted skip, a distinct, explicitly out-of-scope case: the join rule as
+-- designed (docs/typechecker-v10-fixpoint-proposal.md §4) is strictly
+-- binary; chaining an N-way join was not designed there and is not invented
+-- here.
+--
+-- An if-branch with an empty body needs no special case at all: this same
+-- function, called with `stmt_len = 0`, returns the entry state UNCHANGED
+-- (the `for` loop simply never runs) -- `cf_join`'s own Pa/Pb are honestly
+-- satisfied by using the branch's ENTRY point directly in that case (no
+-- axiom relating entry_of/exit_of of the same path is needed, unlike the
+-- empty-LOOP-body case, because `cf_join` never required an "exit_of a
+-- block" reading to begin with -- see docs/typechecker-v10-fixpoint-
+-- proposal.md §4.1, which only fixes a READING for the non-empty case).
+--
+-- ── Shadowing across the if-statement (`already_shadowed`) ───────────────
+--
+-- `already_shadowed`, when true, means the OUTER context (before this
+-- `walk_stmts` call even starts) has ALREADY shadowed `name_id` -- every
+-- occurrence of that intern id within THIS statement list (including one
+-- inside a nested if-statement's own branches, recursively) refers to the
+-- shadow, never the tracked `X`. This is threaded all the way down into a
+-- branch's own recursive `walk_stmts` call (forcing its own local
+-- `shadow_index` to 0, i.e. shadowed from its very first statement) --
+-- otherwise a branch that does NOT itself redeclare `name_id` would wrongly
+-- treat an assignment to the (already-shadowed) name as touching the
+-- tracked `X`'s own identity path: a genuinely FALSE `assign_literal`/
+-- `assign_copies` axiom citation, the one thing this module's header calls
+-- out as unforgivable. Guard recognition on the if-statement's own test is
+-- likewise suppressed when `already_shadowed` (an identifier match there is
+-- the shadow, not `X`) -- falls back to the always-safe unguarded reading,
+-- never treated as an error.
+--: (EmitCtx, Term, Term, integer, ScopeVar, Ctx, integer[], integer, integer, WalkState, boolean, boolean) -> (WalkState, boolean, string | nil)
+walk_stmts = function(ectx, x_path, tinv_term, name_id, sv, ctx, block_path, stmt_start, stmt_len, state, already_shadowed, allow_if)
+	if not walk_stmts then return state, false, "internal: walk_stmts not yet bound" end
+	local addr_ops, vocab = ectx.addr_ops, ectx.vocab
+	local shadow_index = already_shadowed and 0 or shadow_index_for(ctx, stmt_start, stmt_len, name_id)
+
+	local cur_node, cur_point, cur_term, cur_sub_node, h1_live =
+		state.node, state.point, state.term, state.sub_node, state.h1_live
+
+	for i = 0, stmt_len - 1 do
+		local stmt_path = extend_path(block_path, i)
+		local nid = ctx.lists:get(stmt_start + i)
+		local n = ctx.nodes:get(nid)
+		local kind = n.kind
+		local shadowed = i >= shadow_index
+
+		local stmt_path_term, sperr = path_of(addr_ops, stmt_path)
+		if not stmt_path_term then
+			return state, false, "failed to build statement path: " .. tostring(sperr)
+		end
+		local new_point, neperr = prover_addr.exit(addr_ops, ectx.file_id, stmt_path_term)
+		if not new_point then
+			return state, false, "failed to build statement exit point: " .. tostring(neperr)
+		end
+
+		if kind == NODE_LOCAL_STMT or kind == NODE_EXPR_STMT then
+			local node, perr = persist(ectx, cur_node, cur_point, new_point, x_path)
+			if not node then return state, false, perr end
+			cur_node, cur_point = node, new_point
+
+		elseif kind == NODE_ASSIGN_STMT then
+			local tl, el = n.data[1], n.data[3]
+			local targets_start, values_start = n.data[0], n.data[2]
+			local targets_include_x = false
+			if not shadowed then
+				for t = 0, tl - 1 do
+					local tnid = ctx.lists:get(targets_start + t)
+					local tn = ctx.nodes:get(tnid)
+					if tn.kind == NODE_IDENTIFIER and tn.data[0] == name_id then
+						targets_include_x = true
+					end
+				end
+			end
+			if not targets_include_x then
+				local node, perr = persist(ectx, cur_node, cur_point, new_point, x_path)
+				if not node then return state, false, perr end
+				cur_node, cur_point = node, new_point
+			elseif tl ~= 1 or el ~= 1 then
+				return state, false, "multi-target/multi-value assignment to the invariant variable (out of scope)"
+			else
+				local rhs_nid = ctx.lists:get(values_start)
+				local rhs = ctx.nodes:get(rhs_nid)
+				local literal_tagname = rhs.kind == NODE_LITERAL and literal_tag_name(rhs) or nil
+				-- TYPECHECKER WORKAROUND: a plain truthy/`~= nil` check on
+				-- `literal_tagname` does not narrow away `nil` here (same
+				-- gotcha prover.lua's header documents for its own
+				-- `match_path`/`rest_path` locals) -- `type(x) == "string"`
+				-- narrows correctly. See TODO.md.
+				if type(literal_tagname) == "string" then
+					local tagname = literal_tagname
+					local tag_term, tterr = literal_tag_term(vocab, tagname)
+					if not tag_term then return state, false, "failed to build literal tag: " .. tostring(tterr) end
+					local fact = { kind = "axiom", axiom = vocab.ax_assign_literal_facts,
+						bindings = { Pa = new_point, X = x_path, Tag = tag_term } } --[[: CertNode ]]
+					local node = { kind = "rule", rule = vocab.rule_assign_literal_transfer, premises = { fact } } --[[: CertNode ]]
+					local result, rerr = rl.observe(ectx.rp, node)
+					if not result then
+						return state, false, "replay rejected assign-literal-transfer: " .. tostring(rerr)
+					end
+					local ty_of_tag, toerr = vocab.TyOf(tag_term)
+					if not ty_of_tag then return state, false, "failed to build ty_of(tag): " .. tostring(toerr) end
+					local member_name = declared_member_name_for_literal(tagname)
+					local lit_sub_node, serr = build_ty_sub_to_union(vocab, member_name, sv.members, tinv_term)
+					if not lit_sub_node then return state, false, serr or "failed to build ty_sub(Tp, Tinv)" end
+					cur_node, cur_point, cur_term, cur_sub_node = node, new_point, ty_of_tag, lit_sub_node
+					h1_live = false
+				elseif rhs.kind == NODE_IDENTIFIER then
+					-- Known scope reduction (module header): neither
+					-- self-copy nor cross-variable copy is attempted.
+					return state, false, "copy source not independently established at the assign point"
+				else
+					return state, false, "assignment RHS out of scope (not literal or bare-identifier copy)"
+				end
+			end
+
+		elseif kind == NODE_IF_STMT and allow_if then
+			local clauses_len = n.data[1]
+			if clauses_len ~= 1 then
+				return state, false, "elseif chain in loop body not yet supported for branch-join chaining (out of scope)"
+			end
+			local has_else = band(n.flags, FLAG_HAS_ELSE) ~= 0
+			local clauses_start, else_start, else_len = n.data[0], n.data[2], n.data[3]
+			local clause_nid = ctx.lists:get(clauses_start)
+			local cl = ctx.nodes:get(clause_nid)
+			local test_nid, then_start, then_len = cl.data[0], cl.data[1], cl.data[2]
+			local then_body_path = extend_path(stmt_path, prover_addr.if_clause_body_index(0))
+			local else_body_path = extend_path(stmt_path, prover_addr.if_else_index(1))
+
+			local pg, pgerr = prover_addr.entry(addr_ops, ectx.file_id, stmt_path_term)
+			if not pg then return state, false, "failed to build if-statement guard point: " .. tostring(pgerr) end
+			local init_node_g = { kind = "axiom", axiom = ectx.ax_initial,
+				bindings = { P = pg, X = x_path, T = tinv_term } } --[[: CertNode ]]
+
+			local guard_hit = (not shadowed) and extract_guard_fp(ctx, test_nid) or nil
+			local is_guarded = false
+			local guard_then_is_match = false
+			local ta_term --[[: Term | nil ]]
+			local rest_term --[[: Term | nil ]]
+			if guard_hit and guard_hit.var_name_id == name_id
+				and member_removed_by_fp(guard_hit.target) == sv.members[1] then
+				local tag_ty, tterr = tag_term_of(vocab, sv.members[1])
+				local rest_ty, rerr = suffix_union(vocab, sv.members, 2)
+				if tag_ty and rest_ty then
+					ta_term, rest_term, is_guarded = tag_ty, rest_ty, true
+					guard_then_is_match = guard_hit.then_is_match
+				end
+			end
+
+			local then_term --[[: Term ]]
+			local then_sub_node --[[: CertNode ]]
+			local then_use_match --[[: boolean ]]
+			local else_term --[[: Term ]]
+			local else_sub_node --[[: CertNode ]]
+			local else_use_match --[[: boolean ]]
+			if is_guarded and type(ta_term) == "table" and type(rest_term) == "table" then
+				local ta_ty = ta_term
+				local rest_ty = rest_term
+				local ta_sub_node, ta_serr = build_ty_sub_to_union(vocab, sv.members[1], sv.members, tinv_term)
+				if not ta_sub_node then return state, false, ta_serr or "failed to build ty_sub(TA, Tinv)" end
+				local rest_sub_node = { kind = "axiom", axiom = vocab.ax_ty_sub_union_here_right,
+					bindings = { X = ta_ty, B = rest_ty } } --[[: CertNode ]]
+				if guard_then_is_match then
+					then_term, then_sub_node, then_use_match = ta_ty, ta_sub_node, true
+					else_term, else_sub_node, else_use_match = rest_ty, rest_sub_node, false
+				else
+					then_term, then_sub_node, then_use_match = rest_ty, rest_sub_node, false
+					else_term, else_sub_node, else_use_match = ta_ty, ta_sub_node, true
+				end
+			else
+				is_guarded = false
+				local refl_tinv = { kind = "axiom", axiom = vocab.ax_ty_sub_refl, bindings = { A = tinv_term } } --[[: CertNode ]]
+				then_term, then_sub_node, then_use_match = tinv_term, refl_tinv, false
+				else_term, else_sub_node, else_use_match = tinv_term, refl_tinv, false
+			end
+
+			local then_body_term, tbterr = path_of(addr_ops, then_body_path)
+			if not then_body_term then return state, false, "failed to build then-branch body path: " .. tostring(tbterr) end
+			local then_entry_point, tepterr = prover_addr.entry(addr_ops, ectx.file_id, then_body_term)
+			if not then_entry_point then return state, false, "failed to build then-branch entry point: " .. tostring(tepterr) end
+
+			local else_entry_point --[[: Term ]]
+			if has_else then
+				local else_body_term, ebterr = path_of(addr_ops, else_body_path)
+				if not else_body_term then return state, false, "failed to build else-branch body path: " .. tostring(ebterr) end
+				local eep, eeperr = prover_addr.entry(addr_ops, ectx.file_id, else_body_term)
+				if not eep then return state, false, "failed to build else-branch entry point: " .. tostring(eeperr) end
+				else_entry_point = eep
+			else
+				-- No else block: the implicit "control skipped the if"
+				-- edge is honestly anchored at the if's own guard point
+				-- (see module header) -- no real branch body to walk.
+				else_entry_point = pg
+			end
+
+			--: (integer[], integer, integer, Term, Term, CertNode, boolean) -> (WalkState | nil, string | nil)
+			local function branch_state(branch_block_path, branch_start, branch_len, entry_point, entry_term, entry_sub_node, use_match)
+				local entry_node --[[: CertNode ]]
+				if is_guarded and type(ta_term) == "table" then
+					local ta_ty = ta_term
+					local fact = { kind = "axiom", axiom = vocab.ax_syntax_facts,
+						bindings = { Pg = pg, Pb = entry_point, X = x_path, TA = ta_ty } } --[[: CertNode ]]
+					local rule = use_match and vocab.rule_match or vocab.rule_rest
+					entry_node = { kind = "rule", rule = rule, premises = { init_node_g, fact } } --[[: CertNode ]]
+				else
+					entry_node = { kind = "axiom", axiom = ectx.ax_initial,
+						bindings = { P = entry_point, X = x_path, T = tinv_term } } --[[: CertNode ]]
+				end
+				local result, rerr = rl.observe(ectx.rp, entry_node)
+				if not result then
+					return nil, "replay rejected an if-branch entry citation: " .. tostring(rerr)
+				end
+				local branch_state_in = {
+					node = entry_node, point = entry_point, term = entry_term, sub_node = entry_sub_node, h1_live = false,
+				} --[[: WalkState ]]
+				if not walk_stmts then return nil, "internal: walk_stmts not yet bound" end
+				local out_state, bok, berr = walk_stmts(
+					ectx, x_path, tinv_term, name_id, sv, ctx, branch_block_path, branch_start, branch_len,
+					branch_state_in, shadowed, false)
+				if not bok then return nil, berr end
+				return out_state, nil
+			end
+
+			local then_out, then_err = branch_state(then_body_path, then_start, then_len, then_entry_point, then_term, then_sub_node, then_use_match)
+			if not then_out then return state, false, then_err end
+
+			local else_out, else_err
+			if has_else then
+				else_out, else_err = branch_state(else_body_path, else_start, else_len, else_entry_point, else_term, else_sub_node, else_use_match)
+			else
+				-- No real else body: a zero-statement walk over the
+				-- (unused) if-statement's own path is a no-op, returning
+				-- the entry state right back (see module header).
+				else_out, else_err = branch_state(stmt_path, 0, 0, else_entry_point, else_term, else_sub_node, else_use_match)
+			end
+			if not else_out then return state, false, else_err end
+
+			local pj = new_point
+			local cf_fact = { kind = "axiom", axiom = vocab.ax_cf_join_facts,
+				bindings = { Pa = then_out.point, Pb = else_out.point, Pj = pj } } --[[: CertNode ]]
+			local join_node = { kind = "rule", rule = vocab.rule_narrow_join,
+				premises = { then_out.node, else_out.node, cf_fact } } --[[: CertNode ]]
+			local jresult, jrerr = rl.observe(ectx.rp, join_node)
+			if not jresult then
+				return state, false, "replay rejected a narrow-join citation: " .. tostring(jrerr)
+			end
+
+			local union_term, uerr = vocab.TyUnion(then_out.term, else_out.term)
+			if not union_term then return state, false, "failed to build ty_union(A,B) for join: " .. tostring(uerr) end
+
+			local joined_sub_node = { kind = "rule", rule = vocab.rule_ty_sub_union_of_subsets,
+				premises = { then_out.sub_node, else_out.sub_node } } --[[: CertNode ]]
+			local sresult, srerr = rl.observe(ectx.rp, joined_sub_node)
+			if not sresult then
+				return state, false, "replay rejected a ty-sub-union-of-subsets citation after a branch join: " .. tostring(srerr)
+			end
+
+			cur_node, cur_point, cur_term, cur_sub_node = join_node, pj, union_term, joined_sub_node
+			h1_live = false
+
+		else
+			return state, false, "control-flow statement breaks persistence chaining (out of scope)"
+		end
+	end
+
+	return { node = cur_node, point = cur_point, term = cur_term, sub_node = cur_sub_node, h1_live = h1_live }, true, nil
+end
+
 local attempt_loop_invariant --: ((EmitCtx, integer[], integer, integer, Ctx, integer, ScopeVar) -> ()) | nil
 
 --: (EmitCtx, integer[], integer, integer, Ctx, integer, ScopeVar) -> ()
@@ -490,159 +914,21 @@ attempt_loop_invariant = function(ectx, body_path, body_start, body_len, ctx, na
 	if not h1_judgment then skip("failed to build LH hypothesis judgment: " .. tostring(h1jerr)) return end
 	local h1 = { kind = "hypothesis", judgment = h1_judgment } --[[: CertNode ]]
 
-	local shadow_index = shadow_index_for(ctx, body_start, body_len, name_id)
+	local init_sub_node = { kind = "axiom", axiom = vocab.ax_ty_sub_refl, bindings = { A = tinv_term } } --[[: CertNode ]]
+	local init_state = { node = h1, point = lh, term = tinv_term, sub_node = init_sub_node, h1_live = true } --[[: WalkState ]]
 
-	local cur_node = h1
-	local cur_point = lh
-	local cur_term = tinv_term
-	-- `cur_tag_name` tracks the DECLARED-UNION member name (see
-	-- `declared_member_name_for_literal`) of the last literal transferred,
-	-- or nil while the running fact is still exactly `Tinv` (persistence
-	-- only, no reassignment has touched X yet).
-	local cur_tag_name = nil --[[: string | nil ]]
-	-- `h1_live`: whether `cur_node`'s own derivation tree still traces
-	-- back to `h1` (the assumed invariant hypothesis). `seq-persist`
-	-- always carries the PRIOR `cur_node` forward as its own premise, so
-	-- persistence steps preserve this; `assign-literal-transfer` builds a
-	-- BRAND NEW, axiom-grounded derivation with NO reference to the prior
-	-- `cur_node` at all, severing the dependency permanently (once false,
-	-- stays false -- a later persist step only carries the LITERAL fact
-	-- forward, never resurrects `h1`). The root's discharge citation must
-	-- be OMITTED (vacuous -- `M.replay`'s own explicitly legal case) when
-	-- `h1_live` is false at the end of the walk: citing `{h1}` against a
-	-- premise 2 that no longer has `h1` in its open set is rejected by
-	-- `replay_rule`'s own discharge-citation check ("cites a hypothesis
-	-- not open in premise 2"). This is not a special case invented here --
-	-- it is the theory's own degenerate/base-case reading: when the
-	-- back-edge fact is derived WITHOUT depending on the assumed
-	-- invariant at all (a literal reassignment need not read the
-	-- variable's own prior value), the coinductive discharge is
-	-- vacuously satisfied, and `holds_at(LH,X,Tinv)` is licensed by the
-	-- rule either way (its own entry-fact premise, P3, already grounds
-	-- `LH` directly via `pilot-initial-facts-v1`).
-	local h1_live = true
-	local ok = true
-	local fail_reason = nil --[[: string | nil ]]
-	local last_stmt_path = nil --[[: integer[] | nil ]]
-
-	for i = 0, body_len - 1 do
-		local stmt_path = extend_path(body_path, i)
-		last_stmt_path = stmt_path
-		local nid = ctx.lists:get(body_start + i)
-		local n = ctx.nodes:get(nid)
-		local kind = n.kind
-		local shadowed = i >= shadow_index
-
-		local stmt_path_term, sperr = path_of(addr_ops, stmt_path)
-		if not stmt_path_term then
-			ok = false fail_reason = "failed to build statement path: " .. tostring(sperr) break
-		end
-		local new_point, neperr = prover_addr.exit(addr_ops, ectx.file_id, stmt_path_term)
-		if not new_point then
-			ok = false fail_reason = "failed to build statement exit point: " .. tostring(neperr) break
-		end
-
-		if kind == NODE_LOCAL_STMT then
-			local node, perr = persist(ectx, cur_node, cur_point, new_point, x_path)
-			if not node then ok = false fail_reason = perr break end
-			cur_node, cur_point = node, new_point
-
-		elseif kind == NODE_EXPR_STMT then
-			local node, perr = persist(ectx, cur_node, cur_point, new_point, x_path)
-			if not node then ok = false fail_reason = perr break end
-			cur_node, cur_point = node, new_point
-
-		elseif kind == NODE_ASSIGN_STMT then
-			local tl, el = n.data[1], n.data[3]
-			local targets_start, values_start = n.data[0], n.data[2]
-			local targets_include_x = false
-			if not shadowed then
-				for t = 0, tl - 1 do
-					local tnid = ctx.lists:get(targets_start + t)
-					local tn = ctx.nodes:get(tnid)
-					if tn.kind == NODE_IDENTIFIER and tn.data[0] == name_id then
-						targets_include_x = true
-					end
-				end
-			end
-			if not targets_include_x then
-				local node, perr = persist(ectx, cur_node, cur_point, new_point, x_path)
-				if not node then ok = false fail_reason = perr break end
-				cur_node, cur_point = node, new_point
-			elseif tl ~= 1 or el ~= 1 then
-				ok = false
-				fail_reason = "multi-target/multi-value assignment to the invariant variable (out of scope)"
-				break
-			else
-				local rhs_nid = ctx.lists:get(values_start)
-				local rhs = ctx.nodes:get(rhs_nid)
-				local literal_tagname = rhs.kind == NODE_LITERAL and literal_tag_name(rhs) or nil
-				-- TYPECHECKER WORKAROUND: a plain truthy/`~= nil` check on
-				-- `literal_tagname` does not narrow away `nil` here (same
-				-- gotcha prover.lua's header documents for its own
-				-- `match_path`/`rest_path` locals) -- `type(x) == "string"`
-				-- narrows correctly. See TODO.md.
-				if type(literal_tagname) == "string" then
-					local tagname = literal_tagname
-					local tag_term, tterr = literal_tag_term(vocab, tagname)
-					if not tag_term then ok = false fail_reason = "failed to build literal tag: " .. tostring(tterr) break end
-					local fact = { kind = "axiom", axiom = vocab.ax_assign_literal_facts,
-						bindings = { Pa = new_point, X = x_path, Tag = tag_term } } --[[: CertNode ]]
-					local node = { kind = "rule", rule = vocab.rule_assign_literal_transfer, premises = { fact } } --[[: CertNode ]]
-					local result, rerr = rl.observe(ectx.rp, node)
-					if not result then
-						ok = false fail_reason = "replay rejected assign-literal-transfer: " .. tostring(rerr) break
-					end
-					local ty_of_tag, toerr = vocab.TyOf(tag_term)
-					if not ty_of_tag then ok = false fail_reason = "failed to build ty_of(tag): " .. tostring(toerr) break end
-					cur_node, cur_point, cur_term = node, new_point, ty_of_tag
-					cur_tag_name = declared_member_name_for_literal(tagname)
-					h1_live = false
-				elseif rhs.kind == NODE_IDENTIFIER then
-					-- Known scope reduction (module header): neither
-					-- self-copy nor cross-variable copy is attempted.
-					ok = false
-					fail_reason = "copy source not independently established at the assign point"
-					break
-				else
-					ok = false
-					fail_reason = "assignment RHS out of scope (not literal or bare-identifier copy)"
-					break
-				end
-			end
-		else
-			ok = false
-			fail_reason = "control-flow statement breaks persistence chaining (out of scope)"
-			break
-		end
-	end
-
+	if not walk_stmts then skip("internal: walk_stmts not yet bound") return end
+	local final_state, ok, fail_reason = walk_stmts(
+		ectx, x_path, tinv_term, name_id, sv, ctx, body_path, body_start, body_len, init_state, false, true)
 	if not ok then
 		skip(fail_reason or "unknown persistence-chain failure")
 		return
 	end
-	if not last_stmt_path then
-		skip("empty loop body: no persistence chain from loop head to back edge under this theory")
-		return
-	end
 
-	local be = cur_point
-
-	-- ty_sub(Tp, Tinv): either Tp == Tinv syntactically (persistence only,
-	-- no reassignment touched X), or Tp is a single literal tag that must
-	-- be shown a member of Tinv's declared spine.
-	local sub_node = nil --[[: CertNode | nil ]]
-	if cur_tag_name == nil then
-		-- Persistence only: Tp is syntactically Tinv.
-		sub_node = { kind = "axiom", axiom = vocab.ax_ty_sub_refl, bindings = { A = tinv_term } } --[[: CertNode ]]
-	else
-		local node, serr = build_ty_sub_to_union(vocab, cur_tag_name, sv.members, tinv_term)
-		if not node then
-			skip(serr or "failed to build ty_sub(Tp, Tinv)")
-			return
-		end
-		sub_node = node
-	end
+	local be = final_state.point
+	local cur_node = final_state.node
+	local sub_node = final_state.sub_node
+	local h1_live = final_state.h1_live
 
 	local p0 = { kind = "axiom", axiom = vocab.ax_loop_facts, bindings = { LH = lh, BE = be } } --[[: CertNode ]]
 	local p3 = { kind = "axiom", axiom = ectx.ax_initial, bindings = { P = lh, X = x_path, T = tinv_term } } --[[: CertNode ]]

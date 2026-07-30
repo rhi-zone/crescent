@@ -70,7 +70,7 @@ end
 		T.ok((result.stats.loop_skipped["assignment RHS out of scope (not literal or bare-identifier copy)"] or 0) >= 1)
 	end)
 
-	T.it("skips: a nested `if` inside the loop body breaks persistence chaining", function()
+	T.it("ROOT-REPLAYS: else-less if with a literal reassignment, joined against the pre-if fact", function()
 		local source = [[
 local function outer()
 	local x --: number | nil
@@ -84,8 +84,129 @@ end
 		local result, err = fp.analyze_file(source, "fixture.lua")
 		T.ok(result, err)
 		if result == nil then return end
+		T.eq(result.stats.loop_vars_certified, 1)
+		T.eq(#result.judgments, 1)
+	end)
+
+	T.it("ROOT-REPLAYS: if/else with a literal reassignment in one branch, persistence in the other (union join)", function()
+		local source = [[
+local function outer()
+	local x --: number | nil
+	while true do
+		if true then
+			x = nil
+		else
+			noop()
+		end
+	end
+end
+]]
+		local result, err = fp.analyze_file(source, "fixture.lua")
+		T.ok(result, err)
+		if result == nil then return end
+		T.eq(result.stats.loop_vars_certified, 1)
+		T.eq(#result.judgments, 1)
+	end)
+
+	T.it("ROOT-REPLAYS: guard-narrowed branches (type(x)==\"number\" on the structurally-first declared member)", function()
+		local source = [[
+local function outer()
+	local x --: number | nil
+	while true do
+		if type(x) == "number" then
+			noop()
+		else
+			x = nil
+		end
+	end
+end
+]]
+		local result, err = fp.analyze_file(source, "fixture.lua")
+		T.ok(result, err)
+		if result == nil then return end
+		T.eq(result.stats.loop_vars_certified, 1)
+		T.eq(#result.judgments, 1)
+	end)
+
+	T.it("skips: a NESTED `if` (two levels) inside the loop body breaks persistence chaining", function()
+		local source = [[
+local function outer()
+	local x --: number | nil
+	while x do
+		if true then
+			if true then
+				x = nil
+			end
+		end
+	end
+end
+]]
+		local result, err = fp.analyze_file(source, "fixture.lua")
+		T.ok(result, err)
+		if result == nil then return end
 		T.eq(result.stats.loop_vars_certified, 0)
 		T.ok((result.stats.loop_skipped["control-flow statement breaks persistence chaining (out of scope)"] or 0) >= 1)
+	end)
+
+	T.it("skips: an elseif chain (2+ clauses) is out of scope for branch-join chaining", function()
+		local source = [[
+local function outer()
+	local x --: number | nil
+	while x do
+		if true then
+			x = nil
+		elseif false then
+			x = nil
+		end
+	end
+end
+]]
+		local result, err = fp.analyze_file(source, "fixture.lua")
+		T.ok(result, err)
+		if result == nil then return end
+		T.eq(result.stats.loop_vars_certified, 0)
+		T.ok((result.stats.loop_skipped["elseif chain in loop body not yet supported for branch-join chaining (out of scope)"] or 0) >= 1)
+	end)
+
+	T.it("does NOT certify a false invariant: a branch reassigns a type outside the declared union", function()
+		local source = [[
+local function outer()
+	local x --: number | nil
+	while true do
+		if true then
+			x = "oops"
+		end
+	end
+end
+]]
+		local result, err = fp.analyze_file(source, "fixture.lua")
+		T.ok(result, err)
+		if result == nil then return end
+		T.eq(result.stats.loop_vars_certified, 0)
+		T.ok((result.stats.loop_skipped["reassigned type not a member of the declared invariant"] or 0) >= 1)
+	end)
+
+	T.it("ROOT-REPLAYS: full mutation-class loop invariant with a join inside the body, "
+		.. "preceded and followed by ordinary persisting statements", function()
+		local source = [[
+local function outer()
+	local x --: number | nil
+	while x do
+		noop()
+		if type(x) == "number" then
+			x = nil
+		else
+			noop()
+		end
+		noop()
+	end
+end
+]]
+		local result, err = fp.analyze_file(source, "fixture.lua")
+		T.ok(result, err)
+		if result == nil then return end
+		T.eq(result.stats.loop_vars_certified, 1)
+		T.eq(#result.judgments, 1)
 	end)
 
 	T.it("skips: copy from another (untracked) variable is not independently established", function()
