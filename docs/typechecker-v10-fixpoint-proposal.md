@@ -593,3 +593,169 @@ standing instruction, anything requiring a `v10_cleanroom` change would HALT
 to the owner; nothing in this proposal reached that point — every gap found
 was closeable within pilot-territory theory design (`lib/type/v10_kernel/
 pilot/`, not yet implemented, this document only).
+
+---
+
+## 8. Addendum — orchestrator resolutions (fable-delegation-tier, resolves §1.2/§6 open items)
+
+Two of §6's open questions were resolved by the orchestrator after this
+proposal's initial acceptance. Both resolutions and one retraction are
+recorded here verbatim in substance, per this repo's decision-doc
+convention of showing the correction, not just the outcome.
+
+### 8.1 Zero-premise-rule proposal: error and correction
+
+The orchestrator's first-pass resolution of §1.2's taint-cost question
+proposed reframing reflexivity and the two union-here facts (§1.1's
+`ty-sub-refl`, `ty-sub-union-here-left`, `ty-sub-union-here-right`) as
+**zero-premise RULES** rather than axioms, on the stated grounds that "the
+cleanroom core supports them (F11's rejection list is exhaustive)."
+
+This was traced against the actual `declare_rule`/`replay_rule` code
+(`lib/type/v10_cleanroom/replayer.lua:178-246`, `:462-592`) and found
+**structurally false, not merely undesirable**, and retracted:
+
+- `declare_rule` computes `premise_metas` by iterating `spec.premises`
+  (`:184-193`). With `spec.premises = {}` (a true zero-premise rule),
+  `premise_metas` is the empty set unconditionally. A schematic conclusion
+  like `ty_sub(A, A)` has `conclusion.metas = {A}`, and the F11 check
+  (`:197-202`, `{A} ⊆ {}`) rejects it at declaration — this is the exact
+  same mechanism, applied identically, that §1.1 already used to prove the
+  naive union-recursion rule inadmissible. It is not a different case.
+- Independently, `replay_rule` (`:489-504`) builds `bindings` only via
+  `ta.match_into(decl_premises[i], results[i].conclusion, bindings)` for
+  `i = 1, #decl_premises`. With zero premises this loop never runs, so
+  `bindings` stays empty, and `ta.instantiate(decl_conclusion, bindings)`
+  on a conclusion containing a free metavariable errors ("unbound
+  metavariable is an error"). Only **axiom** citations carry a
+  citer-supplied `bindings` table (`replay_axiom`, F12) — rule citations
+  have no channel to supply a binding directly.
+- Conclusion: "zero premises" and "a schematic (metavariable-carrying)
+  conclusion" are mutually exclusive under the ratified kernel as built.
+  There is no fill-in that reconciles them without minting an unstated
+  kernel mechanism — which would be a guess, not a decision, under this
+  repo's halt discipline.
+
+**Adjudicated correction: option (a), unchanged from this proposal's
+original §1.1 text** — reflexivity and both union-here facts remain the
+three schematic AXIOMS as originally derived (`ty-sub-refl`,
+`ty-sub-union-here-left`, `ty-sub-union-here-right`); `ty-sub-trans` and
+`ty-sub-union-of-subsets` remain the two genuine RULES. §1's five-object
+table is unchanged by this addendum — the zero-premise reframing is
+retracted in full, not partially.
+
+### 8.2 Trust rationale for the structural-truth axioms (recorded, not re-opened)
+
+§1.2 flagged as open whether taxing reflexivity/union-here identically to
+a reality-boundary fact (e.g. `pilot-syntax-facts-v1`) is the intended cost
+model. Adjudicated: these three axioms are **the same trust object as the
+theory's own soundness axiom** (the standing assumption, implicit
+throughout this proposal and `flow_narrow_v1.lua` alike, that the pilot's
+rule set is a faithful account of the source language's flow semantics) —
+not a separate, additional assumption. They burn down together, when and
+if theory soundness is ever proved against the prefix; they are not
+individually retireable before that. The resulting taint-label noise
+(these three axiom keys appearing in the trust label of every subsumption
+derivation that uses reflexivity or union membership) is **accepted at
+pilot tier** on this basis — recorded as a deliberate cost, not an
+oversight.
+
+Parked as an **explicitly open OWNER question, not resolved here**:
+whether the kernel should ever gain a distinct "proven-lemma" citation
+kind — a bindings-carrying leaf whose own soundness certificate is
+replayed once (elsewhere, ahead of time), after which citing it contributes
+no per-citation taint, giving untainted structural truths a home distinct
+from reality-boundary axioms. This would touch `lib/type/v10_cleanroom/
+replayer.lua` — kernel-owner territory — and is not acted on by this
+proposal or its addendum.
+
+### 8.3 Sequential flow: design (resolves §6's "completely undesigned" item)
+
+§6 flagged "sequential same-scope forward-flow judgment" as undesigned
+substrate, the actual prerequisite for ever deriving (rather than
+hypothesizing) a loop's pre-loop fact or a join's continuation fact from
+real preceding code. The orchestrator's binding resolution: add this
+within existing mechanisms — a statement-adjacency syntax fact, a
+non-interference syntax fact, and a persistence rule combining them with
+`holds_at`. All three land in the same `narrow-pilot-v1` v3 bump as §2's
+assignment-transfer operators (additive, same idiom as the v1→v2 bump
+documented in `flow_narrow_v1.lua`'s header).
+
+**New operators:**
+
+```
+stmt_seq      (from_point: point, to_point: point) : judgment
+stmt_preserves(from_point: point, to_point: point, var: path) : judgment
+```
+
+`stmt_seq(A, B)` reads: "the parser saw the statement whose own point is
+`B` immediately follow, in the same block, the statement whose own point
+is `A`" — i.e. `A = exit_of(stmt_i's own path)`, `B =
+exit_of(stmt_{i+1}'s own path)` for two syntactically adjacent statements
+(or `A = entry_of(block_path)` when `stmt_i` is the block's first
+statement, per §4.1's already-documented `exit_of`/`entry_of`-of-a-path
+reading — no new addressing primitive, same convention this proposal
+already established for loop/join points).
+
+`stmt_preserves(A, B, X)` reads: "the statement whose execution spans from
+`A` to `B` (i.e. `stmt_{i+1}` in the pairing above) does not assign `X`."
+
+**Design choice made here, within the "exact shape yours, documented"
+latitude the resolution granted:** `stmt_preserves` takes the SAME
+`(from_point, to_point)` pair as `stmt_seq`, rather than an independent
+statement-path argument. This is not free-standing stylistic preference —
+a version with an independent `stmt_path` argument would let an untrusted
+prover cite `stmt_seq(A,B)` for one adjacency and `stmt_preserves(S, X)`
+for an UNRELATED statement `S`, with nothing in the rule forcing `S` to be
+the statement actually spanning `A` to `B` (no metavariable would be
+shared between the two premises at all). Binding `stmt_preserves` to the
+same `A`/`B` metavariables as `stmt_seq` makes them non-linear across
+premises — the same soundness idiom `flow_narrow_v1`'s shared `TA` and
+§3.2's shared `Tinv` already use — so replay's shared binding environment
+mechanically rejects any citation pairing that doesn't agree on which span
+is being asserted non-interfering. This is exactly the class of gap §3.3's
+generalized point-binding principle warns about, caught here before being
+written down wrong, per that same principle's own instruction.
+
+**Reality-boundary axioms** (same idiom as `pilot-syntax-facts-v1` /
+`pilot-loop-facts-v1`, no discharge form):
+
+- `pilot-stmt-seq-facts-v1`: pattern `stmt_seq(A, B)`, fully schematic.
+- `pilot-stmt-preserves-facts-v1`: pattern `stmt_preserves(A, B, X)`, fully
+  schematic. "Non-interference" here means the parser confirmed the
+  statement in question is not a `NODE_ASSIGN_STMT`/`NODE_LOCAL_STMT`
+  naming `X` among its targets/declared names — a purely syntactic check,
+  same trust boundary as every other syntax-facts axiom in this proposal
+  (it does not reason about aliasing, `_G`, metatables, or any semantic
+  effect — a call statement is "preserving" under this fact iff the parser
+  can see it assigns nothing to `X` by name, which is trivially true for
+  any statement kind this pilot does not itself address as an assignment
+  target, e.g. `NODE_IF_STMT`, `NODE_WHILE_STMT` as a whole statement,
+  bare call-statements).
+
+**Persistence rule:**
+
+```
+seq-persist:
+  holds_at(A, X, T), stmt_seq(A, B), stmt_preserves(A, B, X)
+  ⊢ holds_at(B, X, T)
+```
+
+`declare_rule` validity: premise metas `{A,X,T,B}` (shared non-linear `A`
+across all three premises, `B` across the last two, `X` across the first
+and third); conclusion metas `{B,X,T} ⊆ {A,X,T,B}`. Valid, no discharge
+slot (this rule never opens or closes a hypothesis), no point-binding gap
+(`B` is grounded by the `stmt_seq` premise, per §3.3's principle — checked
+explicitly here for the same reason §4's join rule checked it explicitly).
+
+This closes §6's substrate gap for the SAME-BLOCK, straight-line case only:
+chaining `seq-persist` citations statement-by-statement down a block is
+how a fact established early in a block (e.g. an annotated declaration, or
+an assignment-transfer conclusion from §2) reaches a later point in that
+same block, PROVIDED every intervening statement is confirmed
+non-interfering. It does not address control-flow-changing statements
+(`if`, `while`, `break`, `return`) themselves — those remain the loop-edge
+(§3) and join (§4) rules' own territory; `seq-persist` is the connective
+tissue BETWEEN them along ordinary fall-through, not a replacement for
+either.
+
