@@ -140,6 +140,64 @@
 -- reassignment (`x = false`), not a self-copy -- explicitly permitted as
 -- "your choice" by the originating brief.
 --
+-- ── Assignment transfer from an annotated-call RHS ───────────────────────
+--
+-- Per fixpoint_v1.lua's v4 bump (`assign_call`/`pilot-assign-call-facts-v1`/
+-- `assign-call-transfer`): when `NODE_ASSIGN_STMT`/`NODE_LOCAL_STMT` targets
+-- `X` with a call-expression RHS, this module attempts to resolve the
+-- callee STATICALLY AND LOCALLY -- a directly-named (bare-identifier,
+-- non-method) call whose callee resolves, by structural correspondence
+-- only (never guessed), to a SAME-FILE, CHUNK-TOP-LEVEL function
+-- declaration (one of the three function-defining shapes this pilot
+-- already recognizes elsewhere: `NODE_FUNC_DECL` -- covers both
+-- `function f()` and `local function f()`, same node kind, see
+-- lib/type/static/parse.lua's `parse_local_stmt`/`parse_func_decl` --,
+-- `local f = function(...) end`, or `f = function(...) end` with a bare-
+-- identifier target only, never `M.f`/`obj:f`) whose OWN preceding-line
+-- `--: (T1,...) -> R` annotation's `R` parses within the pilot's six-tag-
+-- plus-union vocabulary as a SINGLE return value (a parenthesized,
+-- multi-return `R` -- `-> (A, B)` -- is a counted skip: "first-value-only
+-- scope," per the brief). Every other RHS-call shape (a method call, a
+-- computed/non-identifier callee, a callee with no resolvable top-level
+-- declaration or no/ambiguous annotation, an out-of-vocabulary return
+-- annotation) is a counted skip, never a fabricated axiom citation --
+-- exactly the "never emit a fact not structurally verified from the parse"
+-- law this module already holds itself to for every other citation.
+--
+-- **Reported, NOT-closed soundness scope limit (structural, not a guess by
+-- omission -- flagged plainly, same discipline as the two assign-copy-
+-- transfer gaps above):** callee-name shadowing is checked ONLY within the
+-- CURRENT flat statement list this module is already walking (the loop
+-- body, or the current if/else branch) -- via `shadow_index_for`, the SAME
+-- mechanism and SAME granularity already used for `X`'s own shadow safety.
+-- For `X`, block-local checking is actually SOUND on its own: prover_narrow
+-- .lua's own scope-threading already resolves `X`'s identity correctly
+-- relative to everything OUTSIDE the loop body (real Lua block scoping:
+-- an inner block's own locals cannot leak out to shadow an outer name, so
+-- checking only the block currently being walked is exactly right, at
+-- every level, chained). The callee name has NO such upstream resolution
+-- machinery -- prover_narrow.lua tracks only `--:`-annotated six-tag-union
+-- locals/parameters, never arbitrary identifiers -- so this module's own
+-- block-local check does NOT protect against the callee name being
+-- shadowed by an ENCLOSING function's own parameter or an earlier local in
+-- an OUTER block between the chunk root and this loop (a full lexical
+-- scope-chain walk over EVERY identifier, not just tracked ones, is
+-- substrate this pilot does not have -- building it is a separate,
+-- materially larger undertaking than "one transfer rule mirroring
+-- assign_literal," analogous in kind to the fixpoint proposal's own §6
+-- "sequential-flow judgment is completely undesigned" finding: a real gap
+-- surfaced by trying to write this down, not resolved here). Consequence:
+-- a pathological file where an enclosing function's own parameter (or an
+-- outer local, declared before the loop, at a shallower nesting level than
+-- this module inspects) reuses a chunk-top-level function's name could, in
+-- principle, cause this module to cite a call-return-type fact for the
+-- WRONG function. No such case was found in Run 5's real corpus (every
+-- certified call-RHS pair was hand-verified against the actual callee, not
+-- merely the resolved one -- see the measurement report), but the
+-- limitation is not eliminated by construction, only by absence in this
+-- corpus, and is reported to the orchestrator as exactly that: an open,
+-- unresolved scope boundary, not a guess dressed up as a decision.
+--
 -- ── Another reported gap: the empty-loop-body edge case ──────────────────
 --
 -- A body with zero statements has no `stmt_seq` adjacency to bridge
@@ -174,6 +232,9 @@ local NODE_LITERAL     = defs.NODE_LITERAL
 local NODE_BINARY_EXPR = defs.NODE_BINARY_EXPR
 local NODE_UNARY_EXPR  = defs.NODE_UNARY_EXPR
 local NODE_CALL_EXPR   = defs.NODE_CALL_EXPR
+local NODE_METHOD_CALL = defs.NODE_METHOD_CALL
+local NODE_FUNC_DECL   = defs.NODE_FUNC_DECL
+local NODE_FUNC_EXPR   = defs.NODE_FUNC_EXPR
 
 local OP_EQ  = defs.OP_EQ
 local OP_NE  = defs.OP_NE
@@ -273,15 +334,29 @@ local function tag_term_of(vocab, tag)
 	return vocab.TyOf(t)
 end
 
+-- BUGFIX (found while adding v4's call-RHS multi-member combinator, see
+-- module header and TODO.md): this function's own comment above already
+-- claimed "right-associated," but the code as written accumulated
+-- LEFT-to-right (`term = TyUnion(term, next_term)`, folding forward) --
+-- structurally identical to a right fold ONLY when `members` has exactly
+-- 2 entries (the overwhelming common real-world/test case to date, which
+-- is why this went undetected through runs 1-4's entire measurement
+-- history and every hand-built theory test). For 3+ members the two folds
+-- produce DIFFERENT terms, and `build_ty_sub_to_union`'s own trans-
+-- chaining loop below structurally REQUIRES the true right fold (each
+-- step's invariant is `suffix_union(i) == ty_union(members[i],
+-- suffix_union(i+1))`, which only a right fold satisfies) -- exposed by
+-- this v4 work's own first-ever 3-member-union fixture. Fixed here by
+-- folding from the LAST member backward.
 --: (FixpointVocab, string[]) -> (Term | nil, string | nil)
 local function build_declared_union(vocab, members)
 	if #members == 0 then return nil, "build_declared_union: empty member list" end
-	local term, err = tag_term_of(vocab, members[1])
+	local term, err = tag_term_of(vocab, members[#members])
 	if not term then return nil, err end
-	for i = 2, #members do
-		local next_term, nerr = tag_term_of(vocab, members[i])
-		if not next_term then return nil, nerr end
-		term, err = vocab.TyUnion(term, next_term)
+	for i = #members - 1, 1, -1 do
+		local head_term, herr = tag_term_of(vocab, members[i])
+		if not head_term then return nil, herr end
+		term, err = vocab.TyUnion(head_term, term)
 		if not term then return nil, err end
 	end
 	return term
@@ -304,14 +379,16 @@ end
 -- because the branch-join handling below (control-flow chaining) also needs
 -- it directly, to build a guard's own `Rest` term without going through a
 -- literal-reassignment's tag first.
+-- BUGFIX: same left-vs-right-fold defect as `build_declared_union` above
+-- (identical root cause, same fix -- fold from the last member backward).
 --: (FixpointVocab, string[], integer) -> (Term | nil, string | nil)
 local function suffix_union(vocab, members, from)
-	local term, err = tag_term_of(vocab, members[from])
+	local term, err = tag_term_of(vocab, members[#members])
 	if not term then return nil, err end
-	for i = from + 1, #members do
-		local next_term, nerr = tag_term_of(vocab, members[i])
-		if not next_term then return nil, nerr end
-		term, err = vocab.TyUnion(term, next_term)
+	for i = #members - 1, from, -1 do
+		local head_term, herr = tag_term_of(vocab, members[i])
+		if not head_term then return nil, herr end
+		term, err = vocab.TyUnion(head_term, term)
 		if not term then return nil, err end
 	end
 	return term
@@ -373,9 +450,27 @@ local function build_ty_sub_to_union(vocab, tag, members, tinv_term)
 	return node
 end
 
+-- One entry per distinct name_id declared by a CHUNK-TOP-LEVEL function-
+-- defining statement (see module header). `count > 1` means the name is
+-- declared more than once at chunk top level -- ambiguous, never resolved.
+--:: TopLevelFuncEntry = { count: integer, decl_line: integer }
+--:: TopLevelFuncIndex = { [integer]: TopLevelFuncEntry }
+
+-- Same shape as prover_narrow.lua's own (unexported) `Ctx` -- `lexer` typed
+-- precisely (not `unknown`, unlike THIS module's own `Ctx` above, which
+-- never previously needed to look inside `lexer`) because
+-- `find_preceding_func_annotation_fp` indexes `ctx0.lexer.annotations`
+-- directly, mirroring prover_narrow.lua's own `find_preceding_func_annotation`.
+--:: Ctx0 = {
+--::   nodes: ASTNodeArena, lists: ListPool, pool: Pool,
+--::   lexer: { annotations: { [integer]: { kind: integer, content: string } } },
+--::   source_lines: string[],
+--:: }
+
 --:: EmitCtx = {
 --::   addr_ops: AddrOps, file_id: Term, vocab: FixpointVocab, ax_initial: AxiomDecl,
 --::   rp: Replayer, stats: Stats, judgments: ReplayResult[],
+--::   toplevel_funcs: TopLevelFuncIndex, ctx0: Ctx0,
 --:: }
 
 -- Find the smallest body-statement index (0-based) at which a
@@ -444,6 +539,241 @@ local function literal_tag_term(vocab, tagname)
 	if tagname == "number" then return vocab.tag_number() end
 	if tagname == "string" then return vocab.tag_string() end
 	return nil, "literal_tag_term: unrecognized literal tag " .. tostring(tagname)
+end
+
+-- ── Assignment transfer from an annotated-call RHS: helpers ──────────────
+-- (see module header). Small pure helpers duplicated from prover_narrow.lua
+-- (same two-pass duplication discipline this module already follows for
+-- `path_of`/`extend_path`/`strip_not`/`extract_guard_fp`/etc.) -- adapted
+-- here to additionally capture the RETURN type `R`, which prover_narrow
+-- .lua's own `parse_param_type_slices` explicitly documents as "never
+-- parsed -- this pilot has no use for it" (true for prover_narrow.lua's own
+-- purposes; not true for this module's).
+
+--: (string) -> string[]
+local function split_source_lines_fp(source)
+	local lines = {} --[[: string[] ]]
+	local i = 1
+	local len = #source
+	while i <= len do
+		local nl = source:find("\n", i, true)
+		if nl then
+			lines[#lines + 1] = source:sub(i, nl - 1)
+			i = nl + 1
+		else
+			lines[#lines + 1] = source:sub(i)
+			break
+		end
+	end
+	return lines
+end
+
+--: (string) -> boolean
+local function is_blank_or_comment_line_fp(line_text)
+	return line_text:match("^%s*$") ~= nil or line_text:match("^%s*%-%-") ~= nil
+end
+
+-- Build the chunk-top-level function-name index (module header): walks
+-- ONLY the file's own root statement list (never recurses into any nested
+-- block) for the three function-defining shapes prover_narrow.lua's own
+-- `analyze_block` already recognizes, restricted here to a BARE-IDENTIFIER
+-- name only (a dotted/method name, e.g. `function M.foo()`/`function
+-- obj:method()`, or an `M.foo = function() end` assignment target, can
+-- never be reached by a bare-identifier call site, so is not indexed at
+-- all -- not a skip, simply not a candidate).
+--: (Ctx0, integer, integer) -> TopLevelFuncIndex
+local function build_toplevel_func_index(ctx0, root_stmt_start, root_stmt_len)
+	local index = {} --[[: TopLevelFuncIndex ]]
+	--: (integer, integer) -> ()
+	local function record(name_id, decl_line)
+		local e = index[name_id]
+		if e then
+			e.count = e.count + 1
+		else
+			index[name_id] = { count = 1, decl_line = decl_line }
+		end
+	end
+	for i = 0, root_stmt_len - 1 do
+		local nid = ctx0.lists:get(root_stmt_start + i)
+		local n = ctx0.nodes:get(nid)
+		if n.kind == NODE_FUNC_DECL then
+			-- Covers both `function f() end` and `local function f() end`
+			-- (same node kind -- see lib/type/static/parse.lua). A dotted/
+			-- method name's own `data[0]` is a NODE_FIELD_EXPR, not a
+			-- NODE_IDENTIFIER -- excluded.
+			local name_node = ctx0.nodes:get(n.data[0])
+			if name_node.kind == NODE_IDENTIFIER then
+				record(name_node.data[0], n.line)
+			end
+		elseif n.kind == NODE_LOCAL_STMT then
+			local names_len, el = n.data[1], n.data[3]
+			if names_len == 1 and el == 1 then
+				local init_nid = ctx0.lists:get(n.data[2])
+				local init_n = ctx0.nodes:get(init_nid)
+				if init_n.kind == NODE_FUNC_EXPR then
+					local name_id = ctx0.lists:get(n.data[0])
+					record(name_id, init_n.line)
+				end
+			end
+		elseif n.kind == NODE_ASSIGN_STMT then
+			local tl, el = n.data[1], n.data[3]
+			if tl == 1 and el == 1 then
+				local target_nid = ctx0.lists:get(n.data[0])
+				local target_n = ctx0.nodes:get(target_nid)
+				if target_n.kind == NODE_IDENTIFIER then
+					local init_nid = ctx0.lists:get(n.data[2])
+					local init_n = ctx0.nodes:get(init_nid)
+					if init_n.kind == NODE_FUNC_EXPR then
+						record(target_n.data[0], init_n.line)
+					end
+				end
+			end
+		end
+	end
+	return index
+end
+
+-- Locate a callee's own preceding-line `--: (T1, ...) -> R` annotation,
+-- duplicated from prover_narrow.lua's `find_preceding_func_annotation`
+-- (same line-association rule: inline takes priority; else scan backward
+-- skipping blank/comment-only lines, requiring a run of exactly one
+-- ANN_TYPE entry -- 2+ is an ambiguous overload, distinctly reported here
+-- as "return type not resolvable" rather than prover_narrow.lua's own
+-- "not supported for positional parameter attribution" wording, since this
+-- module has no parameters to attribute at all).
+--: (Ctx0, integer) -> ({ kind: integer, content: string } | nil, string | nil)
+local function find_preceding_func_annotation_fp(ctx0, decl_line)
+	local inline = ctx0.lexer.annotations[decl_line]
+	if inline and inline.kind == defs.ANN_TYPE then return inline, nil end
+	local ann_lines = {} --[[: integer[] ]]
+	local scan = decl_line - 1
+	while scan >= 1 do
+		local a = ctx0.lexer.annotations[scan]
+		if a and a.kind == defs.ANN_TYPE then
+			ann_lines[#ann_lines + 1] = scan
+			scan = scan - 1
+		elseif not a and ctx0.source_lines[scan] and is_blank_or_comment_line_fp(ctx0.source_lines[scan]) then
+			scan = scan - 1
+		else
+			break
+		end
+	end
+	if #ann_lines == 0 then return nil, "callee has no resolvable function-type annotation" end
+	if #ann_lines > 1 then
+		return nil, "callee has multiple preceding function-type annotations (overload) -- return type not resolvable"
+	end
+	return ctx0.lexer.annotations[ann_lines[1]], nil
+end
+
+-- Extract the RAW return-type string `R` from a `(T1, ...) -> R`
+-- annotation's content, via the SAME balanced-paren scan as prover_narrow
+-- .lua's `parse_param_type_slices` (duplicated, not imported -- see this
+-- function's own header note: that module explicitly never parses `R`).
+--: (string) -> (string | nil, string | nil)
+local function parse_return_type_raw(content)
+	local s = content:match("^%s*(.-)%s*$") or content
+	if s:sub(1, 1) ~= "(" then
+		return nil, "callee annotation is not in '(T1, ...) -> R' form"
+	end
+	local depth = 0
+	local close_idx = nil --[[: integer | nil ]]
+	for i = 1, #s do
+		local c = s:sub(i, i)
+		if c == "(" or c == "{" then
+			depth = depth + 1
+		elseif c == ")" or c == "}" then
+			depth = depth - 1
+			if depth == 0 then
+				close_idx = i
+				break
+			end
+		end
+	end
+	if not close_idx then return nil, "callee annotation is not in '(T1, ...) -> R' form" end
+	local after = s:sub(close_idx + 1):match("^%s*(.-)%s*$") or ""
+	if after:sub(1, 2) ~= "->" then
+		return nil, "callee annotation is not in '(T1, ...) -> R' form"
+	end
+	local r = after:sub(3):match("^%s*(.-)%s*$") or ""
+	return r, nil
+end
+
+-- Parse the return type's own raw string into an ordered, deduplicated
+-- six-tag-class member list -- same vocabulary/rejection discipline as
+-- prover_narrow.lua's `parse_annotation_members` (duplicated: that
+-- function is a local, not exported). A parenthesized `R` (`-> (A, B)`,
+-- i.e. a declared multi-return) is REJECTED here, distinctly: this module
+-- only ever transfers a call's FIRST (and, per the annotation, ONLY)
+-- return value -- multi-return is out of scope per the brief.
+--: (string) -> (string[] | nil, string | nil)
+local function parse_return_members(r)
+	if r:sub(1, 1) == "(" then
+		return nil, "callee return annotation declares multiple return values (first-value-only scope)"
+	end
+	local members = {} --[[: string[] ]]
+	local seen = {} --[[: { [string]: boolean } ]]
+	for tok in r:gmatch("[^|]+") do
+		local name = tok:match("^%s*(.-)%s*$")
+		if name == "" then return nil, "callee return annotation: empty union member" end
+		if not SIX_TAGS[name] then
+			return nil, "callee return annotation: unsupported annotation member '" .. name
+				.. "' (not one of the six type() classes)"
+		end
+		if seen[name] then return nil, "callee return annotation: duplicate annotation member '" .. name .. "'" end
+		seen[name] = true
+		members[#members + 1] = name
+	end
+	if #members == 0 then return nil, "callee return annotation: empty annotation" end
+	return members, nil
+end
+
+-- Resolve a bare-identifier callee's declared return-type member list, or
+-- nil + a taxonomy-stable skip reason (module header enumerates every
+-- reason this can fail; never guessed, never silently defaulted).
+--: (EmitCtx, integer) -> (string[] | nil, string | nil)
+local function resolve_callee_return_members(ectx, callee_name_id)
+	local entry = ectx.toplevel_funcs[callee_name_id]
+	if not entry then return nil, "callee is not a same-file top-level function declaration (unresolvable)" end
+	if entry.count > 1 then
+		return nil, "callee name has multiple same-file top-level declarations (ambiguous, not resolvable)"
+	end
+	local ann, aerr = find_preceding_func_annotation_fp(ectx.ctx0, entry.decl_line)
+	if not ann then return nil, aerr end
+	local raw_r, rerr = parse_return_type_raw(ann.content)
+	if not raw_r then return nil, rerr end
+	return parse_return_members(raw_r)
+end
+
+-- Tail of a members list (`members[2..]`) -- used by
+-- `build_ty_sub_union_to_union`'s own recursion (peeling one member at a
+-- time), distinct from `suffix_union` (which builds a TERM, not a list).
+--: (string[]) -> string[]
+local function members_tail(members)
+	local out = {} --[[: string[] ]]
+	for i = 2, #members do out[#out + 1] = members[i] end
+	return out
+end
+
+-- Build `ty_sub(Tp, Tinv)` when `Tp` is ITSELF a union of `tp_members`
+-- (a callee's declared return annotation can be a multi-member union, e.g.
+-- `string | nil` -- unlike a literal reassignment's `Tp`, always a single
+-- tag). Generalizes `build_ty_sub_to_union` (single-tag case, reused
+-- directly as the base case) by peeling one member of `Tp` at a time and
+-- combining via the ALREADY-declared `ty-sub-union-of-subsets` rule --
+-- the SAME rule `narrow-join`'s own branch-merge already cites for exactly
+-- this "both halves of a union individually sub Tinv" shape; no new theory
+-- content needed for this combinator, purely prover-side reuse.
+--: (FixpointVocab, string[], string[], Term) -> (CertNode | nil, string | nil)
+local function build_ty_sub_union_to_union(vocab, tp_members, tinv_members, tinv_term)
+	if #tp_members == 0 then return nil, "empty callee return-type union" end
+	if #tp_members == 1 then
+		return build_ty_sub_to_union(vocab, tp_members[1], tinv_members, tinv_term)
+	end
+	local head_node, herr = build_ty_sub_to_union(vocab, tp_members[1], tinv_members, tinv_term)
+	if not head_node then return nil, herr end
+	local rest_node, rerr = build_ty_sub_union_to_union(vocab, members_tail(tp_members), tinv_members, tinv_term)
+	if not rest_node then return nil, rerr end
+	return { kind = "rule", rule = vocab.rule_ty_sub_union_of_subsets, premises = { head_node, rest_node } } --[[: CertNode ]]
 end
 
 -- The declared-union member name a literal tag corresponds to: `true`/
@@ -723,8 +1053,47 @@ walk_stmts = function(ectx, x_path, tinv_term, name_id, sv, ctx, block_path, stm
 					-- Known scope reduction (module header): neither
 					-- self-copy nor cross-variable copy is attempted.
 					return state, false, "copy source not independently established at the assign point"
+				elseif rhs.kind == NODE_METHOD_CALL then
+					return state, false, "method call callee out of scope (not statically resolvable)"
+				elseif rhs.kind == NODE_CALL_EXPR then
+					local callee_nid = rhs.data[0]
+					local callee = ctx.nodes:get(callee_nid)
+					if callee.kind ~= NODE_IDENTIFIER then
+						return state, false, "computed callee (not a bare identifier, not statically resolvable)"
+					end
+					local callee_name_id = callee.data[0]
+					-- Block-local shadow check only -- see module header's
+					-- reported, NOT-closed soundness scope limit on
+					-- callee-name shadowing from an enclosing scope.
+					local shadow_at = shadow_index_for(ctx, stmt_start, stmt_len, callee_name_id)
+					if i >= shadow_at then
+						return state, false, "callee identifier locally shadowed within the loop body "
+							.. "(not statically resolvable to a single same-file declaration)"
+					end
+					local ret_members, rmerr = resolve_callee_return_members(ectx, callee_name_id)
+					if not ret_members then
+						return state, false, rmerr or "callee return type not resolvable"
+					end
+					local t_term, tterr = build_declared_union(vocab, ret_members)
+					if not t_term then
+						return state, false, "failed to build callee return type: " .. tostring(tterr)
+					end
+					local fact = { kind = "axiom", axiom = vocab.ax_assign_call_facts,
+						bindings = { Pa = new_point, X = x_path, T = t_term } } --[[: CertNode ]]
+					local node = { kind = "rule", rule = vocab.rule_assign_call_transfer, premises = { fact } } --[[: CertNode ]]
+					local result, rerr2 = rl.observe(ectx.rp, node)
+					if not result then
+						return state, false, "replay rejected assign-call-transfer: " .. tostring(rerr2)
+					end
+					local call_sub_node, cserr = build_ty_sub_union_to_union(vocab, ret_members, sv.members, tinv_term)
+					if not call_sub_node then
+						return state, false, cserr or "failed to build ty_sub(Tp, Tinv) for call-RHS"
+					end
+					cur_node, cur_point, cur_term, cur_sub_node = node, new_point, t_term, call_sub_node
+					h1_live = false
 				else
-					return state, false, "assignment RHS out of scope (not literal or bare-identifier copy)"
+					return state, false, "assignment RHS out of scope "
+						.. "(not literal, bare-identifier copy, or annotated same-file call)"
 				end
 			end
 
@@ -1061,11 +1430,25 @@ function M.analyze_file(source, file_path)
 	local rp, rperr = rl.new_replayer({ registry = reg })
 	if not rp then return nil, "analyze_file: " .. tostring(rperr) end
 
+	-- ctx0/toplevel_funcs: the chunk-top-level function-name index for
+	-- assignment transfer from an annotated-call RHS (module header). A
+	-- SEPARATE ctx table from prover_narrow.lua's own internal one (not
+	-- referentially the same object -- structurally equivalent, built from
+	-- the same parser/source), matching this module's established
+	-- duplication-over-sharing discipline.
+	local ctx0 = {
+		nodes = parser.nodes, lists = parser.lists, pool = parser.pool, lexer = parser.lexer,
+		source_lines = split_source_lines_fp(source),
+	} --[[: Ctx0 ]]
+	local root_node = parser.nodes:get(parser.root)
+	local toplevel_funcs = build_toplevel_func_index(ctx0, root_node.data[0], root_node.data[1])
+
 	local stats = M.new_stats()
 	local judgments = {} --[[: ReplayResult[] ]]
 	local ectx = {
 		addr_ops = addr_ops, file_id = file_id, vocab = vocab, ax_initial = ax_initial,
 		rp = rp, stats = stats, judgments = judgments,
+		toplevel_funcs = toplevel_funcs, ctx0 = ctx0,
 	} --[[: EmitCtx ]]
 
 	walk_events(ectx, root.events)

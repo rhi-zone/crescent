@@ -54,7 +54,11 @@ end
 		T.eq(#result.judgments, 1)
 	end)
 
-	T.it("skips: call-expression RHS reassignment (out of scope)", function()
+	T.it("skips: call-expression RHS whose callee is not a same-file top-level declaration", function()
+		-- `foo` is not declared anywhere in this file at all (v4:
+		-- assignment transfer from an annotated-call RHS is now attempted
+		-- for a call-expression RHS -- this is the "unresolvable callee"
+		-- taxonomy reason, not the old generic "RHS out of scope" one).
 		local source = [[
 local function outer()
 	local x --: number | nil
@@ -67,7 +71,7 @@ end
 		T.ok(result, err)
 		if result == nil then return end
 		T.eq(result.stats.loop_vars_certified, 0)
-		T.ok((result.stats.loop_skipped["assignment RHS out of scope (not literal or bare-identifier copy)"] or 0) >= 1)
+		T.ok((result.stats.loop_skipped["callee is not a same-file top-level function declaration (unresolvable)"] or 0) >= 1)
 	end)
 
 	T.it("ROOT-REPLAYS: else-less if with a literal reassignment, joined against the pre-if fact", function()
@@ -256,7 +260,8 @@ end
 		T.ok(result, err)
 		if result == nil then return end
 		T.eq(result.stats.loop_vars_certified, 0)
-		T.ok((result.stats.loop_skipped["assignment RHS out of scope (not literal or bare-identifier copy)"] or 0) >= 1)
+		T.ok((result.stats.loop_skipped[
+			"assignment RHS out of scope (not literal, bare-identifier copy, or annotated same-file call)"] or 0) >= 1)
 	end)
 
 	T.it("skips: self-copy `x = x` (documented scope reduction -- assign-copy-transfer not attempted)", function()
@@ -319,6 +324,270 @@ end
 		if result == nil then return end
 		T.eq(result.stats.loops_found, 0)
 		T.eq(#result.judgments, 0)
+	end)
+
+	-- ── v4: assignment transfer from an annotated-call RHS ─────────────────
+	-- Every taxonomy reason the module header enumerates, exercised once.
+
+	T.it("ROOT-REPLAYS a mutation-class loop-invariant certificate (call-RHS, single-tag return)", function()
+		local source = [[
+--: () -> number
+local function get_num()
+	return 1
+end
+
+local function outer()
+	local x --: number | nil
+	while x do
+		x = get_num()
+	end
+end
+]]
+		local result, err = fp.analyze_file(source, "fixture.lua")
+		T.ok(result, err)
+		if result == nil then return end
+		T.eq(result.stats.loop_vars_attempted, 1)
+		T.eq(result.stats.loop_vars_certified, 1)
+		T.eq(#result.judgments, 1)
+	end)
+
+	T.it("ROOT-REPLAYS a mutation-class certificate (call-RHS, multi-member union return, "
+		.. "exercising the ty-sub-union-of-subsets combinator)", function()
+		local source = [[
+--: () -> string | nil
+local function get_opt()
+	return nil
+end
+
+local function outer()
+	local y --: string | nil | number
+	while y do
+		y = get_opt()
+	end
+end
+]]
+		local result, err = fp.analyze_file(source, "fixture.lua")
+		T.ok(result, err)
+		if result == nil then return end
+		T.eq(result.stats.loop_vars_attempted, 1)
+		T.eq(result.stats.loop_vars_certified, 1)
+		T.eq(#result.judgments, 1)
+	end)
+
+	T.it("skips: method-call RHS (not statically resolvable)", function()
+		local source = [[
+local function outer()
+	local x --: number | nil
+	while x do
+		x = obj:get_num()
+	end
+end
+]]
+		local result, err = fp.analyze_file(source, "fixture.lua")
+		T.ok(result, err)
+		if result == nil then return end
+		T.eq(result.stats.loop_vars_certified, 0)
+		T.ok((result.stats.loop_skipped["method call callee out of scope (not statically resolvable)"] or 0) >= 1)
+	end)
+
+	T.it("skips: computed callee (a field expression, not a bare identifier)", function()
+		local source = [[
+local function outer()
+	local x --: number | nil
+	while x do
+		x = t.get_num()
+	end
+end
+]]
+		local result, err = fp.analyze_file(source, "fixture.lua")
+		T.ok(result, err)
+		if result == nil then return end
+		T.eq(result.stats.loop_vars_certified, 0)
+		T.ok((result.stats.loop_skipped["computed callee (not a bare identifier, not statically resolvable)"] or 0) >= 1)
+	end)
+
+	T.it("skips: callee identifier locally shadowed within the loop body", function()
+		local source = [[
+--: () -> number
+local function get_num()
+	return 1
+end
+
+local function outer()
+	local x --: number | nil
+	while x do
+		local get_num = 1
+		x = get_num()
+	end
+end
+]]
+		local result, err = fp.analyze_file(source, "fixture.lua")
+		T.ok(result, err)
+		if result == nil then return end
+		T.eq(result.stats.loop_vars_certified, 0)
+		T.ok((result.stats.loop_skipped[
+			"callee identifier locally shadowed within the loop body "
+			.. "(not statically resolvable to a single same-file declaration)"] or 0) >= 1)
+	end)
+
+	T.it("skips: callee name has multiple same-file top-level declarations (ambiguous)", function()
+		local source = [[
+--: () -> number
+local function dup()
+	return 1
+end
+
+--: () -> string
+local function dup()
+	return "s"
+end
+
+local function outer()
+	local x --: number | nil
+	while x do
+		x = dup()
+	end
+end
+]]
+		local result, err = fp.analyze_file(source, "fixture.lua")
+		T.ok(result, err)
+		if result == nil then return end
+		T.eq(result.stats.loop_vars_certified, 0)
+		T.ok((result.stats.loop_skipped[
+			"callee name has multiple same-file top-level declarations (ambiguous, not resolvable)"] or 0) >= 1)
+	end)
+
+	T.it("skips: callee has no resolvable function-type annotation (unannotated callee)", function()
+		local source = [[
+local function get_num()
+	return 1
+end
+
+local function outer()
+	local x --: number | nil
+	while x do
+		x = get_num()
+	end
+end
+]]
+		local result, err = fp.analyze_file(source, "fixture.lua")
+		T.ok(result, err)
+		if result == nil then return end
+		T.eq(result.stats.loop_vars_certified, 0)
+		T.ok((result.stats.loop_skipped["callee has no resolvable function-type annotation"] or 0) >= 1)
+	end)
+
+	T.it("skips: callee has an ambiguous overload (2+ preceding annotation lines)", function()
+		local source = [[
+--: (number) -> number
+--: (string) -> string
+local function over(v)
+	return v
+end
+
+local function outer()
+	local x --: number | nil
+	while x do
+		x = over(1)
+	end
+end
+]]
+		local result, err = fp.analyze_file(source, "fixture.lua")
+		T.ok(result, err)
+		if result == nil then return end
+		T.eq(result.stats.loop_vars_certified, 0)
+		T.ok((result.stats.loop_skipped[
+			"callee has multiple preceding function-type annotations (overload) -- return type not resolvable"] or 0) >= 1)
+	end)
+
+	T.it("skips: callee annotation is not in '(T1, ...) -> R' form (bare-arrow sugar)", function()
+		local source = [[
+--: string -> integer
+local function weird()
+	return 1
+end
+
+local function outer()
+	local x --: number | nil
+	while x do
+		x = weird()
+	end
+end
+]]
+		local result, err = fp.analyze_file(source, "fixture.lua")
+		T.ok(result, err)
+		if result == nil then return end
+		T.eq(result.stats.loop_vars_certified, 0)
+		T.ok((result.stats.loop_skipped["callee annotation is not in '(T1, ...) -> R' form"] or 0) >= 1)
+	end)
+
+	T.it("skips: callee return annotation is out of the six-tag vocabulary (a table-shape return)", function()
+		local source = [[
+--: () -> { x: number }
+local function get_rec()
+	return { x = 1 }
+end
+
+local function outer()
+	local x --: number | nil
+	while x do
+		x = get_rec()
+	end
+end
+]]
+		local result, err = fp.analyze_file(source, "fixture.lua")
+		T.ok(result, err)
+		if result == nil then return end
+		T.eq(result.stats.loop_vars_certified, 0)
+		local skips = result.stats.loop_skipped
+		local found = false
+		for reason in pairs(skips) do
+			if reason:find("callee return annotation: unsupported annotation member", 1, true) then found = true end
+		end
+		T.ok(found, "expected an 'unsupported annotation member' callee-return-annotation skip")
+	end)
+
+	T.it("skips: callee return annotation declares multiple return values (first-value-only scope)", function()
+		local source = [[
+--: () -> (string, string)
+local function get_pair()
+	return "a", "b"
+end
+
+local function outer()
+	local x --: number | nil
+	while x do
+		x = get_pair()
+	end
+end
+]]
+		local result, err = fp.analyze_file(source, "fixture.lua")
+		T.ok(result, err)
+		if result == nil then return end
+		T.eq(result.stats.loop_vars_certified, 0)
+		T.ok((result.stats.loop_skipped[
+			"callee return annotation declares multiple return values (first-value-only scope)"] or 0) >= 1)
+	end)
+
+	T.it("skips: callee's declared return type is not a member of the declared invariant", function()
+		local source = [[
+--: () -> string
+local function get_str()
+	return "s"
+end
+
+local function outer()
+	local x --: number | nil
+	while x do
+		x = get_str()
+	end
+end
+]]
+		local result, err = fp.analyze_file(source, "fixture.lua")
+		T.ok(result, err)
+		if result == nil then return end
+		T.eq(result.stats.loop_vars_certified, 0)
+		T.ok((result.stats.loop_skipped["reassigned type not a member of the declared invariant"] or 0) >= 1)
 	end)
 end)
 
