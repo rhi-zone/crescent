@@ -115,6 +115,40 @@
 --   indirection: it IS the statement, its own path is the statement's
 --   path directly.
 --
+-- ── Addressing convention: assign-transfer's `Pa` (Phase 3 addition) ────────
+--
+-- docs/typechecker-v10-fixpoint-proposal.md §2.1 describes
+-- `assign_literal`/`assign_copies`'s schematic `assign_point` argument
+-- (`Pa`) as `exit_of(rhs_expr_path)` — exit of the specific init/RHS
+-- expression, mirroring a guard's own `exit_of(test_expr_path)` choice.
+-- That text is UNCHANGED (it is the theory's own documented reading of its
+-- schematic `Pa`, still valid as written). What is added HERE is a
+-- PROVER-SIDE CONVENTION (pilot territory, analogous to §4.1's already-
+-- documented "`exit_of` of a block's own path" reading — not a kernel or
+-- addressing-signature change): for a `NODE_LOCAL_STMT`/`NODE_ASSIGN_STMT`
+-- whose sole RHS is a literal or bare-identifier copy (the only two shapes
+-- `assign_literal`/`assign_copies` ever transfer), the PROVER binds the
+-- concrete `Pa` term it cites to `exit_of(the owning statement's OWN
+-- path)` — i.e. `M.exit(addr_ops, file_id, stmt_path)`, using
+-- `local_stmt_path`/`assign_stmt_path` directly (child indices for names/
+-- targets and the RHS notwithstanding) — NOT `exit_of(the RHS expression's
+-- own child path)`. Nothing else happens in either statement kind after
+-- evaluating that RHS (there is no further sub-expression, no additional
+-- target-list side effect once a single value has been read), so the two
+-- readings denote the SAME real control-flow instant; the prover picks the
+-- statement's own path as the one concrete term because `stmt_seq`/
+-- `stmt_preserves` (docs/typechecker-v10-fixpoint-proposal.md §8.3) also
+-- relate `exit_of(stmt_i's own path)` to `exit_of(stmt_{i+1}'s own path)`
+-- — whole-statement paths, never an RHS sub-path — and `seq-persist`/
+-- `assign-*-transfer` citations must share the LITERALLY same point term
+-- for "the fact right after this statement" wherever both apply to the
+-- same statement in one certificate (shared metavariables require
+-- structural equality, not merely denotational coincidence). This
+-- convention is exercised by `lib/type/v10_kernel/pilot/fixpoint_prover.lua`
+-- (pilot step 4, loop-invariant derivation); it does not change
+-- `fixpoint_v1.lua`'s axiom/rule declarations, which still take an
+-- arbitrary schematic `Pa`.
+--
 -- `file_id` comes from a content hash of the file's source text
 -- (lib/type/static/sha256.lua's `hash`, reused rather than reimplemented)
 -- encoded as an addr-v1 bitstring: each of the 64 hex digits of the

@@ -240,7 +240,27 @@ local M = {}
 --::   else_path: integer[] | nil, else_events: Event[] | nil,
 --:: }
 --:: NestedScopeEvent = { kind: "nested_scope", path: integer[], events: Event[], fresh_scope: boolean }
---:: Event = LocalFactEvent | GuardEvent | NestedScopeEvent
+-- Phase 3 addition (lib/type/v10_kernel/pilot/fixpoint_prover.lua): emitted
+-- for EVERY `NODE_WHILE_STMT` this pass walks, unconditionally, regardless
+-- of whether its test is a recognized guard shape (the loop-invariant
+-- theory needs no guard fact at all -- see fixpoint_prover.lua's header).
+-- Pushed as an ADDITIONAL sibling alongside whatever this pass already
+-- emits for the same while-statement (a `guard` event when its test is
+-- recognized, else a `nested_scope` wrapping the body) -- prover.lua's
+-- existing pass 2 tolerates an unrecognized event `kind` silently (its
+-- `emit_events` if-chain has no branch for "while_loop" and simply skips
+-- it), so this is a strictly additive, non-regressing change: no existing
+-- event's shape or position changes. `scope` is a SNAPSHOT (`copy_scope`)
+-- of the scope in effect at loop entry -- NOT the live `scope` table
+-- `analyze_block` continues to mutate for subsequent sibling statements
+-- (aliasing the live table here would let a later statement's own local
+-- declaration silently leak into this already-emitted event). `ctx` is
+-- the same per-file `Ctx` this whole pass threads through -- required by
+-- fixpoint_prover.lua to re-inspect the loop body's own raw statement
+-- list (kind, targets, RHS shape), which this pass's plain-data event
+-- tree does not otherwise capture for ordinary (non-guard) statements.
+--:: WhileLoopEvent = { kind: "while_loop", while_path: integer[], body_path: integer[], body_start: integer, body_len: integer, scope: Scope, ctx: Ctx }
+--:: Event = LocalFactEvent | GuardEvent | NestedScopeEvent | WhileLoopEvent
 
 local NODE_LOCAL_STMT  = defs.NODE_LOCAL_STMT
 local NODE_IF_STMT     = defs.NODE_IF_STMT
@@ -836,6 +856,18 @@ analyze_block = function(ctx, block_path, stmt_start, stmt_len, scope, stats)
 
 		elseif kind == NODE_WHILE_STMT then
 			local body_path = extend_path(stmt_path, 1)
+			-- Phase 3: unconditional while-loop event for fixpoint_prover.lua
+			-- (see the Event type's header note) -- emitted regardless of
+			-- whether the test below recognizes a guard shape.
+			events[#events + 1] = {
+				kind = "while_loop",
+				while_path = stmt_path,
+				body_path = body_path,
+				body_start = n.data[1],
+				body_len = n.data[2],
+				scope = copy_scope(scope),
+				ctx = ctx,
+			} --[[: Event ]]
 			local ge = try_guard_event(ctx, extend_path(stmt_path, 0), n.data[0], scope, stats)
 			if ge then
 				local body_scope = copy_scope(scope)

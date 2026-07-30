@@ -727,11 +727,40 @@ written down wrong, per that same principle's own instruction.
   naming `X` among its targets/declared names — a purely syntactic check,
   same trust boundary as every other syntax-facts axiom in this proposal
   (it does not reason about aliasing, `_G`, metatables, or any semantic
-  effect — a call statement is "preserving" under this fact iff the parser
-  can see it assigns nothing to `X` by name, which is trivially true for
-  any statement kind this pilot does not itself address as an assignment
-  target, e.g. `NODE_IF_STMT`, `NODE_WHILE_STMT` as a whole statement,
-  bare call-statements).
+  effect).
+
+  **Correction (Phase 3, pilot/fixpoint_prover.lua):** the addendum's
+  original text above additionally claimed this is "trivially true for any
+  statement kind this pilot does not itself address as an assignment
+  target, e.g. `NODE_IF_STMT`, `NODE_WHILE_STMT` as a whole statement, bare
+  call-statements" — i.e., that any compound/control-flow statement
+  vacuously preserves `X` merely because this pilot's assignment-tracking
+  code doesn't currently model assignment targets nested inside its own
+  child blocks. This is **wrong as a general claim, not merely imprecise**:
+  an `if`/`while`/`repeat`/`do` statement CAN contain a nested assignment
+  to `X` inside its own child block, which the parser can plainly see by
+  walking one level deeper — "this pilot's existing code doesn't walk that
+  deep" is an IMPLEMENTATION GAP, not a proof of non-interference. Reading
+  the retracted sentence as license to emit `stmt_preserves` for a
+  compound statement would let the prover cite a FALSE reality-boundary
+  axiom (an honestly-priced axiom must still assert something TRUE about
+  the file).
+
+  **Corrected, conservative rule, as actually implemented by the prover:**
+  `stmt_preserves(A, B, X)` is only ever emitted for a statement PROVABLY
+  non-interfering with `X`, specifically: (a) `NODE_LOCAL_STMT` (any
+  declared name — it always introduces a fresh binding at a path distinct
+  from `X`'s own declaration site, so it structurally can never rebind
+  `X`); (b) `NODE_ASSIGN_STMT` whose target list does not include `X`; (c)
+  a bare call-expression-statement (`NODE_EXPR_STMT` wrapping a call) —
+  this last one IS a documented, flagged trust-boundary limitation (it does
+  not reason about upvalue mutation through a closure call), same
+  honesty-priced-trust-boundary idiom as every other syntax-facts axiom in
+  this pilot (e.g. `guard_selects` not reasoning about aliasing). Any OTHER
+  statement kind between two points (`if`/`while`/`repeat`/`do`/`for`/
+  `return`/`break`/anything else) is NOT treated as preserving —
+  persistence chaining simply stops there (a counted skip, not a
+  certificate attempt), conservative but sound.
 
 **Persistence rule:**
 
