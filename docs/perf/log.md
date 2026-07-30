@@ -6,6 +6,68 @@ Bench machine: AMD Ryzen 7 5700G, LuaJIT 2.1.1741730670, NixOS Linux 6.12.67.
 
 ---
 
+## 2026-07-30: v10 fixpoint prover — if/else branch-join control-flow chaining, real-corpus measurement (run 4)
+
+Full report: `docs/typechecker-v10-pilot-measurement.md`, "## Run 4" section. Baseline commit
+`4a741cae` (run 3, below); this measurement's code commit and HEAD: `1a491500` ("v10 fixpoint
+prover — if/else branch-join control-flow chaining"). Same 48-file / 1,698,092-byte corpus as
+run 3 (re-confirmed via an unchanged re-run of `scan_loops_run3.lua`: 24/997 eligible files,
+byte-identical file list — no newly-eligible files, expected, since eligibility comes from
+`prover_narrow.lua`'s scope-tracking, untouched by this change). `bin/cr test
+lib/type/v10_kernel/pilot/` 9/9 files green, 356 assertions; `bin/cr test
+lib/type/v10_cleanroom/` 3/3 files green, 1044 assertions — both reconfirmed at this HEAD.
+Drivers: run 3's `measure_run3.lua`/`scan_loops_run3.lua` reused unchanged, plus a new
+disposable `identify_run4_pairs.lua` (per-pair variable/loop correlation for the truth-check).
+No pilot source modified to produce the numbers.
+
+**Headline: 12 root-accepted loop-invariant certificates (+5 over run 3's 7)**, same 48
+(loop, var) pairs attempted, 0 replay failures on either run. New certificates in
+`lib/type/static/constrain.lua` (+3, now 6/6 in that file), `lib/async_queue/init.lua` (+1, new
+file), `lib/type/v9/annot/init.lua` (+1, new file) — `env.lua`/`remark_github` unchanged at 2
+each. All 12 remain persistence-only (`ty-sub-refl`/`ty-sub-union-of-subsets`; no branch's own
+reassignment survived to a real certificate) — the assignment-transfer half of the theory is
+still real-corpus-unexercised, same finding as run 3, now scoped explicitly to a DIFFERENT gap
+(control-flow chaining, this run's own target, closed for the binary if/else case) than the one
+still open (branch bodies that actually reassign the tracked variable in a way that also
+survives a join, plus elseif chains, plus nested control-flow inside a branch).
+
+**Skip-reason decomposition of run 3's 41 "control-flow" skips**: 5 newly certified (this run's
+join), 6 reclassified to a new, more specific `elseif chain ... not yet supported` bucket
+(strictly binary join, as designed), 2 newly surfaced as `multi-target/multi-value assignment`
+(previously hidden one level up behind the now-walked-into enclosing if), 28 still genuinely
+blocked (nested if/while/for/return/break inside a branch, or any other unrecognized
+construct) — 5+6+2+28 = 41 ✓. Zero regressions: every run-3 certificate still certifies.
+
+**Truth check: 5/5 new certificates hand-verified TRUE** (full table with file/line/branch
+shape in the report) — none dishonestly claimed persistence through an actual mutation; two of
+the five double as negative-case confirmations in passing (a SIBLING while-loop over the same
+tracked variable, in the same file, that hits a genuinely unsupported construct — a nested
+`if`, a `break`, an elseif chain that actually mutates the variable — correctly remains
+uncertified, not silently miscounted).
+
+**Wall-clock (summed, 48 files)**: parse 155.2ms (run 3: 184.7ms), pass 1 32.0ms (run 3:
+44.6ms), `fixpoint_prover.analyze_file` total 483.8ms (run 3: 456.6ms) — modest rise from more
+certificates actually closed per file (more axiom citations + `rl.observe` calls per attempt);
+`constrain.lua` rose from 74.6ms to 126.1ms, `env.lua` from 29.5ms to 44.8ms. No file approached
+the 30s per-file `bin/cr check` timeout. Whole-measurement wall-clock: 2.87s for the full
+48-file run (parse + pass 1 + narrowing + fixpoint, sequentially) — reported as a fresh absolute
+number, not a cross-run delta (run 3's own report did not separately record whole-process
+wall-clock, and `v3_ms` cross-run comparisons are already flagged unreliable per run 3's own
+note on system-state divergence).
+
+Raw aggregate (loop-invariant metrics only; narrowing metrics unchanged from run 3):
+```
+loops_found        199   (run 3: 199)
+lv_attempted        48   (run 3: 48)
+lv_certified        12   (run 3: 7)
+loop_judg           12   (run 3: 7)
+parse_ms        155.238   (run 3: 184.733)
+pass1_ms         31.984   (run 3: 44.613)
+fixpoint_total_ms 483.801 (run 3: 456.630)
+```
+
+---
+
 ## 2026-07-30: v10 fixpoint prover — loop-invariant certificates, real-corpus measurement (run 3)
 
 Full report: `docs/typechecker-v10-pilot-measurement.md`, "## Run 3" section. Baseline commit

@@ -679,3 +679,157 @@ scan), `/tmp/v10_parity/measure_run3.lua` (measurement), `/tmp/v10_parity/probe_
 REPO=/home/me/git/rhizone/crescent
 "$REPO/bin/ld-musl-x86_64.so.1" "$REPO/bin/luajit-bin" /tmp/v10_parity/measure_run3.lua "$REPO"
 ```
+
+## Run 4 — if/else branch-join control-flow chaining (commit `1a491500`)
+
+Measured against commit `1a491500` ("v10 fixpoint prover — if/else branch-join control-flow
+chaining"), HEAD at measurement time. `bin/cr test lib/type/v10_kernel/pilot/` 9/9 files green,
+356 assertions (up from run 3's 338 — new fixpoint_prover_test.lua fixtures for the join, per
+the taxonomy this run reports). `bin/cr test lib/type/v10_cleanroom/` 3/3 files green, 1044
+assertions (unchanged — not touched). Both reconfirmed at this HEAD. No pilot source was
+modified to produce these numbers; the run-3 driver scripts (`/tmp/v10_parity/measure_run3.lua`,
+`/tmp/v10_parity/scan_loops_run3.lua`) were reused UNCHANGED against the new HEAD, plus two new
+disposable scripts (`/tmp/v10_parity/identify_run4_pairs.lua` for per-pair correlation,
+`/tmp/v10_parity/probe1.lua`/`probe2.lua`/`probe3.lua` for the ad-hoc soundness probes in the
+truth-check below).
+
+**What run 4 adds:** `fixpoint_prover.lua`'s loop-body walk now recurses into a single-clause
+`if`/`if-else` (docs/typechecker-v10-fixpoint-proposal.md §4's `cf_join`/`narrow-join`, already
+declared in `fixpoint_v1.lua`'s v3 signature bump since run 3's own commit but never cited by
+the prover until now), deriving each branch's own fact and merging at the join point. Elseif
+chains and any control-flow construct (nested if/while/for/etc.) inside a branch remain
+conservative, counted skips — the join rule as designed is strictly binary and one level of
+nesting only, per the brief.
+
+### Corpus
+
+Same 48 files as run 3 (27 from runs 1–2 + 21 run-3 additions), re-confirmed via
+`scan_loops_run3.lua` re-run unchanged against this HEAD: **24/997** files still have a tracked
+variable in scope at a while-loop (`with_tracked_var_at_loop=24`), and the 24-file NAME LIST is
+byte-identical to run 3's. **No newly-eligible files** — expected and unsurprising, since
+`loop_vars_attempted` eligibility comes entirely from `prover_narrow.lua`'s scope-tracking pass,
+which this change does not touch; only whether an already-attempted pair CERTIFIES or SKIPS
+could move, and did.
+
+### Aggregate results
+
+Narrowing metrics (guards/annotations/certificates) are IDENTICAL to run 3 (this change touches
+no narrowing code) — omitted here; see run 3's own table for those. Loop-invariant metrics,
+side by side:
+
+| metric | run 3 (48 files) | run 4 (48 files) | delta |
+|---|---:|---:|---:|
+| while-loops found | 199 | 199 | 0 |
+| (loop, var) pairs attempted | 48 | 48 | 0 |
+| **(loop, var) pairs certified (root-accepted)** | **7** | **12** | **+5** |
+| loop-invariant judgments (root-replayed) | 7 | 12 | +5 |
+| loop-invariant replay failures | 0 | 0 | 0 |
+
+**The headline number is 12** — five more root-accepted loop-invariant certificates than run 3,
+all five newly closed by the if/else join, zero regressions (every run-3 certificate still
+certifies; zero replay failures on either run). Certified pairs now span **5 files**
+(`lib/type/static/constrain.lua` 6, `lib/type/static/env.lua` 2,
+`lib/unified/remark_github/init.lua` 2, `lib/async_queue/init.lua` 1,
+`lib/type/v9/annot/init.lua` 1) — up from run 3's 3 files. **All 12 certificates remain
+persistence-only** (`ty-sub-refl`/`ty-sub-union-of-subsets` closing `ty_sub(Tp, Tinv)` without
+ever exercising `assign-literal-transfer`'s own union-membership chain on real code): every
+newly-certified pair's tracked variable is untouched by BOTH branches of its if-statement, not
+reassigned — the assignment-transfer half of the theory (§2) is still exercised only by
+`fixpoint_prover_test.lua`'s fixtures, unchanged from run 3's own finding. This is reported
+plainly, not as a shortfall of this run's own scope (control-flow chaining) — closing that gap
+was this run's job; assignment-transfer's real-corpus coverage is an independent, still-open
+gap.
+
+### Loop skip-reason breakdown, with run-3 deltas
+
+199 loops − 159 no-tracked-var loops = 40 loops with at least one tracked variable, carrying 48
+(loop, var) pairs; 12 certified + 36 skipped = 48 ✓.
+
+| reason | run 3 | run 4 | delta |
+|---|---:|---:|---:|
+| `no tracked variable in scope at this loop` (per loop) | 159 | 159 | 0 |
+| `control-flow statement breaks persistence chaining (out of scope)` (per pair) | 41 | 28 | −13 |
+| `elseif chain in loop body not yet supported for branch-join chaining (out of scope)` (per pair) | — (bucket did not exist) | 6 | +6 (new) |
+| `multi-target/multi-value assignment to the invariant variable (out of scope)` | 0 | 2 | +2 |
+| `copy source not independently established at the assign point` | 0 | 0 | 0 |
+| `assignment RHS out of scope (not literal or bare-identifier copy)` | 0 | 0 | 0 |
+| `empty loop body: no persistence chain from loop head to back edge under this theory` | 0 | 0 | 0 |
+| `reassigned type not a member of the declared invariant` | 0 | 0 | 0 |
+| replay rejected an emitted certificate | 0 | 0 | 0 |
+
+Zeros are zeros with reasons, restated per-run: the assignment-shaped skip reasons, the
+empty-body edge case, and the tag_true/tag_false-vs-tag_boolean mismatch still never occur
+naturally in this corpus at this HEAD; only `fixpoint_prover_test.lua`'s fixtures exercise them.
+
+The run-3 "control-flow" bucket (41) decomposes exactly: **5** newly certified (this run's own
+join), **6** reclassified into the new, more specific `elseif chain` bucket (an if/elseif/else
+that was ALREADY being counted as "control-flow breaks chaining" in run 3, now correctly
+attributed to the specific reason it still can't chain — the join rule is strictly binary), **2**
+newly surfaced as `multi-target/multi-value assignment` (a multi-target assignment that was
+PREVIOUSLY hidden one level up behind the enclosing if-statement's own "control-flow" skip in
+run 3 — now that the enclosing if is walked into, the walk reaches this deeper, genuinely
+different skip reason), and **28** still genuinely blocked by an unsupported construct (nested
+if/while/for/return/break inside a branch, or any other unrecognized statement) — 5 + 6 + 2 +
+28 = 41 ✓.
+
+### Truth check — all 5 NEW loop-invariant judgments, individually verified
+
+Correlation methodology: a disposable script (`/tmp/v10_parity/identify_run4_pairs.lua`)
+re-walks `prover_narrow`'s own `while_loop` events per file (the exact pass-1 data
+`fixpoint_prover` consumes) to attach a tracked-variable name + declared-union to every
+attempted pair, cross-checked against the REAL `fixpoint_prover.analyze_file` per-file
+`loop_vars_attempted`/`loop_vars_certified` counts — exact match on all 5 files carrying a
+change. Each of the 5 NEW pairs was then hand-verified by opening the file and reading the
+loop; the 7 run-3 pairs are unaffected (same certificates, re-confirmed still certifying at
+this HEAD, not re-verified here — see run 3's own truth-check table).
+
+| # | file | location (manual) | variable / claimed invariant | branch shape | verdict |
+|---|---|---|---|---|---|
+| 1 | `lib/type/static/constrain.lua` | L1197–1206, `while i < is + il - 1 do` (table-indexer resolve loop inside `resolve_annotation_type`); body = two `resolve_annotation_type(...)` calls, an else-less `if (kt == ctx.T_ANY or vt == ctx.T_ANY) and tbl_ann_line ~= 0 then warn(ctx, ...) end`, then two `indexers[...] = ` assigns + `i = i + 2` | `allow_unapplied : boolean\|nil` (parameter 3, signature L840) | else-less if; body is a bare `warn(...)` call (rule (c), preserving); no else | TRUE — neither the if's body nor anything else in the loop assigns the parameter; `warn` is a call-statement, not an assignment |
+| 2 | same loop | `in_match_arm : boolean\|nil` (parameter 4) | same | same | TRUE — same reasoning |
+| 3 | same loop | `in_func_ann : boolean\|nil` (parameter 5) | same | same | TRUE — same reasoning |
+| 4 | `lib/async_queue/init.lua` | `Queue:tick`'s 2nd while-loop, `while j <= #self._pending do ... end` (cancelled-task sweep); body = `local task = ...`, `if task.cancelled then arr_remove(self._pending, j); self._stats.pending = ... else j = j + 1 end` | `clock : number\|nil` (parameter of `tick`) | if/else, both branches preserving (assignments target `self._pending`/`self._stats.pending`/`j`, never `clock`) | TRUE — `clock`/`clock_` is not assigned anywhere in this loop's body; `tick`'s OTHER two while-loops that also track `clock` still correctly skip (one hits a nested `if` inside its branch, the other a bare `break` inside its branch — both genuine, still-unsupported constructs, not silently miscounted) |
+| 5 | `lib/type/v9/annot/init.lua` | nested `while not at(p, ",") and not at(p, "}") and peek(p) ~= nil do ... end` inside `parse_record`'s `"#"` (meta-slot) branch; body = `if at(p,"{") or at(p,"(") or at(p,"[") or at(p,"<") then skip_balanced(p) else advance(p) end` | `feature : string\|nil` (local, declared L202) | if/else, both branches a single call-statement (`skip_balanced`/`advance`), preserving | TRUE — neither branch assigns `feature`; `parse_record`'s OUTER while-loop (the one with the actual 4-clause `if/elseif/elseif/else` that ASSIGNS `feature` in three of its four clauses) correctly remains a skip under the new `elseif chain ... not yet supported` reason, not silently miscounted as certified |
+
+**5/5 verified TRUE. No false certificate found on real corpus.** Two of the five (#4, #5)
+double as small negative-case confirmations in passing: in both files, a SIBLING while-loop
+over the SAME tracked variable that hits a genuinely unsupported construct (nested `if`,
+`break`, an elseif chain that actually mutates the variable) correctly remains uncertified —
+the new code is not merely "more permissive," it is exactly as conservative as designed on the
+constructs it does not yet handle. All 5 carry the same taint set as every persistence-only
+certificate (`pilot-loop-facts-v1`, `pilot-stmt-seq-facts-v1`, `pilot-stmt-preserves-facts-v1`,
+`pilot-initial-facts-v1`, `ty-sub-refl`) PLUS, newly, `pilot-cf-join-facts-v1` (the join's own
+reality-boundary axiom) and (for #1–#3, whose branch has no `else`) no additional axiom beyond
+that — none of the 5 exercised a recognized guard (`guard_selects`/`pilot-syntax-facts-v1`)
+narrowing the branches, since none of the five if-tests recognized a guard on their own tracked
+variable; guard-narrowed-branch and literal-reassignment-inside-a-join shapes are exercised only
+by `fixpoint_prover_test.lua`'s fixtures at this commit, same real-corpus absence run 3 reported
+for the assignment-transfer half.
+
+### Wall-clock
+
+Summed over 48 files: `parse_ms` 155.2 (run 3: 184.7), `pass1_ms` 32.0 (run 3: 44.6),
+`fixpoint_total_ms` 483.8 (run 3: 456.6) — the fixpoint total rose modestly (more real
+certificates attempted-and-closed per file means more axiom citations + `rl.observe` calls per
+attempt; `constrain.lua` alone rose from 74.6ms to 126.1ms, `env.lua` from 29.5ms to 44.8ms,
+consistent with the extra join/branch bookkeeping over the SAME 48-file corpus, not a
+complexity blowup — no file exceeded the 30s per-file `bin/cr check` timeout). Whole-measurement
+wall-clock (`time` around the driver process): **2.87s** for the full 48-file run (parse + pass
+1 + narrowing + fixpoint, all four analyses, per file, sequentially) — run 3's own
+whole-process wall-clock was not separately recorded in that report, so this is reported as a
+fresh absolute number, not a cross-run delta claim (matching run 3's own stated caution about
+`v3_ms` comparisons across runs/system-state).
+
+### Reproduction
+
+Drivers (disposable, not part of the repo, all under `/tmp/v10_parity/`): `scan_loops_run3.lua`
+(corpus/eligibility re-scan, unchanged from run 3), `measure_run3.lua` (measurement, unchanged
+from run 3), `identify_run4_pairs.lua` (new — per-pair variable/loop correlation for the
+truth-check table above). Run via:
+
+```sh
+REPO=/home/me/git/rhizone/crescent
+"$REPO/bin/cr" run /tmp/v10_parity/scan_loops_run3.lua "$REPO"
+"$REPO/bin/cr" run /tmp/v10_parity/measure_run3.lua "$REPO"
+"$REPO/bin/cr" run /tmp/v10_parity/identify_run4_pairs.lua "$REPO"
+```
