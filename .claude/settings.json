@@ -1,5 +1,5 @@
 {
-  "agent": "peer",
+  "agent": "general-purpose",
   "hooks": {
     "UserPromptSubmit": [
       {
