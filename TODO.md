@@ -5458,3 +5458,25 @@ as their status.**
   cycle-detection path is a linked list (O(n) lookup instead of O(1)).
   Revert to node-keyed tables when the checker supports non-primitive
   index-signature keys.
+
+## Taskgraph top-down decomposition gap (2026-08-02)
+
+- [ ] **`lib/taskgraph/` is bottom-up/spawn-only by design, not top-down.** `graph.lua`'s
+  `M.add(g, task_def, parent_id)` lets a *running* task spawn children, and the
+  combinators (`combinators.lua`'s `exec_map`, `exec_retry`, `refine`) operate over
+  dynamically-spawned subtasks as they're added — there is no planner/decomposer that
+  takes one large task description and breaks it into a subtask tree up front, before
+  execution starts. Open question, not a decided feature: whether a top-down
+  decomposition-first planning tool belongs in crescent at all (e.g. as a `taskgraph`
+  addition, or as a separate agent-design tool), and if so where. Not committing to
+  building it here — noted gap/open question only.
+
+## Gamedev genre batteries pointer (2026-08-02)
+
+- [ ] See `docs/batteries.md`'s "Games — planned genre batteries" section (under
+  "Missing — application verticals") for the newly recorded future direction:
+  incrementals, JRPGs, 2D tilemap/spritesheet games (connectivity/autotiling, with
+  multiblock support an open question), physics engine expansion, playtesting tooling,
+  balance-checking tooling, maybe inline custom text elements/text measurement, and
+  wavefunction collapse. Recorded there as direction, not commitment — nothing here is
+  started.
