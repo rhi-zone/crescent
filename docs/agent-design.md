@@ -21,10 +21,11 @@ The single anti-pattern this design is built against: **conversational accumulat
 
 ## What the thesis implies directly
 
+- **Poisoning is a relevance property, not a size or provenance property.** Any context — external (tool output, retrieved docs) or internal (a prior model response, a user message, a note) — that is not directly relevant to the current decision is poisoning, full stop. This is the general form of the point made below about preset context ("noise causes hallucination... not just a speed lever"): it is not a cache-efficiency concern, it's a correctness concern, and nothing is exempt by virtue of where it came from. The set's field-ops already treat model output and tool output symmetrically (both go through add/remove/replace); this states that symmetry as an explicit invariant instead of leaving it implicit.
 - **The set is canonical, the render is derived.** Anything the model "knows" about the task must live in the set. Information that exists only in the rendered turns is lost at the next render and may as well not exist. Render is lossless-to-set by construction.
 - **Notes are `(key, value)` pairs with replace semantics, not log entries.** Written by `note(key, value)` in the LLM's output, merged into the set for downstream calls. The key makes a note addressable and replaceable — a second `note("hypothesis", ...)` replaces the first, it doesn't append. Value is whatever the LLM decides is useful; content type is not prescribed. Notes exist for the unexpected: if the preset author knew upfront what to record, it would be a task input. Constraining note schemas per-preset would predetermine what the LLM can observe and remember, defeating the point.
 - **`drop(note_id)` is a field unset, not a retraction.** Next render doesn't include that note. The model has no idea it ever "existed." Conversation structurally cannot do this — you can append "ignore what I said" but the tokens remain.
-- **"Current tool result" is one slot, not a growing list.** Populated for exactly the decision that immediately follows a call; cleared otherwise. The model never sees "the history of tool results."
+- **Tool results get no special slot.** An earlier draft of this doc gave the tool result an architecturally distinguished "current tool result" field, populated for exactly the decision immediately after a call and cleared otherwise. That was itself a special case — the same mistake the no-special-casing convention forbids at the typechecker level, reappearing here in the context model. A tool result is one more contributor to the set, going through the identical field-op path (add/remove/replace) as a note, a user message, or a model output; nothing in the mechanism is aware "this one came from a tool." What was true of the old framing — that a fresh result is added, may prompt `note()` writes that promote what's relevant out of it, and is then removed before the next decision — still holds, but as an ordinary *use* of add/remove, not as bespoke machinery. No source gets a hardcoded slot that other sources don't.
 - **Retries are field edits, not reruns-with-history.** A retry is a call with a set whose `typecheck_error` field (or whatever) is now populated. No "previous attempts" sequence.
 - **System prompt is a field, too.** Rendered into the system turn each call. Policy changes take effect on the next render. Not "baked in."
 
@@ -32,12 +33,19 @@ The single anti-pattern this design is built against: **conversational accumulat
 
 With set-not-chronology in place, the things an agent intuitively ought to do are all fine:
 
-- **Retrieval decisions.** LLM says "view `foo`" → graph fetches → result occupies the current-tool-result slot for the immediately-following decision → LLM may write any notes it wants → result evaporates from the set. Repeat freely. No poisoning because nothing accumulates.
+- **Retrieval decisions.** LLM says "view `foo`" → graph fetches → result is added to the set through the ordinary field-op path, present for the immediately-following decision → LLM may write any notes it wants, promoting what's relevant → the field is removed before the next decision. Repeat freely. No poisoning because nothing accumulates, and no bespoke retrieval mechanism either — it's the same add/remove any other contributor to the set uses.
 - **Iteration within a leaf.** Multiple tool calls in sequence, each ephemeral in the set. The "conversation with the graph" shape works.
 - **Computation via eval.** `eval("#results")` is a computation cap for things LLMs hallucinate on at the token level — counting, arithmetic, filter/map, string transforms. Ephemeral like any other tool call.
 - **Picking and parameterizing presets.** Just another decision.
 
-Retrieval and computation are both allowed because neither is the bug. The bug is chronological accumulation of raw results. A retrieval that drops its raw result back into the set-slot for the next decision and then evaporates is fine.
+Retrieval and computation are both allowed because neither is the bug. The bug is chronological accumulation of raw results. A retrieval that's added to the set for the next decision and then removed is fine.
+
+**Tool-result size is not a sizing problem.** It can look like oversized results need their own management mechanism — truncation, a bounded-output contract, spill-to-file. They don't. An oversized result is always exactly one of two things:
+
+- **Legitimately large and relevant.** Handled the same way as anything else under the field-op mechanism above: the leaf reads it once, in whatever scope that read has, extracts what's actually relevant via `note()`, and lets the rest disappear structurally when the field is removed. No special-cased size handling is required, because nothing about size was special to begin with.
+- **Never supposed to reach the agent whole.** If a result is oversized *and* opaque to that extraction — nothing in it can be pulled out as a targeted note — that's a defect in the tool/cap's own contract. It should have returned something scoped, queryable, or pre-summarized by design. That's a fix to the cap, not a harness-level patch applied after the fact.
+
+Truncation is rejected outright, not left as an open gap: cutting a result at an arbitrary byte or token boundary is a symptom of the conversational-accumulation mental model (pile everything up, then clip when it gets too big), not a fix compatible with this one. Under set-not-chronology there is nothing to clip after the fact — either the leaf's own read scope already bounds what comes back, or the cap needs fixing.
 
 ## Presets are the primary surface
 
@@ -52,7 +60,7 @@ Why presets over per-run LLM-authored code:
 
 Eval exists for cases where a full preset would be overkill — quick in-line computation that's more reliable than token-level reasoning. Not a replacement for preset design.
 
-Preset authors should pursue aggressive context minimization. A 200-line context containing only the target function and its local helpers produces better output than a 2000-line file dump. Noise causes hallucination; minimization is a model-quality lever, not just a speed lever.
+Preset authors should pursue aggressive context minimization. A 200-line context containing only the target function and its local helpers produces better output than a 2000-line file dump. Noise causes hallucination; minimization is a model-quality lever, not just a speed lever — the specific case of the poisoning invariant stated above.
 
 ## The graph holds inter-task state
 
@@ -100,7 +108,7 @@ Default test for any proposed feature: *what conversational anti-pattern is this
 ## Open questions
 
 1. **Note value encoding.** Content type is not prescribed — values can be strings, tables, whatever. Open question is whether there's a useful convention (e.g. short strings only, or structured tables for machine-readable notes) that emerges from the first real preset, not something to decide upfront.
-2. **Scale.** The only empirical evidence for set-rendered-as-turns in practice (`normalize/docs/archive/agent-dogfooding.md`) is small-task. Whether the shape holds on a 20-file refactor — where note-set size grows and cross-view correlation matters — is unproven.
+2. **Scale.** The only empirical evidence for set-rendered-as-turns in practice (`normalize/docs/archive/agent-dogfooding.md`) is small-task. Whether the shape holds on a 20-file refactor — where note-set size grows and cross-view correlation matters — is unproven. Tool-result *size* specifically is addressed above (legitimately-large-and-relevant vs. cap-contract defect, never truncation) and isn't part of this open question; what's still unproven is note-set growth and cross-view correlation across many leaves over a long-running task, not raw result size.
 3. **Small-model feasibility.** Grammar-constrained output, note-schema discipline, and atemporal rendering all ask more than free prose. llama.cpp at `127.0.0.1:8081` is the test bed. Skeleton-with-slots (pre-written structure, LLM fills gaps) is a plausible middle ground.
 4. **Render benchmarking per model.** `render(set)` is a pure function at the cap boundary; different models may prefer different formats (turns today; maybe structured records later). Pick measured not assumed.
 5. **Structured docs retrieval.** `lib/doc/` index that normalize queries, or something else? No `normalize docs` subcommand exists. Unresolved.
