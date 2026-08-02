@@ -51,6 +51,28 @@ ctrl+c or ctrl+s, done. It deleted all the steps that weren't about what you
 were trying to do. That's the feel the whole system should have — not just
 for screenshots, for everything.
 
+## Onset cost is friction too
+
+Friction isn't just the steady-state distance from intent to result — the
+number of steps once you already know what you're doing. There's a second
+component: the cost of getting to the point where you can traverse that
+distance efficiently at all.
+
+Vim is the sharp example. Once you know it, vim is about as low-friction as
+editing gets — intent to result in a handful of keystrokes, hands never
+leaving the home row. But getting there is a slog. Modes, motions, a
+vocabulary you have to internalize before any of it clicks. That slog is
+friction. It's paid once instead of on every action, but it's still friction,
+and it's the kind that prices out beginners.
+
+So a design that's fast for experts but has a crushing learning curve isn't
+simply "low friction." It's low friction for people who already paid a large
+upfront cost — a different, narrower claim than it sounds like. Lightshot is
+the example worth holding up precisely because it's cheap on both axes: fast
+once you know it, and there's almost nothing to know. An intent engine has to
+optimize for both — steady-state distance and onset cost — not just the one
+that's easier to benchmark.
+
 ## How batteries-included connects
 
 This is where the ecosystem strategy earns its keep. Every typed, composable
