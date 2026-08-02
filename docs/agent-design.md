@@ -47,6 +47,14 @@ Retrieval and computation are both allowed because neither is the bug. The bug i
 
 Truncation is rejected outright, not left as an open gap: cutting a result at an arbitrary byte or token boundary is a symptom of the conversational-accumulation mental model (pile everything up, then clip when it gets too big), not a fix compatible with this one. Under set-not-chronology there is nothing to clip after the fact — either the leaf's own read scope already bounds what comes back, or the cap needs fixing.
 
+## One authoritative store, not synced copies
+
+The context-poisoning invariant above is the LLM-facing instance of a broader principle that governs this design wherever it touches harness or tooling architecture — not only what an LLM call sees. An agent isn't only its context. For any piece of logical state the harness manages — task lists, notes, run state, whatever else accumulates as the system grows — there is exactly one authoritative store. Any other representation of that state — a rendered file, a UI view, a cache — must be a derived, read-through mirror: refreshed deterministically from the authoritative store, never independently writable.
+
+The failure mode is not "more than one copy exists." A disk-backed store with an in-process cache for latency is fine, because the cache is never directly authored — only ever repopulated from the store. The failure mode is more than one independently-writable surface for the same logical state. That's what makes "syncing" necessary in the first place, and syncing two writable copies is a workaround for the design mistake, not a fix for it — the same relationship truncation has to conversational accumulation, above.
+
+Concrete instance: a task list is conceptually a set of records with state (add a task / mark done / drop) and operations over that set, not a text file to be hand-edited by inserting and removing lines. Treating "add a task" as "open the markdown file, find a spot, insert a line" is the same category error the thesis rejects for context — a chronological artifact standing in for structured facts with operations. If a project renders its task list as a markdown file (this repo's own `TODO.md`, say) while a separate tool exposes its own independent write surface over overlapping state (a session-scoped task-tracking tool used by an agent harness), those are two independently-writable copies of the same logical state — the anti-pattern exactly — and they drift for the identical structural reason unmanaged context drifts: stale entries, tribal knowledge nobody prunes, tasks nobody removes.
+
 ## Presets are the primary surface
 
 A preset is a battle-tested task type: declared input schema, output schema, cap manifest, note-slot schema, and implementation (pure code, a single curated LLM leaf, or a small task graph of both). Agent apps are mostly built by selecting, parameterizing, and composing presets.
@@ -114,6 +122,7 @@ Default test for any proposed feature: *what conversational anti-pattern is this
 5. **Structured docs retrieval.** `lib/doc/` index that normalize queries, or something else? No `normalize docs` subcommand exists. Unresolved.
 7. **Failure semantics.** Retry / abandon-subtree / escalate-to-parent as a per-preset knob. Deferred until a real preset hits real failure.
 8. **First concrete app.** Narrow preset-only agent (shakes out substrate) or small generalist with curated leaves (proves the thesis end-to-end). Current lean: narrow first.
+9. **TODO.md as authoritative store.** Does crescent's own `TODO.md` become a rendered mirror of some other authoritative store, and if so, what store? Open — the one-authoritative-store principle above names the shape of the problem, not the answer.
 
 ## Out of scope for v1
 
