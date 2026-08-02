@@ -2153,6 +2153,38 @@ layer. Type-safe builder APIs for constructing game state.
   supermove shortcut), solvability (all standard deals are solvable; library tracks deal number).
   Multi-frontend: CLI, TUI, web.
 
+**Games — planned genre batteries** *(future direction, not yet implemented — recorded here
+so the direction isn't lost, not as a commitment to a timeline)*. The board/card games above
+are the proven pattern (headless rules + multi-frontend); the genres below are where that
+pattern is meant to extend next:
+
+- **Incrementals** — idle/clicker game genre primitives: resource accumulation curves,
+  offline-progress calculation, unlock/prestige trees, cost-scaling formulas. Not started.
+- **JRPGs** — turn-based RPG genre primitives: party/turn-order management, stat growth,
+  skill/ability systems, encounter and battle-loop scaffolding. Not started.
+- **2D tilemap/spritesheet games** — building on the existing `lib/tilemap` (see above) and
+  `lib/game_math`, with QoL features aimed specifically at authoring: connectivity/autotiling
+  (tiles that pick their sprite based on neighboring tiles) and spritesheet-driven rendering.
+  Multiblock support (multi-tile structures placed/tracked as a single logical entity) is
+  under consideration but not decided — an open question, not a planned feature yet.
+- **Physics engines** — `lib/physics_2d` already exists (semi-implicit Euler integration,
+  AABB/circle collision detection, impulse-based resolution, distance joints); the forward
+  direction here is expanding that existing library's coverage (more shapes, constraints,
+  broad-phase), not starting a new one from scratch.
+- **Playtesting tooling** — ways to test games as games, not just unit-test their rules:
+  scripted-input replay, scenario fixtures, automated play sessions against the headless
+  state model. Not started.
+- **Balance-checking tooling** — simulation-driven balance analysis: running many simulated
+  playouts (e.g. via `lib/minimax`-style search or Monte Carlo rollout) to surface degenerate
+  strategies, win-rate skew, or economy runaway before a game ships. Not started.
+- **Rich-text/UI primitives** *(maybe — genuinely uncertain, not committed)*: inline custom
+  elements within text, text measurement, and similar primitives that a text-heavy game UI
+  (dialogue boxes, tooltips) would need. Whether this belongs in the games vertical or
+  elsewhere (e.g. alongside `lib/tui`/`lib/html`) is unresolved.
+- **Wavefunction collapse (WFC)** — constraint-based procedural tile generation. No WFC or
+  constraint-based procgen implementation exists anywhere in `lib/` today; this would be a
+  new library, motivated by the tilemap/2D-game direction above. Not started.
+
 ### Missing — typechecker features (load-bearing for the ecosystem)
 
 **Record spread union distribution** — `{ ...(A | B), k: V }` where the spread inner

@@ -30,6 +30,22 @@ implementations of the same concepts; LuaJIT is fast enough that both are real.
 comments (`--:`, `--::`). There is no transpiler. The answer is always a
 library.
 
+**Future direction, not current scope:** today crescent's user-facing surfaces
+are web/browser (`lib/reactive_optics` + `lib/web/reactive_dom`) and terminal
+UI (`lib/tui`). Native/desktop application UI is stated future direction — a
+third surface, not yet built — following the same pattern of a headless core
+with a swappable frontend.
+
+Separately, game primitives are currently framed in `docs/batteries.md` as one
+stdlib category among many (`lib/chess`, `lib/physics_2d`, `lib/tilemap`, and
+so on). The owner's stated long-term ambition goes further: for crescent to
+eventually grow into a "serious" game engine in its own right, not just a
+library shelf a game happens to be buildable from. This is framed here as
+long-term direction/ambition — distinct from, and well beyond, the current
+scope of individual game-primitive libraries — and another vector (alongside
+the portable-application-substrate thesis in `docs/batteries.md`) for
+crescent-the-platform to spread. Nothing about this is committed or built yet.
+
 ## Architecture
 
 ```
