@@ -22,9 +22,10 @@
 -- function, mirroring the TS, where such a node is a bare function too. A
 -- node carrying BOTH a handler and children (uncommon but valid — see
 -- init.lua) cannot be that, because a Lua function cannot hold keys: it
--- becomes a table whose child sub-APIs are ordinary keys and whose `__call`
--- metamethod invokes the handler. Both forms are called identically
--- (`node(input)`); only `type()` distinguishes them.
+-- becomes a table whose child sub-APIs are ordinary keys and whose own
+-- callable is exposed under a `handler` key (`node.handler(input)`), rather
+-- than the node itself being callable. `type()` still distinguishes a bare
+-- leaf (`"function"`) from a leaf-with-children (`"table"`).
 --
 -- ASYNC. Every leaf callable returns a promise, via `lib/async`'s established
 -- transparent-coroutine convention (`async`/`await`, as used by
@@ -138,9 +139,8 @@ local function build_api(tree, slugs)
 	end
 	if is_leaf then
 		-- Both a handler and children: the child sub-APIs are ordinary keys
-		-- on this table, and `__call` invokes the handler.
-		local caller = make_caller(tree, slugs)
-		setmetatable(base, { __call = function(_, input) return caller(input) end })
+		-- on this table, and the node's own callable sits under `handler`.
+		base.handler = make_caller(tree, slugs)
 	end
 	return base
 end
@@ -149,7 +149,8 @@ end
 --
 --   - leaf (handler, no children/fallback) — a callable returning a promise;
 --   - branch (children and/or fallback, no handler) — a nested table;
---   - both — a table with children as keys and a `__call` metamethod;
+--   - both — a table with children as keys plus a `handler` key holding the
+--     node's own callable;
 --   - fallback — a `(slug_value) -> sub_api` function under `fallback.name`,
 --     with the slug value threaded down and merged into every descendant
 --     leaf's input (see the module doc's slug-seeding note).

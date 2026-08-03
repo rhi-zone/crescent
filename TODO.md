@@ -5497,15 +5497,24 @@ as their status.**
   `response` is typed `unknown` instead, so callers must narrow what comes
   back out of the encoder. Restore the generic signature when this is fixed.
 
-- [ ] Revert TYPECHECKER WORKAROUND in `lib/fractal/direct_test.lua`
+- [x] Revert TYPECHECKER WORKAROUND in `lib/fractal/direct_test.lua`
   (`invoke`): `__call` metatables are not modelled. A table carrying a
   statically-visible `__call` cannot be called — `cannot call value of type
-  `{} & { __call: ... }``. `direct.lua` projects a node that is BOTH a leaf
+  `{} & { __call: ... }``. `direct.lua` projected a node that is BOTH a leaf
   and a branch as exactly such a table (a Lua function cannot hold child
-  keys), so the natural caller code `api(input)` does not typecheck; the test
-  fetches and invokes the metamethod by hand instead. This is a limitation
-  every consumer of `create_direct_api` will hit, not just the test. Replace
-  the helper with a direct call once `__call` is supported.
+  keys), so the natural caller code `api(input)` did not typecheck; the test
+  fetched and invoked the metamethod by hand instead.
+  **MOOT (2026-08-03):** investigation into the TS original (`direct.ts`)
+  found this dual leaf+children shape barely load-bearing — it appears in
+  exactly 3 identical test fixtures across the fractal monorepo, has no
+  constructor that produces it (`op()`/`api()` each build only one half),
+  zero production callers, and even in TS it forced an untyped
+  `Record<string, any>` escape hatch. Owner decision: drop the `__call`
+  metatable representation. A node with both a handler and children is now
+  a plain table with a `handler` key (`node.handler(input)`) plus children
+  as sibling keys — no metatable involved. The `__call`-modelling gap itself
+  remains open in the typechecker generally but no longer applies to this
+  code.
 
 - [ ] `lib/fractal/result.lua`'s `pipe` is imprecisely typed
   (`(a: unknown, ...(a: unknown) -> unknown) -> unknown`). The TypeScript

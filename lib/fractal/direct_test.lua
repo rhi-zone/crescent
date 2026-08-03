@@ -23,28 +23,15 @@ end
 --: (v: unknown) -> v is (input: unknown) -> unknown
 local function is_fn(v) return type(v) == "function" end
 
---: (v: unknown) -> v is (self: unknown, input: unknown) -> unknown
-local function is_call_metamethod(v) return type(v) == "function" end
-
 -- Invoke a projected node, whether it is a bare function (a plain leaf) or a
--- `__call` table (a leaf that also has children).
---
--- TYPECHECKER WORKAROUND: the natural code is `node(input)` for both forms —
--- that is exactly what the `__call` metatable exists for, and it is what a
--- real caller writes. The checker rejects calling any table, even one whose
--- metatable is statically visible at the construction site: "cannot call
--- value of type `{} & { __call: ... }`". So the metamethod is fetched and
--- invoked by hand here. Replace this with a direct call once `__call` is
--- modelled — see TODO.md.
+-- table carrying a `handler` key (a leaf that also has children).
 --: (f: unknown, input: unknown) -> unknown
 local function invoke(f, input)
   if is_fn(f) then return f(input) end
   if type(f) ~= "table" then error("invoke: not callable") end
-  local mt = getmetatable(f)
-  if type(mt) ~= "table" then error("invoke: table has no metatable") end
-  local call_mm = mt.__call
-  if not is_call_metamethod(call_mm) then error("invoke: table has no __call") end
-  return call_mm(f, input)
+  local handler = f.handler
+  if not is_fn(handler) then error("invoke: table has no handler") end
+  return handler(input)
 end
 
 -- Every leaf callable returns a promise (lib/async's transparent-coroutine
@@ -152,12 +139,12 @@ T.describe("lib.fractal.direct", function()
       T.eq(type(api), "table")
     end)
 
-    T.it("is callable via __call", function()
+    T.it("is callable via its handler key", function()
       local node = fractal.api({ child = fractal.op(function(_) return "child" end) })
       --: (input: unknown) -> unknown
       node.handler = function(_) return "self" end
       local api = direct.create_direct_api(node)
-      T.eq(call(api, nil), "self")
+      T.eq(call(api.handler, nil), "self")
     end)
 
     T.it("its children are ordinary keys on the same table", function()
