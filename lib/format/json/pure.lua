@@ -1,6 +1,7 @@
 -- lib/format/json/pure.lua
 -- Pure Lua JSON encoder and decoder. Tier 1 of the three-tier JSON library.
--- Works on PUC-Rio Lua 5.2+ and LuaJIT. No dependencies.
+-- Works on PUC-Rio Lua 5.2+ and LuaJIT. No external dependencies; the only
+-- intra-repo require is lib/null, for the shared null sentinel.
 --
 -- Public API (same as the module):
 --   M.encode(value)  -> string | (nil, errmsg)
@@ -23,13 +24,18 @@
 --   Strict: trailing garbage after top-level value is an error.
 --   Error messages include byte offset: "unexpected token at offset N".
 
+if not package.path:find("./?/init.lua", 1, true) then
+    package.path = "./?/init.lua;" .. package.path
+end
+
 local M = {}
 
 -- ── Null sentinel ──────────────────────────────────────────────────────────────
 
--- Try to share the null sentinel with lib.null if it exists.
-local _ok, _null_mod = pcall(require, "lib.null")
-M.null = _ok and _null_mod.null or {}
+-- The repo-wide shared sentinel (lib/null). Shared by identity: a private
+-- `{}` here would compare unequal to every other library's null, so a value
+-- decoded by this module could not be recognized as null by anything else.
+M.null = require("lib.null").null
 
 -- ── Encode ────────────────────────────────────────────────────────────────────
 

@@ -471,6 +471,7 @@ These declare shared types and have no runtime code (or only declaration-side gl
 - `lib/memoize/` — memoize/once/debounce/lru/ttl/weak/multi. Status: stable.
 - `lib/merge/` — table merge. Status: stable.
 - `lib/merkle_tree/` — Merkle tree (build, verify, sparse, diff, concat). Status: stable.
+- `lib/null/` — the shared null sentinel: one table, compared by identity, for data models that must distinguish an explicit null from an absent value. Used by `lib/format/json/{pure,ffi}` and `lib/fractal/type_ref`. Status: stable.
 - `lib/search/` — search. Status: stable.
 - `lib/semver/` — Semver 2.0 parser/comparator. Status: stable.
 - `lib/string_ext/`, `lib/table_ext/` — extended Lua stdlib utilities. Status: stable.

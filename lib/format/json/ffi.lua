@@ -26,6 +26,10 @@
 --     FFI equal:  integer arrays, encode
 --   Real throughput gains require a C library (simd tier — see simd.lua).
 
+if not package.path:find("./?/init.lua", 1, true) then
+    package.path = "./?/init.lua;" .. package.path
+end
+
 if not pcall(require, "ffi") then
     -- FFI unavailable: fall back to pure tier.
     return require("lib.format.json.pure")
@@ -37,8 +41,9 @@ local M = {}
 
 -- ── Null sentinel ──────────────────────────────────────────────────────────────
 
-local _ok, _null_mod = pcall(require, "lib.null")
-M.null = _ok and _null_mod.null or {}
+-- The repo-wide shared sentinel (lib/null) — same table the pure tier uses,
+-- which is what makes the two tiers' output interchangeable. See pure.lua.
+M.null = require("lib.null").null
 
 -- ── FFI type declarations ─────────────────────────────────────────────────────
 
