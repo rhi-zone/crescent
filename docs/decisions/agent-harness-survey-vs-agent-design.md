@@ -226,7 +226,17 @@ here.)
 
 ### 8. First concrete app (narrow preset-only vs. small generalist)
 
-agent-design.md's current lean is narrow-first.
+**Resolved since this document was written.** agent-design.md no longer
+frames this as a choice between narrow-first and small-generalist — the
+owner decision recorded there is to build both as separate first apps: a
+narrow preset-only instance (a file-management library exposing filesystem
+operations behind a cap, sequenced before any UI or agent projection onto
+it, per the one-authoritative-store principle) and a small generalist app
+(scope still open). The narrow-first *lean* that the analysis below was
+written against is now specifically the narrow instance of a two-app plan,
+not the sole first app; the survey's convergence/countervailing evidence
+below still applies to that narrow instance and, for the CAMEL point, to
+what the still-unscoped generalist app may cost.
 
 - **smolagents**' published agency ladder (`smolagents.md`) is the strongest
   direct validation of "narrow first" as a general design stance, not just a
@@ -501,20 +511,36 @@ These are gaps in the draft — things multiple independent projects treat as
 load-bearing that agent-design.md's text does not mention at all, not
 restatements of the 8 already-open questions above.
 
-1. **Tool-result size / spill-to-file.** Claude Code (10K/25K-token
+1. **Tool-result size / spill-to-file — resolved since this document was
+   written, superseding what follows as a "gap."** Claude Code (10K/25K-token
    thresholds, spill to disk with a reference), Goose (`GOOSE_MAX_TOOL_RESPONSE_SIZE`,
    default 200,000 chars, spilled to a temp file with the model told the
    path), browser-use (two-tier `extracted_content`/`long_term_memory`
    split, 60,000-char hard cap), and AutoGPT ("a large output is treated as
    a *failure of the call*, not as data to be squeezed") all treat oversized
-   tool output as a first-class problem with a named mechanism. agent-design.md's
-   "current tool result is one slot, not a growing list" describes the
-   *lifetime* of a tool result but says nothing about its *size* — a tool
-   call that returns 200KB still occupies that one slot in full. This is a
-   gap in the draft: multiple projects consider this failure mode common
-   enough to design against explicitly, and the note-vs-eval mechanisms in
-   agent-design.md don't obviously cover it (a note is LLM-authored content,
-   not harness-imposed truncation).
+   tool output as a first-class problem with a named mechanism. At the time
+   this comparison was written, agent-design.md's "current tool result is
+   one slot, not a growing list" described the *lifetime* of a tool result
+   but said nothing about its *size* — a tool call returning 200KB still
+   occupied that one slot in full. agent-design.md has since resolved this
+   explicitly. (The "current tool result" slot itself was also removed as a
+   special case in the same round of edits — tool results now go through the
+   ordinary add/remove/replace field-op path like any other set contributor,
+   with no source getting a hardcoded slot other sources don't.) An oversized
+   result is always
+   exactly one of two things — **legitimately large and relevant**, handled
+   by the ordinary field-op path (the leaf reads it once, extracts what
+   matters via `note()`, the rest disappears structurally when the field is
+   removed, no size-specific handling needed), or **never supposed to reach
+   the agent whole**, in which case an oversized-and-opaque result is a
+   defect in the tool/cap's own contract, fixed at the cap, not patched
+   around in the harness. Truncation and bounded-output contracts are
+   rejected outright, not left open, as artifacts of the conversational-
+   accumulation model this design replaces. This is a real point of
+   divergence from every mechanism named above, all of which are exactly the
+   truncation/spill-to-file/hard-cap machinery agent-design.md now rejects by
+   name — worth reading as a considered position against the survey's
+   consensus, not a silent gap.
 
 2. **Approval/permission gating as a control-flow mechanism distinct from
    caps.** agent-design.md's caps-first framing (a tool handler errors if a
@@ -620,11 +646,11 @@ restatements of the 8 already-open questions above.
 | Q4 render benchmarking | Aider (measured JSON vs. text, model-specific) | — | — |
 | Q5 structured docs retrieval | — | — | nearly all (crescent-specific) |
 | Q7 failure semantics | SWE-agent, CAMEL (enumerated states, recovery ladder) | AutoGPT (deferring the *category* of answer is itself risky) | — |
-| Q8 first concrete app | smolagents, AutoGen, pi (narrow-first as policy) | CAMEL (narrow-first doesn't bound app 2's cost) | — |
+| Q8 first concrete app — resolved (build both: narrow file-mgmt library + small generalist, scope of latter still open) | smolagents, AutoGen, pi (narrow-first as policy, validates the narrow instance) | CAMEL (narrow-first doesn't bound app 2's cost) | — |
 | Atemporal-facts memory | browser-use, smolagents (independent convergence) | LlamaIndex, AutoGen, SK (transcript+policy-object as a complete, considered alternative) | — |
 | Presets over code | SWE-agent (with caveat), AutoGPT, SK | smolagents, Open Interpreter (code-as-action, argued and measured) | CrewAI/AutoGen/LangGraph (a third position: developer-graph, neither) |
 | Agents as platform apps | Cline, pi, Continue.dev, openai-agents-sdk | none found | opencode (partial: declarative agent, no tarball/install model) |
-| Gap: tool-result size | — | — | Claude Code, Goose, browser-use, AutoGPT all address it; draft doesn't |
+| Tool-result size — resolved (a/b: promote-via-note vs. cap-contract defect; truncation rejected) | agent-design.md's resolution | Claude Code, Goose, browser-use, AutoGPT (all use truncation/spill/hard-cap machinery agent-design.md now rejects by name) | — |
 | Gap: approval as control flow | — | — | most harnesses have this; draft's caps-first is orthogonal to it |
 | Gap: partial-failure recovery granularity | — | — | SWE-agent, CAMEL, Codex CLI all richer than "retry from inputs" |
 | Gap: single-render overflow | — | — | Claude Code, Gemini CLI, Continue.dev all handle it explicitly |
