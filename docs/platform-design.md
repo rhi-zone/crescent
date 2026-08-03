@@ -649,13 +649,30 @@ caps.time.now()  -- returns Unix timestamp (integer) | nil, "capability revoked"
 
 Scoped to a directory via `root` in the manifest declaration. All paths are
 relative to `root`; path traversal (`../`, absolute paths) is blocked at the
-cap level. An `allow_write` flag (default false) controls write access.
+cap level.
+
+Permission is granular per operation, all independent `allow_*` booleans on
+the manifest declaration. Read-side operations (`read`/`list`/`list_recursive`/
+`stat`) default to granted; mutating operations (`write`/`mkdir`/`delete`/
+`rename`) default to denied, same as `write` always has:
 
 ```lua
-caps.my_fs.read(path)            -- returns string | nil, err
-caps.my_fs.write(path, content)  -- returns true | nil, err (only if allow_write)
-caps.my_fs.list(path?)           -- returns string[] | nil, err (filenames)
+caps.my_fs.read(path)                 -- string | nil, err
+caps.my_fs.write(path, content)       -- true | nil, err            (only if allow_write)
+caps.my_fs.list(path?)                -- string[] | nil, err        (filenames, not full paths)
+caps.my_fs.list_recursive(path?)      -- string[] | nil, err        (paths relative to `path`, "/"-separated,
+                                       --   covers files and directories at every depth)
+caps.my_fs.stat(path)                 -- { size, mtime, type: "file" | "directory" } | nil, err
+caps.my_fs.mkdir(path)                -- true | nil, err            (only if allow_mkdir)
+caps.my_fs.delete(path, opts?)        -- true | nil, err            (only if allow_delete;
+                                       --   opts.recursive = true required to remove a non-empty directory)
+caps.my_fs.rename(path_from, path_to) -- true | nil, err            (only if allow_rename; move within root)
 ```
+
+`attenuate({ root, allow_read?, allow_write?, allow_list?, allow_list_recursive?,
+allow_stat?, allow_mkdir?, allow_delete?, allow_rename? })` narrows a cap to a
+subdirectory and/or a subset of its operations. Narrow-only: it can drop any
+of the eight flags the parent holds, never grant one the parent lacks.
 
 ### `caps.cli` — command-line arguments
 

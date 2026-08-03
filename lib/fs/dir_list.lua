@@ -151,6 +151,25 @@ if ffi.os == "Linux" then
 			result.path = path
 			return result
 		end
+
+		-- stat(path) -> file_info for ANY path (file or directory), unlike
+		-- dir_info which only works on directories (it opendir()s the path).
+		-- statx'd directly; no opendir required.
+		--: (string | nil) -> ({ name: string, path: string, is_dir: boolean, size: number, modified: number } | nil, string | nil)
+		mod.stat = function(path)
+			path = path or "."
+			if type(path) ~= "string" then return nil, "stat: path must be a string" end
+			local err = dir_list_ffi.statx(-100 --[[AT_FDCWD]], path, 0, 0xfff --[[STATX_ALL]], stat)
+			if err ~= 0 then return nil, "stat: could not stat " .. path end
+			local name = path:match("([^/]+)$") or path
+			return {
+				name = name,
+				path = path,
+				is_dir = bit.band(stat[0].stx_mode, 0xf000) == 0x4000,
+				size = tonumber(stat[0].stx_size) or 0,
+				modified = (tonumber(stat[0].stx_mtime_sec) or 0) + (tonumber(stat[0].stx_mtime_nsec) or 0) / 1000000000,
+			}
+		end
 	end
 elseif ffi.os == "Windows" then
 	ffi.cdef [[
@@ -241,9 +260,33 @@ elseif ffi.os == "Windows" then
 		result.path = path
 		return result
 	end
+
+	-- stat(path) -> file_info for ANY path (file or directory). Unlike
+	-- dir_info, FindFirstFileA is pointed directly at path (no \* wildcard),
+	-- so it works for plain files too.
+	--: (string | nil) -> ({ name: string, path: string, is_dir: boolean, size: number, modified: number } | nil, string | nil)
+	mod.stat = function(path)
+		path = path or "."
+		if type(path) ~= "string" then return nil, "stat: path must be a string" end
+		local dir = dir_list_ffi.FindFirstFileA(path, entry)
+		if dir == nil then return nil, "stat: could not stat " .. path end
+		local name = path:match("([^\\]+)$") or path
+		local result = {
+			name = name,
+			path = path,
+			is_dir = bit.band(entry[0].dwFileAttributes, 0x10 --[[FILE_ATTRIBUTE_DIRECTORY]]) ~= 0,
+			size = tonumber(entry[0].nFileSizeHigh * 0x100000000 + entry[0].nFileSizeLow) or 0,
+			modified = tonumber((entry[0].ftLastAccessTime.dwHighDateTime * 0x100000000ULL + entry[0].ftLastAccessTime.dwLowDateTime) /
+			10000000ULL - 11644473600ULL) or 0,
+		}
+		local success = dir_list_ffi.FindClose(dir)
+		if not success then return nil, "stat: could not close handle for " .. path end
+		return result
+	end
 end
 
 mod.dir_list = mod.dir_list or function(path) return nil, "dir_list: os/processor not supported" end
 mod.dir_info = mod.dir_info or function(path) return nil, "dir_info: dir_info: os/processor not supported" end
+mod.stat = mod.stat or function(path) return nil, "stat: os/processor not supported" end
 
 return mod

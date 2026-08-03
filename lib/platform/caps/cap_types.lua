@@ -96,7 +96,22 @@
 --::   read: (path: string) -> (string | nil, string | nil),
 --::   write: (path: string, content: string) -> (true | nil, string | nil),
 --::   list: (path: string | nil) -> (string[] | nil, string | nil),
---::   attenuate: (sub_opts: { root: string, allow_write: boolean | nil } | nil) -> (FsCap | nil, (() -> nil) | string | nil),
+--::   list_recursive: (path: string | nil) -> (string[] | nil, string | nil),
+--::   stat: (path: string) -> ({ size: number, mtime: number, type: string } | nil, string | nil),
+--::   mkdir: (path: string) -> (true | nil, string | nil),
+--::   delete: (path: string, opts: { recursive: boolean | nil } | nil) -> (true | nil, string | nil),
+--::   rename: (path_from: string, path_to: string) -> (true | nil, string | nil),
+--::   attenuate: (sub_opts: {
+--::     root: string,
+--::     allow_read: boolean | nil,
+--::     allow_write: boolean | nil,
+--::     allow_list: boolean | nil,
+--::     allow_list_recursive: boolean | nil,
+--::     allow_stat: boolean | nil,
+--::     allow_mkdir: boolean | nil,
+--::     allow_delete: boolean | nil,
+--::     allow_rename: boolean | nil,
+--::   } | nil) -> (FsCap | nil, (() -> nil) | string | nil),
 --:: }
 
 -- ── RegistryCap ───────────────────────────────────────────────────────────────

@@ -49,7 +49,7 @@ local function unpack_tarball(tardata)
 end
 
 --:: TarEntry = { name: string, mode: number, size: number, mtime: number, data: string, typeflag: string }
---:: CapDecl = { type: string | nil, required: boolean | nil, host: string | nil, model: string | nil, path: string | nil, paths: unknown, allow_write: boolean | nil, scope: unknown, tables: unknown, provider: string | nil, key_name: string | nil, base_url: string | nil, provider_default: string | nil, root: string | nil, binaries: unknown, stderr: string | nil, methods: unknown, port: integer | nil, cmd: string | nil, ... }
+--:: CapDecl = { type: string | nil, required: boolean | nil, host: string | nil, model: string | nil, path: string | nil, paths: unknown, allow_write: boolean | nil, allow_read: boolean | nil, allow_list: boolean | nil, allow_list_recursive: boolean | nil, allow_stat: boolean | nil, allow_mkdir: boolean | nil, allow_delete: boolean | nil, allow_rename: boolean | nil, scope: unknown, tables: unknown, provider: string | nil, key_name: string | nil, base_url: string | nil, provider_default: string | nil, root: string | nil, binaries: unknown, stderr: string | nil, methods: unknown, port: integer | nil, cmd: string | nil, ... }
 --:: EntryDef = { main: string | nil, caps: { [string]: CapDecl | string } | nil }
 --:: Manifest = { name: string | nil, version: string | nil, entry: { [string]: EntryDef | string } | nil, caps: { [string]: CapDecl | string } | nil, default_entry: string | nil, meta: { tags: { [integer]: string } | nil, description: string | nil, ... } | nil, ... }
 --:: AppRecord = { path: string, chunks: { [integer]: { type: string, data: string } } | nil, entries: { [number]: TarEntry }, manifest: Manifest | nil, _dir_mode: boolean | nil }
@@ -410,8 +410,15 @@ local CAP_FACTORIES = {
 		build = function(decl)
 			local root = decl.root or error("platform: fs cap requires 'root' in declaration")
 			return require("lib.platform.caps.fs").fs_cap({
-				root        = path_util.expand_home(root),
-				allow_write = decl.allow_write,
+				root                 = path_util.expand_home(root),
+				allow_read           = decl.allow_read,
+				allow_write          = decl.allow_write,
+				allow_list           = decl.allow_list,
+				allow_list_recursive = decl.allow_list_recursive,
+				allow_stat           = decl.allow_stat,
+				allow_mkdir          = decl.allow_mkdir,
+				allow_delete         = decl.allow_delete,
+				allow_rename         = decl.allow_rename,
 			})
 		end,
 	},
