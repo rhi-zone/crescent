@@ -6,6 +6,8 @@ end
 -- Spec: http://bsonspec.org/spec.html
 -- All multi-byte integers are little-endian.
 
+local null = require("lib.null")
+
 local M = {}
 
 M._tier = "pure"
@@ -27,12 +29,13 @@ local type = type
 
 -- ── sentinels ────────────────────────────────────────────────────────────────
 
-local null_mt = {}
 local datetime_mt = {}
 local binary_mt = {}
 
 --- BSON null sentinel. Use this to encode BSON null (distinct from Lua nil).
-M.null = setmetatable({}, null_mt)
+-- Shared across libraries (lib/null) so null values compare equal regardless
+-- of which library produced them.
+M.null = null.null
 
 --- Wrap an integer millisecond timestamp as a BSON UTC datetime.
 --: (ms: number) -> { ms: number, ... }
@@ -310,7 +313,7 @@ end
 encode_value = function(v)
 	local tv = type(v)
 
-	if tv == "nil" or (tv == "table" and getmetatable(v) == null_mt) then
+	if tv == "nil" or v == M.null then
 		-- null
 		return "\x0a"
 	end

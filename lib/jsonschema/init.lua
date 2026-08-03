@@ -6,6 +6,8 @@ if not package.path:find("./?/init.lua", 1, true) then
   package.path = "./?/init.lua;" .. package.path
 end
 
+local null = require("lib.null")
+
 local M = {}
 
 M._tier = "pure"
@@ -20,8 +22,10 @@ local function is_array(t)
   return count == n
 end
 
--- JSON null sentinel — callers can use M.null to represent JSON null
-M.null = {}
+-- JSON null sentinel — callers can use M.null to represent JSON null.
+-- Shared across libraries (lib/null) so null values compare equal regardless
+-- of which library produced them.
+M.null = null.null
 
 local function is_null(v)
   return v == nil or v == M.null

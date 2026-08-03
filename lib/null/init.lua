@@ -29,6 +29,14 @@ local M = {}
 -- The sentinel. An empty table whose identity, not contents, carries the
 -- meaning. Never mutate it and never copy it: a copy is a different table and
 -- compares unequal to this one.
-M.null = {}
+--
+-- __tostring is generic ("null"), not per-module. Consumers that used to mint
+-- their own private sentinel (json.null, bson.null, y_crdt.encoding.null, ...)
+-- each had their own debug string ("json.null", "y_crdt.encoding.null", ...).
+-- A single shared table can carry only one metatable, so a per-module debug
+-- string is not reachable without giving up true identity (e.g. wrapping with
+-- per-module `__eq` bridging) -- that tradeoff was rejected in favor of one
+-- generic string, decided 2026-08-03.
+M.null = setmetatable({}, { __tostring = function() return "null" end })
 
 return M

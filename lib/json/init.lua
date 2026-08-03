@@ -6,6 +6,8 @@ if not package.path:find("./?/init.lua", 1, true) then
 	package.path = "./?/init.lua;" .. package.path
 end
 
+local null = require("lib.null")
+
 local M = {}
 M._tier = "pure"
 
@@ -16,8 +18,9 @@ local concat, sort = table.concat, table.sort
 local floor, huge = math.floor, math.huge
 local type, tostring, pairs, ipairs, next = type, tostring, pairs, ipairs, next
 
--- Sentinel for explicit JSON null
-M.null = setmetatable({}, { __tostring = function() return "json.null" end })
+-- Sentinel for explicit JSON null. Shared across libraries (lib/null) so
+-- null values compare equal regardless of which library produced them.
+M.null = null.null
 
 -- ── Decoder ──────────────────────────────────────────────────────────────────
 

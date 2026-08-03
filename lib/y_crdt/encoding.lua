@@ -41,6 +41,8 @@ if not package.path:find("./?/init.lua", 1, true) then
 	package.path = "./?/init.lua;" .. package.path
 end
 
+local null = require("lib.null")
+
 local M = {}
 
 local floor = math.floor
@@ -57,7 +59,9 @@ local tostring = tostring
 
 -- Sentinel for the wire "null" value (tag 126). Lua `nil` itself represents
 -- wire "undefined" (tag 127) -- see docs/conventions.md "Null sentinels".
-M.null = setmetatable({}, { __tostring = function() return "y_crdt.encoding.null" end })
+-- Shared across libraries (lib/null) so null values compare equal regardless
+-- of which library produced them.
+M.null = null.null
 
 local MAX_SAFE_INTEGER = 9007199254740991 -- 2^53 - 1
 

@@ -55,6 +55,22 @@ T.describe("lib.null", function()
       T.eq(require("lib.fractal.type_ref").null, null.null)
     end)
 
+    T.it("lib.json's null is this sentinel", function()
+      T.eq(require("lib.json").null, null.null)
+    end)
+
+    T.it("lib.jsonschema's null is this sentinel", function()
+      T.eq(require("lib.jsonschema").null, null.null)
+    end)
+
+    T.it("lib.bson's null is this sentinel", function()
+      T.eq(require("lib.bson").null, null.null)
+    end)
+
+    T.it("lib.y_crdt.encoding's null is this sentinel", function()
+      T.eq(require("lib.y_crdt.encoding").null, null.null)
+    end)
+
   end)
 
 end)
