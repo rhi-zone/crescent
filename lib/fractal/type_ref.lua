@@ -19,10 +19,12 @@
 -- `optional`, `nullable`, `readonly`, `typeName`/`declarationFile`,
 -- `additionalProperties`, `additionalPropertyType`).
 --
--- NOT ported here: the projection/serialization matrix (JSON Schema,
--- OpenAPI, SQL DDL, and the other ~20 projectors), which are separate
--- modules in the TS package too, and `derive.ts`'s
--- partial/required/pick/omit helpers.
+-- NOT ported here: the projection/serialization matrix, which lives in
+-- separate modules exactly as it does in the TS package. Ported so far:
+-- `type_ref_json_schema.lua` (draft 2020-12), `type_ref_json_schema_07.lua`,
+-- `type_ref_json_schema_04.lua`, `type_ref_openapi_30.lua` and
+-- `type_ref_openapi_20.lua`. Still unported: SQL DDL and the other ~20
+-- projectors, and `derive.ts`'s partial/required/pick/omit helpers.
 
 if not package.path:find("./?/init.lua", 1, true) then
 	package.path = "./?/init.lua;" .. package.path
