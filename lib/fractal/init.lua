@@ -26,6 +26,12 @@ local M = {}
 -- distinguishing `[]` from `{}` the way JS's `Array.isArray` does, so an
 -- empty table is treated as an (empty) map, consistent with every other
 -- codec in this repo that has to make the same call.
+-- Exported so sibling modules that want exactly THESE semantics (direct.lua's
+-- plain-object test, which mirrors JS's `!Array.isArray`) share the one
+-- implementation rather than copying it. A module that wants the opposite
+-- answer for an empty table declares its own, deliberately-different local —
+-- see page.lua's `is_array_like`, where a zero-item last page must still
+-- count as an array.
 --: ({ [unknown]: unknown }) -> boolean
 local function is_array(t)
 	local len = 0
@@ -47,6 +53,8 @@ end
 -- earlier one; Lua's `pairs()` already can't observe a key holding `nil`
 -- (assigning `nil` removes the key), so that behavior falls out for free
 -- here with no extra check needed.
+M.is_array = is_array
+
 --: ({ [string]: unknown }, { [string]: unknown }) -> { [string]: unknown }
 local function merge_records(existing, value)
 	local out = {}

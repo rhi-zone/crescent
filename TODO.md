@@ -5480,3 +5480,64 @@ as their status.**
   balance-checking tooling, maybe inline custom text elements/text measurement, and
   wavefunction collapse. Recorded there as direction, not commitment — nothing here is
   started.
+
+## lib/fractal port — typechecker workarounds and open items (2026-08-03)
+
+- [ ] Revert TYPECHECKER WORKAROUND in `lib/fractal/result.lua`
+  (`match_kind`): the natural signature is
+  `<R>(kind: string, response: R) -> ErrorEncoder<unknown, R>`, which would
+  carry the response type through to the composed encoder. It is rejected —
+  inside a generic function, returning a closure whose own return type is
+  `R | nil` fails with "`_` in union is not assignable to `_ | nil`". The
+  checker does not accept an unsolved type parameter as a member of a union
+  formed from itself; the identical NON-generic signature (`response: string`
+  returning `string | nil`) checks clean, so the shape is not the problem.
+  `response` is typed `unknown` instead, so callers must narrow what comes
+  back out of the encoder. Restore the generic signature when this is fixed.
+
+- [ ] Revert TYPECHECKER WORKAROUND in `lib/fractal/direct_test.lua`
+  (`invoke`): `__call` metatables are not modelled. A table carrying a
+  statically-visible `__call` cannot be called — `cannot call value of type
+  `{} & { __call: ... }``. `direct.lua` projects a node that is BOTH a leaf
+  and a branch as exactly such a table (a Lua function cannot hold child
+  keys), so the natural caller code `api(input)` does not typecheck; the test
+  fetches and invokes the metamethod by hand instead. This is a limitation
+  every consumer of `create_direct_api` will hit, not just the test. Replace
+  the helper with a direct call once `__call` is supported.
+
+- [ ] `lib/fractal/result.lua`'s `pipe` is imprecisely typed
+  (`(a: unknown, ...(a: unknown) -> unknown) -> unknown`). The TypeScript
+  original types `pipe` with a family of fixed-arity overloads, one per stage
+  count, which is what lets each stage's output type flow into the next
+  stage's input. Crescent has no overload mechanism and a variadic parameter
+  takes a single type, so every stage is `unknown -> unknown` and each
+  callback must narrow its own argument. `compose` beside it IS precisely
+  typed. Not a workaround around a bug — a missing mechanism; revisit if
+  overloads or variadic tuple types land.
+
+- [ ] `collect` (the applicative record combinator, `index.ts`) is NOT
+  ported — open question, needs a decision before it is written. It runs a
+  record of field-producers and short-circuits on the FIRST failure, where
+  "first" in TypeScript means `Object.keys` insertion order, derived from
+  source declaration order. Lua tables carry no insertion order, and LuaJIT
+  randomizes hash-table iteration per process, so which error a
+  multiple-failure `collect` returns cannot reproduce the TS behavior and
+  would not even be stable run-to-run under raw `pairs()`. The success path
+  is unaffected — only error selection. Options, none chosen: sort keys
+  (deterministic, but a different error than TS surfaces); require the caller
+  to pass an explicit key order alongside the producers; or leave it out.
+
+- [ ] `lib/result`'s design is flagged for a separate future review — its
+  `{ _tag, _val }`-plus-methods representation is a different encoding from
+  the `{ kind, value }` shape `lib/fractal/result.lua` needs for wire
+  compatibility with the TypeScript side, and the method-based approach was
+  noted as worth revisiting on its own merits. Out of scope for the fractal
+  port; `lib/result` is untouched by it. Not a decided change — a review item.
+
+- [ ] `cache.ts`'s `checkCache` / `writeCacheMetadata` / `withCache` are not
+  ported and are not portable as written: they are bound to `ts.Program` (they
+  hash the source-file set a TypeScript Program parsed) and to Node's
+  `require.resolve` (reading installed package versions as toolchain-identity
+  signals). `lib/fractal/cache.lua` ports only the fingerprinting layer. If a
+  Lua-side incremental build cache is ever wanted, it needs its own design for
+  the file-closure tier rather than a translation of these.
