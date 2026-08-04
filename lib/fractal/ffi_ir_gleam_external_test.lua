@@ -96,6 +96,19 @@ T.describe("lib.fractal.ffi_ir_gleam_external", function()
 			if err ~= nil then T.ok(contains(err, "missing required meta.jsModule")) end
 		end)
 
+		T.it("a parameter name that snake_cases to a Gleam reserved word is escaped with a trailing underscore", function()
+			-- Divergence from fractal's gleam-external.ts (which doesn't escape
+			-- reserved words) — see the projector's file header and
+			-- `build_function_decl`'s comment.
+			local fn = f(
+				boundary.function_({ { name = "type", type = t(types.string) } }, t(types.void)),
+				{ jsModule = "./x.mjs" }
+			)
+			local src = gleam.to_gleam_ffi(fn, "set_kind")
+			T.ok(src ~= nil)
+			if src ~= nil then T.ok(contains(src, "pub fn set_kind(type_: String) -> Nil")) end
+		end)
+
 		T.it("ownership discipline metadata does not change the emitted declaration at all", function()
 			-- JS/Gleam have no native ownership mechanism for @external to hook
 			-- into — see the projector's file header.

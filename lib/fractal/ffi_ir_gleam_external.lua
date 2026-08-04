@@ -72,6 +72,16 @@
 -- apply: a missing name, a missing `meta.jsModule`, or an unhandled boundary
 -- kind is a data error, not a programming error. This propagates — the
 -- internal builders below return `(nil, errmsg)` too, and every caller checks.
+--
+-- RESERVED-WORD ESCAPING (a deliberate divergence from fractal's
+-- gleam-external.ts, which doesn't escape reserved words — matches
+-- gleam-native.ts's approach instead, likely a bug in the upstream source).
+-- Every parameter/receiver name reaching a `pub fn` signature is snake_cased
+-- and then escaped against Gleam's reserved words (trailing underscore, same
+-- fallback `type_ref_gleam_native.lua` uses). Without it, a source name that
+-- snake_cases to a bare reserved word (`type`, `use`, `let`, ...) would emit
+-- as invalid Gleam. See `build_function_decl`'s comment for the full
+-- reasoning.
 
 if not package.path:find("./?/init.lua", 1, true) then
 	package.path = "./?/init.lua;" .. package.path
@@ -221,15 +231,42 @@ local function js_name_of(meta, gleam_name)
 	return gleam_name
 end
 
+-- Gleam's reserved words. VERBATIM COPY of `type_ref_gleam_native.lua`'s own
+-- `GLEAM_KEYWORDS` — see this function's comment for why this file diverges
+-- from its TS source by escaping them, matching that module's approach.
+local GLEAM_KEYWORDS = {
+	["as"] = true, ["assert"] = true, ["auto"] = true, ["case"] = true,
+	["const"] = true, ["delegate"] = true, ["derive"] = true, ["echo"] = true,
+	["else"] = true, ["fn"] = true, ["if"] = true, ["implement"] = true,
+	["import"] = true, ["let"] = true, ["macro"] = true, ["opaque"] = true,
+	["panic"] = true, ["pub"] = true, ["test"] = true, ["todo"] = true,
+	["type"] = true, ["use"] = true,
+} --[[: { [string]: boolean }]]
+
+-- Gleam has no raw-identifier escape (unlike Rust's `r#ident`), so a
+-- collision is resolved with a trailing underscore — the same fallback
+-- `type_ref_gleam_native.lua`'s `escape_gleam_ident` uses.
+--: (snake_name: string) -> string
+local function escape_gleam_ident(snake_name)
+	if GLEAM_KEYWORDS[snake_name] then return snake_name .. "_" end
+	return snake_name
+end
+
 -- One `@external(javascript, ...)` + `pub fn name(...)` declaration for a
 -- `function`-shaped signature. `extra_param`, when given, is prepended ahead
 -- of the shape's own params — used by `build_method` to splice in the receiver
 -- (see that function's comment for why).
 --
--- Parameter names are snake_cased but NOT checked against Gleam's reserved
--- words, matching the TS source. `type_ref_gleam_native.lua` does escape them
--- (its own source does); adding escaping here would make this port emit
--- different Gleam than the file it is a port of.
+-- DIVERGES FROM fractal's gleam-external.ts, which does NOT check parameter
+-- names against Gleam's reserved words — a bare reserved word snake_cased
+-- from a param name (e.g. a JS `type` parameter) would emit as an invalid
+-- Gleam function signature. `type_ref_gleam_native.lua`'s own port of
+-- gleam-native.ts DOES escape reserved words for field labels, matching
+-- Gleam's actual grammar; this file follows that approach instead of the
+-- TS source's, on the read that the TS's omission is a latent bug rather than
+-- an intentional target-language choice — a reserved word cannot legally
+-- appear unescaped as a Gleam parameter name regardless of what fractal's own
+-- source does.
 --: (gleam_name: string, params: FfiParam[], return_type: TypeRef, meta: Meta, where: string, extra_param: FfiParam | nil) -> (string | nil, string | nil)
 local function build_function_decl(gleam_name, params, return_type, meta, where, extra_param)
 	local js_module, err = js_module_of(meta, where)
@@ -240,11 +277,13 @@ local function build_function_decl(gleam_name, params, return_type, meta, where,
 	local n = 0
 	if extra_param ~= nil then
 		n = n + 1
-		rendered[n] = to_snake_case(extra_param.name) .. ": " .. gleam_native.gleam_type_from_type_ref(extra_param.type)
+		rendered[n] = escape_gleam_ident(to_snake_case(extra_param.name))
+			.. ": " .. gleam_native.gleam_type_from_type_ref(extra_param.type)
 	end
 	for i = 1, #params do
 		n = n + 1
-		rendered[n] = to_snake_case(params[i].name) .. ": " .. gleam_native.gleam_type_from_type_ref(params[i].type)
+		rendered[n] = escape_gleam_ident(to_snake_case(params[i].name))
+			.. ": " .. gleam_native.gleam_type_from_type_ref(params[i].type)
 	end
 
 	local lines = doc_comment(meta)
