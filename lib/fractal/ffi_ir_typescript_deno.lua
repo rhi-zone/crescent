@@ -1,5 +1,5 @@
--- lib/fractal/ffi_ir_deno.lua — the Deno FFI consumer projector, ported from
--- fractal's packages/ffi-ir/src/deno.ts.
+-- lib/fractal/ffi_ir_typescript_deno.lua — the Deno FFI consumer projector, ported from
+-- fractal's packages/ffi-ir/src/typescript-deno.ts.
 --
 -- ffi-ir -> Deno FFI consumer projector: NOT a producer (unlike the C-ABI
 -- backend, which emits Rust `extern "C"` source implementing a C-ABI library)

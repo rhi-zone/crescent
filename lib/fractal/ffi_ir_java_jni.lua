@@ -1,5 +1,5 @@
--- lib/fractal/ffi_ir_jni.lua — the JNI (Java Native Interface) projector,
--- ported from fractal's packages/ffi-ir/src/jni.ts.
+-- lib/fractal/ffi_ir_java_jni.lua — the JNI (Java Native Interface) projector,
+-- ported from fractal's packages/ffi-ir/src/java-jni.ts.
 --
 -- This emits the Java-side `native` method declaration surface for calling
 -- into native code — the human-facing counterpart of ReScript's `external` /
@@ -321,13 +321,13 @@ function M.to_jni_type(ref)
 			return nil,
 				'to_jni_type: unsupported ownership discipline "refcount" for JNI target — no native JNI/JVM '
 					.. "shared-refcount mechanism (Java's GC-triggered finalize()/Cleaner is a single-owner collection "
-					.. "callback, not reference counting; see ffi_ir_jni.lua's file header)"
+					.. "callback, not reference counting; see ffi_ir_java_jni.lua's file header)"
 		end
 		if discipline.kind == "resource" then
 			return nil,
 				'to_jni_type: unsupported ownership discipline "resource" for JNI target — WIT-only own/borrow '
 					.. "lend-count-and-trap mechanism, no citable JNI/Android NDK convention enforces it (see "
-					.. "ffi_ir_jni.lua's file header; use ownership.opaque_handle() instead)"
+					.. "ffi_ir_java_jni.lua's file header; use ownership.opaque_handle() instead)"
 		end
 		-- "copy" falls through to the plain mapping below.
 	end

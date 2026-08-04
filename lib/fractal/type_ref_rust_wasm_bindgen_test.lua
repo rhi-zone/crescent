@@ -1,9 +1,9 @@
--- lib/fractal/type_ref_wasm_bindgen_test.lua
--- Tests for lib/fractal/type_ref_wasm_bindgen.lua, ported from fractal's
+-- lib/fractal/type_ref_rust_wasm_bindgen_test.lua
+-- Tests for lib/fractal/type_ref_rust_wasm_bindgen.lua, ported from fractal's
 -- packages/type-ir/src/wasm-bindgen.test.ts.
 --
 -- Every expected string here was produced by running the TS projector on the
--- same input (`bun run` against packages/type-ir/src/wasm-bindgen.ts), so
+-- same input (`bun run` against packages/type-ir/src/rust-wasm-bindgen.ts), so
 -- these are byte-comparisons against fractal's actual output, not
 -- reconstructions from reading the code.
 --
@@ -24,7 +24,7 @@ end
 local T = require("lib.test.assert")
 local type_ref = require("lib.fractal.type_ref")
 local common = require("lib.fractal.type_ref_kinds_common")
-local wb = require("lib.fractal.type_ref_wasm_bindgen")
+local wb = require("lib.fractal.type_ref_rust_wasm_bindgen")
 
 local types = type_ref.types
 local t = type_ref.type_ref_from_shape
@@ -57,7 +57,7 @@ local function lines(...)
 	return table.concat(parts, "\n")
 end
 
-T.describe("lib.fractal.type_ref_wasm_bindgen", function()
+T.describe("lib.fractal.type_ref_rust_wasm_bindgen", function()
 
 	T.describe("primitives", function()
 

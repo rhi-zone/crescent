@@ -1,5 +1,5 @@
--- lib/fractal/ffi_ir_bun_test.lua
--- Tests for lib/fractal/ffi_ir_bun.lua (the Bun `bun:ffi` consumer
+-- lib/fractal/ffi_ir_typescript_bun_test.lua
+-- Tests for lib/fractal/ffi_ir_typescript_bun.lua (the Bun `bun:ffi` consumer
 -- projector), ported from fractal's packages/ffi-ir/src/bun.test.ts.
 --
 -- The TS source's `expect(...).toThrow(/pattern/)` cases become `(nil, errmsg)`
@@ -19,7 +19,7 @@ if not package.path:find("./?/init.lua", 1, true) then
 end
 
 local T        = require("lib.test.assert")
-local bun      = require("lib.fractal.ffi_ir_bun")
+local bun      = require("lib.fractal.ffi_ir_typescript_bun")
 local ffi_ir   = require("lib.fractal.ffi_ir")
 local type_ref = require("lib.fractal.type_ref")
 
@@ -64,7 +64,7 @@ local function handle_ref(resource_name, free_fn)
 	)
 end
 
-T.describe("lib.fractal.ffi_ir_bun", function()
+T.describe("lib.fractal.ffi_ir_typescript_bun", function()
 
 	T.describe("to_bun_ffi_type", function()
 

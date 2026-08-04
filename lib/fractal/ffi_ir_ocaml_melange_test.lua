@@ -1,5 +1,5 @@
--- lib/fractal/ffi_ir_melange_test.lua
--- Tests for lib/fractal/ffi_ir_melange.lua (the Melange `external`-declaration
+-- lib/fractal/ffi_ir_ocaml_melange_test.lua
+-- Tests for lib/fractal/ffi_ir_ocaml_melange.lua (the Melange `external`-declaration
 -- projector), ported from fractal's packages/ffi-ir/src/melange.test.ts.
 --
 -- Two systematic adaptations of the TS source:
@@ -23,7 +23,7 @@ end
 
 local T        = require("lib.test.assert")
 local ffi_ir   = require("lib.fractal.ffi_ir")
-local melange  = require("lib.fractal.ffi_ir_melange")
+local melange  = require("lib.fractal.ffi_ir_ocaml_melange")
 local type_ref = require("lib.fractal.type_ref")
 
 local ownership = ffi_ir.ownership
@@ -45,7 +45,7 @@ local function contains(haystack, needle)
 	T.ok(index_of(haystack, needle) ~= nil, "expected output to contain: " .. needle)
 end
 
-T.describe("lib.fractal.ffi_ir_melange", function()
+T.describe("lib.fractal.ffi_ir_ocaml_melange", function()
 
 	T.describe("to_melange_ffi — function", function()
 

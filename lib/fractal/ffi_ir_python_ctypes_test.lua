@@ -1,5 +1,5 @@
--- lib/fractal/ffi_ir_ctypes_test.lua
--- Tests for lib/fractal/ffi_ir_ctypes.lua (the Python `ctypes` projector),
+-- lib/fractal/ffi_ir_python_ctypes_test.lua
+-- Tests for lib/fractal/ffi_ir_python_ctypes.lua (the Python `ctypes` projector),
 -- ported from fractal's packages/ffi-ir/src/ctypes.test.ts.
 --
 -- The TS source's `expect(...).toThrow(/pattern/)` cases become `(nil, errmsg)`
@@ -19,7 +19,7 @@ end
 
 local T        = require("lib.test.assert")
 local ffi_ir   = require("lib.fractal.ffi_ir")
-local ctypes   = require("lib.fractal.ffi_ir_ctypes")
+local ctypes   = require("lib.fractal.ffi_ir_python_ctypes")
 local type_ref = require("lib.fractal.type_ref")
 
 local ownership = ffi_ir.ownership
@@ -54,7 +54,7 @@ local function handle_ref(resource_name, free_fn)
 	)
 end
 
-T.describe("lib.fractal.ffi_ir_ctypes", function()
+T.describe("lib.fractal.ffi_ir_python_ctypes", function()
 
 	T.describe("to_ctypes_shape", function()
 

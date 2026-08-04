@@ -1,6 +1,6 @@
--- lib/fractal/ffi_ir_melange.lua — the Melange (https://melange.re)
+-- lib/fractal/ffi_ir_ocaml_melange.lua — the Melange (https://melange.re)
 -- `external`-declaration projector, ported from fractal's
--- packages/ffi-ir/src/melange.ts.
+-- packages/ffi-ir/src/ocaml-melange.ts.
 --
 -- TOOLCHAIN DETERMINATION (the TS source's first job, reproduced here because
 -- it is the reasoning behind this file existing at all, not a detail of it):
@@ -107,7 +107,7 @@
 --
 -- The TS source spells two error prefixes, `toMelange:` and `toMelangeFfi:`,
 -- for what is one entry point; this port uses `to_melange_ffi:` uniformly
--- (naming a function that actually exists) and `ffi_ir_melange:` where the TS
+-- (naming a function that actually exists) and `ffi_ir_ocaml_melange:` where the TS
 -- named its own file. The substance of each message — which discipline or kind
 -- is unsupported on this target and why — is carried over unchanged.
 
@@ -422,7 +422,7 @@ function generate_named_type(ref, name, ctx)
 	end
 
 	return nil,
-		'ffi_ir_melange: cannot hoist type-ir kind "' .. shape.kind ..
+		'ffi_ir_ocaml_melange: cannot hoist type-ir kind "' .. shape.kind ..
 		'" — outside this file\'s minimal data-shape subset'
 end
 
@@ -458,7 +458,7 @@ function melange_type(ref, ctx, name_hint)
 	end
 
 	return nil,
-		'ffi_ir_melange: unsupported type-ir kind "' .. shape.kind ..
+		'ffi_ir_ocaml_melange: unsupported type-ir kind "' .. shape.kind ..
 		'" — outside this file\'s minimal data-shape subset'
 end
 

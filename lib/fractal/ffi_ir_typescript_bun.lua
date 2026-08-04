@@ -1,5 +1,5 @@
--- lib/fractal/ffi_ir_bun.lua — the Bun (`bun:ffi`) consumer projector, ported
--- from fractal's packages/ffi-ir/src/bun.ts.
+-- lib/fractal/ffi_ir_typescript_bun.lua — the Bun (`bun:ffi`) consumer projector, ported
+-- from fractal's packages/ffi-ir/src/typescript-bun.ts.
 --
 -- This is the JS-side counterpart to the C-ABI backend: where that backend
 -- emits the Rust *producer* of a plain C ABI (`extern "C"`, `#[repr(C)]`),

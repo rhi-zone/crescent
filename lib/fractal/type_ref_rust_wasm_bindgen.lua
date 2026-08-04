@@ -1,6 +1,6 @@
--- lib/fractal/type_ref_wasm_bindgen.lua — Rust codegen targeting
+-- lib/fractal/type_ref_rust_wasm_bindgen.lua — Rust codegen targeting
 -- wasm-bindgen (https://wasm-bindgen.github.io/wasm-bindgen/), ported from
--- fractal's packages/type-ir/src/wasm-bindgen.ts.
+-- fractal's packages/type-ir/src/rust-wasm-bindgen.ts.
 --
 -- Emits `#[wasm_bindgen]`-annotated structs/enums/functions that JS can call
 -- into once compiled to wasm. Generated snippets assume the caller has

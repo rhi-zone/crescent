@@ -1,5 +1,5 @@
--- lib/fractal/ffi_ir_ctypes.lua — the Python `ctypes` projector, ported from
--- fractal's packages/ffi-ir/src/ctypes.ts.
+-- lib/fractal/ffi_ir_python_ctypes.lua — the Python `ctypes` projector, ported from
+-- fractal's packages/ffi-ir/src/python-ctypes.ts.
 --
 -- Python source (a `ctypes.CDLL` load, per-function `.argtypes`/`.restype`
 -- declarations, and thin wrapper functions/classes) as the CONSUMER side of a

@@ -105,7 +105,7 @@ local M = {}
 -- number, ... }, ...)`), so no `string[]` value can be passed to
 -- `table.concat` at all — and this module's whole output path is
 -- `table.concat` over accumulated lines. Revert to `string[]` once the sugar
--- and the stdlib declaration agree. (`lib/fractal/type_ref_wasm_bindgen.lua`
+-- and the stdlib declaration agree. (`lib/fractal/type_ref_rust_wasm_bindgen.lua`
 -- carries the same workaround, arrived at independently.)
 --:: StringList = { [integer]: string }
 

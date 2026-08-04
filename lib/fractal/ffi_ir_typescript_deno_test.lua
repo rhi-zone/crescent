@@ -1,5 +1,5 @@
--- lib/fractal/ffi_ir_deno_test.lua
--- Tests for lib/fractal/ffi_ir_deno.lua (the Deno FFI consumer projector),
+-- lib/fractal/ffi_ir_typescript_deno_test.lua
+-- Tests for lib/fractal/ffi_ir_typescript_deno.lua (the Deno FFI consumer projector),
 -- ported from fractal's packages/ffi-ir/src/deno.test.ts.
 --
 -- Two systematic differences from the TS tests, both consequences of decisions
@@ -24,7 +24,7 @@ end
 local T        = require("lib.test.assert")
 local ffi_ir   = require("lib.fractal.ffi_ir")
 local type_ref = require("lib.fractal.type_ref")
-local deno     = require("lib.fractal.ffi_ir_deno")
+local deno     = require("lib.fractal.ffi_ir_typescript_deno")
 
 local ownership = ffi_ir.ownership
 local boundary  = ffi_ir.boundary
@@ -63,7 +63,7 @@ local function handle_ref(resource_name, free_fn)
 	)
 end
 
-T.describe("lib.fractal.ffi_ir_deno", function()
+T.describe("lib.fractal.ffi_ir_typescript_deno", function()
 
 	T.describe("deno_ffi_type", function()
 

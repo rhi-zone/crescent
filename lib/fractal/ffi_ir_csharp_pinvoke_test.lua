@@ -1,5 +1,5 @@
--- lib/fractal/ffi_ir_dotnet_test.lua
--- Tests for lib/fractal/ffi_ir_dotnet.lua (the .NET/P-Invoke backend), ported
+-- lib/fractal/ffi_ir_csharp_pinvoke_test.lua
+-- Tests for lib/fractal/ffi_ir_csharp_pinvoke.lua (the .NET/P-Invoke backend), ported
 -- from fractal's packages/ffi-ir/src/dotnet.test.ts.
 --
 -- Two mechanical differences from the TS source, both following the porting
@@ -19,7 +19,7 @@ if not package.path:find("./?/init.lua", 1, true) then
 end
 
 local T        = require("lib.test.assert")
-local dotnet   = require("lib.fractal.ffi_ir_dotnet")
+local dotnet   = require("lib.fractal.ffi_ir_csharp_pinvoke")
 local ffi_ir   = require("lib.fractal.ffi_ir")
 local type_ref = require("lib.fractal.type_ref")
 
@@ -32,7 +32,7 @@ local f         = ffi_ir.ffi_ref_from_shape
 -- TYPECHECKER WORKAROUND: verbatim copies of type_ref.lua's declarations,
 -- required in every consumer of the fractal type/FFI modules. See the same
 -- three lines (and the full explanation) in lib/fractal/ffi_ir.lua and
--- lib/fractal/ffi_ir_dotnet.lua, and the TODO.md entry they point at.
+-- lib/fractal/ffi_ir_csharp_pinvoke.lua, and the TODO.md entry they point at.
 --:: Meta = { [string]: unknown }
 --:: TypeShape = { kind: string, ... }
 --:: TypeRef = { shape: TypeShape, meta: Meta }
@@ -61,7 +61,7 @@ local function handle_ref(resource_name, discipline)
 	)
 end
 
-T.describe("lib.fractal.ffi_ir_dotnet", function()
+T.describe("lib.fractal.ffi_ir_csharp_pinvoke", function()
 
 	T.describe("to_dotnet_type", function()
 

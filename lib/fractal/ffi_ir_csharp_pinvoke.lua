@@ -1,8 +1,8 @@
--- lib/fractal/ffi_ir_dotnet.lua — the .NET/P-Invoke consumer-side projector,
--- ported from fractal's packages/ffi-ir/src/dotnet.ts.
+-- lib/fractal/ffi_ir_csharp_pinvoke.lua — the .NET/P-Invoke consumer-side projector,
+-- ported from fractal's packages/ffi-ir/src/csharp-pinvoke.ts.
 --
 -- This backend emits the CALLER of a C-ABI shared library (the counterpart to
--- `c-abi.ts`'s Rust `#[no_mangle] pub extern "C"` PRODUCER side). Named by
+-- `rust-c-abi.ts`'s Rust `#[no_mangle] pub extern "C"` PRODUCER side). Named by
 -- target platform, matching the TS package's naming split: `rescript`/`gleam`/
 -- `melange` name by target language/platform (the file emits a whole
 -- language's own idiomatic external-declaration syntax), while
@@ -153,7 +153,7 @@
 -- the declaration). Here they fall through to `to_dotnet_type`'s
 -- unsupported-kind error instead. The delta is narrow and fails toward an
 -- explicit error rather than a silent mis-lowering, which is why this backend
--- lands ahead of the `kinds/common` port. `ffi_ir_dotnet_test.lua` pins the
+-- lands ahead of the `kinds/common` port. `ffi_ir_csharp_pinvoke_test.lua` pins the
 -- CURRENT behavior with a test so the change is caught rather than silent;
 -- delete this note and flip that test when `kinds/common` is ported.
 

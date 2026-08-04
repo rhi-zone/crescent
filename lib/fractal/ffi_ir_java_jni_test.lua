@@ -1,5 +1,5 @@
--- lib/fractal/ffi_ir_jni_test.lua
--- Tests for lib/fractal/ffi_ir_jni.lua (the JNI projector), ported from
+-- lib/fractal/ffi_ir_java_jni_test.lua
+-- Tests for lib/fractal/ffi_ir_java_jni.lua (the JNI projector), ported from
 -- fractal's packages/ffi-ir/src/jni.test.ts.
 --
 -- The TS source's `expect(...).toThrow(/pattern/)` cases become `(nil,
@@ -17,7 +17,7 @@ end
 
 local T        = require("lib.test.assert")
 local ffi_ir   = require("lib.fractal.ffi_ir")
-local jni      = require("lib.fractal.ffi_ir_jni")
+local jni      = require("lib.fractal.ffi_ir_java_jni")
 local type_ref = require("lib.fractal.type_ref")
 
 local ownership = ffi_ir.ownership
@@ -49,7 +49,7 @@ local function handle_ref(resource_name)
 	)
 end
 
-T.describe("lib.fractal.ffi_ir_jni", function()
+T.describe("lib.fractal.ffi_ir_java_jni", function()
 
 	T.describe("to_jni_type", function()
 
