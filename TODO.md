@@ -91,6 +91,22 @@ See `docs/roadmap-v2.md` for the authoritative project roadmap and sequencing. T
 
 - [ ] **Other libraries still carry private null sentinels now that `lib/null` exists (2026-08-03):** `lib/null` was created (2026-08-03) because `lib/format/json/{pure,ffi}.lua` already did `pcall(require, "lib.null")` and fell back to a private `{}` — a module referenced but never written. Both now use the shared table, so the two JSON tiers' output is mutually recognizable. Several other libraries still mint their own: `lib/json/init.lua:20`, `lib/jsonschema/init.lua:24`, `lib/bson/init.lua:35`, `lib/y_crdt/encoding.lua:60` (and `lib/pdf/object.lua:77`'s `pdf.null`, which is arguably a PDF-domain object rather than the generic sentinel and may belong outside any migration). Consequence today: a value decoded as null by one of these is NOT `== ` any other's null, so passing decoded data between them silently misreads nulls as ordinary tables. Not migrated here because it is a real design call, not a mechanical sweep: several of these attach a `__tostring` metatable naming the owning module (useful in errors, lost if they share one table), and `lib/json` vs `lib/format/json` are two separate JSON libraries whose relationship is its own open question. Needs an owner decision on whether the generic sentinel is repo-wide vocabulary that every format library adopts, or whether per-format sentinels are deliberate.
 
+- [ ] **Typechecker: a local REASSIGNED inside a conditional branch is typed `nil` at any later use as a METHOD-CALL RECEIVER (found while porting `lib/fractal/ffi_ir_rescript_external.lua`, 2026-08-04):** The natural spelling of "conditionally rewrite a string, then test the result" — the exact formulation `type_ref_rescript_native.lua`'s own `sanitize_label` uses — fails with `cannot call value of type 'nil'` at the second method call. Minimal repro (no project dependencies, no aliasing, literal initializer):
+
+    ```lua
+    --: (name: string) -> string
+    local function a(name)
+        local lowered = "y"
+        if name:match("^[A-Z]") ~= nil then lowered = "x" end
+        if lowered:match("^[a-z_]") ~= nil then return lowered end
+        return "_" .. lowered
+    end
+    ```
+
+  → `cannot call value of type 'nil'` at `lowered:match`. Only the method-call RECEIVER position is affected: using the same reassigned local in a concatenation (`return lowered .. "!"`) checks clean, which is why other conditionally-reassigned locals in the same file (`attr`, `type_decl`) needed no change. Note `sanitize_label` in `lib/fractal/type_ref_rescript_native.lua` passes today with the natural formulation, but extracted verbatim into a standalone file it fails — so something in that file's surrounding context suppresses it and the real trigger is narrower than the repro alone shows. **Worked around** in `lib/fractal/ffi_ir_rescript_external.lua`'s `external_ident` by hoisting the conditional rewrite into a separate `decapitalize_leading_upper` function (returning the input unchanged on the non-matching path) and spelling the `_`-prefix decision with two returns instead of a reassignment, flagged in-file as `TYPECHECKER WORKAROUND`. Collapse it back into one function with the reassignment once a conditionally-reassigned local keeps its type at a method-call receiver.
+
+- [ ] **A parenthesized `gsub` call in ARGUMENT position is not truncated to one value (same port, 2026-08-04):** `f((name:gsub(pat, rep)))` is rejected with "argument 1: cannot pass `(string, integer)` where `string` expected", although the identical expression in a `local x = (name:gsub(...))` binding types as `string`. Lua's parentheses truncate a multi-value expression to one value in every position, so argument position should behave the same as binding position. Worked around in `lib/fractal/ffi_ir_rescript_external.lua`'s `external_ident` by binding to a `local` first and passing the local. Not separately flagged in-file (the binding reads naturally either way); revert the extra local once parentheses truncate in argument position.
+
 ## Strategic decisions
 
 - **Rescribe fixture alignment (2026-07-26):** Crescent's format libraries will eventually be tested against rescribe's cross-language fixture suite. This is high-value for conformance but not immediately urgent — rescribe's format crates are still in progress. Approach: pick this up per-format as format work comes up in crescent, rather than as a dedicated alignment project. Documented in `docs/roadmap-v2.md`, "Strategic direction: Rescribe fixture alignment" section.
