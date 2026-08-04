@@ -5802,3 +5802,110 @@ the rust-serde / wasm-bindgen / gleam-native / rescript-native projectors.
   Revert both sites to a direct `rec.kind`/`discipline` read, dropping the
   whole-record cast, once a `type(x) == "string"` check on a record field
   narrows that field.
+
+## lib/fractal CLI projector — omissions, typechecker gaps, open items (2026-08-04)
+
+Filed alongside the port of fractal's `packages/cli-api-projector`
+(`src/cli.ts` + `src/completions.ts`) to `lib/fractal/cli_projector.lua`.
+
+- [ ] `CliOpts.validators` is NOT ported. It wires generated validators onto
+  the tree through `wrapValidators`/`isValidatorWrapped`
+  (`packages/api-tree/src/build.ts`), which has no counterpart in this repo —
+  there is no generated-validator pipeline to wire. The projector's
+  schema-derived `coerce_input`/`apply_defaults`/`validate_required` path is
+  what TS uses for every leaf a generated validator does NOT cover, so the
+  ported behavior is complete for the uncovered case and simply absent for the
+  covered one. Same treatment `cache.ts`'s `ts.Program`-bound entry points got.
+  Port `build.ts` first if this is ever wanted.
+
+- [ ] `CliOpts.als` is NOT ported. It runs the handler inside an
+  `AsyncLocalStorage` context (`packages/api-tree/src/context.ts`); Lua has no
+  ambient async-context mechanism and none is ported. `opts.middleware`
+  carries the same cross-cutting concerns explicitly through `stores`, which
+  is what the TS doc already recommends for anything a middleware needs to
+  read. Revisit if an async-context substrate is ever built.
+
+- [ ] **Typechecker: a RECURSIVE call's result is typed `never`, ignoring the
+  function's own declared return type.** Found while porting
+  `describe_field_type`. Minimal repro, no project dependencies:
+  ```lua
+  --:: S = { t?: string, items?: S }
+  --: (fs: S) -> string | nil
+  local function describe(fs)
+      local items = fs.items
+      if items ~= nil then
+          local it = describe(items)          -- typed `never`, not `string | nil`
+          if it ~= nil then return it .. "[]" end
+      end
+      return fs.t
+  end
+  ```
+  → ``cannot concatenate type `never` ``. The identical call to a
+  NON-recursive function of the same signature checks clean; writing the
+  recursion through the module table (`M.describe`) instead fails identically,
+  so it is the recursion, not the binding form. **Worked around** in
+  `lib/fractal/cli_projector.lua`'s `describe_field_type` by casting the
+  recursive call's result to the function's own declared return type
+  (`--[[: string | nil]]`), flagged in-file as `TYPECHECKER WORKAROUND`.
+  Delete the cast once a recursive call is checked against its declaration.
+
+- [ ] **Typechecker: a narrowing predicate does not stick to a local that is
+  REASSIGNED later in the same function.** `local ok, res = pcall(...)`, then
+  `if is_stream_value(res) then use(res) end`, then further down
+  `res = unwrap_result(res, ...)` — the use inside the branch reports `res` as
+  `unknown`. Deleting the later assignment makes it check clean, so the
+  reassignment retroactively defeats the earlier narrowing. Same family as the
+  "a local REASSIGNED inside a conditional branch is typed `nil` at a
+  method-call receiver" entry above. **Worked around** in
+  `lib/fractal/cli_projector.lua`'s `run_cli_async` by binding a fresh
+  `streamed` local for the sniff, flagged in-file. Collapse it back once
+  narrowing survives a later reassignment.
+
+- [ ] `lib/levenshtein`'s `M.distance` carries no `--:` signature. Its return
+  type therefore crosses the module boundary as an unsolved variable: at a
+  consumer, `local d = levenshtein.distance(a, b)` narrows to `never` under
+  `d ~= nil` and to `_ | integer` under `or 0`, so the value cannot be
+  compared with `<` in any formulation. `lib/fractal/cli_projector.lua`'s
+  `closest_enum_match` states the type with a `--[[: integer]]` cast at the
+  call site. The real fix is annotating `lib/levenshtein/init.lua` (note that
+  file already reports 5 errors of its own, so annotating it is its own piece
+  of work). Drop the cast once `distance` is annotated.
+
+- [ ] `lib/async`'s `M.cancellable` (and so `M.async`) packs its arguments
+  with `{ ... }` and replays them with `unpack`, so a NIL argument anywhere in
+  the list truncates every argument after it. An async function taking an
+  optional middle parameter silently receives `nil` for everything following
+  it — a runtime hazard with no type-level signal. Hit while porting
+  `--all-pages`: `stream_all_pages(first, input, ..., paginated_meta, caps)`
+  lost `caps` whenever a leaf had no `meta.cli.paginated`. **Worked around**
+  in `lib/fractal/cli_projector.lua` by bundling the walk's arguments into a
+  single `PageWalk` table. The general fix is `select("#", ...)` plus an
+  explicit count in `cancellable`, at which point the bundle can stay or go on
+  its own merits.
+
+- [ ] `run_cli`'s missing-capability guard has NO test. Every formulation of
+  "call it with an incomplete caps table" is rejected at check time — directly,
+  through `pcall`, and through a force cast (refused outright) — so the guard
+  can only be exercised by a caller the typechecker does not see. Noted in
+  `lib/fractal/cli_projector_test.lua` where the test would otherwise sit. A
+  mechanism for deliberately-ill-typed call sites in tests (the thing
+  `lib/fsm/fsm_test.lua`'s force casts predate) would close it.
+
+- [ ] Two behavioral divergences from the TypeScript source, both documented
+  in `lib/fractal/cli_projector.lua`'s header, both forced by the substrate
+  rather than chosen:
+  - Numeric flag coercion uses Lua's `tonumber`, not JS's `Number`. `""`
+    (JS: 0) and `"Infinity"` (JS: Infinity) are rejected here.
+  - `lib/json` fails on a value it cannot encode where `JSON.stringify`
+    silently drops it, so an unencodable result surfaces as a `cli_error`
+    rather than as a lossy `{}`. Visible when stream detection is disabled and
+    a stream value reaches the ordinary output path.
+
+- [ ] Output key order is SORTED, not authored. The TS source relies on JS
+  object insertion order for command listings, completion levels and JSON
+  bodies; LuaJIT randomizes hash iteration, so `lib/fractal/cli_projector.lua`
+  sorts every child-name walk and passes `sort_keys` to `lib/json` — the same
+  answer `cache.lua` gives to the same problem. Byte-identical output against
+  fractal is therefore not achievable for a tree whose authored order differs
+  from alphabetical. Only matters if byte-parity with the TS side ever becomes
+  a requirement.
