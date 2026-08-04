@@ -21,6 +21,17 @@
 --     opts.host         : string  (default "0.0.0.0") — bind address
 --     opts.tcp_nodelay  : boolean (default true) — disable Nagle's algorithm
 --                         on SSE streams. Set false for benchmarks/special cases.
+--     opts.idle_timeout : number  (optional) — ms idle between keep-alive
+--                         requests; passed through to lib/http/server.
+--     opts.max_requests : integer (optional) — max requests per connection;
+--                         passed through to lib/http/server. 1 pins the server
+--                         to one response per connection.
+--
+--   Connection reuse: the standalone listener is lib/http/server, so keep-alive
+--   is on by default. Two overrides remain available and neither replaces the
+--   other: opts.max_requests / opts.idle_timeout set server-wide policy, and a
+--   handler may set `res.keep_alive = false` to pin a single response on the
+--   connection it is currently answering.
 --
 --   Daemon: the cap does not bind; cap.serve(handler) records the handler and
 --   returns immediately. The daemon invokes the handler per request through
@@ -32,7 +43,10 @@
 --
 --   SSE wire format contract (any future daemon HTTP server MUST honour):
 --     1. First send_event call writes the response preamble (200 + SSE headers)
---        then flushes; subsequent calls write SSE frames incrementally.
+--        then flushes; subsequent calls write SSE frames incrementally. The
+--        preamble carries NO content-length: declaring a length and then
+--        streaming further bytes violates RFC 9112 §6.1 (the length is the
+--        exact body length, so trailing bytes have no defined meaning).
 --     2. Each frame is `id: <id>\nevent: <event>\ndata: <data>\n\n`. Both
 --        `id:` and `event:` lines are omitted if the corresponding opts field
 --        was not set. `data:` is mandatory.
@@ -52,8 +66,11 @@
 --   cap.url             — string, e.g. "http://localhost:7860"
 --   cap.port            — integer (0 in daemon mode)
 --
--- req: { method, path, headers, body, query, last_event_id }
--- res: response builder with .status, .headers, .body, .send_event(data, opts?), .close()
+-- req: { method, path, headers, body, query, last_event_id, scheme, host, port }
+--   scheme/host/port are what the server knows about the connection (see
+--   http_server_request in lib/http/server.lua). No X-Forwarded-* is consulted.
+-- res: response builder with .status, .headers, .body, .keep_alive,
+--      .send_event(data, opts?), .close()
 --   res.send_event(data, opts?) -> ok | nil, err
 --     opts.id    : string | number | nil — SSE event id
 --     opts.event : string | nil          — SSE event name (default "message")
@@ -63,7 +80,8 @@ if not package.path:find("./?/init.lua", 1, true) then
 end
 
 local http_server = require("lib.http.server")
-local http_format = require("lib.http.format")
+
+--:: require "lib.http.server"
 
 local M = {}
 
@@ -79,18 +97,15 @@ local function split_target(target)
 	return target, nil
 end
 
--- Build the SSE header preamble (sent once on first send_event call).
---: (integer) -> string
-local function sse_preamble(status)
-	return http_format.serialize_response({
-		status = status,
-		headers = {
-			["content-type"] = { "text/event-stream" },
-			["cache-control"] = { "no-cache" },
-			["connection"] = { "keep-alive" },
-		},
-		body = "",
-	})
+-- SSE response head fields. Framing is by connection close, so no
+-- content-length is declared (see the wire-format contract above).
+--: () -> { [string]: string[] }
+local function sse_head_headers()
+	return {
+		["content-type"] = { "text/event-stream" },
+		["cache-control"] = { "no-cache" },
+		["connection"] = { "keep-alive" },
+	}
 end
 
 -- Extract a single header value (lib/http/format stores headers as { string, ... }).
@@ -103,12 +118,13 @@ local function header_first(headers, name)
 	return nil
 end
 
---:: HttpServerSock = { set_option: (unknown, string, unknown, string) -> nil, send: (unknown, string) -> (unknown, string | nil), close: (unknown) -> nil, ... }
+-- The socket is lib/http/server's http_client_sock; the cap never declares its
+-- own shape for it, so there is one definition of what an accepted client is.
 
 -- Set TCP-level socket options for an SSE stream.
 -- We do this on the first send_event call so that buffered short-lived
 -- responses don't pay the syscall cost.
---: (HttpServerSock | nil, boolean) -> nil
+--: (http_client_sock | nil, boolean) -> nil
 local function set_sse_socket_options(sock, want_nodelay)
 	if not sock then return end
 	local set = sock.set_option
@@ -136,14 +152,23 @@ local function format_sse_frame(data, id, event)
 	return table.concat(parts)
 end
 
---:: HttpServerRawReq = { target?: string, method?: string, headers?: { [string]: unknown }, body?: string, ... }
---:: HttpServerRawRes = { status: integer, headers: { [string]: unknown }, body: string | nil, ... }
+-- Normalize app-set header values in place: apps may write a bare string
+-- (res.headers["Content-Type"] = "text/html"), while the wire serializer
+-- expects a list of field values.
+--: ({ [string]: unknown }) -> nil
+local function normalize_headers(headers)
+	for k, v in pairs(headers) do
+		if type(v) == "string" then
+			headers[k] = { v }
+		end
+	end
+end
 
 -- Wrap the raw HTTP handler to hide the socket from the app.
 -- Returns a handler compatible with lib/http/server.make_connection_handler.
---: (((req: unknown, res: unknown) -> nil), { [integer]: boolean }, boolean) -> ((req: HttpServerRawReq, res: HttpServerRawRes, sock: HttpServerSock) -> boolean | nil)
+--: (((req: unknown, res: unknown) -> nil), { [integer]: boolean }, boolean) -> HttpHandlerFn
 local function wrap_handler(app_handler, revoked_ref, tcp_nodelay)
-	--: (HttpServerRawReq, HttpServerRawRes, HttpServerSock) -> boolean | nil
+	--: (http_server_request, http_server_response, http_client_sock) -> (boolean | nil)
 	return function(raw_req, raw_res, sock)
 		if revoked_ref[1] then return end
 		local sock_s = sock
@@ -158,16 +183,31 @@ local function wrap_handler(app_handler, revoked_ref, tcp_nodelay)
 			headers       = req_t.headers,
 			body          = req_t.body,
 			last_event_id = header_first(req_t.headers, "last-event-id"),
+			scheme        = req_t.scheme,
+			host          = req_t.host,
+			port          = req_t.port,
 		}
 
 		-- Build the response builder object.
+		local stream = nil --: http_response_stream | nil
 		local streaming = false
 		local closed = false
 		local res = {
-			status  = 200,
-			headers = {},
-			body    = nil,
+			status     = 200,
+			headers    = {},
+			body       = nil,
+			keep_alive = nil,
 		}
+
+		-- Take the socket over for an incremental response. lib/http/server
+		-- owns the connection loop; response_stream is how a handler borrows
+		-- the socket from it without re-implementing that loop.
+		--: () -> http_response_stream
+		local function take_socket()
+			local st = http_server.response_stream(raw_res, sock_s) --: http_response_stream
+			stream = st
+			return st
+		end
 
 		-- send_event(data, opts?) — SSE streaming. First call writes headers,
 		-- flushes, and configures the socket (TCP_NODELAY + keepalive).
@@ -181,19 +221,21 @@ local function wrap_handler(app_handler, revoked_ref, tcp_nodelay)
 				id    = opts.id
 				event = opts.event
 			end
-			if not streaming then
+			local st = stream
+			if not streaming or not st then
 				streaming = true
 				set_sse_socket_options(sock, tcp_nodelay)
-				local ok_p, err_p = sock_s:send(sse_preamble(res.status))
+				raw_res.status  = res.status
+				raw_res.headers = sse_head_headers()
+				st = take_socket()
+				local ok_p, err_p = st:send_head()
 				if not ok_p then
 					closed = true
-					return nil, "client closed"
+					return nil, tostring(err_p or "client closed")
 				end
-				-- some sockets return (nil, err) — defensive
-				if ok_p == nil then return nil, tostring(err_p or "client closed") end
 			end
 			local frame = format_sse_frame(data, id, event)
-			local ok_s, err_s = sock_s:send(frame)
+			local ok_s, err_s = st:write(frame)
 			if not ok_s then
 				closed = true
 				return nil, tostring(err_s or "client closed")
@@ -201,33 +243,40 @@ local function wrap_handler(app_handler, revoked_ref, tcp_nodelay)
 			return true
 		end
 
-		-- close() — end an SSE stream.
+		-- close() — end the response and the connection. Normally used to end
+		-- an SSE stream; when called before anything was streamed it still
+		-- means "I am done with this connection", so the socket is taken over
+		-- and closed with nothing further written to it.
 		function res.close()
 			if closed then return end
 			closed = true
-			sock_s:close()
+			local st = stream or take_socket()
+			st:close()
 		end
 
 		-- Call the app handler. It may set res.status/headers/body for a normal
 		-- response, or call res.send_event() for SSE streaming.
 		app_handler(req, res)
 
-		-- If the handler used SSE, the response was already sent incrementally.
-		-- Otherwise, serialize the normal response and send it.
+		-- If the handler used SSE, the response was already sent incrementally
+		-- and raw_res.raw is set, so the connection core leaves the socket
+		-- alone. Otherwise hand the buffered response back for serialization.
 		if not streaming then
-			raw_res.status  = res.status
-			raw_res.headers = res.headers
-			raw_res.body    = res.body
+			normalize_headers(res.headers)
+			raw_res.status     = res.status
+			raw_res.headers    = res.headers
+			raw_res.body       = res.body
+			raw_res.keep_alive = res.keep_alive
 		end
 
-		-- Return true for SSE to signal that the connection handler should NOT
-		-- serialize+close (the stream manages its own lifecycle).
-		-- For normal responses, return nil so the default path runs.
+		-- Return true for SSE. The authoritative signal to the connection core
+		-- is raw_res.raw (set by response_stream); this return value is the
+		-- wrapper's own report of which path it took.
 		if streaming then return true end
 	end
 end
 
---:: http_server_opts = { port?: integer, host?: string, daemon?: boolean, url?: string, on_serve?: (unknown) -> nil, tcp_nodelay?: boolean }
+--:: http_server_opts = { port?: integer, host?: string, daemon?: boolean, url?: string, on_serve?: (unknown) -> nil, tcp_nodelay?: boolean, idle_timeout?: number, max_requests?: integer }
 -- http_server_cap(opts) -> cap_table, revoke_fn
 --: (http_server_opts) -> (unknown, (() -> nil) | string | nil)
 function M.http_server_cap(opts)
@@ -283,79 +332,20 @@ function M.http_server_cap(opts)
 			return nil, "http_server: handler must be a function"
 		end
 
-		-- Build a custom connection handler that supports SSE.
-		-- We cannot use http_server.server() directly because it always
-		-- serializes res and closes the socket after the handler returns.
-		-- Instead, we use the socket server with a custom connection handler
-		-- that delegates to our wrapper.
-		local ffi = require("ffi")
-		local buf = ffi.new("char[65536]")
-		local max_header_size = 65536
-		local err_res = http_format.serialize_response({ status = 400, headers = {} })
-
+		-- lib/http/server owns the connection loop: reading requests, framing,
+		-- keep-alive, and the origin (scheme/host/port) it reports to handlers.
+		-- SSE lives inside that loop rather than beside it — wrap_handler
+		-- borrows the socket via http_server.response_stream when an app
+		-- streams, which is what tells the loop to stop managing the response.
 		local wrapped = wrap_handler(handler, revoked_ref, tcp_nodelay)
-
-		local socket_server = require("lib.socket.server")
-		--: (client: { receive: (unknown, unknown) -> string | nil, send: (unknown, string) -> unknown, close: (unknown) -> unknown, ... }) -> nil
-		socket_server.server(function(client)
-			if revoked_ref[1] then client:close(); return end
-
-			-- Read headers (same logic as lib/http/server.lua)
-			local parts = {}
-			local total = 0
-			local header_end
-			while not header_end do
-				local s = client:receive(buf)
-				if not s then return end
-				parts[#parts + 1] = s
-				total = total + #s
-				if total > max_header_size then client:send(err_res); return end
-				local combined = table.concat(parts)
-				header_end = combined:find("\r\n\r\n", 1, true)
-				if header_end then parts = { combined } end
-			end
-			local data = parts[1]
-			local req, i = http_format.parse_request(data)
-			if not req or not i then client:send(err_res); return end
-
-			-- Read remaining body if Content-Length specified
-			local content_length = req.headers["content-length"]
-			if content_length then
-				content_length = tonumber(content_length[1])
-				if content_length then
-					local body_start = header_end + 4
-					local body_so_far = #data - body_start + 1
-					while body_so_far < content_length do
-						local s = client:receive(buf)
-						if not s then break end
-						parts[#parts + 1] = s
-						body_so_far = body_so_far + #s
-					end
-					if #parts > 1 then
-						data = table.concat(parts)
-						req = http_format.parse_request(data)
-						if not req then client:send(err_res); return end
-					end
-				end
-			end
-
-			local res = { headers = {} }
-			local is_streaming = wrapped(req, res, client)
-
-			-- For normal (non-SSE) responses, serialize and close.
-			if not is_streaming then
-				-- Normalize header values: app may set strings, serialize expects {string}.
-				if res.headers then
-					for k, v in pairs(res.headers) do
-						if type(v) == "string" then
-							res.headers[k] = { v }
-						end
-					end
-				end
-				client:send(http_format.serialize_response(res))
-				client:close()
-			end
-		end, port, nil, { host = host })
+		http_server.server(wrapped, port, nil, {
+			host         = host,
+			tls_cert     = nil,
+			tls_key      = nil,
+			idle_timeout = opts.idle_timeout,
+			max_requests = opts.max_requests,
+			loop         = nil,
+		})
 	end
 
 	local function revoke()

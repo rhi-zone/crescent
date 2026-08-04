@@ -181,6 +181,32 @@ mod.serialize_request = function(req)
 	return concat(parts)
 end
 
+-- RFC 9112 §4 — Serialize only the status line + field lines + terminating CRLF.
+-- No body is appended and no Content-Length is synthesized: the caller states
+-- the framing it wants (or states none, as a streaming response does).
+--
+-- This is the head-only counterpart to serialize_response, which always
+-- synthesizes `content-length` when absent. Synthesizing `content-length: 0`
+-- and then writing further bytes violates RFC 9112 §6.1 — Content-Length
+-- declares the exact body length, so a client has no defined interpretation
+-- for bytes that follow. Incremental responses must therefore serialize their
+-- head through this function, not through serialize_response.
+--: (http_response) -> string
+mod.serialize_response_head = function(res)
+	local parts = {}
+	local status = res.status or 200
+	local reason = res.reason or status_names[status] or "Unknown"
+	local version = res.version or "HTTP/1.1"
+	parts[1] = version .. " " .. status .. " " .. reason .. "\r\n"
+	for name, values in pairs(res.headers or {}) do
+		for j = 1, #values do
+			parts[#parts + 1] = name .. ": " .. values[j] .. "\r\n"
+		end
+	end
+	parts[#parts + 1] = "\r\n"
+	return concat(parts)
+end
+
 -- RFC 9112 §4 — Serialize response to wire bytes.
 --: (http_response) -> string
 mod.serialize_response = function(res)

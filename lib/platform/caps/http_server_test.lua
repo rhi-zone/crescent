@@ -424,6 +424,91 @@ T.describe("http_server_cap", function()
 			T.ok(saw_keepalive, "so_keepalive should be set")
 		end)
 
+		-- The response table lib/http/server hands the wrapper. Declared here so
+		-- the fields these tests assert on (raw, keep_alive, normalized header
+		-- values) are part of the type rather than inferred away.
+		--:: RawResProbe = { headers: { [string]: { [integer]: string } }, status: integer | nil, body: string | nil, raw: boolean | nil, keep_alive: boolean | nil }
+		--: () -> RawResProbe
+		local function raw_res_probe()
+			return { headers = {}, status = nil, body = nil, raw = nil, keep_alive = nil }
+		end
+
+		T.it("SSE: preamble declares no content-length", function()
+			local revoked_ref = { false }
+			local wrapped = http_srv._wrap_handler(function(req, res)
+				res.send_event("x")
+				res.close()
+			end, revoked_ref)
+			local sock = mock_socket()
+			wrapped({ method = "GET", target = "/events", headers = {} }, { headers = {} }, sock)
+			-- RFC 9112 §6.1: a declared length is the exact body length, so the
+			-- frames written after the head would have no defined meaning.
+			T.eq(sock.sent[1]:find("content-length", 1, true), nil,
+				"SSE head must not declare a body length")
+		end)
+
+		T.it("SSE: hands the socket to the connection core's raw path", function()
+			local revoked_ref = { false }
+			local wrapped = http_srv._wrap_handler(function(req, res)
+				res.send_event("x")
+			end, revoked_ref)
+			local raw_res = raw_res_probe()
+			wrapped({ method = "GET", target = "/events", headers = {} }, raw_res, mock_socket())
+			T.eq(raw_res.raw, true,
+				"raw is what tells lib/http/server not to serialize or close")
+		end)
+
+		T.it("surfaces scheme/host/port from the connection to the app", function()
+			local revoked_ref = { false }
+			local captured_req
+			local wrapped = http_srv._wrap_handler(function(req, res)
+				captured_req = req
+			end, revoked_ref)
+			wrapped({
+				method = "GET", target = "/", headers = {},
+				scheme = "https", host = "dash.example:8443", port = 8443,
+			}, { headers = {} }, mock_socket())
+			T.eq(captured_req.scheme, "https")
+			T.eq(captured_req.host, "dash.example:8443")
+			T.eq(captured_req.port, 8443)
+		end)
+
+		T.it("normalizes bare-string header values for the serializer", function()
+			local revoked_ref = { false }
+			local wrapped = http_srv._wrap_handler(function(req, res)
+				res.headers["Content-Type"] = "text/html"
+				res.body = "<p>x</p>"
+			end, revoked_ref)
+			local raw_res = raw_res_probe()
+			wrapped({ method = "GET", target = "/", headers = {} }, raw_res, mock_socket())
+			T.eq(raw_res.headers["Content-Type"][1], "text/html")
+		end)
+
+		T.it("propagates a per-response keep_alive override", function()
+			local revoked_ref = { false }
+			local wrapped = http_srv._wrap_handler(function(req, res)
+				res.body = "once"
+				res.keep_alive = false
+			end, revoked_ref)
+			local raw_res = raw_res_probe()
+			wrapped({ method = "GET", target = "/", headers = {} }, raw_res, mock_socket())
+			T.eq(raw_res.keep_alive, false,
+				"an endpoint can still pin one response per connection")
+		end)
+
+		T.it("close() without streaming takes the socket over rather than leaving a half-written response", function()
+			local revoked_ref = { false }
+			local wrapped = http_srv._wrap_handler(function(req, res)
+				res.close()
+			end, revoked_ref)
+			local raw_res = raw_res_probe()
+			local sock = mock_socket()
+			wrapped({ method = "GET", target = "/", headers = {} }, raw_res, sock)
+			T.ok(sock.closed)
+			T.eq(raw_res.raw, true, "the core must not write to a socket the app closed")
+			T.eq(#sock.sent, 0)
+		end)
+
 		T.it("SSE: TCP_NODELAY skipped when tcp_nodelay=false; keepalive still on", function()
 			local revoked_ref = { false }
 			local wrapped = http_srv._wrap_handler(function(req, res)
