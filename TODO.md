@@ -5645,3 +5645,123 @@ as their status.**
   signals). `lib/fractal/cache.lua` ports only the fingerprinting layer. If a
   Lua-side incremental build cache is ever wanted, it needs its own design for
   the file-closure tier rather than a translation of these.
+
+## lib/fractal type-ir projectors — typechecker gaps and open items (2026-08-04)
+
+Filed alongside the port of `type_ref_codegen`, `type_ref_kinds_common`, and
+the rust-serde / wasm-bindgen / gleam-native / rescript-native projectors.
+
+- [ ] Generic type parameters are not inferred from an index-signature
+  argument. `type_ref.resolve` is `<T>(string, { [string]: T }) -> T | nil`;
+  called with a `{ [string]: Converter }` the result types as `never` rather
+  than `Converter | nil`. It stays invisible while the value flows into a
+  declared `string` position (which is why `type_ref_gleam_native.lua` needs
+  no workaround — its converter result goes straight into a `string` parameter
+  or return), and surfaces as ``cannot concatenate type `never | string` ``
+  the moment it reaches a concatenation. Three of the four projectors hit it
+  and worked around it three different ways — see the consistency item below.
+
+- [ ] A generic function's instantiation LEAKS ACROSS CALL SITES within a
+  file: the second call is checked against the first call's solved `T`.
+  Verified on a minimal repro — two `type_ref.resolve` calls, one passing
+  `{ [string]: (string) -> string }` and one passing `{ [string]: string }`,
+  fails on the second with ``argument 2: cannot pass `{ [string]: string }`
+  where `{ [string]: (string) -> string }` expected``. Almost certainly the
+  same root cause as the entry above (a solution cached per function rather
+  than per call site). None of the four projectors trip it — each uses a
+  single handler type — so there is no workaround to revert, but any file
+  calling one generic with two different instantiations will hit it.
+
+- [ ] The `T[]` sugar lowers to `{ [number]: T }`, which the stdlib
+  declarations for `table.concat` and `table.sort` reject — they require
+  `{ [integer]: ... }` (`lib/type/static/stdlib_types.lua:141`). So no value
+  annotated `string[]` can reach `table.concat`. It only bites where a local,
+  parameter, or return needs an explicit annotation; inference on a bare
+  `local out = {}` produces the integer-indexed form and works.
+  `type_ref_wasm_bindgen.lua` and `type_ref_gleam_native.lua` each declare a
+  `StringList = { [integer]: string }` alias (arrived at independently, same
+  name); rust-serde and rescript-native spell the index signature inline. One
+  fix covers all four. Marked `-- TYPECHECKER WORKAROUND:` in the two files
+  carrying the alias.
+
+- [ ] A trailing `--:` annotation after a MULTI-LINE table literal is silently
+  dropped. The same annotation on a single-line literal is applied, and a
+  `--[[: T]]` cast in that position works multi-line (the form
+  `type_ref.lua:232-235` uses). Fails open, which is what makes it dangerous —
+  it surfaced during the gleam port as an unrelated-looking downstream error
+  rather than at the annotation. Repro:
+  ```lua
+  local WRONG = {
+  	"a",
+  } --: { [integer]: integer }
+  --: () -> string
+  function M.g() return WRONG[1] end   -- no error; annotation was dropped
+  ```
+
+- [ ] Index-signature keys accept only `string` / `integer` / `unknown`. A
+  `Map` keyed by object identity (`Map<TypeRef, string>` in
+  `rescript-native.ts`) has no spelling: `{ [TypeRef]: string }` parses as a
+  record with one field literally named `TypeRef`. `type_ref_rescript_native.lua`
+  types its hoist cache `{ [unknown]: string }` with a widening cast at the
+  lookup. Runtime identity keying is unaffected; the type just no longer says
+  what the key is. Deliberately NOT tagged `TYPECHECKER WORKAROUND` — it is a
+  widening, not a behaviour-preserving detour.
+
+- [ ] DECIDE: whether the four projectors should share one spelling of the
+  index-signature-inference workaround. They currently differ —
+  `type_ref_rust_serde.lua` uses a `--[[: Converter | nil]]` cast at each call
+  site, `type_ref_wasm_bindgen.lua` routes through a `converter_for(kind)`
+  wrapper with a concrete return type, `type_ref_rescript_native.lua` uses a
+  `--: Converter | nil` annotation on the result, and
+  `type_ref_gleam_native.lua` carries no workaround because its call sites
+  never reach a concatenation. Each is locally minimal and correct, and no
+  file carries a workaround it does not need — that is the argument for
+  leaving them alone. The argument against is that eight more ffi-ir backends
+  and every future projector will read these four as canonical and copy
+  whichever they happen to open first. Not resolved during the port because
+  the tradeoff is a repo-preference call, not a source-determined one.
+  Whichever way it goes, it is cheaper to settle before the next projector
+  lands than after.
+
+- [ ] `type_ref_codegen.lua`'s module path is a placement call, not a
+  source-determined one. fractal's `codegen-helpers.ts` is not a dialect, so
+  it did not fit the `type_ref_<dialect>.lua` pattern the projector files use.
+  Rename is a one-line change per requiring file while there are only four of
+  them.
+
+- [ ] Only the subset of `codegen-helpers.ts` these four projectors need is
+  ported (identifier casing, `is_a`, `quote`). The per-ecosystem doc-comment
+  renderers, `indent4`/`indentLines`, `resolveOptions`, `goFieldIdent`, and
+  `toCamelCase*` are unported — they belong with the projectors that use
+  them, none of which are ported yet.
+
+- [ ] `type_ref_wasm_bindgen.lua`'s `field_type` returns a `rust_name` no
+  caller reads. Dead in `wasm-bindgen.ts` too, kept for fidelity during the
+  port. Drop it, or keep it deliberately and say why.
+
+- [ ] `kinds/refinements.ts` is not ported and has nothing to port: it
+  declares branded TS types (`MinLength<N>`, `Pattern<P>`, …) that exist only
+  for `from-typescript.ts`'s static analysis to read back as `meta` keys. No
+  IR kind, no runtime value, no emit. Same for `semantic-strings.ts`'s
+  `Uuid`/`Uri`/`Email` brand types. If a Lua-side ingester that recovers
+  refinements from annotations is ever wanted, it needs its own design.
+
+- [ ] `gleam-native.ts`'s hoisting-section comment overstates what the code
+  does: it claims declarations are hoisted from "a field, array/list element,
+  tuple slot, or map key/value", but the code hoists only from field and
+  array/stream/page element positions — a nested object in a tuple slot or a
+  map value renders `Dynamic`. Confirmed by running the TS.
+  `type_ref_gleam_native.lua` reproduces the CODE's behaviour (two tests pin
+  it) and flags the discrepancy in its header. Worth reporting upstream to
+  fractal; if fractal treats it as a bug and fixes the code, the port follows.
+
+- [ ] Field/key emission order across all four projectors is byte order, not
+  the JS insertion order fractal emits — the precedent `type_ref.lua`'s
+  `ordered_keys` set, for the same reason (Lua has no insertion order to
+  recover). The emitted SET is always identical. In
+  `type_ref_rescript_native.lua` it can additionally shift a hoisted type's
+  NAME, not just line order: with field hints colliding at one base name, the
+  byte-first field claims the unsuffixed name where fractal gives it to the
+  insertion-first one. A test pins the `home_address` / `homeAddress` case.
+  Only matters if byte-identical output against fractal ever becomes a
+  requirement rather than a target.
