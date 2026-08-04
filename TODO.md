@@ -8,6 +8,31 @@ See `docs/roadmap-v2.md` for the authoritative project roadmap and sequencing. T
 
 ## Open bugs
 
+- [ ] **Typechecker: narrowing facts are keyed by variable NAME, not by binding — a same-named local in an unrelated scope poisons narrowing file-wide (2026-08-04):** Found while building `lib/fractal/stream.lua`. Minimal repro (checks with 1 spurious error; delete the `outer` function and it checks clean):
+  ```lua
+  --: (v: unknown) -> v is { data: unknown }
+  local function is_boxed(v) return type(v) == "table" end
+
+  --: (produce: () -> unknown) -> nil
+  local function outer(produce)
+    local wrapped = function()
+      local ok, value = pcall(produce)
+      _ = ok
+      _ = value
+    end
+    wrapped()
+  end
+
+  --: (value: unknown) -> unknown
+  local function read(value)
+    if is_boxed(value) then return value.data end   -- "value of type `unknown` must be narrowed before indexing"
+    return nil
+  end
+  ```
+  The `value` bound by `local ok, value = pcall(...)` inside the unannotated inner closure and the `value` parameter of `read` are entirely unrelated bindings in disjoint scopes, but the first one's un-narrowable `unknown` suppresses the narrowing predicate at the second. Renaming either binding fixes it. **Worked around** in `lib/fractal/stream.lua` by naming the producer's pcall result `outcome` instead of the natural `value` (flagged in-file as `TYPECHECKER WORKAROUND`). Revert that rename once narrowing facts are keyed by binding. Belongs to `lib/type/static/`'s narrowing environment.
+
+- [ ] **Typechecker: a trailing `--: T` on the CLOSING line of a multi-line table constructor is mis-associated (2026-08-04):** Found while building `lib/fractal/stream.lua`. `local st = { a = false, b = nil } --: S` (one line) checks clean; the identical annotation written as `} --: S` at the end of a multi-line constructor is not applied to the local, and every later field assignment is then checked against the whole table type instead of the field's — e.g. `st.b = "x"` reports ``cannot assign `"x"` to `{ a: boolean, b: unknown }`: string has no field `a` ``. The preceding-line form (`--: S` on its own line above `local st = {`) and the inline cast form (`} --[[: S]]`) both check clean. This is a placement bug, not a shape one. **Worked around** in `lib/fractal/stream.lua` by putting the `StreamState` annotation on the preceding line (flagged in-file as `TYPECHECKER WORKAROUND`); restore the repo-standard trailing form once the association is fixed. Note `lib/async/init.lua`'s `co_box` uses the broken trailing form today and is only unaffected because nothing assigns to its fields afterwards.
+
 - [ ] **`lib/html` doesn't typecheck for its own intended usage (2026-07-30):** No file in the repo consumes `lib/html` (`grep -rl 'require("lib.html")' lib/ | grep -v /html/` returns nothing) -- it has never had a real caller. Two independent problems, found while building `lib/platform/apps/finance/dom.lua` (this app's web frontend): (1) `lib/html/init.lua` itself fails `bin/cr check` at HEAD with 75 pre-existing errors, nearly all `force cast — fix the upstream type annotation instead` on the file's own `--[[:! Element<T, A>]]` casts (every `M.div`/`M.span`/`M.a`/etc. definition at the bottom of the file) -- written against a looser force-cast enforcement that no longer holds, never revisited since. (2) Independently of (1), ordinary *nested* composition -- exactly what `lib/html/html_test.lua` never exercises (it only checks leaf elements in isolation, never e.g. `h.html(...)` containing `h.head(...)` containing `h.title(...)`) -- fails on the consumer side too. Minimal repro: `h.html({ lang = "en", h.head({ h.title("hi") }), h.body({ h.div({ class = "x" }, h.p("hello")) }) })` produces `nominal type TitleElement is not assignable to MetaElement | LinkElement | ScriptElement | StyleElement | TitleElement` -- a value of a type literally listed in a union failing to satisfy that same union once it's inside a table literal passed to a `{ [integer]: ... }`-typed parameter. Per owner decision (2026-07-30), `dom.lua` ships today using plain string-template HTML (with `h.escape` for user data) instead of `lib/html`'s nested element builders, specifically to avoid the force-cast-everywhere workaround the current state would otherwise require. Migrating `dom.lua` to `lib/html` once these are fixed is expected to be a straightforward refactor, not a redesign -- but the fix itself (the `Element<Content, Attrs>` nominal-union machinery, plus lib/html/init.lua's own internal force casts) is unscoped and belongs to `lib/html`/the typechecker, not to this app.
 
 - [ ] **No cap surfaces terminal dimensions for sandboxed TUI apps (2026-07-30):** `lib/tui/init.lua`'s `M.size` gets real terminal geometry via FFI `ioctl` (TIOCGWINSZ) or `COLUMNS`/`LINES` env vars, both unreachable from inside the platform sandbox (`os`/`ffi` are both absent per `lib/platform/CLAUDE.md`'s "Sandbox is the security boundary", and the cap taxonomy has no env/tty primitive -- `cli` only exposes argv). `lib/platform/apps/finance/tui.lua`'s `M.create` passes a stub `no_env` (always returns nil) to `tui.size`, which sends it to its documented 80x24 fallback -- functional, but every sandboxed TUI app is stuck at a fixed size regardless of the real terminal. Fix requires a new primitive cap (e.g. `tty`/`terminal` surfacing `COLUMNS`/`LINES`, or a narrow `getenv` cap) -- not something to invent ad hoc inside one app.
