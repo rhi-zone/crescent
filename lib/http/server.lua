@@ -6,7 +6,39 @@ local mod = {}
 
 --:: http_request = { method: string, target: string, version: string, headers: { [string]: string[] }, body: string | nil }
 --:: http_response = { status: integer, reason: string, version: string, headers: { [string]: string[] }, body: string | nil }
---:: http_server_response = { status: integer, reason: string, version: string, headers: { [string]: string[] }, body: string | nil, raw: boolean | nil }
+
+-- What the server itself knows about the connection it is answering on.
+-- RFC 9112 §3.3 (Reconstructing the Target URI) is the authority for these.
+-- There is no X-Forwarded-* handling here and none should be added at this
+-- layer: a reverse proxy's claims are a separate, trust-gated input.
+--:: http_origin = { scheme: string, host: string | nil, port: integer | nil }
+
+-- The request as delivered to a handler: the parsed message plus the origin
+-- fields the wire codec cannot know.
+--   scheme — "https" when this connection is TLS-wrapped, else "http"
+--            (RFC 9112 §3.3: scheme is https if the connection is secured).
+--   host   — the RFC 9112 §3.3 authority: the Host field value when non-empty
+--            (verbatim, so it retains any ":port" the client sent), otherwise
+--            the server's configured host name (opts.host). nil means neither
+--            exists — the server genuinely has no configured host name, and a
+--            caller must not fabricate one. Note opts.host is a *bind*
+--            address, so an operator who binds a wildcard ("0.0.0.0", "*")
+--            gets that value back here; it is reported verbatim rather than
+--            filtered, because any filter list would be invented.
+--   port   — the port this server is bound to (not any port in the Host
+--            field, which is part of `host` above).
+--:: http_server_request = { method: string, target: string, version: string, headers: { [string]: string[] }, body: string | nil, scheme: string, host: string | nil, port: integer | nil }
+
+-- raw        — handler has taken ownership of the socket; the core neither
+--              serializes nor closes. Set by mod.response_stream, and by
+--              protocol-upgrade handlers (lib/http/server_ws) directly.
+-- keep_alive — per-response override of the connection-reuse decision the
+--              core derives from the request. false pins this connection to
+--              a single response (`connection: close`, then close) even when
+--              the request would have permitted reuse. nil leaves the derived
+--              decision in place. The server-wide equivalents are
+--              opts.max_requests and opts.idle_timeout.
+--:: http_server_response = { status: integer, reason: string, version: string, headers: { [string]: string[] }, body: string | nil, raw: boolean | nil, keep_alive: boolean | nil }
 
 local ffi = require("ffi")
 local buf = ffi.new("char[65536]")
@@ -29,8 +61,14 @@ local function get_tls()
 	return tls_lib
 end
 
---:: http_client_sock = { receive: (self: http_client_sock, unknown) -> string | nil, send: (self: http_client_sock, string) -> unknown, close: (self: http_client_sock) -> unknown, fd: integer, on_send: unknown, on_receive: unknown, _loop: unknown }
---:: HttpHandlerFn = (req: http_request, res: http_server_response, sock: http_client_sock) -> (boolean | nil)
+-- What this server requires of an accepted client socket, not the whole of
+-- what one is — hence the `...`: lib/socket/server declares its client the
+-- same way, and real clients (LjSocket instances) carry more members than
+-- this. set_option mirrors LjSocket's member of the same name, so a handler
+-- that needs socket-level options (TCP_NODELAY on a stream, keepalive) can
+-- reach it without casting past this declaration.
+--:: http_client_sock = { receive: (self: http_client_sock, unknown) -> string | nil, send: (self: http_client_sock, string) -> unknown, close: (self: http_client_sock) -> unknown, set_option: (self: http_client_sock, string, unknown, string | nil) -> (boolean | nil, string | nil), fd: integer, on_send: unknown, on_receive: unknown, _loop: unknown, ... }
+--:: HttpHandlerFn = (req: http_server_request, res: http_server_response, sock: http_client_sock) -> (boolean | nil)
 --:: HttpKeepAliveOpts = { idle_timeout: number | nil, max_requests: integer | nil }
 
 -- NOTE: cross-module named types are not yet supported; AsyncLoop is the
@@ -51,12 +89,19 @@ local function should_keep_alive(version, connection_header_val)
 	return conn ~= "close"
 end
 
--- Connection handler factory. Takes an HTTP handler and keep-alive options.
---: (HttpHandlerFn | nil, HttpKeepAliveOpts | nil) -> (http_client_sock) -> nil
-local function make_handler_core(http_handler, ka_opts)
+-- Connection handler factory. Takes an HTTP handler, keep-alive options, and
+-- the connection origin (scheme/host/port) the server knows about itself.
+-- origin is optional: callers that bind their own listener and know nothing
+-- about it get scheme "http" and no host/port.
+--: (HttpHandlerFn | nil, HttpKeepAliveOpts | nil, http_origin | nil) -> (http_client_sock) -> nil
+local function make_handler_core(http_handler, ka_opts, origin)
 	local ka = ka_opts or {}
 	local idle_timeout_ms = ka.idle_timeout or 60000
 	local max_requests = ka.max_requests or 0
+	local org = origin or { scheme = "http", host = nil, port = nil } --: http_origin
+	local origin_scheme = org.scheme
+	local origin_host = org.host
+	local origin_port = org.port
 
 	--: (http_client_sock) -> nil
 	return function(client)
@@ -157,19 +202,45 @@ local function make_handler_core(http_handler, ka_opts)
 			local conn_val = connection_hdr and connection_hdr[1] or ""
 			keep_alive = should_keep_alive(req_.version, conn_val)
 
+			-- RFC 9112 §3.3 — reconstruct the authority the handler should see.
+			-- The Host field wins when non-empty; otherwise the server's own
+			-- configured host name. See http_server_request for why nil is a
+			-- legitimate outcome rather than a fabricated placeholder.
+			local host_hdr = req_.headers["host"]
+			local host_val = host_hdr and host_hdr[1]
+			if host_val == "" then host_val = nil end
+
+			local sreq = {
+				method = req_.method,
+				target = req_.target,
+				version = req_.version,
+				headers = req_.headers,
+				body = req_.body,
+				scheme = origin_scheme,
+				host = host_val or origin_host,
+				port = origin_port,
+			} --: http_server_request
+
 			-- HTTP request handling.
-			local res = { status = 200, reason = "", version = "HTTP/1.1", headers = {}, body = nil, raw = nil } --: http_server_response
+			local res = { status = 200, reason = "", version = "HTTP/1.1", headers = {}, body = nil, raw = nil, keep_alive = nil } --: http_server_response
 			if not http_handler then
 				res.status = 404
 				res.reason = "Not Found"
 			else
-				http_handler(req_, res, client_)
+				http_handler(sreq, res, client_)
 			end
 
 			if res.raw then
-				-- Handler took ownership of the socket (SSE, etc.).
+				-- Handler took ownership of the socket: an incremental response
+				-- in flight (mod.response_stream) or a protocol upgrade. Neither
+				-- serialize nor close — the handler owns both from here.
 				return
 			end
+
+			-- A handler may pin this connection to a single response even when
+			-- the request permitted reuse (opts.max_requests is the server-wide
+			-- equivalent; this is the per-response one).
+			if res.keep_alive == false then keep_alive = false end
 
 			-- Add Connection header to response.
 			if keep_alive then
@@ -185,10 +256,89 @@ local function make_handler_core(http_handler, ka_opts)
 	end
 end
 
--- Public API: accepts an HTTP handler function and optional keep-alive options.
---: (HttpHandlerFn, HttpKeepAliveOpts | nil) -> (http_client_sock) -> nil
-mod.make_connection_handler = function(handler, ka_opts)
-	return make_handler_core(handler, ka_opts)
+-- Public API: accepts an HTTP handler function, optional keep-alive options,
+-- and the optional connection origin (see http_origin).
+--: (HttpHandlerFn, HttpKeepAliveOpts | nil, http_origin | nil) -> (http_client_sock) -> nil
+mod.make_connection_handler = function(handler, ka_opts, origin)
+	return make_handler_core(handler, ka_opts, origin)
+end
+
+--:: http_response_stream = { send_head: (self: http_response_stream) -> (boolean | nil, string | nil), write: (self: http_response_stream, string) -> (boolean | nil, string | nil), close: (self: http_response_stream) -> nil, is_open: (self: http_response_stream) -> boolean }
+
+-- Take ownership of `sock` for an incremental (streamed) response: send the
+-- head once, then write body bytes over time, then close. This is the
+-- supported alternative to buffering a whole body into res.body, and it
+-- removes the need for a caller to re-implement the connection loop just to
+-- keep a socket open (SSE, long-poll, progressive rendering).
+--
+-- Calling this marks res.raw, so the connection core stops treating the
+-- response as something it will serialize or close: from here the stream owns
+-- both. Nothing is written until the first send_head/write call, so a handler
+-- may create the stream and still decide to fail before any bytes go out.
+--
+-- Framing is the caller's to state. The head is serialized with
+-- serialize_response_head, which synthesizes no content-length — see the note
+-- there on RFC 9112 §6.1. A caller that knows its exact body length may set
+-- `content-length` in res.headers itself; a caller that does not (SSE and
+-- friends) sets none and ends the body by closing.
+--: (http_server_response, http_client_sock) -> http_response_stream
+mod.response_stream = function(res, sock)
+	local res_ = res
+	local sock_ = sock
+	local head_sent = false
+	local closed = false
+
+	res_.raw = true
+
+	local stream = {}
+
+	-- Serialize and send the response head. Idempotent: the second and later
+	-- calls succeed without writing. Returns (nil, err) once the peer is gone.
+	--: (self: http_response_stream) -> (boolean | nil, string | nil)
+	function stream:send_head()
+		if closed then return nil, "stream closed" end
+		if head_sent then return true end
+		head_sent = true
+		local ok, err = sock_:send(http.serialize_response_head(res_))
+		if not ok then
+			closed = true
+			return nil, tostring(err or "client closed")
+		end
+		return true
+	end
+
+	-- Write body bytes. Sends the head first if it has not gone out yet, so a
+	-- handler that only ever calls write still emits a well-formed response.
+	--: (self: http_response_stream, string) -> (boolean | nil, string | nil)
+	function stream:write(chunk)
+		if closed then return nil, "stream closed" end
+		if not head_sent then
+			local ok_h, err_h = stream:send_head()
+			if not ok_h then return nil, err_h end
+		end
+		local ok, err = sock_:send(chunk)
+		if not ok then
+			closed = true
+			return nil, tostring(err or "client closed")
+		end
+		return true
+	end
+
+	-- End the response. Closing is what delimits a body with no declared
+	-- length, so this is the normal termination, not only the error path.
+	--: (self: http_response_stream) -> nil
+	function stream:close()
+		if closed then return end
+		closed = true
+		sock_:close()
+	end
+
+	--: (self: http_response_stream) -> boolean
+	function stream:is_open()
+		return not closed
+	end
+
+	return stream
 end
 
 -- Wrap an accepted client socket with TLS server-side hooks.
@@ -307,7 +457,12 @@ mod.server = function(handler, port, epoll, opts)
 	end
 
 	local ka_opts = { idle_timeout = opts_.idle_timeout, max_requests = opts_.max_requests }
-	return socket.server(mod.make_connection_handler(handler, ka_opts), port or 80, epoll, server_opts)
+	-- The origin is what this server knows about itself: TLS actually got
+	-- established (not merely requested — the blocks above fall back to
+	-- plaintext on failure), the configured bind host, and the bound port.
+	local bind_port = port or 80
+	local origin = { scheme = tls_ctx and "https" or "http", host = opts_.host, port = bind_port } --: http_origin
+	return socket.server(mod.make_connection_handler(handler, ka_opts, origin), bind_port, epoll, server_opts)
 end
 
 return mod

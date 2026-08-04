@@ -17,8 +17,8 @@ local mod = {}
 
 --:: WsMessage = { type: string, payload: string, status?: integer }
 --:: WsConn = { recv: (self: WsConn) -> (WsMessage | nil, string | nil), send: (self: WsConn, string, string | nil) -> (boolean | nil, string | nil), close: (self: WsConn, integer | nil, string | nil) -> nil }
---:: WsHandlerFn = (ws_conn: WsConn, req: http_request) -> nil
---:: WsAcceptFn = (req: http_request) -> (boolean | nil, string | nil)
+--:: WsHandlerFn = (ws_conn: WsConn, req: http_server_request) -> nil
+--:: WsAcceptFn = (req: http_server_request) -> (boolean | nil, string | nil)
 --:: WsHandlerTable = { http: HttpHandlerFn | nil, ws_accept: WsAcceptFn | nil, ws: WsHandlerFn | nil }
 
 -- RFC 6455 §4.2.2 — WebSocket GUID for accept-key computation.
@@ -26,7 +26,7 @@ local WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 
 -- Validate WebSocket upgrade request headers (RFC 6455 §4.2.1).
 -- Returns the Sec-WebSocket-Key on success, or (nil, errmsg) on failure.
---: (http_request) -> (string | nil, string | nil)
+--: (http_server_request) -> (string | nil, string | nil)
 local function ws_validate_upgrade(req)
 	local conn_arr = req.headers["connection"]
 	local conn_hdr = conn_arr and conn_arr[1]
@@ -198,7 +198,7 @@ local function make_ws_wrapper(handler_table)
 	local ws_handler_fn = handler_table.ws
 	local recv_buf = ffi.new("char[65536]")
 
-	--: (http_request, http_server_response, http_client_sock) -> (boolean | nil)
+	--: (http_server_request, http_server_response, http_client_sock) -> (boolean | nil)
 	return function(req, res, client)
 		local upgrade_val = req.headers["upgrade"]
 		if not (upgrade_val and upgrade_val[1] and upgrade_val[1]:lower() == "websocket") then
@@ -258,11 +258,12 @@ local function make_ws_wrapper(handler_table)
 	end
 end
 
--- Public API: accepts a handler table { http?, ws_accept?, ws? } and optional
--- keep-alive options. Returns a connection handler suitable for socket.server.
---: (WsHandlerTable, HttpKeepAliveOpts | nil) -> (http_client_sock) -> nil
-mod.make_connection_handler = function(handler_table, ka_opts)
-	return server.make_connection_handler(make_ws_wrapper(handler_table), ka_opts)
+-- Public API: accepts a handler table { http?, ws_accept?, ws? }, optional
+-- keep-alive options, and the optional connection origin (see http_origin).
+-- Returns a connection handler suitable for socket.server.
+--: (WsHandlerTable, HttpKeepAliveOpts | nil, http_origin | nil) -> (http_client_sock) -> nil
+mod.make_connection_handler = function(handler_table, ka_opts, origin)
+	return server.make_connection_handler(make_ws_wrapper(handler_table), ka_opts, origin)
 end
 
 -- Convenience entry point mirroring server.server() but accepting a handler
