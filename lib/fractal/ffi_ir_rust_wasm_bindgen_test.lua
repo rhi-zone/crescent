@@ -314,13 +314,13 @@ T.describe("lib.fractal.ffi_ir_rust_wasm_bindgen", function()
 
 	T.describe("re-exported data-shape entry point", function()
 
-		T.it("wasm_bindgen_type_from_type_ref is the type-ir projector's own function, re-exported unchanged", function()
+		T.it("rust_wasm_bindgen_type_from_type_ref is the type-ir projector's own function, re-exported unchanged", function()
 			-- `common` is required above so the refined-kind lattice is
 			-- registered; `uuid` reaching the `string` handler through it is
 			-- what makes this assertion meaningful rather than incidental.
 			T.eq(common ~= nil, true)
-			T.eq(wb.wasm_bindgen_type_from_type_ref(t(types.integer)), "i64")
-			T.eq(wb.wasm_bindgen_type_from_type_ref(t({ kind = "uuid" })), "String")
+			T.eq(wb.rust_wasm_bindgen_type_from_type_ref(t(types.integer)), "i64")
+			T.eq(wb.rust_wasm_bindgen_type_from_type_ref(t({ kind = "uuid" })), "String")
 		end)
 
 	end)

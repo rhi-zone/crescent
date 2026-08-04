@@ -28,8 +28,8 @@ local wb = require("lib.fractal.type_ref_rust_wasm_bindgen")
 
 local types = type_ref.types
 local t = type_ref.type_ref_from_shape
-local inline = wb.wasm_bindgen_type_from_type_ref
-local source = wb.wasm_bindgen_source_from_type_ref
+local inline = wb.rust_wasm_bindgen_type_from_type_ref
+local source = wb.rust_wasm_bindgen_source_from_type_ref
 
 -- Assert a successful projection equals `expected` exactly.
 --: (got: string | nil, err: string | nil, expected: string) -> nil

@@ -7,7 +7,7 @@
 -- primitives/structs/fieldless enums/plain functions, refusing union/map/tuple/
 -- intersection/interface/method-with-receiver). That file is NOT modified here;
 -- this one requires it and calls its exported
--- `wasm_bindgen_source_from_type_ref`/`wasm_bindgen_type_from_type_ref` for
+-- `rust_wasm_bindgen_source_from_type_ref`/`rust_wasm_bindgen_type_from_type_ref` for
 -- every data-shape position (params, return types, hoisted struct/enum
 -- declarations) rather than reimplementing type mapping, and adds only what
 -- ffi-ir carries that type-ir doesn't: function/module boundaries, resource
@@ -255,11 +255,13 @@ local function declared_discipline_kind(meta)
 	if type(discipline) ~= "table" then return "copy" end
 	local rec = discipline --[[: { kind: unknown, ... }]]
 	if type(rec.kind) ~= "string" then return "copy" end
-	-- Two casts, not one: `type(x) == "string"` does not narrow an `unknown`
-	-- FIELD to `string`, so the guarded value is re-read through a cast of the
-	-- WHOLE record instead — the same two-step (`{ kind: unknown, ... }` to
-	-- probe, then a cast of the original value) that `ffi_ir.ownership_of`
-	-- itself uses on the same data for the same reason.
+	-- TYPECHECKER WORKAROUND: two casts, not one — `type(x) == "string"` does
+	-- not narrow an `unknown` FIELD to `string`, so the guarded value is
+	-- re-read through a cast of the WHOLE record instead — the same two-step
+	-- (`{ kind: unknown, ... }` to probe, then a cast of the original value)
+	-- that `ffi_ir.ownership_of` itself uses on the same data for the same
+	-- reason. See that function's own comment for the minimal repro and the
+	-- TODO.md entry both sites share; revert both once this narrows correctly.
 	return (discipline --[[: { kind: string, ... }]]).kind
 end
 
@@ -294,13 +296,13 @@ local function synthetic_function_ref(params, return_type, meta)
 end
 
 -- Free function -> delegates entirely to the type-ir projector's
--- `wasm_bindgen_source_from_type_ref` via a reconstructed `function` TypeRef
+-- `rust_wasm_bindgen_source_from_type_ref` via a reconstructed `function` TypeRef
 -- (see `synthetic_function_ref`).
 --: (name: string, shape: FfiFunctionLike, meta: Meta) -> (string | nil, string | nil)
 local function build_function(name, shape, meta)
 	local ref, err = synthetic_function_ref(shape.params, shape.returnType, meta)
 	if ref == nil then return nil, err end
-	return wb.wasm_bindgen_source_from_type_ref(ref, name)
+	return wb.rust_wasm_bindgen_source_from_type_ref(ref, name)
 end
 
 -- Method -> reuses the type-ir projector's free-function emission (hoisted
@@ -337,7 +339,7 @@ end
 local function build_method(name, shape, meta)
 	local ref, err = synthetic_function_ref(shape.params, shape.returnType, meta)
 	if ref == nil then return nil, err end
-	local rendered, render_err = wb.wasm_bindgen_source_from_type_ref(ref, name)
+	local rendered, render_err = wb.rust_wasm_bindgen_source_from_type_ref(ref, name)
 	if rendered == nil then return nil, render_err end
 	local receiver = #shape.params == 0 and "pub fn %1(&self" or "pub fn %1(&self, "
 	return (rendered:gsub("pub fn ([%w_]+)%(", receiver, 1)), nil
@@ -641,6 +643,6 @@ end
 -- boundary shapes routinely also needs the inline Rust type for a bare
 -- data-shape `TypeRef`, and re-exporting saves it a second require. Same name
 -- as in `type_ref_rust_wasm_bindgen.lua` — it is that function, not a wrapper.
-M.wasm_bindgen_type_from_type_ref = wb.wasm_bindgen_type_from_type_ref
+M.rust_wasm_bindgen_type_from_type_ref = wb.rust_wasm_bindgen_type_from_type_ref
 
 return M

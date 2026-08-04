@@ -210,7 +210,7 @@ local function vec_element_type(element)
 		return nil, VEC_NESTED_REFUSAL
 	end
 	if kind == "bytes" then return nil, VEC_BYTES_REFUSAL end
-	return M.wasm_bindgen_type_from_type_ref(element)
+	return M.rust_wasm_bindgen_type_from_type_ref(element)
 end
 
 -- ── Handlers ─────────────────────────────────────────────────────────────────
@@ -356,7 +356,7 @@ local handlers = {
 
 	intersection = unsupported("intersection", REASON_INTERSECTION),
 
-	-- Handled structurally by `wasm_bindgen_source_from_type_ref` /
+	-- Handled structurally by `rust_wasm_bindgen_source_from_type_ref` /
 	-- `build_function` (a callable needs a name to become a
 	-- `#[wasm_bindgen] pub fn`) — not meaningful as a bare inline type
 	-- expression (e.g. a struct field holding a callback would need
@@ -405,7 +405,7 @@ end
 -- `(nil, errmsg)` for any kind with no direct ABI mapping — see the
 -- `unsupported` handlers above and this file's header.
 --: (ref: TypeRef) -> (string | nil, string | nil)
-function M.wasm_bindgen_type_from_type_ref(ref)
+function M.rust_wasm_bindgen_type_from_type_ref(ref)
 	local converter = converter_for(ref.shape.kind)
 	if converter == nil then return nil, unhandled_kind_message(ref.shape.kind) end
 	local base, err = converter(ref.shape, ref.meta)
@@ -428,7 +428,7 @@ end
 local emit = {}
 
 -- Field/param-context inline type: same as
--- `wasm_bindgen_type_from_type_ref`, except `object`/`enum` hoist a fresh
+-- `rust_wasm_bindgen_type_from_type_ref`, except `object`/`enum` hoist a fresh
 -- named declaration into `decls` under `name_hint` (PascalCase) instead of
 -- falling back to a generic placeholder — mirroring rust-serde.ts's
 -- `bareType` (Rust, like FlatBuffers, has no anonymous nested struct/enum
@@ -583,7 +583,7 @@ end
 -- that compiles and panics if called before the caller fills it in (the
 -- standard Rust scaffolding idiom; there's no valid free-standing
 -- signature-only Rust syntax outside a trait). `method` (thisType present)
--- is rejected earlier, in `wasm_bindgen_source_from_type_ref`.
+-- is rejected earlier, in `rust_wasm_bindgen_source_from_type_ref`.
 --:: FunctionShape = { params: { [integer]: { name: string, type: TypeRef } }, returnType: TypeRef, ... }
 --: (name: string, ref: TypeRef, decls: StringList) -> (string | nil, string | nil)
 function emit.build_function(name, ref, decls)
@@ -645,13 +645,13 @@ local FUNCTION_NEEDS_NAME_REFUSAL =
 -- for anything else (primitives, `array`, ...) — preceded by any struct/enum
 -- declarations hoisted out of nested fields/params (see `emit.bare_type`).
 -- Without `name`, returns just the inline type expression for `ref`
--- (`wasm_bindgen_type_from_type_ref`).
+-- (`rust_wasm_bindgen_type_from_type_ref`).
 --
 -- Returns `(nil, errmsg)` for any kind (or nested kind) with no direct
 -- wasm-bindgen ABI mapping — see this file's header for the full unsupported
 -- list and why this projector refuses instead of degrading.
 --: (ref: TypeRef, name: string | nil) -> (string | nil, string | nil)
-function M.wasm_bindgen_source_from_type_ref(ref, name)
+function M.rust_wasm_bindgen_source_from_type_ref(ref, name)
 	local kind = ref.shape.kind
 
 	if kind == "function" then
@@ -668,7 +668,7 @@ function M.wasm_bindgen_source_from_type_ref(ref, name)
 	-- Shares the inline-position `method` handler's explanatory message.
 	if kind == "method" then return nil, unsupported_message("method", REASON_METHOD) end
 
-	if name == nil then return M.wasm_bindgen_type_from_type_ref(ref) end
+	if name == nil then return M.rust_wasm_bindgen_type_from_type_ref(ref) end
 
 	local decls = {} --[[: StringList]]
 	local main_decl = "" --: string
@@ -685,7 +685,7 @@ function M.wasm_bindgen_source_from_type_ref(ref, name)
 		-- unreachable branch.)
 		return nil, unsupported_message("union", REASON_UNION)
 	else
-		local inline, err = M.wasm_bindgen_type_from_type_ref(ref)
+		local inline, err = M.rust_wasm_bindgen_type_from_type_ref(ref)
 		if inline == nil then return nil, err end
 		main_decl = "pub type " .. name .. " = " .. inline .. ";"
 	end
