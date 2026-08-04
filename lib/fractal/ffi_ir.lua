@@ -208,6 +208,32 @@ M.ownership = {
 -- Returns the raw table without validating its `kind`: the meta bag is open,
 -- so a value under this key that is not a well-formed discipline is data a
 -- projector must diagnose, not something this reader can silently drop.
+--
+-- TYPECHECKER WORKAROUND: the natural code tests `rec.kind` directly
+-- (`if type(rec.kind) ~= "string" then return nil end return rec`), reading
+-- `rec.kind` as narrowed to `string` after the guard. It is not — a
+-- `type(x) == "string"` check on a FIELD of an `unknown`-shaped record does
+-- not narrow that field, so `rec` (or `discipline`) still reads as carrying an
+-- `unknown`-typed `kind` on the return, which fails against the declared
+-- `OwnershipDiscipline` result. Working around it needs a cast of the WHOLE
+-- record (`discipline --[[: OwnershipDiscipline]]`) rather than the field
+-- alone, done here on the already-checked `discipline`. Minimal repro (no
+-- project dependencies):
+--
+--     --:: Rec = { kind: string }
+--     --: (r: { kind: unknown }) -> Rec | nil
+--     local function f(r)
+--         if type(r.kind) ~= "string" then return nil end
+--         return r  -- error: field `kind` is still `unknown`, not narrowed to `string`
+--     end
+--
+-- The same pattern (guard on `type(rec.kind)`, cast the whole record rather
+-- than relying on the field narrowing) recurs in
+-- `ffi_ir_rust_wasm_bindgen.lua`'s `declared_discipline_kind` — see that
+-- function's own comment, which cross-references this one rather than
+-- repeating the explanation. Revert both to a direct `rec.kind`/`discipline`
+-- read once a `type(x) == "string"` check on a record field narrows that
+-- field (TODO.md).
 --: (ref: TypeRef) -> OwnershipDiscipline | nil
 function M.ownership_of(ref)
 	local discipline = ref.meta.ownership

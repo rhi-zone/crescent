@@ -5781,3 +5781,24 @@ the rust-serde / wasm-bindgen / gleam-native / rescript-native projectors.
   insertion-first one. A test pins the `home_address` / `homeAddress` case.
   Only matters if byte-identical output against fractal ever becomes a
   requirement rather than a target.
+
+- [ ] Revert TYPECHECKER WORKAROUND in `lib/fractal/ffi_ir.lua`
+  (`ownership_of`) and `lib/fractal/ffi_ir_rust_wasm_bindgen.lua`
+  (`declared_discipline_kind`): a `type(rec.kind) ~= "string"` guard on an
+  `unknown`-typed record FIELD does not narrow that field to `string`, so the
+  post-guard value still can't be returned/reused where the field's narrowed
+  type is expected. Both sites work around it by casting the WHOLE record
+  (`discipline --[[: OwnershipDiscipline]]` / `(discipline --[[: { kind:
+  string, ... }]]).kind`) rather than relying on the field narrowing. Minimal
+  repro (no project dependencies):
+  ```lua
+  --:: Rec = { kind: string }
+  --: (r: { kind: unknown }) -> Rec | nil
+  local function f(r)
+      if type(r.kind) ~= "string" then return nil end
+      return r  -- error: field `kind` is still `unknown`, not narrowed to `string`
+  end
+  ```
+  Revert both sites to a direct `rec.kind`/`discipline` read, dropping the
+  whole-record cast, once a `type(x) == "string"` check on a record field
+  narrows that field.
