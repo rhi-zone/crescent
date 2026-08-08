@@ -5915,3 +5915,25 @@ Filed alongside the port of fractal's `packages/cli-api-projector`
   fractal is therefore not achievable for a tree whose authored order differs
   from alphabetical. Only matters if byte-parity with the TS side ever becomes
   a requirement.
+
+- [ ] TYPECHECKER: a function type in UNION RETURN position warns ("wrap each
+  function type in parens") and the suggested fix does not silence it —
+  `-> ((A) -> B) | nil` and `-> (((A) -> B) | nil)` both warn. Worked around in
+  `lib/fractal/http_client_extension.lua` by naming the function type
+  (`StreamingCallFn`), which the alias makes read better anyway, so nothing
+  needs reverting when the grammar gap closes — only the note explaining it.
+
+- [ ] The `unpack`-stops-at-the-first-nil-hole trap listed above for
+  `cli_projector`'s `PageWalk` bites `lib/fractal/http_client.lua` too:
+  `perform_async(site, nil, call_opts)` — a no-input call carrying per-call
+  options — silently dropped `call_opts`, so a caller's timeout or cancellation
+  was ignored. Same fix (`CallBundle`, one table argument), same real fix
+  (`select("#", ...)` plus an explicit count in `async.cancellable`), same
+  "the bundle can then stay or go on its own merits".
+
+- [ ] `lib/fractal/http_client.lua` has no `create_client(node, opts)` entry
+  point yet — it needs the `http_projection` rewriter pipeline, which lands
+  with `lib/fractal/http_route.lua`. Everything the wrapper ADDS over the core
+  is already there (`opts.node` recovers authored member names and codegen
+  names), so the wrapper is
+  `create_client_from_route(http_projection(node), { node = node, ... })`.
