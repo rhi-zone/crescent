@@ -84,6 +84,75 @@ function M.parse_query(qs)
   return result
 end
 
+--- Parse a query string, preserving every occurrence of a repeated key.
+--
+-- `parse_query` above is last-wins: `?a=1&a=2` yields `{ a = "2" }` and the
+-- first value is gone. That is the right answer for a caller reading a single
+-- expected param, and the wrong one for a caller that must REPRODUCE the query
+-- it was given — rebuilding a link from a last-wins parse silently drops
+-- repeated params, which is the same flattening this repo already rejects for
+-- repeated HTTP header fields (lib/http/format.lua parses those into
+-- `{ [string]: string[] }` for exactly this reason).
+--
+-- Value order within a key is the order the pairs appeared on the wire, which
+-- is the only ordering the query string itself carries. Keys carry no order —
+-- see `build_query_multi`.
+--
+-- A key with no `=` maps to an empty-string value, matching `parse_query`.
+--: (string) -> { [string]: string[] }
+function M.parse_query_multi(qs)
+  --: { [string]: { [integer]: string } }
+  local result = {}
+  if not qs or qs == "" then return result end
+  for pair in qs:gmatch("[^&;]+") do
+    local eq = find(pair, "=", 1, true)
+    local key, val
+    if eq then
+      key = M.decode(sub(pair, 1, eq - 1))
+      val = M.decode(sub(pair, eq + 1))
+    else
+      key = M.decode(pair)
+      val = ""
+    end
+    local arr = result[key]
+    if not arr then arr = {}; result[key] = arr end
+    arr[#arr + 1] = val
+  end
+  return result
+end
+
+--- Build a query string from a multi-valued table.
+--
+-- Keys are sorted, matching `build_query` — a Lua table has no key order and
+-- LuaJIT's hash iteration is randomized, so sorting is what makes the output
+-- reproducible rather than a per-run permutation. Values WITHIN a key keep
+-- their array order, which is genuine ordering information the caller supplied
+-- and must not be re-sorted away.
+--
+-- A key whose array is empty contributes nothing.
+--: ({ [string]: string[] }) -> string
+function M.build_query_multi(t)
+  local keys = {}
+  local n = 0
+  for k in pairs(t) do
+    n = n + 1
+    keys[n] = k
+  end
+  sort(keys)
+  local parts = {}
+  local p = 0
+  for i = 1, n do
+    local k = keys[i]
+    local encoded_key = M.encode(k)
+    local values = t[k]
+    for j = 1, #values do
+      p = p + 1
+      parts[p] = encoded_key .. "=" .. M.encode(values[j])
+    end
+  end
+  return concat(parts, "&")
+end
+
 --- Build a query string from a table.
 -- Keys are sorted for deterministic output.
 --: ({ [string]: string }) -> string
