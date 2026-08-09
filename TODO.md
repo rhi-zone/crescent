@@ -159,6 +159,14 @@ regressions in the 9 pre-existing ones.
   preservation once an aliasing theory exists) would raise real-corpus
   incidence beyond the one confirmed instance — future work, not a gap in
   what the three-leg proof already establishes at the certificate level.
+  **Partly closed (2026-08-09, iteration 3 phase 2/4):** `prover_effects.lua`
+  is retired; `extractor_v1.lua` + the engine reproduce its result on
+  `lib/table_ext/init.lua` exactly (same guard, same composed judgment, same
+  taint) and generalize it — every clause of an elseif chain, and whole
+  statement chains rather than one first statement. Still open in this item:
+  table-field-aware preservation (needs an aliasing theory, which does not
+  exist), and rest-branch/`else` reach, which is blocked by the branch-role
+  HALT recorded in the core design doc's phase-2 section.
 
 ## v10 canon swap executed: cleanroom core canonical, old kernel core retired (2026-07-29)
 

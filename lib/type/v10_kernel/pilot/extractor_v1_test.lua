@@ -347,7 +347,71 @@ end
 	end)
 end)
 
-T.describe("extractor_v1: real repository source", function()
+-- ── Ported from prover_effects_test.lua (that walker is retired; git
+-- preserves it at its last commit). Same file, same claim, same numbers —
+-- driven through extractor+engine instead of the bespoke walk. The walker's
+-- own stats names map as: guards_certified -> a derived narrowing fact,
+-- persist_certified -> a composition-only fact (provenance chaining through
+-- `narrow-persist`), #judgments -> facts that replay root-strict.
+T.describe("extractor_v1: real repository source (ported from prover_effects_test)", function()
+	T.it("lib/table_ext/init.lua: M.flatten's guard yields a narrowed fact AND a composed persistence fact", function()
+		local fh = io.open("lib/table_ext/init.lua", "r")
+		T.ok(fh, "could not open lib/table_ext/init.lua")
+		if not fh then return end
+		local source = fh:read("*a")
+		fh:close()
+		T.ok(type(source) == "string")
+		if type(source) ~= "string" then return end
+
+		local s = run_on(source)
+		-- `M.flatten(t, depth)`'s `--: (unknown, number | nil) -> ...`
+		-- parameter, guarded by `if depth == nil then depth_ = math.huge ...`:
+		-- the then-branch assigns a DIFFERENT local, so `depth`'s
+		-- guard-established `nil` survives that statement — unreachable by
+		-- narrowing's own rules, derived here by the spine composition.
+		T.eq(s.stats.tracked_vars, 1)
+		T.eq(s.stats.guards_seeded, 1)
+		T.eq(derived_holds_at_count(s), 2)
+		T.eq(composition_count(s), 1)
+		T.eq(replay_all_holds_at(s), 3)
+
+		-- The composed fact's certificate must name the effects theory's OWN
+		-- reality-boundary axiom in its taint: the only vocabulary this
+		-- derivation crosses between the two independently-authored theories
+		-- is the spine judgment's producing axiom.
+		local facts = engine.facts_of(s.store, "holds_at")
+		local found_effects_axiom = false
+		for i = 1, #facts do
+			if chains_through_spine(facts[i]) then
+				local node, cerr = engine.to_certificate(facts[i])
+				T.ok(node, cerr)
+				if node then
+					local result, rerr = rl.replay(s.rp, node)
+					T.ok(result, rerr)
+					if result then
+						for key in pairs(result.taint) do
+							if key:find("assign%-effects%-syntax%-facts%-v1") then found_effects_axiom = true end
+						end
+					end
+				end
+			end
+		end
+		T.ok(found_effects_axiom, "composed derivation does not name the effects theory's axiom")
+	end)
+
+	T.it("is deterministic: re-running the same file yields the same counts", function()
+		local fh = io.open("lib/table_ext/init.lua", "r")
+		T.ok(fh)
+		if not fh then return end
+		local source = fh:read("*a")
+		fh:close()
+		if type(source) ~= "string" then return end
+		local a = run_on(source)
+		local b = run_on(source)
+		T.eq(composition_count(a), composition_count(b))
+		T.eq(a.stats.preserve_facts_seeded, b.stats.preserve_facts_seeded)
+	end)
+
 	T.it("extracts and derives on lib/table_ext/init.lua without any replay rejection", function()
 		local fh = io.open("lib/table_ext/init.lua", "r")
 		T.ok(fh, "could not open lib/table_ext/init.lua")

@@ -1151,6 +1151,63 @@ against the real kernel replayer, root-strict, in the paired test.
 
 ---
 
+## Corroboration engine build — iteration 3, phase 4 (walker retirement)
+
+**Status: fable-delegation-tier.** Of the five AST-walker provers in scope,
+ONE was retired and four survive with named blockers. No rule was bent and no
+axiom was faked to force a retirement.
+
+**Retired: `prover_effects.lua` + `prover_effects_test.lua` (690 + 81 lines).**
+Its entire behaviour is subsumed: `extractor_v1` + the engine reproduce its
+real-file result on `lib/table_ext/init.lua` exactly — one guard, one
+composition-only `holds_at` (provenance chaining through `narrow-persist`),
+three facts replaying root-strict, taint naming
+`assign-effects-syntax-facts-v1` — and strictly generalize it (every clause
+of an elseif chain; whole statement chains, not the first statement of a
+single-clause `if`). Its test's assertions were ported onto extractor+engine
+rather than dropped. No new rule or axiom was needed for the port: the
+walker's content was entirely fact extraction plus citation of rules that
+were already declared.
+
+**Survives — `prover.lua` (504 lines): blocked by the branch-role HALT.** It
+cites `narrow-select-rest` for rest-branch judgments (prover_test.lua asserts
+the resulting counts, e.g. 4 certificates on a three-clause elseif). A
+forward engine cannot register that rule without deriving facts that are
+false of the source (phase-2 section above). Nothing to port until the fork is
+decided.
+
+**Survives — `prover_narrow.lua` (990 lines): consumed by two other walkers.**
+It emits no certificates at all; it is pass 1, producing an event tree that
+`prover.lua` and `fixpoint_prover.lua` both read (including a live parser-arena
+handle on its `while_loop` events, which cannot be a ground fact). It cannot be
+deleted while either dependent stands. Its own content is extraction plus one
+derived quantity (the running member set under branch forking), which
+`extractor_v1` already re-derives independently.
+
+**Survives — `fixpoint_prover.lua` (1,459 lines): blocked by hypothesis
+discharge.** Its root certificate is the pilot's only discharge-bearing rule
+(`loop-invariant-discharge`), and it hand-maintains an `h1_live` flag tracking
+whether the assumed invariant is still reachable in the built proof term —
+provenance/reachability over a derivation tree, monotone-DECREASING, i.e. not
+a Datalog-monotone quantity. The engine refuses discharge-bearing rules
+outright (`add_rule` rejects `#discharges > 0`), and hypothetical reasoning in
+a forward engine is unbuilt substrate. Recorded as a substrate need
+("hypothetical reasoning / discharge in the forward engine is not built"), not
+as a result deficit. Two further items surfaced while reading it and are
+flagged rather than resolved, both needing an owner call before any port
+touches them: a code/comment contradiction on boolean-literal reassignment
+(`true`/`false` widened to `"boolean"` at the `ty_sub` step while
+`assign-literal-transfer` cited `tag_true()`), and shadow detection that only
+recognizes single-name `local` statements.
+
+**Survives — `prover_addr.lua` (310 lines): not a walker.** It reads no AST;
+it is the addressing contract (node-kind → child-index mapping, peano paths,
+SHA-256 file identity) that every prover AND `extractor_v1` itself calls.
+Retiring it would move its code, not remove it. Recorded as
+mis-scoped-in-the-brief rather than silently skipped.
+
+---
+
 ## Explicitly open (flagged, not settled — do not present as decided)
 
 - Side conditions in rule schemas (task-4 fork B) — UNDESIGNED, owner
