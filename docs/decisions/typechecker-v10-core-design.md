@@ -694,6 +694,110 @@ root-only surface cannot express.
 
 ---
 
+## Owner-stated design goals
+
+**Status: settled as goals; recorded verbatim in substance.**
+
+1. Extreme modularity — to the point that a kid can build a toy version of
+   the architecture that is still useful in its own right.
+2. Scale to zero — removability; nothing hardcoded into the core such that
+   removing it breaks the kernel (consistent with the earlier side-condition
+   carveout's clarified reading).
+3. Perf is never carelessly left on the table.
+4. Scales up to full Lua, modularly — including arbitrary strictness of
+   static analysis depending on configuration.
+5. Ecosystem mental model: ts-eslint + typescript — a base checker plus
+   pluggable, user-authorable rule/theory packages in one ecosystem.
+
+---
+
+## Named open items
+
+**Status: new, undesigned — each needs its own ratification round.**
+
+1. **Portable core spec.** The four-piece core (claims-as-data /
+   reasons-as-citations / page-sized citation checker / assumption ledger)
+   written as a standalone, implementation-independent specification, such
+   that a from-scratch toy implementation is a conforming replayer able to
+   check real certificates. Serves goal 1.
+2. **Profile/acceptance-policy object.** A declared, first-class
+   configuration object = theory set + tower depth + required trust
+   stratum (proved / proved-modulo-{named axioms} / asserted) per judgment
+   kind. Strictness is an acceptance policy over trust labels, never an
+   analysis knob. Invariant stated in-session and owner-approved for
+   recording: SOUNDNESS IS NEVER CONFIGURABLE — a looser profile derives
+   fewer judgments, never wrong ones. Serves goal 4.
+3. **Plugin/DX surface.** Config format, project-local theory declaration,
+   third-party theory authorship via the registry; a user theory without
+   soundness certificates enters axiom-tainted and profiles decide whether
+   tainted judgments gate. Downstream of item 2. Serves goal 5.
+
+These three items are also carried in the open-items list below.
+
+---
+
+## Admission discipline (boundary addition)
+
+**Status: owner-endorsed direction; design pending.** This supersedes the
+earlier "coexistence axiom" idea raised in this session's conversation —
+that idea is not recorded as live and should not be treated as settled or
+in-flight.
+
+- Composition-safety is the ADMISSION CRITERION for a feature/theory, not
+  a property hunted afterward: a feature enters only through a constructor
+  requiring its refinement certificate against the spine and discharge of
+  coexistence obligations at every visible overlap. Fence-by-construction
+  applied at the feature level, same law as ill-sorted-terms-unrepresentable.
+- The feature-definition language is deliberately constrained so
+  preservation/composition obligations are derivable (the same move that
+  made replay decidable). Where a legitimate feature cannot fit, that is a
+  SUBSTRATE GAP: extend the formalism (itself proven) or leave the feature
+  undone. Never admit with a tracked assumption attached.
+- Overlap between features' commitments is syntactically visible at
+  declaration (shared spine judgment forms), which is what makes
+  obligations mechanically generatable.
+
+---
+
+## Corroboration/co-solving design-input note
+
+**Status: FLAGGED — unratified sketch. Prior-art claims are from-memory
+and require grounding before hardening**, per the same discipline as the
+term algebra section's mandatory caveat above. This is design input, not a
+ratified conclusion; do not treat any bullet below as settled.
+
+- Exchange is SPINE-MEDIATED ONLY: all cross-theory facts are judgments in
+  layer (spine) vocabulary; there is no pairwise/bridge vocabulary between
+  theories (supersedes the bridge-rules idea raised earlier in-session). A
+  needed fact with no spine home = missing judgment form = substrate gap,
+  halts to owner.
+- Mechanism sketch: shared fact store (blackboard) + worklist; provers
+  post partial judgments and subscribe via their rules' premise patterns;
+  directed/stateful provers participate by suspend-on-query/wake-on-fact;
+  provenance recorded as `(rule, premise ids)` per fact; certificate nodes
+  materialize lazily on export. Kernel/replay never sees any of this.
+- Prior-art candidates to ground then pick (owner decision):
+  datalog-with-lattices (flix-style; stratified negation as the
+  absence-fact treatment; semi-naive evaluation; widening/lattice cells
+  for boundedness) vs. CHR (cooperating solvers over a shared constraint
+  store); Nelson-Oppen/DPLL(T) as protocol precedent. Adopt a published
+  formalism as-written for the generic engine; implement small in pure
+  Lua.
+- Perf requirements (owner goal 3 applied): the exchange unit is an
+  interned term plus a provenance pair, NOTHING richer (no
+  envelopes/translation layers — they reintroduce marshalling); indexed
+  dispatch by `(head operator, program point)` — never store scans;
+  semi-naive deltas; lattice cells not fact piles for quantitative
+  domains; LuaJIT hygiene per repo doctrine. Generic engine is the floor;
+  bespoke provers are unconstrained and trust-free to swap (certificates
+  the only channel); the exchange protocol must be ENGINE-AGNOSTIC
+  (registry objects, not engine artifacts).
+- Merge-time overlap analysis (from the admission discipline section
+  above) is where sibling-conflict hunting happens; at use time, conflicts
+  surface as underivable/contradictory judgments — fail-closed.
+
+---
+
 ## Explicitly open (flagged, not settled — do not present as decided)
 
 - Side conditions in rule schemas (task-4 fork B) — UNDESIGNED, owner
@@ -711,4 +815,13 @@ root-only surface cannot express.
   worked around. The fork remains deferred; no approach is chosen (none of
   the three candidates discussed — none-in-v1 / mechanism-now-empty-
   vocabulary / starter set — has been chosen).
-- Everything downstream per the charter (prefix, corroboration).
+- Portable core spec (named open item 1, above) — undesigned.
+- Profile/acceptance-policy object (named open item 2, above) — undesigned.
+- Plugin/DX surface (named open item 3, above) — undesigned, downstream of
+  item 2.
+- Admission discipline / composition-safety formal design (see "Admission
+  discipline" section above) — owner-endorsed direction, design pending.
+- Everything downstream per the charter (prefix, corroboration — the
+  latter has an unratified design-input sketch recorded in the
+  "Corroboration/co-solving design-input note" section above, not yet a
+  design).
