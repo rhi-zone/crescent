@@ -117,6 +117,49 @@ See `docs/roadmap-v2.md` for the authoritative project roadmap and sequencing. T
 
 - **Rescribe fixture alignment (2026-07-26):** Crescent's format libraries will eventually be tested against rescribe's cross-language fixture suite. This is high-value for conformance but not immediately urgent — rescribe's format crates are still in progress. Approach: pick this up per-format as format work comes up in crescent, rather than as a dedicated alignment project. Documented in `docs/roadmap-v2.md`, "Strategic direction: Rescribe fixture alignment" section.
 
+## v10 corroboration proof-of-concept: spine-mediated composition, first evidence (2026-08-09)
+
+Built the first genuinely spine-mediated cross-theory composition, per
+`docs/decisions/typechecker-v10-core-design.md`'s "Corroboration
+proof-of-concept: spine-mediated composition, first evidence" section
+(fable-delegation-tier). New files, all under `lib/type/v10_kernel/pilot/`:
+`effects_spine_v1.lua` (layer-owned `preserves(from,to,x)` spine judgment,
+importing `point`/`path` from `addr-v1`), `assign_effects_v1.lua` (the
+effects theory: its own signature, one reality-boundary axiom, one grounding
+rule, one pure transitivity rule), `narrow_persist_v1.lua` (the composition
+wiring — one rule, `narrow-persist`, needing NO new signature at all, citing
+narrowing's existing `narrow-pilot-v1` v1 and the new spine as ordinary
+premises), `prover_effects.lua` (a fresh, narrow real-AST walker deriving the
+composed judgment from real source). Corrects the existing pilot's own
+`narrow-pilot-v1` precedent (which grew narrowing's and the fixpoint theory's
+vocabulary inside one jointly-version-bumped signature — pairwise coupling by
+another name) without modifying or retracting it.
+
+Three-leg proof (`narrow_persist_v1_test.lua`, certificate level): (a)
+narrowing alone is fail-closed — no certificate rooted in a registry lacking
+the effects theory can produce a closed `preserves` fact (foreign citation
+rejected; hypothesis-based attempt leaves an undischarged open hypothesis);
+(b) with the effects theory, `narrow-persist` derives `holds_at` at a later
+point neither theory reaches alone, root-strict, taint naming exactly the
+axioms trusted; (c) scale-to-zero asserted structurally — registry (a) is
+registry (b) minus the one call to `assign_effects_v1.declare_vocabulary`.
+Real-file corroboration (`prover_effects_test.lua`): scanning all 569
+`lib/*/init.lua` files found exactly one naturally-occurring match,
+`lib/table_ext/init.lua`'s `M.flatten` (`depth == nil` guard, then-branch
+assigns to a different local `depth_`) — low incidence is a scope-of-
+demonstration fact (the walker only attempts single-clause `if` with a
+first-statement safety check), not a claim about the architecture. 32 pilot
+files batch-typecheck clean; 459 assertions across 13 test files, zero
+regressions in the 9 pre-existing ones.
+
+- [ ] **`prover_effects.lua`'s real-source walker scope is deliberately
+  narrow (single-clause `if` only, first-branch-statement safety check
+  only, one composition hop):** extending it (elseif chains, chained
+  `preserves-trans` hops across multiple statements, table-field-aware
+  preservation once an aliasing theory exists) would raise real-corpus
+  incidence beyond the one confirmed instance — future work, not a gap in
+  what the three-leg proof already establishes at the certificate level.
+
 ## v10 canon swap executed: cleanroom core canonical, old kernel core retired (2026-07-29)
 
 **Executed the owner-ratified canon swap** (`docs/decisions/typechecker-v10-core-design.md`,

@@ -836,6 +836,160 @@ ratified conclusion; do not treat any bullet below as settled.
 
 ---
 
+## Corroboration proof-of-concept: spine-mediated composition, first evidence
+
+**Status: fable-delegation-tier throughout — derived and recorded under the
+pilot-execution delegation note above, explicitly NOT owner-ratified,
+re-openable without ceremony.** Every design call in this section is a
+delegated-execution decision. This is the first concrete evidence for the
+"Corroboration/co-solving design-input note" section's central bet
+(power-by-composition over the trust substrate), built directly against the
+spine-mediated-exchange principle recorded there ("no pairwise/bridge
+vocabulary between theories, ever"), and against the earlier pilot's own
+`narrow-pilot-v1` precedent, which this build explicitly corrects — see
+below.
+
+### The correction: a genuinely spine-mediated composition, not a shared signature
+
+The existing pilot (`flow_narrow_v1.lua` / `fixpoint_v1.lua`) grew narrowing's
+and the fixpoint/effects content's judgment vocabulary
+(`holds_at`/`stmt_seq`/`stmt_preserves`/`assign_*`/...) inside ONE
+jointly-version-bumped signature, `narrow-pilot-v1`, successively extended by
+different theory modules. Read against this session's own spine-mediated
+principle, that shape IS pairwise/bridge vocabulary — whichever theory bumps
+the version next is deciding the other's vocabulary surface, exactly the
+declc-era H1 coupling the addressing signature (`addr-v1`) was already built
+to avoid at the addressing layer. This build does not modify or retract that
+existing precedent (still valid, still tested, still canon for its own
+scope) — it adds a NEW, corrected composition alongside it, demonstrating
+the principle the existing precedent did not yet embody.
+
+### What was built (`lib/type/v10_kernel/pilot/`)
+
+1. **`effects_spine_v1.lua`** — the FIRST spine signature beyond `addr-v1`,
+   owned by neither theory ("the layer"). One judgment,
+   `preserves(from: point, to: point, x: path)`, importing `point`/`path`
+   from `addr-v1`. Working defaults from the orchestrating brief, adopted
+   as-is (no rule in the build taught otherwise): positive preservation
+   judgment; negation internalized in the producing theory (the prover
+   decides non-interference structurally, never a rule/kernel-level
+   negative premise); locals only (enforced for free — the shared
+   addressing signature has no field-projection operator at all, so
+   "no aliasing theory exists" needs no extra guard here).
+2. **`assign_effects_v1.lua`** — the effects THEORY: its own signature
+   (`assign-effects-v1`), never importing from or requiring
+   `flow_narrow_v1.lua`. One reality-boundary judgment
+   (`stmt_preserves_fact`), one schematic axiom, one grounding rule
+   (`preserves-transfer`, axiom-tainted) and one pure rule
+   (`preserves-trans`, transitivity over the spine's own shape — genuine
+   rule content, not axiom pass-through, taint-free beyond what its
+   premises already carry).
+3. **`narrow_persist_v1.lua`** — the WIRING: one rule, `narrow-persist`
+   (`holds_at(P,X,T), preserves(P,Q,X) |- holds_at(Q,X,T)`), declared with
+   **no new signature at all** — `declare_rule` takes plain premise/
+   conclusion terms, not a signature, so composition needed no vocabulary
+   of its own; narrowing's existing `narrow-pilot-v1` v1 signature (from
+   the original pilot, unmodified) and the new spine are cited exactly as
+   the design brief specified: "narrowing's rules consume spine
+   preservation judgments as ordinary premises." Sort compatibility (the
+   metavariable `P`/`Q`/`X` typing both `holds_at` and `preserves`
+   simultaneously) falls out of shared `addr-v1` import identity, not a
+   special case — the same declared-object sort-identity ratification the
+   core design already fixed for exactly this purpose.
+4. **`prover_effects.lua`** — a fresh, deliberately narrow real-AST walker
+   (not a modification of `prover_narrow.lua`/`prover.lua`/
+   `fixpoint_prover.lua`, all left untouched) that finds `--:`-annotated
+   two-member-six-tag-union locals/parameters guarded by a single-clause
+   `if/else`, certifies the match branch via `flow_narrow_v1` exactly as
+   the existing real-file prover does, then — only when the branch's own
+   first statement is structurally verified non-interfering (a bare call,
+   or a fresh local declaration, per the same §8.3(a) reasoning
+   `fixpoint_prover.lua` already documents) — composes `narrow-persist`
+   to derive `holds_at` at a LATER point neither `flow_narrow_v1` alone,
+   nor this walker alone without the effects theory, can reach.
+
+### Real-file result
+
+Scanning all 569 `lib/*/init.lua` files (script not committed — a one-off
+corpus scan), exactly one real, unmodified function triggered the composed
+derivation: `lib/table_ext/init.lua`'s `M.flatten(t, depth)`
+(`--: (unknown, number | nil) -> ...`), guarded by
+`if depth == nil then depth_ = math.huge else depth_ = depth end`. The
+then-branch assigns to `depth_` (a different local), never touching
+`depth` — the effects theory certifies that non-interference and
+`narrow-persist` derives `depth : nil` at the exit of that assignment, a
+fact `flow_narrow_v1`'s own rules have no way to reach on their own (they
+narrow only at a branch's entry, never past a subsequent statement).
+Low real-corpus incidence (1 of 569 — most guards live deeper in call
+chains or on chained/elseif conditions this narrow demonstration walker
+does not attempt) is a scope-of-demonstration fact, not a claim about the
+architecture's applicability; `prover_effects.lua`'s header records the
+walker's scope limits explicitly (single-clause `if` only, first branch
+statement only) as a narrowness-of-THIS-PROVER choice, not a limit of the
+composition mechanism itself.
+
+### The three-leg proof (`narrow_persist_v1_test.lua`, certificate level — the rigorous evidence)
+
+- **(a) fail-closed baseline**: narrowing + `narrow-persist` declared, the
+  effects theory declared NOWHERE. Two independent, structural dead ends,
+  both asserted: citing a foreign (different-registry) effects citation is
+  rejected by `resolve_citation` ("not declared in this replayer's
+  registry"); assuming `preserves` as a hypothesis instead leaves it
+  permanently open, and root-strict `replay` rejects ("undischarged
+  hypothesis"). No certificate rooted in this registry's own declarations
+  can ever produce a closed, hypothesis-free `preserves` fact.
+- **(b) derives**: narrowing + the effects theory + the spine, all
+  declared. Root-strict replay accepts, zero open hypotheses, conclusion
+  is `holds_at` at the later point `Q`, taint names exactly the three
+  axioms actually trusted (flow's syntax facts, the initial-fact axiom,
+  the effects theory's own syntax facts) — no additional cost for citing a
+  spine judgment as an ordinary premise beyond what was already trusted.
+- **(c) scale to zero**: asserted structurally, not narrated — registry
+  (a) is built by the identical sequence of calls registry (b) uses, MINUS
+  the one call to `assign_effects_v1.declare_vocabulary`. Removing the
+  effects theory is not calling that one function; nothing else changes,
+  nothing is left dangling.
+
+All three legs, plus unit coverage for every new module (32 files
+batch-typechecked clean; 459 assertions across the pilot test suite, zero
+regressions in the pre-existing 14 test files), are committed at
+`lib/type/v10_kernel/pilot/{effects_spine_v1,assign_effects_v1,
+narrow_persist_v1,prover_effects}{,_test}.lua`.
+
+### Delegation-tier calls made, recorded compactly
+
+- Working defaults from the brief (positive preservation, negation
+  internalized in the producer, locals-only) adopted without modification
+  — no rule built here needed a different reading.
+- Spine signature location: `lib/type/v10_kernel/pilot/` (beside
+  `addr_v1.lua`, the existing layer-owned precedent), not a new top-level
+  directory — matches the existing "vocabulary lives beside pilot/, rules
+  live in pilot/ too until a prefix exists" convention.
+- `preserves-trans` (transitivity) added as a genuine rule beyond the
+  brief's literal ask, to give the effects theory real inferential content
+  distinct from pure axiom-wrapping — reusable by any future `preserves`
+  producer, not special-cased to this one theory.
+- `narrow-persist` declared with NO signature bump of `narrow-pilot-v1` —
+  a stronger reading of "ordinary premises" than modifying narrowing's own
+  vocabulary would have been; chosen because `declare_rule` structurally
+  permits it (rules are registry-scoped, not signature-scoped) and it is
+  the more literal form of "zero pairwise vocabulary."
+- `prover_effects.lua`'s scope (single-clause `if`, first-branch-statement
+  safety check only) was narrowed deliberately to keep the demonstration
+  tractable; flagged in-module as a walker limitation, not a composition
+  limitation — extending it (elseif chains, multi-statement chains via
+  `preserves-trans`, table-field-free alias tracking) is future work, not
+  a gap in what was proven here.
+
+No H1-style failure was hit: composition fired cleanly at both the
+certificate level (exhaustive, mechanical) and on real, unmodified
+repository source (one confirmed instance). This corroborates — on a small
+but real first data point — the corroboration note's central architectural
+claim: two theories sharing zero pairwise vocabulary compose through a
+declared spine judgment to derive precision neither reaches alone.
+
+---
+
 ## Explicitly open (flagged, not settled — do not present as decided)
 
 - Side conditions in rule schemas (task-4 fork B) — UNDESIGNED, owner
