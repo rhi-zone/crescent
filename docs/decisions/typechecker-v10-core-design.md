@@ -436,6 +436,13 @@ owner-ratified, and re-openable without ceremony. Owner-ratified items
 (the "Settled" sections above) remain the only fully settled tier —
 fable-delegation-tier content must not be read as equivalent to them.
 
+**Owner directive, 2026-08-09: campaign mode is now rapid-iteration/
+fail-fast.** In-flight design calls are made at delegation tier (recorded,
+reopenable); owner ratification is reserved for soundness-relevant forks
+and dead-ends. A composition build (second theory + spine vocabulary over
+`addr-v1` — the architecture's central claim) is in flight under this
+mode.
+
 ### Context (recorded so the plan's motivation survives)
 
 The campaign's open risk, owner-articulated: there is no confirmation the
@@ -524,9 +531,40 @@ corroboration wiring over the same addressing signature).
 4. **Certificate-emitting prover** — crescent parser + narrowing analysis
    (v3 readable now, post-core), two-pass emission per the W/J-port
    pattern.
+
+   **Executed (fable-delegation-tier, not owner-ratified) —
+   `lib/type/v10_kernel/pilot/prover_addr.lua`,
+   `prover_narrow.lua`, `prover.lua`.** Then extended further into a
+   fixpoint/control-flow line, beyond the original step-4 scope:
+   `fixpoint_v1.lua`, `fixpoint_prover.lua` — loop-invariant certificates,
+   if/else branch-join chaining, assign-call-transfer. Commits
+   `4a741cae`, `1a491500`, `0dae97e6` (all dated 2026-07-30).
 5. **Measurement** on real `lib/` files vs the v3 checker: judgments
    derived+replayed, precision deltas, wall-clock emit+replay vs check
    time.
+
+   **Status (fable-delegation-tier, not owner-ratified) — started
+   2026-08-09, deliberately STOPPED by owner call:** measuring a
+   narrowing-only analyzer is useless until the analyzer demonstrates real
+   precision. Measurement is re-queued behind the composition work (second
+   theory + spine vocabulary over `addr-v1` — see the fail-fast-mode entry
+   below).
+
+   **Open items tracked in TODO.md only (not yet promoted into this
+   record's own open-items list), findable from here:**
+   - `TODO.md:48` — a `--::` type-visibility bug: type visibility breaks
+     across a two-hop `require` once the requiring file contains any
+     `--:`-annotated local function, even one whose signature references
+     none of the required types. Filed against
+     `lib/type/static/constrain.lua`'s cross-file type-declaration
+     collection; not investigated further (typechecker-internals
+     territory, outside this milestone's scope).
+   - `TODO.md:50` — the assign-copy-transfer fork: `fixpoint_prover.lua`
+     does not attempt `assign-copy-transfer` (neither self-copy nor a copy
+     from a different tracked variable) at all. Self-copy specifically is
+     flagged as needing an owner call — closing it would depart from the
+     uniform `Pa = exit_of(own path)` addressing convention. Parked since
+     2026-07-30, per the halt discipline rather than resolved unilaterally.
 
 ### Parked (unchanged status)
 

@@ -5499,6 +5499,8 @@ framing.
 
 **Typechecker is parked.** Per earlier verdict: autonomous agent-directed development discontinued. Existing legacy checker (v2/v3) gates all commits, working reliably. Resuming typechecker work requires either solving hard-problem in v9 lineage or finding fundamentally different approach — outside Phase 3 scope.
 
+**SUPERSEDED (2026-08-09):** the above verdict is stale. The v10 cleanroom core campaign is active and has its own running decision record — see `docs/decisions/typechecker-v10-core-charter.md` and `docs/decisions/typechecker-v10-core-design.md` for current status (term algebra, kernel primitives, replayer/certificates, the flow-narrowing pilot, and the 2026-08-09 fail-fast campaign mode). This line is kept, not deleted, per the repo's no-delete-unchecked-TODO-items convention; it no longer reflects the typechecker's actual status.
+
 **Unresolved design questions (from prior sessions, no product implications yet):**
 - Self-expression as civilizational absence (`docs/self-compression-research.md`) — owner said sit with it, no decision needed for roadmap.
 
