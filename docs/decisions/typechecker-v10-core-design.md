@@ -1069,6 +1069,88 @@ extraction is thin and the walkers are retired, not before.
 
 ---
 
+## Corroboration engine build — iteration 3, phase 2 (AST→base-facts extractor)
+
+**Status: fable-delegation-tier, not owner-ratified, re-openable.** Built:
+`lib/type/v10_kernel/pilot/extractor_v1.lua` + `_test.lua` — the only
+component in the engine line that reads a parsed AST. It contains no
+analysis: it walks the borrowed cleanroom parser's nodes and seeds ground
+base facts into an engine store via `engine.seed` (axiom citations against
+the theories' existing schematic reality-boundary axioms). No new signature,
+no new axiom, no new rule was declared — every fact it emits already had a
+declared vocabulary home.
+
+**HALT (new, blocking, surfaced not filled): the two narrowing rules cannot
+both be run FORWARD over the current `guard_selects` judgment.** A walker
+chooses which rule to cite; an engine does not — every registered rule fires
+on every matching fact. `narrow-select-match` and `narrow-select-rest` share
+one premise pair, so a single `guard_selects(Pg,Pb,X,TA)` fact derives BOTH
+`holds_at(Pb,X,TA)` and `holds_at(Pb,X,Rest)` at the SAME point. Measured,
+not reasoned: seeding one guard fact with both rules registered derives
+exactly those two facts. One is false of the source (on the then-branch of
+`type(x) == "string"`, x is `string`, not `nil`). The branch ROLE lives
+nowhere in the judgment — `flow_narrow_v1.lua`'s own header records that as
+deliberate, on the explicit assumption of a prover that chooses. Closing this
+is a THEORY-level decision (a branch-role argument on the guard judgment plus
+two rules keyed on it, or some other mechanism); it is not a fill-in the
+execution tier is entitled to make, so it halts here. Until it is decided:
+
+- The extractor emits `guard_selects` only for the branch the axiom's own
+  reading licenses (the branch reached WHEN the guard selects `target_ty`),
+  never the complementary one.
+- A driver must register `narrow-select-match` and NOT `narrow-select-rest`
+  (`extractor_v1.M.SOUND_NARROW_RULES` states this in code).
+- Rest-branch narrowing (an `else` block's residual type) is therefore
+  unreachable through the engine, and `cf_join`/`narrow-join` facts are not
+  emitted at all (they could never fire with only one branch narrowed).
+  `prover.lua` still derives rest-branch judgments; that is one reason it
+  cannot be retired.
+
+**What the extractor does reach, that no walker did:** guard extraction at
+EVERY clause of an elseif chain (the phase-1-flagged corpus blocker), routing
+a failing clause's selected branch to the next clause's own test point — a
+literally true reading of the guard axiom, so no vocabulary was invented; and
+`preserves`-mediated persistence along WHOLE statement chains in every
+branch, versus `prover_effects.lua`'s single first statement of a
+single-clause `if`. Both were verified by replaying every derived `holds_at`
+against the real kernel replayer, root-strict, in the paired test.
+
+**Recorded delegation-tier calls:**
+- The declared type enters at the guard point (`exit_of` the clause's test
+  path), not at the declaration site. Anchoring at the declaration and
+  flowing it forward would need a preservation fact for a NON-STATEMENT span
+  (previous statement exit → guard-test exit); both `stmt_preserves_fact` and
+  `stmt_preserves` are documented as statement-paired, so that span has no
+  vocabulary home. Recorded as a substrate gap; the existing
+  re-ground-at-the-guard-point idiom (`prover.lua`, `fixpoint_prover.lua`)
+  was followed instead of stretching a reading or minting a judgment.
+- Preservation is emitted on the SPINE route (`assign_effects_v1`) only, not
+  also on `fixpoint_v1`'s single-theory `stmt_seq`/`stmt_preserves` route:
+  both would derive the same `holds_at` facts, and since the engine dedups
+  structurally-equal facts, whichever fired first would own the provenance —
+  making any composition-only measurement an artifact of evaluation order.
+- The "this statement does not write X" negative check runs in the extractor,
+  on the AST — the effects theory's own recorded working default ("negation
+  internalized in the producing theory"). An unrecognized statement kind ends
+  the chain; it is never assumed safe.
+- `assign_copies` facts are NOT emitted and `assign-copy-transfer` is not
+  registered: the assign-copy-transfer fork (TODO.md:50) is parked pending an
+  owner call, and a forward engine would resolve its cross-variable half for
+  free. Left untouched.
+- `assign_call` facts are not emitted (callee resolution + return-annotation
+  parsing): they feed only the loop-invariant line, whose walker cannot be
+  retired regardless, so they would add lines against the budget for no
+  measured derivation. Recorded as scope, not as done.
+- A tracked variable re-declared by a later `local` is DROPPED from scope
+  rather than re-tracked — conservative; no fact is emitted about a path
+  later occurrences no longer denote.
+- `flow_narrow_v1` (`narrow-pilot-v1` v2) and `fixpoint_v1` (v4) declare
+  axioms and rules under the SAME (name, version) keys, so they cannot be
+  declared into one registry (F11). Any driver picks exactly one. Recorded
+  because it constrains every future driver, not just the test.
+
+---
+
 ## Explicitly open (flagged, not settled — do not present as decided)
 
 - Side conditions in rule schemas (task-4 fork B) — UNDESIGNED, owner
