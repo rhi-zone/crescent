@@ -990,6 +990,85 @@ declared spine judgment to derive precision neither reaches alone.
 
 ---
 
+## Corroboration engine build — iteration 3, phase 1 (engine only)
+
+**Status: fable-delegation-tier, not owner-ratified, re-openable.** Responds
+to a line-count audit + blocker scan diagnosis: the 2,126 lines of bespoke
+per-theory AST-walker provers (`prover_narrow`/`prover_effects`/
+`fixpoint_prover`/`prover`/`prover_addr`, `lib/type/v10_kernel/pilot/`) are
+hand-rolled evaluation a generic engine should subsume; separately, elseif
+chains block guard analysis on a majority of the audited corpus, and the
+fix is evaluation plumbing, not theory content. Owner kill-criterion:
+≤2000 total non-blank non-comment lines for a working modular checker.
+Delegation-tier formalism pick, adopted as-written (not re-derived this
+session): semi-naive Datalog over term-algebra facts, stratified negation,
+head-operator-indexed dispatch, no pairwise theory vocabulary — the
+generic-engine floor the "Corroboration/co-solving design-input note"
+above sketched, now built.
+
+**Built and committed (`74e32ced`):** `lib/type/v10_kernel/pilot/engine.lua`
+(188 non-blank/non-comment code lines, budget target ≤500) + `engine_test.lua`.
+Facts are ground kernel terms; rules fire by matching an
+already-declared `RuleDecl`'s own premise patterns against the fact store
+via the kernel's `match_into`/`instantiate` (no bespoke matcher — the
+engine reuses the replayer's own first-order matching, run forward instead
+of checked backward). Per-fact provenance (rule/axiom + premise fact
+refs) is structurally identical to the replayer's own `CertNode` grammar
+(confirmed by reading `replay_axiom`/`replay_rule` before writing
+`to_certificate`, not assumed) — certificate export is a five-line mirror,
+not a translation layer, matching the design-input note's "certificate
+nodes materialize lazily on export" literally. Stratified negation is
+built and exercised by a standalone test (not yet cited by any ported
+theory — recorded honestly as built-but-not-load-bearing). Lattice cells
+were deliberately NOT built: no rule in scope needs a quantitative domain;
+framed as substrate not yet needed, not a result deficit. Indexing is
+head-operator only (the first half of "(head operator, program point)");
+program-point sub-indexing is an honest gap, not silently assumed done.
+
+**Soundness-relevant validation:** `engine_test.lua` reproduces the
+existing narrow-persist three-leg proof's "leg (b), DERIVES" scenario
+(`narrow_persist_v1_test.lua`) end-to-end through the engine — same axiom
+citations seeded, the SAME already-declared `RuleDecl` objects from
+`flow_narrow_v1`/`assign_effects_v1`/`narrow_persist_v1` registered
+unmodified (no rule content rewritten to "port" them — registering an
+existing `RuleDecl` into the engine IS the port), run to a 3-fact
+fixpoint, exported, and replayed against the REAL kernel replayer:
+root-strict accept, taint set identical (the same 3 axioms) to the
+hand-built certificate. The engine adds no trust, only bookkeeping the
+kernel independently re-verifies. Full `lib/type/v10_kernel/` suite (17
+files, 523 assertions) regresses zero.
+
+**Tripwire checked:** no commits since the corroboration proof-of-concept
+(`5f698703`) touch `prover_effects.lua`/`prover_narrow.lua` — nothing to
+flag, nothing built on.
+
+**Honestly NOT done this iteration (do not read as complete):**
+- The thin AST-to-base-facts extractor (elseif chains as ordinary
+  control-flow edges/guard facts) — no code written.
+- Retiring any walker prover file — none deleted; the 2,126-line figure is
+  unchanged.
+- Corpus re-measurement (composition-only derivation count vs the 1/569
+  baseline) — not run; no elseif-chain extraction exists yet to change
+  that number, so re-measuring now would not be meaningful.
+- Diagnostics formatting / driver for end-to-end use.
+
+Line-count table (measured, non-blank/non-comment):
+
+| bucket | files | lines |
+|---|---|---|
+| trusted core (cleanroom) | `term_algebra.lua` + `replayer.lua` + `init.lua` | 928 |
+| theory vocab+rules (existing, unmodified) | `addr_v1`, `flow_narrow_v1`, `narrow_pilot_v1`, `effects_spine_v1`, `assign_effects_v1`, `narrow_persist_v1`, `pilot_initial_facts_v1` | 346 |
+| **engine (new)** | `engine.lua` | **188** |
+| walker provers (not yet retired) | `prover.lua`, `prover_addr.lua`, `prover_narrow.lua`, `prover_effects.lua`, `fixpoint_v1.lua`, `fixpoint_prover.lua` | 2,461 |
+| extractor | — | not built |
+
+Total against the 2,000-line budget is not yet meaningful while the
+walker provers (the thing the engine is meant to replace) are still
+present alongside the new engine — the budget number matters once
+extraction is thin and the walkers are retired, not before.
+
+---
+
 ## Explicitly open (flagged, not settled — do not present as decided)
 
 - Side conditions in rule schemas (task-4 fork B) — UNDESIGNED, owner
