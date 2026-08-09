@@ -476,3 +476,100 @@ patched in the frozen doc.
 | multi-return/vararg/multi-assign | `tret`,`tfst`,`tappspread`,`tvapp`,`tmassign` | `TRet`,`TFst`,`TFstNil`,`TAppSpread`,`TVApp`,`TMAssign` | `SRet`,`SFst*`,`SAppSpread*`,`SVApp*`,`SMAssign*` | yes — confirmed present | **no** |
 | metatables/metamethods | `tmeta`,`tnewidx`,`tunop`,`trawget`,`trawset` | `TMeta`,`TCallMeta`,`TPrimMetaL/R`,`TNewIdx`,`TUnMetaL`,`TRawGet`,`TRawSet` | `SMeta*`,`SCallMeta`,`SPrimMetaL/R`,`SNewIdx*`,`SUnMetaL`,`SRawGet*`,`SRawSet*` | yes — confirmed present | **no** |
 | unions (as value types) | (via `tif`/`tifn`/`ttypetest` results) | `BUnion` results throughout | — | yes (as term-formers; the type itself is pervasive) | yes (`ex_if`, not narrowing) |
+
+---
+
+## Independent re-derivation, 2026-08-09
+
+A second full inventory pass was performed by a different session, reading
+`proof/typing.v` + `subtype.v`/`ssub.v`/`check.v` headers, `docs/reality-
+bridge.md`, and the `docs/decisions/typechecker-v10-*.md` set — **without
+reading this document first** (the second pass was drafted, then this
+document was discovered already at this path mid-task, at which point the
+draft was not merged in directly; this section is the reconciliation record
+instead). `TODO.md` was not read in the second pass. Recorded per the
+owner's request as an agreement/discrepancy record, not a replacement.
+
+**Independently confirmed** (both passes reached this via separate reading):
+the "one file family" framing is accurate only at the `proof/` directory
+level — `check.v` (checker-soundness) and `subtype.v` (semantic lattice)
+are already clean, separately-headed, non-modified-dependency files, not
+textually inside `typing.v`; `typing.v` itself does define its own second,
+syntactic subtyping development (`ssub`/`rsub`) not reducible to either of
+those two files, which is the real referent for design-sync's "(c)
+subtype-lattice" claim; `progress`/`preservation` are genuine, `Qed`, no
+`Admitted`/`Axiom`/`Classical`; the header's "DEFERRED" list (statements/
+control flow, mutation, vararg/multi-return, recursion, metatables) is
+stale — every named item is in fact present, typed, stepped, and proved;
+roughly a third of the file (~31–32%) is worked-example/instantiation
+content, not new metatheory; `ttypetest`'s `tag` enum is totalized over
+every value kind at once rather than being cleanly per-layer (named
+independently by both passes as an extraction fracture-line, under
+different labels — "extraction debt" vs. "fracture-line"); flow-narrowing
+(`tifn`/`ttypetest`), the entire metatable/metamethod machinery, and multi-
+return/vararg/multi-assign are all fully formalized in `typing.v` but have
+**zero** coverage in `docs/reality-bridge.md`'s 17-term execution battery —
+the largest formalized-but-unbridged surface in both readings is the
+metatable/metamethod example cluster.
+
+**Discrepancies, listed as facts, not resolved:**
+
+- **`ssub.v` line count.** This pass: 1592 (`wc -l`, re-checked). Existing
+  report: 1579. Not re-reconciled here.
+- **Boundary line numbers for `preservation`/`progress` and the example
+  tail differ by a few lines** across the two passes (e.g. `preservation`
+  end at 6013 vs. 6005; `progress` end at 6494 vs. 6489; example-tail start
+  at 6495 vs. 6489) — likely a convention difference (next-declaration
+  boundary vs. last-content line) but not confirmed.
+- **Size and contiguity of the "syntactic subtyping inside `typing.v`"
+  bucket disagree substantively, not just by a few lines.** This pass
+  reported one ~3100-line span (typing.v:624–3721, ~33% of the file),
+  including the canonical-forms lemmas (`canon_arrow` etc.) and the
+  narrowing-soundness bridge lemmas (`truthy_narrows`/`falsy_narrows`/
+  `tag_narrows`) as part of that bucket. The existing report instead treats
+  `ssub`/`rsub` as **two non-contiguous ranges** totaling ~1450 lines
+  (621–848 and 2505–3432) and places canonical forms + the narrowing-
+  soundness lemmas in its op-sem-core block instead, explicitly excluding
+  them from the `ssub`/`rsub` bucket. This is a real disagreement about
+  where the extraction seam falls for lines ~3432–3721, not a rounding
+  difference — needs reconciliation before either bucket size is treated as
+  authoritative.
+- **`rsub`'s provenance ("SPLIT-STEP 3").** The existing report states
+  `rsub` was "promoted into `typing.v` from `ssub.v`" per a `typing.v:797–
+  819` comment and a `TODO.md:1320–1349` cross-reference, and flags that
+  backlog entry as stale (describes split-step 3 as "NEXT...DEFERRED" when
+  it is already done). This pass did not read `TODO.md` and did not
+  independently verify the promotion-history claim or the staleness
+  finding — neither confirmed nor contradicted, just unchecked.
+- **`PDiv`/arithmetic-value staleness — a substantive, not cosmetic,
+  conflict.** This pass's subset-boundary section, following `docs/
+  reality-bridge.md`'s own prose, reported `PDiv` as currently computing
+  term-level integer division (`Nat.div`) at the value level, distinct from
+  Lua's float `/` (the reality-bridge "sound but unfaithful" gap,
+  unresolved). The existing report instead found, via direct reading of
+  `typing.v:382–388`'s increment-19 `arith_op`/`cmp_op` comment and
+  `bridge_exec_oracle.v`'s own in-file comment, that arithmetic currently
+  has **no computed value at all** ("the former `prim_arith`/`prim_cmp`
+  nat-level computation functions are REMOVED"), making the whole PDiv
+  gap moot and `reality-bridge.md`'s own §5.4(I) text stale. This pass did
+  not read `typing.v:382–388` directly and sourced the PDiv claim from
+  `reality-bridge.md`'s prose alone — a likely sourcing error in this
+  pass's draft, but recorded here as a conflict between the two documents'
+  claims about current file content, not adjudicated.
+- **Granularity/coverage of the "over-commitment" (extraction debt)
+  findings differs, not just in framing.** This pass flagged two
+  signature-level over-parameterization points not raised in the existing
+  report: `step`'s very first constructor is already store-configuration-
+  shaped (`tm * store`), so even pure congruence rules that touch no
+  store carry an unused store parameter; `has_type` similarly threads an
+  unconditional `Sig` store-typing context through rules that never use
+  it. The existing report's fracture-line analysis (§2.2–2.3) instead
+  documents rule-*content* entanglement not raised in this pass:
+  `TNewIdx`/`TRawSet` require a writable field's *type* to be `BRef T`
+  (tables and refs coupled at type-formation, not just reduction
+  strategy — called "the sharpest fracture-line finding" there), and
+  `TPrimMetaR` requires a scalar left-operand type specifically to keep
+  metamethod dispatch step-disjoint. Both passes found real, distinct
+  extraction-relevant findings the other did not surface; neither
+  supersedes the other.
+
