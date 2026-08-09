@@ -1208,6 +1208,81 @@ mis-scoped-in-the-brief rather than silently skipped.
 
 ---
 
+## Corroboration engine build — iteration 3, phase 5 (measurement)
+
+**Status: fable-delegation-tier.** Both measurements were run, not estimated.
+Counter: non-blank lines whose first two non-space characters are not `--`
+(the same rule phase 1's table used — cross-checked: it reproduces phase 1's
+928 / 346 / 188 exactly, and its walker bucket 1,630 + retired 470 +
+`fixpoint_v1` 361 = 2,461, phase 1's figure to the line).
+
+### (a) Line counts (non-blank, non-comment)
+
+| bucket | files | lines |
+|---|---|---|
+| trusted core (cleanroom) | `term_algebra`, `replayer`, `init` | 928 |
+| theory vocab+rules (narrowing/effects/spine) | `addr_v1`, `narrow_pilot_v1`, `flow_narrow_v1`, `effects_spine_v1`, `assign_effects_v1`, `narrow_persist_v1`, `pilot_initial_facts_v1` | 346 |
+| theory vocab+rules (fixpoint line) | `fixpoint_v1` | 361 |
+| engine | `engine.lua` | 188 |
+| **extractor (new)** | `extractor_v1.lua` | **511** |
+| walkers still standing | `prover` 279, `prover_addr` 76, `prover_narrow` 502, `fixpoint_prover` 773 | 1,630 |
+| **deleted this iteration** | `prover_effects.lua` | **470** |
+
+Against the owner's ≤2,000 kill-criterion, stated without spin:
+
+- Everything currently present: **3,964** — roughly double the criterion,
+  and 1,630 of it is walkers the engine has not replaced.
+- The engine-driven path alone (core + narrowing/effects/spine theories +
+  engine + extractor, i.e. what actually runs in the corpus scan):
+  **1,973** — under the criterion, but that path currently derives only
+  match-branch narrowing plus spine-mediated persistence. It is not yet "a
+  working modular checker"; calling 1,973 a pass would be measuring a
+  smaller thing than the criterion means.
+- Adding `fixpoint_v1`'s theory content brings it to 2,334 — over.
+- The extractor (511) costs slightly MORE lines than the one walker it
+  retired (470). The line ledger for this iteration is therefore roughly
+  flat; what improved is coverage (below), not size. Reported as measured.
+
+### (b) Corpus scan (569 files, `find lib -name init.lua` — the baseline's own corpus)
+
+Extractor + engine, spine stack, `narrow-select-match` only (per the phase-2
+HALT). Every derived `holds_at` was exported and replayed against the real
+kernel replayer.
+
+| metric | value |
+|---|---|
+| files scanned | 569 (0 parse/analysis errors) |
+| guard facts seeded | 30 |
+| narrowing derivations | 38, in 19 files |
+| **composition-only derivations** (provenance chaining through `narrow-persist`) | **8, in 7 files** |
+| replay rejections | 0 |
+| wall clock | 177.5s |
+
+Against the **1/569 baseline** (one file, one composed instance,
+`prover_effects.lua`): **7 files / 8 derivations**. Sample sites, by file:
+`lib/oauth2/init.lua` (2), `lib/platform/policy/init.lua`,
+`lib/sscanf/init.lua`, `lib/async_queue/init.lua`, `lib/ed25519/init.lua`,
+`lib/inotify/init.lua`, `lib/table_ext/init.lua` (1 each). The
+`table_ext` site is the baseline's own — `M.flatten(t, depth)`'s
+`number | nil` parameter guarded by `depth == nil`, then-branch assigning a
+different local — and is pinned by a test assertion. Per-site attribution for
+the other six is NOT recorded: the extractor addresses structurally (child
+paths), not by line, so naming the exact guards would be a guess and is left
+undone rather than filled in.
+
+Honest reading of the number: the movement is real (1 → 8, 1 → 7 files) but
+the absolute count stays small, and the binding constraint has MOVED. It is
+no longer elseif chains (closed) or single-statement persistence (closed) —
+it is that only 30 guard facts exist corpus-wide at all, because a variable
+is tracked only when its `--:` annotation is a 2+-member union drawn from the
+six `type()` classes. Most real guards in `lib/` are on richer annotated
+types the pilot vocabulary cannot express. Rest-branch narrowing being off
+(the phase-2 HALT) also removes every `else`-side derivation from this count.
+Neither is a claim about the architecture; both are measured scope limits of
+this pilot's type vocabulary and of an undecided fork.
+
+---
+
 ## Explicitly open (flagged, not settled — do not present as decided)
 
 - Side conditions in rule schemas (task-4 fork B) — UNDESIGNED, owner

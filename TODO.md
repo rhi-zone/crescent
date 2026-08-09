@@ -5996,3 +5996,49 @@ Filed alongside the port of fractal's `packages/cli-api-projector`
 - [ ] **`lib/regex/pure.lua` missing bounded-repetition and non-capturing-group support (2026-08-08):** `lib/regex/pure.lua` does not handle `{n}`, `{m,n}`, `{n,}` bounded-repetition quantifiers or `(?:...)` non-capturing groups — both are parsed as literal characters, silently producing wrong (not erroring) matches instead of the intended regex behavior. The instruction tree already carries `min`/`max` on `quant` nodes and the backtracker already handles arbitrary min/max bounds — the gap is parser-only: needs a branch for `{m,n}` syntax plus a non-capturing-group flag on `(` groups. No engine rework required; same fix scope as adding any new quantifier or group type.
 
 - [ ] **`lib/regexp` crashes on multi-instruction counted repetition (2026-08-08):** `^(?:ab){2}$`, `(?:ab){2,3}`, `(ab){2}`, `(?:ab|cd){2}` and similar (any counted repetition over a multi-instruction atom) raise `table index is nil` at `init.lua:693` during `clone_frag`. Root cause: lines 405 (`clone_frag`) and 432 (`apply_quant`) — counted repetition clones an atom's instruction range and re-derives out-slots by offset arithmetic, which fails for multi-instruction atoms because out-slot pointers cannot simply shift by a constant offset; they must be remapped through a src→dst pc map. Lines 513-521 flag this as a known limitation. **Fix:** represent out-slots as explicit `(pc, field)` handles and have `clone_frag` build a src→dst pc map, remapping all out-slot pointers and renumbering all `OP_SAVE` capture slots in each clone. Related to `lib/regex` but in `lib/regexp`, a separate engine.
+
+## v10 corroboration engine, iteration 3 phases 2/4/5 (2026-08-09)
+
+Built `lib/type/v10_kernel/pilot/extractor_v1.lua` (AST→base-facts, the only
+AST reader in the engine line), retired `prover_effects.lua`, and measured
+(design record: `docs/decisions/typechecker-v10-core-design.md`, the three
+"iteration 3, phase 2/4/5" sections). Corpus: composition-only derivations
+went 1/569 → 8 in 7 files, zero replay rejections. Line ledger is flat
+(extractor 511 vs retired walker 470); everything present is 3,964 lines
+against the ≤2,000 kill-criterion, of which 1,630 is walkers not yet
+replaced.
+
+- [ ] **HALT, owner call needed — branch role is not in the `guard_selects`
+  judgment.** `narrow-select-match` and `narrow-select-rest` share one
+  premise pair, so run FORWARD a single guard fact derives both the match
+  type and the rest type at the same branch point; one of them is false of
+  the source (measured). A walker chooses which rule to cite; an engine
+  cannot. Until decided, the extractor emits only the branch the axiom's
+  reading licenses and drivers must not register `narrow-select-rest` —
+  which makes rest-branch/`else` narrowing, `cf_join`/`narrow-join` facts,
+  and the retirement of `prover.lua` all unreachable.
+- [ ] **Substrate need — hypothetical reasoning / hypothesis discharge in the
+  forward engine.** `fixpoint_prover.lua` cannot be retired without it: it
+  hand-maintains an `h1_live` reachability flag over the built proof term for
+  the pilot's only discharge-bearing rule, and `engine.add_rule` rejects
+  discharge-bearing rules outright.
+- [ ] **Substrate gap — no judgment covers a NON-STATEMENT span.** Anchoring
+  a declared type at its declaration site and flowing it to a guard needs a
+  preservation fact spanning "previous statement exit → guard-test exit";
+  both `stmt_preserves_fact` and `stmt_preserves` are documented as
+  statement-paired. Until that is decided, the extractor re-grounds the
+  annotation at the guard point (the existing prover idiom).
+- [ ] **Owner call needed before any port of `fixpoint_prover.lua`'s content:**
+  (i) boolean-literal reassignment — the code widens `true`/`false` to
+  `"boolean"` at the `ty_sub` step while `assign-literal-transfer` cites
+  `tag_true()`, contradicting that module's own header comment, and no test
+  exercises it; (ii) shadow detection recognizes only single-name `local`
+  statements, so `local a, x = ...` is not detected as shadowing.
+- [ ] **`prover_narrow.lua` cannot be deleted while `prover.lua` /
+  `fixpoint_prover.lua` stand** — it emits no certificates at all; it is
+  their shared pass-1 event tree (and carries a live parser-arena handle on
+  `while_loop` events, which cannot be a ground fact).
+- [ ] **The binding constraint on corpus coverage has moved** to the pilot's
+  type vocabulary: only 30 guard facts exist corpus-wide, because a variable
+  is tracked only when its `--:` annotation is a 2+-member union over the six
+  `type()` classes. Elseif chains and multi-statement persistence are closed.
