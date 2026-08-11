@@ -11,40 +11,31 @@
 -- takes the default. Flat scalar fields sidestep that bug entirely rather
 -- than working around it with a per-entity deep copy.
 --
--- TYPECHECKER WORKAROUND: every function here that touches the
--- lib.entity_component World object, or the lib.tilemap TileMap object
--- past its documented alias surface, is deliberately left WITHOUT a `--:`
--- signature. The natural code would annotate each with its real
--- parameter/return types (a `World` alias for entity_component's world,
--- `TileMap` for tilemap's map). Two independent, confirmed typechecker
--- gaps prevent that:
+-- TYPECHECKER WORKAROUND: functions here that touch the lib.tilemap
+-- TileMap object past its documented alias surface are deliberately left
+-- WITHOUT a `--:` signature. lib/tilemap's `TileMap` alias only lists
+-- `in_bounds`, `get`, `set`, `fill` -- it omits `fill_border`, `width`,
+-- `height`, and most of the module's other public methods. A properly
+-- narrowed `TileMap`-typed value therefore fails "field doesn't exist"
+-- for any of those omitted methods. Worked around here by only calling
+-- the four aliased methods (no fill_border/width/height) and keeping our
+-- own MAP_W/MAP_H constants instead of querying the map for its
+-- dimensions. This is a lib/tilemap gap (incomplete `TileMap` alias),
+-- not a bug in this file's logic -- see TODO.md.
 --
---   1. lib/entity_component's `M.world()` has no return-type annotation.
---      Its returned object is `setmetatable({}, World)` with fields
---      assigned after the call; the checker's flow inference does not
---      carry those fields to the `return` point, so any `--:`-annotated
---      function whose parameter/return type mentions a restated `World`
---      alias sees the object as structurally disjoint from that alias
---      and rejects it -- even via `--[[:! T]]` force cast (the checker's
---      own overlap check refuses it as having "no overlap", and
---      `--[[: any]]` is separately rejected as "explicit any in
---      annotation"). Confirmed via minimal repro: identical
---      register/entity/add/get calls typecheck clean with 0 errors when
---      the enclosing function has no `--:` signature, and fail with 2
---      hard errors the moment one is added -- reproduced both at
---      top-level chunk scope and inside an annotated function.
---   2. lib/tilemap's `TileMap` alias only lists `in_bounds`, `get`,
---      `set`, `fill` -- it omits `fill_border`, `width`, `height`, and
---      most of the module's other public methods. A properly narrowed
---      `TileMap`-typed value therefore fails "field doesn't exist" for
---      any of those omitted methods. Worked around here by only calling
---      the four aliased methods (no fill_border/width/height) and
---      keeping our own MAP_W/MAP_H constants instead of querying the map
---      for its dimensions.
---
--- Both are lib/ gaps (entity_component's missing return annotation +
--- incomplete flow narrowing; tilemap's incomplete TileMap alias), not
--- bugs in this file's logic -- see TODO.md.
+-- (A previously-suspected second gap -- that entity_component's `M.world()`
+-- return object was structurally disjoint from a hand-written `World`-style
+-- alias -- turned out to be a different bug: colon-defined methods
+-- (`function World:emit(...)`) desugar to a real `self` parameter, so their
+-- field type on the table (read through the `__index` chain) legitimately
+-- includes `self` as the first parameter -- exactly as the checker's own
+-- colon-call sites supply it. The alias entity_component originally shipped
+-- (`WorldObj`) omitted `self` from its method signatures, unlike every other
+-- hand-written method-bearing alias in this codebase (`lib/db`, `lib/http`,
+-- `lib/aho_corasick`, etc., which all write `self: T` explicitly). Fixed by
+-- correcting `WorldObj` in lib/entity_component/init.lua to match that
+-- convention -- see TODO.md and lib/entity_component/init.lua. `build_world`
+-- and `player_position` below are annotated now that this is fixed.
 
 if not package.path:find("./?/init.lua", 1, true) then
   package.path = "./?/init.lua;" .. package.path
@@ -52,6 +43,17 @@ end
 
 local tilemap = require("lib.tilemap")
 local ecs     = require("lib.entity_component")
+
+--:: require "lib.entity_component"
+
+-- Player position/facing component shape. entity_component's World:get is
+-- generic (`<T>(WorldObj, integer, string) -> T | nil`) since component
+-- storage is untyped from the ECS's point of view (registered defaults are
+-- caller-supplied) -- this alias documents the concrete shape this demo
+-- actually registers under "position", and player_position below is the
+-- one boundary where that dynamic component data becomes typed demo data
+-- via a checked cast plus a nil guard (not a force cast).
+--:: Position = { x: number, y: number, facing_dx: number, facing_dy: number }
 
 local M = {}
 
@@ -78,7 +80,7 @@ M.MAP_H = 8  --: number
 --- tilemap.random_rooms/cellular_automata -- both error() on missing/odd
 --- opts.seed, and a fixed layout is all this demo needs. Border is built
 --- with four `fill` calls rather than `fill_border` -- see the file-level
---- TYPECHECKER WORKAROUND comment (point 2).
+--- TYPECHECKER WORKAROUND comment.
 function M.build_map()
   local map, err = tilemap.new(M.MAP_W, M.MAP_H, { default_tile = M.TILE_FLOOR, tile_size = nil })
   if map == nil then
@@ -98,9 +100,8 @@ end
 -- World / player construction
 -- ---------------------------------------------------------------------------
 
---- Build the ECS world and the single player entity. See the file-level
---- TYPECHECKER WORKAROUND comment (point 1) for why this has no `--:`
---- signature.
+--- Build the ECS world and the single player entity.
+--: () -> (WorldObj, integer)
 function M.build_world()
   local world = ecs.world()
   world:register("position", { x = 1, y = 1, facing_dx = 1, facing_dy = 0 })
@@ -109,9 +110,18 @@ function M.build_world()
   return world, player
 end
 
---- Read the player's position component ({ x, y, facing_dx, facing_dy }).
+--- Read the player's position component. build_world() always registers
+--- and adds "position" for the player right after creating it, so this
+--- component is always present in practice -- the nil branch below covers
+--- the case entity_component's `get` can't rule out statically (wrong
+--- entity id, component never added), not a normal code path here.
+--: (WorldObj, integer) -> Position
 function M.player_position(world, player)
-  return world:get(player, "position")
+  local pos = world:get(player, "position") --[[: Position | nil]]
+  if pos == nil then
+    error("tile_sandbox: player " .. tostring(player) .. " has no position component")
+  end
+  return pos
 end
 
 -- ---------------------------------------------------------------------------

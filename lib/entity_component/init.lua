@@ -42,12 +42,13 @@ end
 -- World
 -- ---------------------------------------------------------------------------
 
---:: WorldObj = { _next_id: integer, _alive: { [integer]: boolean }, _components: { [string]: { [integer]: unknown } }, _defaults: { [string]: unknown }, _listeners: { [string]: { [integer]: (...unknown) -> unknown } }, emit: (...unknown) -> unknown, destroy: (...unknown) -> unknown, ... }
+--:: WorldObj = { _next_id: integer, _alive: { [integer]: boolean }, _components: { [string]: { [integer]: unknown } }, _defaults: { [string]: unknown }, _listeners: { [string]: { [integer]: (...unknown) -> unknown } }, register: (WorldObj, string, unknown) -> nil, entity: (WorldObj) -> integer, destroy: (WorldObj, integer) -> nil, clear: (WorldObj) -> nil, add: (WorldObj, integer, string, unknown) -> (boolean | nil, string | nil), remove: (WorldObj, integer, string) -> nil, get: <T>(WorldObj, integer, string) -> T | nil, emit: (WorldObj, string, ...unknown) -> nil, ... }
 local World = {}
 World.__index = World
 
 --- Create a new ECS world.
 -- @return world
+--: () -> WorldObj
 function M.world()
   local w = setmetatable({}, World)
   w._next_id    = 1          -- next entity ID counter
@@ -66,6 +67,7 @@ end
 -- Must be called before world:add() uses this component name.
 -- @param name   string  component name
 -- @param defaults table|nil  default field values (shallow-copied on add)
+--: (WorldObj, string, unknown) -> nil
 function World:register(name, defaults)
   if self._components[name] == nil then
     self._components[name] = {}
@@ -148,7 +150,11 @@ function World:remove(e, name)
   end
 end
 
---- Get a component table for an entity, or nil.
+--- Get a component table for an entity, or nil. Component storage is
+--- untyped from the ECS's point of view (registered via caller-supplied
+--- defaults); callers narrow to their own component shape at the call
+--- site, e.g. `world:get(e, "position") --[[: Position | nil]]`.
+--: <T>(WorldObj, integer, string) -> T | nil
 function World:get(e, name)
   local store = self._components[name]
   if store == nil then return nil end
@@ -309,6 +315,7 @@ end
 --- Emit an event, calling all registered listeners in order.
 -- @param event  string
 -- @param ...    arguments forwarded to listeners
+--: (WorldObj, string, ...unknown) -> nil
 function World:emit(event, ...)
   local ls = self._listeners[event]
   if ls == nil then return end

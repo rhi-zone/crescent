@@ -6060,30 +6060,46 @@ replaced.
   type vocabulary: only 30 guard facts exist corpus-wide, because a variable
   is tracked only when its `--:` annotation is a 2+-member union over the six
   `type()` classes. Elseif chains and multi-statement persistence are closed.
-- [ ] **Substrate gap — `--:`-annotating a consumer of `lib/entity_component`'s
-  `World` breaks typechecking, unconditionally.** `M.world()` has no
-  return-type annotation; its returned object is `setmetatable({}, World)`
-  with fields assigned after the call, and the checker's flow inference does
-  not carry those fields to the `return` point. Any `--:`-annotated function
-  whose parameter/return type mentions a restated `World`-shaped alias sees
-  the object as structurally disjoint from that alias for `entity`/`add`/
-  `destroy`/`clear`/`remove`/`run` (whose declared self-parameter is the flat
-  `WorldObj` record) and rejects it — including via `--[[:! T]]` force cast
-  (checker reports "no overlap") and `--[[: any]]` (checker reports
-  "explicit `any` in annotation", contradicting
-  `docs/typechecker-reference.md`'s own documented escape-hatch advice for
-  this exact case). Confirmed via minimal repro (see
-  `examples/tile_sandbox/world.lua`'s file-level comment): identical
-  register/entity/add/get calls typecheck clean with 0 errors when the
-  enclosing function has no `--:` signature at all, and fail with 2 hard
-  errors the moment one is added, reproduced both at top-level chunk scope
-  and inside an annotated function. Until the checker's flow inference
-  handles post-`setmetatable` field assignment (or `M.world()` gets an
-  explicit return-type annotation matching what it actually builds), every
-  typed consumer of entity() /add()/ destroy()/ clear()/ remove()/ run() must
-  leave the touching function unannotated — `examples/tile_sandbox/` does
-  this and documents it inline rather than fixing lib/entity_component (out
-  of scope for that task).
+- [x] **`lib/entity_component`'s `WorldObj` alias omitted `self`, unlike
+  every other hand-written method-bearing alias in the codebase — not a
+  checker bug.** FIXED. A previous session's diagnosis (this entry,
+  originally) attributed the failure to the checker's flow inference not
+  carrying `setmetatable({}, World)` + post-call field assignments to
+  `M.world()`'s `return` point. Re-investigated and that framing was wrong:
+  a minimal repro isolating just the assignability check (no flow inference
+  involved at all — a plain `setmetatable({}, Widget)` returned from a
+  one-line constructor) reproduced the identical "no overlap" rejection.
+  The actual mechanism: `function World:emit(event, ...)` desugars to a real
+  `self` parameter (Lua's own colon-sugar makes it literal, not implicit),
+  and the checker's function-field-type derivation correctly keeps that
+  `self` param when `emit` is read as an ordinary table field through the
+  `__index` chain — exactly matching how colon-call sites (`w:emit(...)`)
+  supply the receiver as that same first argument
+  (`ExprRule[NODE_METHOD_CALL]` in constrain.lua). This is not a special
+  case; every other hand-written method-bearing alias already in this
+  codebase (`lib/db`, `lib/http/server.lua`, `lib/aho_corasick`,
+  `lib/config`, `lib/net`, `lib/lru`, `lib/jsonrpc`, `lib/kqueue`,
+  `lib/epoll`, `lib/interpolation`, `lib/consistent_hash`, ...) already
+  writes `self: T` explicitly as the first parameter of every method field —
+  `WorldObj` was the outlier, not the checker. Fixed by rewriting `WorldObj`
+  in `lib/entity_component/init.lua` to list `self`-correct signatures for
+  every method actually used through the alias (`register`, `entity`,
+  `destroy`, `clear`, `add`, `remove`, `get`, `emit`), adding `--:`
+  signatures to the three of those (`register`, `get`, `emit`) that
+  previously had none, and restoring `--: () -> WorldObj` on `M.world()`.
+  `World:get` was additionally made generic (`--: <T>(WorldObj, integer,
+  string) -> T | nil`, mirroring the existing `Rng.pick` pattern in
+  `lib/test/fuzz.lua`) since component storage is genuinely untyped from the
+  ECS's point of view — the caller narrows to its own component shape with a
+  checked cast at the call site (`world:get(e, "position") --[[: Position |
+  nil]]`), not a force cast (force-casting `unknown` is correctly rejected
+  by the checker: "fix the upstream type annotation instead"). Verified:
+  `lib/entity_component/init.lua` and all three `examples/tile_sandbox/*.lua`
+  files typecheck at 0 errors; repo-wide `bin/cr check` error set is
+  byte-identical before/after (6989/6989, diffed line-for-line); `bin/cr
+  test lib/entity_component/` and `bin/cr test lib/type/static/` unchanged
+  (the latter's one pre-existing TAG_SPREAD failure is unrelated, confirmed
+  present on unmodified HEAD too).
 - [ ] **Substrate gap — `lib/tilemap`'s `TileMap` type alias is incomplete.**
   It lists only `in_bounds`, `get`, `set`, `fill`; every other public method
   (`fill_border`, `width`, `height`, `copy_region`, `flood_fill`, `find`,
