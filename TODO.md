@@ -6060,3 +6060,36 @@ replaced.
   type vocabulary: only 30 guard facts exist corpus-wide, because a variable
   is tracked only when its `--:` annotation is a 2+-member union over the six
   `type()` classes. Elseif chains and multi-statement persistence are closed.
+- [ ] **Substrate gap — `--:`-annotating a consumer of `lib/entity_component`'s
+  `World` breaks typechecking, unconditionally.** `M.world()` has no
+  return-type annotation; its returned object is `setmetatable({}, World)`
+  with fields assigned after the call, and the checker's flow inference does
+  not carry those fields to the `return` point. Any `--:`-annotated function
+  whose parameter/return type mentions a restated `World`-shaped alias sees
+  the object as structurally disjoint from that alias for `entity`/`add`/
+  `destroy`/`clear`/`remove`/`run` (whose declared self-parameter is the flat
+  `WorldObj` record) and rejects it — including via `--[[:! T]]` force cast
+  (checker reports "no overlap") and `--[[: any]]` (checker reports
+  "explicit `any` in annotation", contradicting
+  `docs/typechecker-reference.md`'s own documented escape-hatch advice for
+  this exact case). Confirmed via minimal repro (see
+  `examples/tile_sandbox/world.lua`'s file-level comment): identical
+  register/entity/add/get calls typecheck clean with 0 errors when the
+  enclosing function has no `--:` signature at all, and fail with 2 hard
+  errors the moment one is added, reproduced both at top-level chunk scope
+  and inside an annotated function. Until the checker's flow inference
+  handles post-`setmetatable` field assignment (or `M.world()` gets an
+  explicit return-type annotation matching what it actually builds), every
+  typed consumer of entity() /add()/ destroy()/ clear()/ remove()/ run() must
+  leave the touching function unannotated — `examples/tile_sandbox/` does
+  this and documents it inline rather than fixing lib/entity_component (out
+  of scope for that task).
+- [ ] **Substrate gap — `lib/tilemap`'s `TileMap` type alias is incomplete.**
+  It lists only `in_bounds`, `get`, `set`, `fill`; every other public method
+  (`fill_border`, `width`, `height`, `copy_region`, `flood_fill`, `find`,
+  `count`, `neighbors4`, `neighbors8`, `astar`, `serialize`) is missing, so a
+  properly narrowed `TileMap`-typed value fails "field doesn't exist" for any
+  of them. `examples/tile_sandbox/world.lua` works around this by only
+  calling the four aliased methods (building the map border with four
+  `fill()` calls instead of `fill_border()`, and keeping its own width/height
+  constants instead of querying the map).
