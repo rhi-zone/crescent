@@ -40,6 +40,13 @@ adjudicated by this doc in advance. Both removed from "Explicitly open
 questions"; see "What this reframing leaves open" for the reframed
 composition note.
 
+**2026-08-11 update (3):** eight design-proposal docs were produced this
+round at `docs/genre-battery/`, each covering something this doc previously
+listed as an open question or a flagged-broken library needing remediation.
+Pointers to each are added at the relevant section below. All eight are
+proposals awaiting owner sign-off — nothing about them is decided, and
+nothing in this doc's settled-direction sections changes as a result.
+
 ## The ambition (owner-directed, settled)
 
 Crescent should grow batteries-included library coverage for genres:
@@ -269,10 +276,14 @@ Paradigms named, matched to the use case each is actually good at:
 - **Factorio-style structured data-merge** — staged data/control lifecycle,
   prototypes merged field-by-field across mods with conflict resolution
   intrinsic to the merge. Best fit: structured game-balance content
-  (items/recipes/entities). Already covered above under "Factorio."
+  (items/recipes/entities). Already covered above under "Factorio." A design
+  proposal exists at `docs/genre-battery/data-merge-lifecycle.md`, awaiting
+  owner sign-off.
 - **Minecraft datapacks** — declarative JSON, sandboxed, no arbitrary code,
   can only reconfigure existing systems. Best fit: safe/sandboxed
-  reconfiguration of existing systems. Already covered above.
+  reconfiguration of existing systems. Already covered above. A design
+  proposal exists at `docs/genre-battery/datapack-layer.md`, awaiting owner
+  sign-off.
 - **Forge/Fabric, tModLoader-style** — full code mods hooking a closed
   engine's internals directly. Already covered above as the "breaks on every
   version" cautionary case; still named by the owner as a paradigm to
@@ -280,9 +291,12 @@ Paradigms named, matched to the use case each is actually good at:
 - **Godot .pck raw overlay, and ".pck + load order"** — pure path-keyed
   asset overlay, optionally with an orchestration layer for manifests/
   load-order/non-destructive extension on top. Best fit: asset delivery.
-  See "Godot" above.
+  See "Godot" above. A design proposal exists at
+  `docs/genre-battery/pck-overlay-loader.md`, awaiting owner sign-off.
 - **Harmony/BepInEx-style runtime patching** — best fit: behavior hooking of
   existing systems. See below for why this paradigm looks different in Lua.
+  A design proposal for the conflict-arbitration/ordering layer exists at
+  `docs/genre-battery/conflict-arbitration.md`, awaiting owner sign-off.
 
 ### Harmony-style modding in Lua is a smaller problem than in .NET
 
@@ -309,7 +323,10 @@ documented above (unpredictable patch interaction with no explicit
 ordering, fragility of wrap-style patches to upstream signature changes) are
 real and language-independent.
 
-No design for this arbitration layer exists. Not proposed here.
+No design for this arbitration layer existed at the time this section was
+written. Not proposed here — but see the pointer above: a design proposal
+now exists at `docs/genre-battery/conflict-arbitration.md`, awaiting owner
+sign-off.
 
 ### What this reframing leaves open
 
@@ -510,6 +527,13 @@ unresolved. The owner flagged this with a "(?)". This is a process question
 for whoever actually executes remediation work; this doc does not prescribe
 it.
 
+Design proposals produced under this approach (design-blind, per the
+constraint above) exist for three of the four flagged libraries, each
+awaiting owner sign-off: `docs/genre-battery/vm-redesign.md` (`lib/vm`),
+`docs/genre-battery/constraint-solver-nary.md` (`lib/constraint_solver`), and
+`docs/genre-battery/logic-circuit-extensible.md` (`lib/logic_circuit`). No
+proposal exists yet for `lib/ecs`.
+
 ## Explicitly open questions
 
 Not to be guessed at in this document.
@@ -518,7 +542,8 @@ Not to be guessed at in this document.
   Restricted stdlib surface, resource/instruction limits, capability-
   injected I/O only, some combination? The authoring *language* is settled
   (plain Lua — see "Control-stage authoring language" above); the sandboxing
-  *mechanism* is not designed.
+  *mechanism* is not designed. A design proposal exists at
+  `docs/genre-battery/sandboxing.md`, awaiting owner sign-off.
 
 ## Out of scope for this document
 
