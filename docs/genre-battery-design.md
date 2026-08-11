@@ -7,16 +7,26 @@ scope... nothing about this is committed or built yet"), everything in this
 document is direction, not done. Two things are kept structurally distinct
 throughout:
 
-- **Owner-directed, settled direction** — the ambition itself and the
-  Factorio-inspired data/control-stage split. These are decisions the owner
-  has made, not proposals this doc is debating. Marked explicitly where they
-  appear.
+- **Owner-directed, settled direction** — the ambition itself, the
+  Factorio-inspired data/control-stage split, and (as of the 2026-08-11
+  update below) the composition-cost meaning of the 1000-line budget,
+  plain-Lua control-stage authoring, genre-reference-core priority
+  (any/all), the flagged-library remediation approach, and the
+  multi-paradigm mod-loader shape. These are decisions the owner has made,
+  not proposals this doc is debating. Marked explicitly where they appear.
 - **Not built** — no code exists for any of this. No library changes, no
   mod-loader, no reference core. This doc does not propose fixes to any
   library issue it mentions.
 
 Don't read a "settled direction" statement as "implemented." They're
 different claims.
+
+**2026-08-11 update:** the owner resolved five items from the original
+"explicitly open questions" list in a follow-up conversation. Those
+resolutions are folded into the relevant sections below (marked
+owner-directed, settled where they land) and removed from the open-questions
+list; new questions the resolutions themselves surface are added there
+instead. See each touched section for the specific change.
 
 ## The ambition (owner-directed, settled)
 
@@ -30,10 +40,20 @@ and incremental/idle games. Three explicit success criteria:
    conventions (each lib copy-paste-ownable, no framework code in `lib/`,
    per `CLAUDE.md`).
 2. **Gluing existing libraries into a working genre prototype should take
-   ~1000 lines of code or less.**
+   ~1000 lines of code or less.** The owner clarified what this measures:
+   "composition cost. pretty much ALL logic should reside in either (a) game
+   data or (b) the system implementations." The 1000-line budget is the
+   *composition/glue layer only* — the code that wires already-implemented
+   libraries and declarative game data together into a working prototype. It
+   excludes both the libraries' own implementation code and the data/
+   prototype definitions themselves. A genre prototype built "right" carries
+   almost no logic in the composition layer at all — nearly everything is
+   either declarative data or a call into a system the composition layer
+   just invokes/configures.
 3. **Crescent should also ship complete, playable "Factorio-style" reference
    cores per genre** — not just raw libraries — that modders/game-authors can
-   fork and build on top of.
+   fork and build on top of. No genre is prioritized over another — owner's
+   exact words on which gets the first reference core: "any/all."
 
 ## The architectural steer (owner-directed, settled)
 
@@ -54,6 +74,27 @@ behavior stuff would need to be code" — the data stage covers
 configuration/definition; real gameplay logic legitimately lives in
 control-stage code, and that is expected, not a failure of the data-driven
 ideal.
+
+### Control-stage authoring language (owner-directed, settled)
+
+Control-stage code is plain Lua, not a higher-level authoring or visual-node
+layer. Owner's exact words: "lua is already a standard scripting language
+for games. just sandbox it properly." Proper sandboxing is a real
+requirement, not a hand-wave — crescent needs an actual sandboxing mechanism
+(restricted environment/capability injection, not ambient globals),
+consistent with crescent's existing caps-first convention (`CLAUDE.md`).
+
+This sidesteps the visual-node-vs-text-scripting tension found in the
+platform prior art below rather than resolving it: VRChat/Resonite chose
+visual graphs specifically for untrusted-multiplayer sandboxing reasons;
+Hytale rejected text scripting for a different reason (accessibility).
+Crescent's answer is neither extreme — text scripting, sandboxed.
+
+What this resolution does *not* settle: what "sandboxed properly" means
+concretely — restricted stdlib surface? resource/instruction limits?
+capability-injected I/O only, some combination? No sandboxing design exists.
+This is the next-level question the resolution surfaces; see "Explicitly
+open questions" below.
 
 ## Prior art synthesis
 
@@ -106,6 +147,60 @@ integrated with the code track. Factorio is the only one of the three with a
 first-party, single-language, staged separation with a documented
 cross-mod-conflict-resolution mechanism.
 
+### Godot (.pck raw asset overlay, and ".pck + load order")
+
+Owner named these as two distinct paradigms to track. A Godot `.pck` is a
+packed resource archive mounted into the engine's virtual filesystem at
+runtime — pure path-keyed overlay, "last loaded wins," no data-merge, no
+staged lifecycle at all (Godot docs, `exporting_pcks`).
+
+In practice, raw overlay didn't stay convention-only: community mod-loader
+projects (`godot-mod-loader`, `Loadot`) bolt an orchestration layer on top
+specifically to add what raw overlay structurally lacks — mod manifests/
+metadata, declared dependencies and load order (`load_before`/
+`incompatibilities`), and non-destructive script extension via GDScript
+inheritance chains (so multiple mods can each extend the same base script by
+calling up to the parent, instead of one mod's whole-file replacement
+clobbering another's). Even the "dumber" paradigm needed real orchestration
+software once multiple mods existed.
+
+Documented pain points, even with the loader layer added: whole-path/
+whole-file conflicts are still "last wins" — two mods editing the exact same
+file/line can't both apply (godot-proposals#6788); path-matching fragility
+and resource-cache eviction bugs affecting override reliability
+(godot/godot#77317, godot-proposals#14219).
+
+Sources: Godot docs (`exporting_pcks`), GodotModding/godot-mod-loader,
+godot-proposals#6788, godot/godot#77317, godot-proposals#14219.
+
+### Harmony / BepInEx (.NET runtime monkeypatching)
+
+Harmony is a .NET/Mono runtime IL-patching library: prefix/postfix/
+transpiler patches applied to JIT-compiled methods in memory, without
+touching the on-disk assembly. BepInEx is a plugin-host framework around it
+(plugin lifecycle, dependency declarations, config, logging) plus Harmony's
+own `[HarmonyPriority]`/`[HarmonyBefore]`/`[HarmonyAfter]` annotations for
+arbitrating multiple mods patching the same method.
+
+Harmony's core mechanical problem — rewriting IL for compiled, JIT'd code
+you don't have editable source for, without recompiling — is a structural
+consequence of C#/.NET's compiled method dispatch: once JIT'd, callers hold
+references to native code, so simple reassignment doesn't intercept
+anything. Documented pain points: patch order is "adaptive and prioritized,"
+not simple load order, and two mods patching the same method with no
+explicit ordering hit real, documented unpredictability; transpiler-style
+patches are fragile to upstream signature/shape changes; shared-dependency
+version pinning issues exist but aren't directly relevant to crescent.
+Community tooling ("Harmony Patch Scanner," Nexus Mods) exists specifically
+because which mods are patching a given function isn't otherwise visible —
+there's an open BepInEx/HarmonyX feature request for a patch registry
+(BepInEx/HarmonyX#64).
+
+Sources: Harmony docs (pardeike.net), Harmony wiki priority-annotations
+page, BepInEx dev guide, BepInEx/HarmonyX#64, Stardew Valley Wiki Harmony
+modding guide, Nexus Mods Harmony Patch Scanner. No LOC estimate found for a
+minimal BepInEx plugin — not attempted, unlike the estimates above.
+
 ### Platform prior art (VRChat/Udon, Resonite/ProtoFlux, Roblox, Hytale, GMod/Source/S&box)
 
 - **Visual-node vs. text-scripting is a live, contested choice.**
@@ -137,13 +232,80 @@ cross-mod-conflict-resolution mechanism.
 
 Crescent is Lua-native already — all libs are Lua — which is directly
 relevant: Factorio's own mod API is Lua, so crescent doesn't face the "which
-language" question other platforms did. But the visual-node-vs-text-scripting
-question these platforms grappled with is still real for crescent's
-*control stage* specifically: should exotic per-entity/per-recipe behavior
-be authored as Lua functions directly, or via some higher-level authoring
-layer? Flagged as open in "Explicitly open questions" below — prior art
-shows real, divergent outcomes from this choice on other platforms, but
-none of it resolves the question for crescent.
+language" question other platforms did. The visual-node-vs-text-scripting
+question these platforms grappled with for their control-stage-equivalent
+layer is now resolved for crescent (plain Lua, sandboxed — see "Control-stage
+authoring language" above), but the resolution is a choice of *authoring
+language*, not a solved sandbox. The concrete sandboxing mechanism remains
+open (see "Explicitly open questions").
+
+## Mod-loader shape: multiple paradigms (owner-directed, settled)
+
+Owner's exact words: "we need to support ALL paradigms of modloading.
+minecraft forge/fabric, terraria, vanilla .pcks, .pcks + load order, harmony,
+bepinex, factorio, minecraft datapacks etc." This replaces the doc's prior
+"dedicated library vs. documented convention" framing for the mod-loader
+question — that framing assumed one shape to pick. The settled direction is
+support for multiple distinct mod-loading paradigms as separate composable
+libraries, consistent with `CLAUDE.md`'s "when one implementation can't
+satisfy all legitimate use cases, provide multiple" principle: these are
+genuinely different use cases (different games need different modding
+guarantees), not a duplicate cluster to consolidate.
+
+Paradigms named, matched to the use case each is actually good at:
+
+- **Factorio-style structured data-merge** — staged data/control lifecycle,
+  prototypes merged field-by-field across mods with conflict resolution
+  intrinsic to the merge. Best fit: structured game-balance content
+  (items/recipes/entities). Already covered above under "Factorio."
+- **Minecraft datapacks** — declarative JSON, sandboxed, no arbitrary code,
+  can only reconfigure existing systems. Best fit: safe/sandboxed
+  reconfiguration of existing systems. Already covered above.
+- **Forge/Fabric, tModLoader-style** — full code mods hooking a closed
+  engine's internals directly. Already covered above as the "breaks on every
+  version" cautionary case; still named by the owner as a paradigm to
+  support, not one to avoid.
+- **Godot .pck raw overlay, and ".pck + load order"** — pure path-keyed
+  asset overlay, optionally with an orchestration layer for manifests/
+  load-order/non-destructive extension on top. Best fit: asset delivery.
+  See "Godot" above.
+- **Harmony/BepInEx-style runtime patching** — best fit: behavior hooking of
+  existing systems. See below for why this paradigm looks different in Lua.
+
+### Harmony-style modding in Lua is a smaller problem than in .NET
+
+Harmony/BepInEx's IL-patching mechanics exist to solve a problem specific to
+compiled, JIT'd languages: once a method is JIT'd, callers hold references
+to native code, so intercepting it requires rewriting IL in memory. This
+problem does not exist in Lua. Lua functions are ordinary mutable table
+values — monkeypatching (`orig = t.f; t.f = function(...) ... end`) is
+already free, no IL/JIT boundary in the way. Crescent's libraries are also
+already plain readable, copy-paste-ownable source, not compiled/closed. So
+the IL-patching mechanism itself is not something crescent needs to
+replicate.
+
+What does carry over, because it's language-independent: the multi-mod
+coordination/conflict-arbitration layer. When N independently-authored mods
+each want to wrap/intercept the same function, something has to decide
+execution order (Harmony's priority/before/after model), let each patch be
+reasoned about or removed independently, and make it possible to introspect
+which mods are patching a given function. Crescent's version of
+"Harmony-style modding" is really just: expose a conflict-arbitration/
+ordering layer over plain Lua function wrapping. Smaller than what Harmony
+solves for .NET, but not zero — the ordering/visibility pain points
+documented above (unpredictable patch interaction with no explicit
+ordering, fragility of wrap-style patches to upstream signature changes) are
+real and language-independent.
+
+No design for this arbitration layer exists. Not proposed here.
+
+### What this reframing leaves open
+
+Which paradigm-library gets built first, and how paradigm libraries
+interoperate when a single genre core wants more than one at once (e.g.
+Factorio-style data-merge for recipes plus monkeypatch-conflict-arbitration
+for behavior hooks in the same game) are both new questions this resolution
+surfaces, not answered by it. See "Explicitly open questions."
 
 ## Internal audit
 
@@ -298,28 +460,59 @@ Named, not resolved — none of these are proposals for a fix in this doc.
   column-major `mat4` needs resolving before either is safely used as the
   base math layer for a 3D genre core.
 
+## Remediation approach for flagged libraries (owner-directed, settled)
+
+Applies to the libraries flagged broken-for-purpose above (`lib/ecs`,
+`lib/vm`, `lib/constraint_solver`, `lib/logic_circuit`). Owner's exact
+words: "per-library judgment call but be VERY careful per library IFF
+patching, since reading the code poisons architecture. ideally subagents
+should spawn a sub-subagent with a strong model for design WITHOUT the
+design agent looking at our code (researching prior art and evaluating
+tradeoffs is okay, multiple iterations and/or /polish rounds is okay), and
+then implement *exactly* based off of that design."
+
+No blanket policy. Fix-in-place vs. full rewrite vs. supersede-and-deprecate
+is decided per library, based on how deep the flaw goes — not resolved here
+for any specific one of the four.
+
+The one constraint that does apply generally: whenever the chosen
+remediation path involves patching or redesigning a library's *existing*
+architecture (as opposed to a pure new-parallel-implementation under the
+multiple-implementations convention that never touches the old file), the
+design phase must happen without the designing agent reading crescent's
+existing implementation of that library. Prior-art research and abstract
+tradeoff evaluation are fine, including multiple iterations or polish
+rounds. The actual code change must then implement that design exactly —
+not deviate based on what the implementer sees when they finally look at
+the existing file. Rationale (owner's framing): reading the existing flawed
+code risks anchoring the redesign on the existing architecture's
+assumptions, defeating the point of a from-scratch design pass.
+
+Open: the exact orchestration mechanics — how a design-blind agent is
+spawned/isolated from a codebase-aware implementing agent in practice — are
+unresolved. The owner flagged this with a "(?)". This is a process question
+for whoever actually executes remediation work; this doc does not prescribe
+it.
+
 ## Explicitly open questions
 
 Not to be guessed at in this document.
 
-- What exactly does "1000 lines" measure? Control-stage glue code only?
-  Including data-stage prototype definitions? Per whole genre prototype, or
-  per individual mod?
-- Which genre gets the first reference core? The audit found zachlikes has
-  the strongest existing library fits and Factorio the most flat gaps — this
-  is an observation about current library coverage, not a recommendation.
-  The owner picks.
-- Does the data-stage/control-stage split become a new dedicated library (a
-  "mod loader"/"prototype registry"), or a convention documented for library
-  authors to follow?
-- Does crescent's control-stage authoring stay plain Lua functions (the
-  natural fit given crescent is Lua-native and Factorio itself uses Lua), or
-  does it need a higher-level authoring layer? Prior art shows this exact
-  choice caused real, divergent problems on other platforms — Roblox/GMod
-  security and conflict issues from full scripting, Hytale's explicit
-  rejection of text scripting, visual-node platforms paying a steep
-  performance tax. No recommendation follows from that; it's a live
-  tradeoff, not a settled answer.
+- What does "sandbox it properly" mean concretely for control-stage Lua?
+  Restricted stdlib surface, resource/instruction limits, capability-
+  injected I/O only, some combination? The authoring *language* is settled
+  (plain Lua — see "Control-stage authoring language" above); the sandboxing
+  *mechanism* is not designed.
+- Which mod-loader-paradigm library gets built first? All five paradigms
+  (data-merge, datapack-style, code-mod, raw overlay, monkeypatch-
+  arbitration) are named as in-scope, but no priority order among them has
+  been given — distinct from the "any/all" resolution above, which was
+  about genre reference-core order, not paradigm-library order.
+- How do paradigm-libraries interoperate when a single genre core wants more
+  than one at once — e.g. Factorio-style data-merge for recipes plus
+  monkeypatch-conflict-arbitration for behavior hooks in the same game? Not
+  addressed by any resolution so far; a composition question the
+  multi-paradigm direction itself surfaces.
 
 ## Out of scope for this document
 
