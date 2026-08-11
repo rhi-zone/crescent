@@ -5113,6 +5113,15 @@ Type-safe CSS builder library. Lua table → CSS string. Pairs with `lib/html/ht
   - [ ] `lib/spider` — Spider Solitaire: 1/2/4-suit, sequence completion, undo
   - [ ] `lib/freecell` — FreeCell: freecell/cascade/home rules, supermove, deal number
 
+- [ ] **Genre battery design (Terraria/Minecraft/Factorio/zachlike/incremental)** —
+  design doc written at `docs/genre-battery-design.md` capturing the owner's
+  long-term direction (library-shelf composability, ~1000-line glue budget,
+  Factorio-style data/control-stage mod-loader model) plus a prior-art
+  synthesis and internal library-quality audit. Nothing implemented: no
+  mod-loader, no reference cores, no fixes to any library issue the audit
+  found. See that doc's "Prerequisites" and "Explicitly open questions"
+  sections for what would need deciding before implementation starts.
+
 - [ ] **Reactive frontend** — Lua implementation + optional TS deployment:
   1. `lib/reactive/` + `lib/reactive_optics/` are self-contained Lua libraries
   2. `lib/lua2ts/` can transpile them to standalone TypeScript (no Rainbow import)

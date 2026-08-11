@@ -2156,7 +2156,10 @@ layer. Type-safe builder APIs for constructing game state.
 **Games — planned genre batteries** *(future direction, not yet implemented — recorded here
 so the direction isn't lost, not as a commitment to a timeline)*. The board/card games above
 are the proven pattern (headless rules + multi-frontend); the genres below are where that
-pattern is meant to extend next:
+pattern is meant to extend next. For the owner's longer-term Terraria/Minecraft/Factorio/
+zachlike/incremental "genre battery" ambition — library-shelf composability, the
+Factorio-style data/control-stage mod-loader direction, and the internal gap/quality audit
+behind it — see `docs/genre-battery-design.md`.
 
 - **Incrementals** — idle/clicker game genre primitives: resource accumulation curves,
   offline-progress calculation, unlock/prestige trees, cost-scaling formulas. Not started.

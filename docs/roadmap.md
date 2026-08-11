@@ -171,6 +171,11 @@ it feel like creation, which is display's job.
   described in the substrate definition. Whether ECS is the right shape or
   whether a separate `lib/object_graph` (or similar) is needed is an open
   question — derive from a real consumer.
+- The `lib/ecs` vs. `lib/entity_component` duplication above is also a named
+  prerequisite for the owner's longer-term genre-battery ambition (Terraria/
+  Minecraft/Factorio/zachlike/incremental library coverage) — see
+  `docs/genre-battery-design.md` for that direction and the forcing function
+  it adds to this open question.
 
 ### Shared infrastructure across substrates
 
