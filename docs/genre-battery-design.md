@@ -28,6 +28,18 @@ owner-directed, settled where they land) and removed from the open-questions
 list; new questions the resolutions themselves surface are added there
 instead. See each touched section for the specific change.
 
+**2026-08-11 update (2):** the owner rejected two of the questions the
+mod-loader resolution above had surfaced as new open questions — not as
+unresolved, but as never having been real branch points. On paradigm-library
+build order: "why the fuck prioritize" — there's no gate here; libraries get
+built in whatever order capacity allows, not by a priority decision. On
+cross-paradigm composition: "if they are compatible then they are
+compatible" — a tautology, not a design question; two paradigm libraries
+either compose or they don't, discovered empirically at point of use, not
+adjudicated by this doc in advance. Both removed from "Explicitly open
+questions"; see "What this reframing leaves open" for the reframed
+composition note.
+
 ## The ambition (owner-directed, settled)
 
 Crescent should grow batteries-included library coverage for genres:
@@ -301,11 +313,15 @@ No design for this arbitration layer exists. Not proposed here.
 
 ### What this reframing leaves open
 
-Which paradigm-library gets built first, and how paradigm libraries
-interoperate when a single genre core wants more than one at once (e.g.
+Neither of the two questions the multi-paradigm direction first suggested
+here turned out to be real (see the 2026-08-11 update (2) note above).
+Build order among paradigm libraries isn't a design decision — they get
+built in whatever order capacity allows. Cross-paradigm composition (e.g.
 Factorio-style data-merge for recipes plus monkeypatch-conflict-arbitration
-for behavior hooks in the same game) are both new questions this resolution
-surfaces, not answered by it. See "Explicitly open questions."
+for behavior hooks in the same game) is discovered at point of use, not
+adjudicated up front: two paradigm libraries either compose cleanly or they
+don't, and that's found out when someone actually combines them in a genre
+core.
 
 ## Internal audit
 
@@ -503,16 +519,6 @@ Not to be guessed at in this document.
   injected I/O only, some combination? The authoring *language* is settled
   (plain Lua — see "Control-stage authoring language" above); the sandboxing
   *mechanism* is not designed.
-- Which mod-loader-paradigm library gets built first? All five paradigms
-  (data-merge, datapack-style, code-mod, raw overlay, monkeypatch-
-  arbitration) are named as in-scope, but no priority order among them has
-  been given — distinct from the "any/all" resolution above, which was
-  about genre reference-core order, not paradigm-library order.
-- How do paradigm-libraries interoperate when a single genre core wants more
-  than one at once — e.g. Factorio-style data-merge for recipes plus
-  monkeypatch-conflict-arbitration for behavior hooks in the same game? Not
-  addressed by any resolution so far; a composition question the
-  multi-paradigm direction itself surfaces.
 
 ## Out of scope for this document
 
