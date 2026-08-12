@@ -79,12 +79,24 @@ function M.run(code, env, opts)
 	end
 
 	-- Instruction budget: hook fires after `budget` instructions and kills the
-	-- coroutine. The hook clears itself first to avoid recursive error on next
-	-- instruction after the error is thrown.
+	-- coroutine. The hook restores whatever hook (if any) was active before
+	-- this run() call first — both to avoid a recursive error on the next
+	-- instruction after the error is thrown, and so a nested sandbox.run
+	-- (this run() called from inside another budgeted run() on the same
+	-- thread) doesn't wipe out the outer call's budget enforcement. The prior
+	-- hook is saved/restored on every exit path: normal completion below and
+	-- the error path inside the hook itself, since pcall(fn) below catches
+	-- that error and execution always reaches the post-pcall restore too.
+	local prev_hook, prev_mask, prev_count
 	if opts.budget then
+		prev_hook, prev_mask, prev_count = debug.gethook()
 		local budget = opts.budget
 		debug.sethook(function()
-			debug.sethook(nil, "", nil)
+			if prev_hook then
+				debug.sethook(prev_hook, prev_mask, prev_count)
+			else
+				debug.sethook(nil, "", nil)
+			end
 			error("sandbox: instruction budget exceeded")
 		end, "", budget)
 	end
@@ -92,7 +104,11 @@ function M.run(code, env, opts)
 	local ok, result = pcall(fn)
 
 	if opts.budget then
-		debug.sethook(nil, "", nil)  -- clear hook
+		if prev_hook then
+			debug.sethook(prev_hook, prev_mask, prev_count)
+		else
+			debug.sethook(nil, "", nil)  -- clear hook (none was active before)
+		end
 	end
 
 	return ok, result
@@ -197,10 +213,22 @@ M.stdlib = {
 		jit         = safe_jit,
 		bit         = safe_bit,
 	},
-	-- Vendored app code often does require("bit") / require("jit") rather
-	-- than using the globals directly. Allow these safe built-ins so that
-	-- pattern works without individual apps having to declare them.
-	modules = { "bit", "jit" },
+	-- Vendored app code often does require("bit") rather than using the
+	-- global directly. Allow it so that pattern works without individual
+	-- apps having to declare it. "jit" is deliberately NOT in this list:
+	-- env()'s whitelist require() calls the real host require() (see
+	-- above), which would hand sandboxed code the actual jit module —
+	-- jit.on/off toggle the JIT compiler for the whole process (every
+	-- other sandbox and the host share it), jit.flush discards the
+	-- global trace cache, and jit.attach registers a trace-event
+	-- callback that observes ALL compiled code, not just this script.
+	-- That's strictly more than the curated `globals.jit` subset above
+	-- (os/arch/version only) grants, so allowing it here would silently
+	-- bypass the curation. "bit" has no such gap: bit_mod is pure
+	-- numeric functions (band/bor/bxor/bnot/shifts/rol/ror/tobit/tohex/
+	-- bswap) with no shared state, no callbacks, and no introspection,
+	-- so the real module and the "safe" subset are the same thing.
+	modules = { "bit" },
 }
 
 -- pure: no I/O, no print, no coroutines — computation only.

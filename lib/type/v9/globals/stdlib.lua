@@ -218,6 +218,7 @@ return [==[
 --::   getinfo: (thread_or_f: unknown, what: string | nil) -> table | nil,
 --::   traceback: (msg: unknown, level: integer | nil) -> string,
 --::   sethook: (...unknown) -> (),
+--::   gethook: () -> (function | nil, string, integer),
 --::   getlocal: (level: integer, l: integer) -> (string | nil, unknown),
 --::   setlocal: (level: integer, l: integer, value: unknown) -> string | nil,
 --::   getmetatable: (v: unknown) -> table | nil,

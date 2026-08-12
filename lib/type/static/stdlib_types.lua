@@ -253,6 +253,7 @@
 --::     getinfo:      (thread_or_f: integer | ((...never) -> unknown) | Thread, what: string | nil) -> { [string]: unknown, ... } | nil,
 --::     traceback:    (thread_or_msg: Thread | string | nil, msg: string | integer | nil, level: integer | nil) -> string,
 --::     sethook:      (thread_or_fn: Thread | ((string, integer | nil) -> ()) | nil, mask: string | nil, count: integer | nil) -> (),
+--::     gethook:      (thread: Thread | nil) -> (((string, integer | nil) -> ()) | nil, string, integer),
 --::     getlocal:     (level: integer, local_: integer) -> (string, unknown),
 --::     setlocal:     (level: integer, local_: integer, value: unknown) -> string,
 --::     getmetatable: (t: unknown) -> unknown,

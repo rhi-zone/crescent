@@ -127,6 +127,56 @@ T.describe("sandbox.run", function()
 		T.eq(result, 2)
 	end)
 
+	T.it("nested budgeted run does not clobber the outer budget hook", function()
+		-- Regression test: sandbox.run installs its instruction-budget hook
+		-- via debug.sethook with no save/restore of whatever hook was
+		-- already active on the thread. A nested budgeted sandbox.run used
+		-- to unconditionally clear the hook on exit (both the normal
+		-- cleanup and the budget-exceeded error path), silently disabling
+		-- the outer call's budget enforcement for the remainder of its run.
+		--
+		-- lib.sandbox is not on any require whitelist, so the inner run()
+		-- is exercised via a directly-injected global rather than through
+		-- a sandboxed require.
+		--
+		-- Budgets (20 inner / 60 outer) are deliberately tiny — both stay
+		-- under LuaJIT's ~56-back-edge hot-loop threshold. The instruction-
+		-- budget count-hook does not reliably fire once a tight loop gets
+		-- traced (see TODO.md), which is a separate, pre-existing gap; a
+		-- realistic budget (e.g. 5000) here would let the outer loop get
+		-- trace-compiled before its hook fires and hang the test on that
+		-- gap instead of exercising the save/restore fix under test.
+		local inner_env = S.env(S.pure)
+		local function run_inner()
+			return S.run("local i = 0; while true do i = i + 1 end", inner_env, { budget = 20 })
+		end
+		local inner_ok, inner_err
+
+		local cap = { globals = { run_inner = function()
+			inner_ok, inner_err = run_inner()
+		end }, modules = {} }
+		local outer_env = S.env(S.pure, cap)
+
+		-- Outer code runs the inner budgeted sandbox first (which exhausts
+		-- its own small budget and returns an error internally, without
+		-- propagating), then keeps looping. If the outer hook survived,
+		-- the outer budget below still fires; if the bug regresses, this
+		-- loop runs forever instead.
+		local ok, err = S.run([[
+			run_inner()
+			local i = 0
+			while true do i = i + 1 end
+		]], outer_env, { budget = 60 })
+
+		-- The inner sandboxed run hit its own (much smaller) budget first.
+		T.fail(inner_ok)
+		T.ok(inner_err:find("budget exceeded"))
+
+		-- The outer sandbox's budget enforcement must still be intact.
+		T.fail(ok)
+		T.ok(err:find("budget exceeded"))
+	end)
+
 	T.it("caps compose for run", function()
 		local data_cap = { globals = { data = {1, 2, 3} }, modules = {} }
 		local env = S.env(S.pure, data_cap)
@@ -187,5 +237,18 @@ T.describe("sandbox.stdlib bundle", function()
 
 	T.it("does not have debug", function()
 		T.eq(S.stdlib.globals.debug, nil)
+	end)
+
+	T.it("require blocks jit (real module has on/off/flush/attach — process-wide)", function()
+		local env = S.env(S.stdlib)
+		local ok = pcall(env.require, "jit")
+		T.eq(ok, false)
+	end)
+
+	T.it("require allows bit (pure numeric functions, no shared state)", function()
+		local env = S.env(S.stdlib)
+		local ok, bit_mod = pcall(env.require, "bit")
+		T.ok(ok)
+		T.eq(bit_mod.bor(1, 2), 3)
 	end)
 end)

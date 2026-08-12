@@ -6109,3 +6109,28 @@ replaced.
   calling the four aliased methods (building the map border with four
   `fill()` calls instead of `fill_border()`, and keeping its own width/height
   constants instead of querying the map).
+- [ ] **`lib/sandbox`'s instruction-budget count-hook does not reliably fire
+  once a sandboxed loop gets hot enough for LuaJIT to trace-compile it.**
+  `M.run`'s `opts.budget` enforcement (`lib/sandbox/init.lua`) works via
+  `debug.sethook(fn, "", budget)`, a count hook. Confirmed independently of
+  nesting, on plain non-nested `sandbox.run` calls: a tight loop
+  (`local i = 0; while true do i = i + 1 end`) run with `budget = 150` hits
+  the hook and errors correctly; the same loop with `budget = 200` hangs
+  forever (probed directly with `debug.gethook`/`sethook`, bypassing the
+  test framework, on the vendored LuaJIT in `bin/`). The crossover sits
+  between LuaJIT's ~56-back-edge hot-loop trace threshold and the ~3
+  bytecode instructions per loop iteration here — once trace-compiled, the
+  interpreter-level count hook stops firing reliably. This is why the
+  nesting-regression test added alongside the `debug.sethook` save/restore
+  fix in `sandbox_test.lua` uses artificially small budgets (20 inner / 60
+  outer) rather than realistic ones — a `budget = 5000` outer value in that
+  same test previously hung `bin/cr test lib/sandbox/` for exactly this
+  reason (not a bug in the save/restore fix itself; confirmed by bisecting
+  budget values with a standalone repro before the test was corrected). Not
+  fixed here — root cause is LuaJIT trace-compilation bypassing the
+  interpreter's hook dispatch, which needs either a different enforcement
+  mechanism (e.g. `jit.off` on sandboxed chunks, at a real performance
+  cost) or an upstream LuaJIT-level fix; out of scope for the nesting-hook
+  fix this entry accompanies. Any new sandboxed-loop test with a `budget`
+  large enough to plausibly get traced should stay under this threshold or
+  explicitly account for it.
