@@ -6133,7 +6133,36 @@ replaced.
   cost) or an upstream LuaJIT-level fix; out of scope for the nesting-hook
   fix this entry accompanies. Any new sandboxed-loop test with a `budget`
   large enough to plausibly get traced should stay under this threshold or
-  explicitly account for it.
+  explicitly account for it. **Design consequence written up:**
+  `docs/genre-battery/sandboxing.md` ("Rejected: `debug.sethook` count-hook /
+  wall-clock budgets as a security mechanism") treats this finding as
+  conclusive evidence the count-hook mechanism cannot be a hostile-script
+  defense for control-stage mods, not merely a perf/reliability wrinkle —
+  read that doc for the downstream architecture decision this drove
+  (multiple independent process/thread isolation implementations, not an
+  in-VM budget).
+- [ ] **`fork()`-without-`exec()` safety on LuaJIT is undocumented
+  upstream — substrate gap for any fork-based mod-process-isolation
+  implementation.** Surfaced while designing control-stage sandboxing
+  (`docs/genre-battery/sandboxing.md`, "Decided direction," process
+  isolation implementation (a)): searched the LuaJIT mailing list and issue
+  tracker for `fork()` as a syscall and found zero hits — silence, not
+  endorsement. Separately, POSIX itself restricts a fork-without-exec
+  child of a multithreaded parent to async-signal-safe calls for its entire
+  life, and any lock held by another thread of the parent at fork time
+  stays locked forever in the child (`pthread_atfork(3)`: "in practice,
+  this task is generally too difficult to be practicable" to fix
+  generically) — this is why that implementation is scoped as opt-in for
+  hosts the game author keeps single-threaded, not a default. Also worth
+  noting: crescent already tried and abandoned a `fork()`-based HTTP server
+  (`lib/http/server_fork.lua`, removed per the entry above around line
+  5292) in favor of coroutine-based async; the specific reason for
+  abandonment wasn't captured in what was checked while writing the
+  sandboxing doc and is worth digging up before leaning on `fork()` again
+  for mod isolation. Nothing to fix yet — this is a substrate unknown to
+  resolve (upstream confirmation, or crescent's own fork-safety testing
+  against the vendored LuaJIT) before any fork-based implementation ships,
+  not a coded workaround to apply.
 
 ## Session pause — fractal port + agent-design status snapshot (2026-08-13)
 

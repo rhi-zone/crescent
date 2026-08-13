@@ -1,12 +1,22 @@
-# Control-stage sandboxing — design proposal
+# Control-stage sandboxing — design status
 
-**Status: PROPOSAL awaiting owner sign-off. Nothing in this document is
-settled direction.** It answers the open question `genre-battery-design.md`
-names under "Explicitly open questions": *"What does 'sandbox it properly'
-mean concretely for control-stage Lua? ... No sandboxing design exists."*
-This document proposes candidates; it does not pick one. The authoring
-*language* for control-stage code (plain Lua) is separately settled per
-`genre-battery-design.md` — this document does not revisit that.
+**Status: mixed.** Architecture direction is DECIDED for the shape (multiple
+independent implementations, no single "correct" answer — see "Decided
+direction" below); several load-bearing mechanism choices from the original
+proposal are REJECTED with sourced reasoning (see "Rejected" below);
+significant implementation detail remains genuinely OPEN and is called out
+explicitly, not filled in. This document is no longer "awaiting sign-off" in
+the sense of picking between A/B/C — that pick happened, and the answer was
+"build more than one, per crescent's own multi-implementation convention" —
+but it is also not a finished design: several sections below still need real
+design work before anything in them is implementable. Treat each section's
+own status marker as authoritative over this paragraph.
+
+It answers the open question `genre-battery-design.md` names under
+"Explicitly open questions": *"What does 'sandbox it properly' mean
+concretely for control-stage Lua? ... No sandboxing design exists."* The
+authoring *language* for control-stage code (plain Lua) is separately settled
+per `genre-battery-design.md` — this document does not revisit that.
 
 ## What already exists (found before designing anything new)
 
@@ -42,20 +52,24 @@ scratch:
   isolation. It is not about control-stage mods, but it already worked
   through most of the same problem shape (untrusted Lua, capability
   injection, instruction budgets, LuaJIT-specific escape vectors) for
-  HTTP-handler-shaped code, and reached a documented tier decision (below).
-  This document treats it as the closest available precedent and reuses its
-  vocabulary and its already-answered sub-questions rather than re-deriving
-  them.
+  HTTP-handler-shaped code, and reached a documented tier decision. This
+  document treats it as a precedent for vocabulary, and inherits its cap
+  taxonomy (`http_client`, `db`, `kv`, `llm`, `fs`, ffi caps, `exec`/`shell`/
+  `pty`) as the reference for what counts as a genuine external-resource
+  crossing (see "Decided direction" below) — but its tier-1 budget mechanism
+  (`debug.sethook` count-hook) is the thing this document now has sourced,
+  reproduced evidence is broken on LuaJIT specifically (see "Rejected"
+  below), so its tier decision does not transfer uncritically.
 
-Concretely: the capability-injection half of this task (point 1 in the
-brief) and a first cut at the bounded-execution half (point 2) are not
-"undesigned" — they're built, and audited for one consumer. What's actually
-open for control-stage is: (a) whether the game-mod calling shape (control
-code invoked every tick, not per HTTP request) changes the tier tradeoff
-`daemon-isolation.md` already made for its own workload, (b) wall-clock vs.
-instruction-count budgeting, and (c) what capability bundle a control-stage
-mod gets by default. Sections below address these; they do not re-litigate
-what `lib/sandbox` already does.
+Concretely: the capability-injection half of this task is not "undesigned" —
+it's built, and audited for one consumer, and this document keeps it as the
+substrate every implementation below builds on (Section 1 is unchanged from
+the original proposal). What changed is the bounded-execution half: the
+original proposal's Options A and B assumed `debug.sethook` count-hook
+budgets were a real bounding mechanism on LuaJIT. Investigation since found,
+and reproduced against the vendored binary in this repo, that they are not —
+see "Rejected" below for the sourced reasoning, and "Decided direction" for
+what replaces them.
 
 ## Prior art: Lua sandboxing mechanisms (brief)
 
@@ -71,27 +85,22 @@ what `lib/sandbox` already does.
   code is a full sandbox escape (`getfenv(0)` returns the true globals
   table). `lib/sandbox`'s stdlib bundle omits both, and the audit test
   checks they're unreachable from inside a sandboxed env.
-- **Coroutine-based cooperative time-slicing.** A common pattern for
-  bounding untrusted Lua: run the untrusted chunk as a coroutine, install a
-  `debug.sethook(co, fn, "", N)` count-hook that fires every N bytecode
-  dispatches, and have `fn` check a deadline (wall-clock or instruction
-  count) and `error()` out if it's exceeded. This is exactly what
-  `daemon-isolation.md`'s tier-1 plan describes and what `lib/sandbox.run`'s
-  `opts.budget` already implements in instruction-count form (not yet
-  wall-clock — see below). The hook only fires between bytecode
-  instructions; it cannot interrupt a single long-running C function call
-  (a pathological `string.rep`, a catastrophic-backtracking pattern match,
-  a big `table.sort` with a hostile comparator) or the underlying `load()`
-  compile step itself.
+- **Coroutine-based cooperative time-slicing.** The general pattern: run
+  untrusted Lua as a coroutine, install a `debug.sethook(co, fn, "", N)`
+  count-hook that fires every N bytecode dispatches, and have `fn` check a
+  deadline and `error()` out if it's exceeded. This is what
+  `lib/sandbox.run`'s `opts.budget` already implements in instruction-count
+  form. **This mechanism is now CONFIRMED broken as a security boundary on
+  LuaJIT** — see "Rejected: count-hook budgets" below. It remains useful as
+  a *cooperative* bound (catches bugs and slow-but-not-adversarial scripts
+  before they get JIT-hot), just not as a hostile-script defense.
 - **LuaJIT-specific gotchas**, in order of how load-bearing crescent's
   choices already are:
-  - `debug.sethook`'s count-hook interacts with JIT-compiled traces.
-    `daemon-isolation.md` flags this as an open, unbenchmarked interaction
-    ("Interaction with LuaJIT traces needs benchmarking before this
-    lands" — build-order step 3, not yet done for the daemon either).
-    Whether the hook fires reliably inside a hot JIT-compiled trace, and at
-    what overhead, is not established anywhere in this codebase yet. This
-    is a real gap this document inherits rather than resolves.
+  - `debug.sethook`'s count-hook interacts with JIT-compiled traces — **this
+    interaction is now CONFIRMED, not just flagged as unbenchmarked** (the
+    original text here said "not established anywhere in this codebase
+    yet"; it has since been established — see "Rejected" below for the
+    sourced, reproduced finding).
   - `string.dump` serializes a function to LuaJIT bytecode; loading crafted
     bytecode bypasses the VM's bytecode verifier in ways source-mode
     loading does not. `lib/sandbox` forces `load(..., "t", ...)` (text-only)
@@ -104,7 +113,15 @@ what `lib/sandbox` already does.
     whitelist; the audit test enumerates every function on the real `ffi`
     module and blacklists each one individually (not just the table),
     specifically so a future edit can't accidentally re-expose it through a
-    partial re-export.
+    partial re-export. A related, separate escape was found and fixed
+    (already committed, `a71874aa`): the module whitelist used to include
+    `"jit"`, letting sandboxed code `require("jit")` and get the entire
+    unrestricted jit module (`jit.on/off/flush/attach` — process-wide
+    DoS/introspection levers), bypassing the already-curated `safe_jit`
+    table sitting next to it in globals. `"bit"` was investigated at the
+    same time and kept — confirmed pure/side-effect-free, `globals.bit`
+    already assigns the identical real module, no whitelist-bypass risk.
+    Noted here as resolved context; not re-litigated by this document.
   - `newproxy` (LuaJIT-specific, absent from stock 5.1) can construct
     userdata with an arbitrary metatable — a documented escape primitive in
     some sandboxing writeups. Banned defensively in the audit blacklist even
@@ -121,94 +138,131 @@ what `lib/sandbox` already does.
 as `CLAUDE.md`'s convention requires: default is nothing (an empty env has no
 globals at all, not even `_G`), and every name a script can see — including
 `require`-able module names — is named explicitly in a `{ globals, modules }`
-cap table the host composes and passes in. Nothing is ambient.
+cap table the host composes and passes in. Nothing is ambient. Unchanged from
+the original proposal.
 
-For control-stage mods specifically, two decisions remain open (not decided
-by anything read while researching this):
+**DECIDED:** game-state operations (reading/writing world/entity data) are
+NOT capability-gated at all. They are not I/O crossing out of the sandbox, so
+no cap applies. Only genuine external-resource crossings need a
+capability/mediation mechanism — matching `lib/platform`'s existing cap
+taxonomy: `http_client`, `db`, `kv`, `llm`, `fs`, ffi caps, `exec`/`shell`/
+`pty`. This narrows what "capability bundle" even means for control-stage
+mods: most of what a mod does (reading/writing entities, subscribing to
+events) is not a cap surface at all under this decision.
 
-- **What capability bundle is the control-stage default?** `sandbox.stdlib`
-  and `sandbox.pure` are generic, application-agnostic bundles built for the
-  platform daemon's app-loader use case. Control-stage mods need engine-side
-  capabilities that don't exist yet in any cap bundle — the "game/rendering/
-  events API" `genre-battery-design.md` describes control stage as having
-  full access to. Whether that becomes one broad `caps.engine` bundle, or
-  several narrower caps (`caps.entities`, `caps.render`, `caps.events`)
-  granted per-mod-manifest the way the platform daemon grants
-  `caps.kv`/`caps.fs`/`caps.http_server` per app, is unresolved — it depends
-  on what the engine substrate itself ends up exposing, which
-  `genre-battery-design.md`'s "Prerequisites" section already flags as
-  unbuilt (`lib/ecs` vs `lib/entity_component` gap, closed-dispatch-table
-  libraries with no extension API).
-- **Per-mod or per-manifest-declared caps?** The platform daemon model
-  (`docs/daemon-isolation.md`) is: an app's manifest declares which caps it
-  wants, the operator grants or denies at install time, and the daemon
-  assembles exactly that cap set before constructing the app's env. Whether
-  control-stage mods follow the same declare-then-grant flow, or get a
-  fixed default bundle with no per-mod variance (closer to Factorio, where
-  control stage just has "full API access" uniformly), is a mod-loader-shape
-  question this document does not decide — it depends on the trust model for
+**STILL OPEN — what a game-state-affecting cap (if any is even needed)
+actually gates over.** An earlier framing floated during design discussion
+was "one attenuatable cap type" for game-state mutation — this was
+explicitly rejected as ungrounded when put to the owner directly ("i dont
+know? sounds made up"). It is not established that game-state mutation needs
+any cap at all beyond the "not I/O, not gated" decision above; if some
+narrower concern turns out to need gating (e.g. one mod overwriting another
+mod's owned entities), what that boundary concretely is has not been
+designed. Do not treat "one attenuatable cap" as settled vocabulary — it
+isn't.
+
+**Still open, unchanged from the original proposal:**
+
+- **What capability bundle is the control-stage default** for the genuine
+  I/O caps that *do* apply (the `lib/platform` taxonomy above) — whether
+  that's one broad `caps.engine` bundle or several narrower caps granted
+  per-mod-manifest depends on what the engine substrate itself ends up
+  exposing, which `genre-battery-design.md`'s "Prerequisites" section
+  already flags as unbuilt (`lib/ecs` vs `lib/entity_component` gap,
+  closed-dispatch-table libraries with no extension API).
+- **Per-mod or per-manifest-declared caps?** Whether control-stage mods
+  follow the platform daemon's declare-then-grant flow, or get a fixed
+  default bundle with no per-mod variance, depends on the trust model for
   wherever mods come from (bundled-with-game vs. Workshop-style third-party
-  distribution), which is itself unresolved in `genre-battery-design.md`.
+  distribution) — itself unresolved in `genre-battery-design.md`.
 
 ## 2. Bounded execution
 
-`sandbox.run`'s `opts.budget` already gives instruction-count bounding today:
-a `debug.sethook` count-hook fires after `budget` instructions and raises a
-Lua error, caught by the `pcall` inside `sandbox.run`, surfacing as
-`(false, err)` — a return value, not a thrown exception out of `run` itself.
-Adapting that to the project-wide `(nil, errmsg)` convention at the
-mod-loader boundary is a thin wrapper (`if not ok then return nil, err end`),
-not a design question.
+### Rejected: `debug.sethook` count-hook / wall-clock budgets as a security mechanism
 
-What's genuinely open:
+The original proposal's Options A and B (below, kept for record with a
+REJECTED marker) both assumed a `debug.sethook` count-hook — instruction-count
+or wall-clock-checking — is a real bound on a hostile or hung script.
+**This is false on LuaJIT and has been confirmed two ways: by reading LuaJIT
+`v2.1` source, and by reproducing the failure against the vendored binary in
+this repo.**
 
-- **Instruction count vs. wall-clock.** An instruction-count budget is
-  deterministic and cheap but means the same mod script runs a different
-  *number of frames-worth of real time* depending on whether the JIT has
-  compiled its hot loop yet — a script budgeted for "typical" JIT-compiled
-  speed can blow way past its intended time slice while still
-  interpreter-only, and one budgeted conservatively for interpreter speed
-  wastes headroom once JIT-compiled. `daemon-isolation.md`'s build-order step
-  3 (not yet landed there either) proposes a wall-clock check inside the
-  same count-hook (`time_fn() - start_ns > budget_ns`, checked every N
-  bytecodes) as the fix. That design is directly reusable here; it has not
-  shipped anywhere in this codebase yet, so "reusable" means "same
-  unbuilt work," not "already available."
-- **What a violation means for a hung script vs. a script that merely errors.**
-  A script that raises (including via budget-exceeded) is a normal
-  `(nil, errmsg)` case for the mod loader — no different from a syntax error
-  or a runtime `error()` call, and already handled by the pcall wrapping.
-  The harder case the brief calls out — "a script that's genuinely hung may
-  need a harder stop than a returned error" — is real and *not* solved by
-  the count-hook at all: the hook fires between bytecode dispatches, so it
-  cannot interrupt a single pathological C-level call (catastrophic-backtrack
-  pattern match, huge `string.rep`, a hostile `table.sort` comparator that
-  never terminates its own C-side probing, or a genuine infinite loop
-  entirely inside a C function crescent doesn't control). `debug.sethook`
-  never fires in that case; there is no bytecode dispatch to hook. This gap
-  is inherited from `daemon-isolation.md`, which names the analogous
-  "blocking-I/O cap limits" and "coroutine hijacking" cases as accepted
-  non-goals for its own tier-1 answer, not as solved. Nothing in this
-  codebase currently has a harder stop than "the count-hook fires, or it
-  doesn't." A genuinely hard stop (kill the OS thread, kill the process)
-  requires a boundary the count-hook approach doesn't have — see Option C
-  below.
-- **Tick-frequency changes the tradeoff `daemon-isolation.md` already made.**
-  That document picked tier 1 (shared `lua_State`, in-process, `pcall` +
-  instruction quota) for the platform daemon's workload: per-HTTP-request
-  handler invocations. Control-stage code's calling shape is plausibly very
-  different — invoked every game tick (e.g. 60/s), not per request — which
-  changes the cost-per-invocation math for any tier that adds
-  per-invocation overhead (tier 2's state-boundary cap calls, tier 3's IPC).
-  Whether tier 1's overhead profile still holds at tick frequency, or
-  whether a different tier is actually cheaper at that call rate, is not
-  established by anything read for this document and needs its own
-  measurement before being assumed either way.
+- **Source-level:** trace recording in `lj_trace.c` only checks for GC and
+  vmevent hooks before compiling a hot loop to a trace — it does not check
+  for an active count or line hook. Once LuaJIT compiles a trace (after
+  roughly 56 loop back-edges by default), the trace is native machine code
+  (`lj_dispatch.c`, `vm_x64.dasc`) with zero dispatch-table/hook involvement.
+  `hookcount` is frozen at whatever value it had at compile time; it is never
+  decremented again while the trace runs.
+- **Empirical, reproduced against the vendored LuaJIT in `bin/`:** an
+  unconditional loop with no natural exit (`local i = 0; while true do i =
+  i + 1 end`) run through `sandbox.run` with `opts.budget = 150` hits the
+  hook and errors correctly. The same loop with `budget = 200` hangs
+  forever — no error, no timeout, immune to the budget entirely. Calling
+  `jit.off()` before the loop makes `budget = 200` fire correctly again,
+  isolating the cause specifically to tracing (not to hook mechanics in
+  general). This crossover — between LuaJIT's ~56-back-edge hot-loop
+  threshold and this loop's ~3 bytecodes/iteration — is also documented as
+  its own `TODO.md` entry (search "does not reliably fire"), filed
+  independently before this document was updated; that entry is the
+  canonical record of the reproduction, this document just carries the
+  security-design consequence of it.
+
+**Consequence:** a count-hook or wall-clock-check-inside-a-count-hook budget
+is not a defense against an adversarial or genuinely hung script — a hostile
+mod author (or a buggy one) can write a tight infinite loop that JIT-traces
+past the hook and runs forever, unbounded, with no error surfaced anywhere.
+It remains useful as a *cooperative* bound — catching non-adversarial bugs
+and slow scripts before they get hot enough to trace — but it is not load-
+bearing for anything that needs to survive a hostile mod. Options A and B
+below are REJECTED on this basis, not merely deprioritized.
+
+A separate, already-resolved bug in the same code path (commit `a71874aa`,
+noted for completeness, not part of this document's open items): the
+budget-hook cleanup used to call `debug.sethook(nil, "", nil)`
+unconditionally on exit, clobbering any outer hook when `sandbox.run` calls
+nest — now saves and restores the previous hook state.
+
+### Rejected: async signal-based preemption
+
+Floated as a candidate for a genuine hard interrupt (fire a signal handler
+at an arbitrary point, `longjmp` out mid-execution, no cooperation from the
+script required). **Rejected as unsupported and hazardous, not merely
+undesirable:**
+
+- LuaJIT's own unwind path (`lj_err_throw`) calls `lj_trace_abort()` before
+  any `longjmp`, deliberately bringing trace state to a safe point first — an
+  async signal handler firing at an arbitrary instruction cannot arrange
+  this same safety.
+- No source found of anyone shipping true async mid-trace interruption for
+  LuaJIT.
+- The closest real-world discussion found (Tarantool issue #4748) had a
+  maintainer directly object to the premise ("who said sethook is
+  async-signal-safe?") and converge instead on a flag-set-by-signal,
+  synchronously-consumed-elsewhere pattern — which is what LuaJIT's own
+  `LUAJIT_ENABLE_CHECKHOOK` does. That flag itself is unsupported/off-by-
+  default upstream, and Mike Pall has confirmed it costs real per-iteration
+  time in tight loops — rejected here on cost grounds as a separate,
+  additional reason on top of the safety concern.
+
+### Still open (unchanged from the original proposal, restated for the mechanisms that remain relevant)
+
+- **Tick-frequency changes the cost tradeoff any process/state-boundary
+  option makes.** `daemon-isolation.md` picked its tier for per-HTTP-request
+  invocation. Control-stage code runs every game tick (e.g. 60/s) — a
+  fundamentally different call-volume profile. Whether any given isolation
+  tier's per-invocation overhead is acceptable at tick frequency has not
+  been measured and needs its own benchmark, not an assumption carried over
+  from the daemon's numbers.
+- **What a violation means for a hung script vs. one that merely errors.** A
+  script that raises (including via a cooperative budget) is a normal
+  `(nil, errmsg)` case, already handled by `pcall` wrapping. A script that's
+  genuinely hung (or adversarially avoiding the cooperative hook per
+  "Rejected" above) needs a harder stop — this is exactly what "Decided
+  direction" below addresses with process/thread-level interruption
+  mechanisms, since no in-VM mechanism can do it.
 
 ## 3. LuaJIT interaction
-
-Covered in "Prior art" above in detail. Summary of what's load-bearing for
-this design specifically:
 
 - The env-injection mechanism (`load(src, name, "t", env)`) is the LuaJIT
   5.1-style fenv, not a 5.2 `_ENV` upvalue — already how `lib/sandbox` works,
@@ -219,117 +273,174 @@ this design specifically:
   Any control-stage cap bundle built on top of `lib/sandbox.env` inherits
   this for free as long as it's built from `sandbox.stdlib`/`sandbox.pure`
   or passes through the same audit; a bundle built from scratch would need
-  its own audit-test coverage — the existing test only covers the two
-  bundles that exist today.
-- The count-hook / JIT-trace interaction is unbenchmarked anywhere in this
-  codebase (daemon or otherwise). This is the single largest unresolved
-  technical unknown underneath *any* instruction- or wall-clock-budget
-  option below, and applies identically regardless of which option is
-  chosen.
+  its own audit-test coverage.
+- The count-hook / JIT-trace interaction, previously flagged here as
+  unbenchmarked, is now resolved to a negative result: it's not a viable
+  security mechanism (see "Rejected" above). This changes the shape of
+  Section 2 from "needs a benchmark before any option can be chosen" to
+  "the in-VM option is off the table; hard interruption needs an OS-level
+  boundary."
+- **`fork()`-without-`exec()` safety on LuaJIT is undocumented upstream** —
+  searched the LuaJIT mailing list and issue tracker for `fork()` as a
+  syscall; zero hits. Silence, not endorsement. This is a real substrate gap
+  for any fork-based implementation under "Decided direction" below — see
+  that section's caveats.
 
-## Design options
+## Decided direction
 
-Presented side by side per the brief; no recommendation. All three assume
-`lib/sandbox.env`/`sandbox.stdlib`-shaped capability injection underneath
-(Section 1) — they differ only in how execution is bounded and how far
-isolation goes, since that's the axis with genuinely different unresolved
-mechanisms.
+**No single "correct" architecture. Multiple independent implementations,
+per this repo's own convention** ("When one implementation can't satisfy all
+legitimate use cases, provide multiple... each is a real, independent
+implementation; never wrap one around another" — `CLAUDE.md`, invoked
+directly for this decision). Concretely:
 
-### Option A — reuse `lib/sandbox.run` as-is, per-invocation instruction budget
+- **Process isolation, as at least two genuinely separate implementations:**
+  - **(a) Direct `fork()` from the host process itself.** Cheap (page-table
+    copy, COW-deferred), precedented (Chromium's zygote forks without exec
+    specifically to skip re-paying dynamic-linker cost per spawn). Only safe
+    when the host process is single-threaded at fork time — if the host has
+    any other live thread, any lock that thread held stays locked forever in
+    the forked child (POSIX law, `pthread_atfork(3)`: "in practice, this
+    task is generally too difficult to be practicable" to fix generically),
+    and POSIX also restricts the child to async-signal-safe calls only,
+    which never lifts for a fork-without-exec child's entire life. Whether a
+    given game host is single- or multi-threaded is a downstream game
+    author's per-game decision, not something crescent can verify or
+    enforce — so this is an opt-in path with a documented precondition, not
+    a default. `fork()`'s LuaJIT-safety is itself undocumented upstream (see
+    Section 3) — a real open substrate risk this implementation carries, not
+    a solved problem being reused.
+  - **(b) A minimal, deliberately single-threaded external supervisor
+    process that forks mod children on the host's behalf.** Sidesteps the
+    multithreaded-fork hazard entirely regardless of what the host does
+    (the supervisor controls its own threading), and enables a pre-warmed
+    process pool amortizing spawn cost the same way Chromium's zygote does.
+  - These are not variants of one thing — build them as two independent
+    implementations per the tiering convention, not one wrapping the other.
+- **Thread-based isolation (separate `lua_State` per OS thread, same
+  process) as a third independent implementation.** Weaker guarantees — no
+  fault containment (an FFI/C bug in one mod corrupts the whole process
+  regardless of separate Lua states, since the address space is shared) and
+  no cheap forced-stop (`pthread_cancel`'s deferred-mode cancellation points
+  are never hit by a tight compute loop with no blocking syscalls; async
+  cancellation is documented unsafe for arbitrary code) — but cheaper, for
+  callers who accept "isolate mods from corrupting each other's Lua state"
+  rather than "defend against a hostile script."
+- **The interruption/stop mechanism is also multiple independent,
+  user-selectable implementations, not one chosen mechanism:**
+  - **(a) Process kill (SIGKILL)** — real, but only for actual separate OS
+    processes. On Linux, SIGKILL and any signal with terminate/stop/continue
+    disposition only isolate at process granularity, not thread granularity
+    (`pthread_kill(3)`: "if the disposition of the signal is 'stop',
+    'continue', or 'terminate', this action will affect the whole process";
+    `ptrace(2)`: a stopping signal to any thread of a multithreaded process
+    stops all its threads). `tgkill()` only controls delivery *targeting*,
+    not the *scope of effect* for these dispositions. This means "just
+    SIGKILL the stuck mod's thread" is not a real per-mod primitive for the
+    thread-based implementation above — only a genuinely separate process
+    gets a clean, kernel-enforced kill.
+  - **(b) `ptrace`-based single-thread suspend, for the thread-based
+    implementation.** `PTRACE_SEIZE` + `PTRACE_INTERRUPT` is genuinely
+    per-thread (distinct from SIGSTOP's whole-process group-stop), and
+    self-attach from a sibling thread in the same process is explicitly
+    permitted per `ptrace(2)` ("If the calling thread and the target thread
+    are in the same thread group, access is always allowed" — no separate
+    tracer process required). Real and usable, but debugger/checkpoint-
+    tool-grade (the pattern gdb non-stop mode, `rr`, and CRIU use) — heavy
+    for an everyday primitive, and only one tracer may attach to a tracee at
+    a time, which breaks if the process is already being debugged or
+    profiled by something else.
+  - **(c) Manually-instrumented loop checks (cooperative).** In-code budget
+    checks the mod/game author opts into and pays the per-iteration cost
+    for. Earlier explored and rejected as a *mandatory universal* mechanism
+    (a hard 10% overhead ceiling on tiny loops makes that untenable), but as
+    an *optional* mechanism for callers who want it and accept the cost,
+    it's legitimate and should be offered, not foreclosed by the mandatory-
+    case rejection.
 
-Control-stage mod callbacks (however the mod loader ends up structuring
-"the function this mod runs when X happens") are invoked through
-`sandbox.run(code_or_fn, env, { budget = N })` directly, same as the daemon's
-planned (not-yet-landed) `app_loader.lua` integration. No new mechanism.
+These decisions concern architecture shape and which mechanisms are real vs.
+dead. They do not specify pool sizing, IPC wire format, cap-call latency
+budget, or any other implementation parameter — those are open, below.
 
-- **Pros:** Already built and audited (`lib/sandbox/sandbox_audit_test.lua`).
-  Zero new escape-vector surface to review. Zero per-call overhead beyond the
-  hook itself — no state boundary, no serialization.
-  Matches `daemon-isolation.md`'s tier-1 choice, so any future work closing
-  that document's build-order step 3 (wall-clock check in the hook) benefits
-  control-stage mods automatically without a separate implementation.
-- **Cons:** Same tier-1 gaps as the daemon doc, inherited as-is: no memory
-  quota, no defense against a single hung C-level call, shared `lua_State`
-  means one mod's primitive-metatable mutation or GC pressure is visible to
-  every other mod and the host engine. At tick frequency, an unbounded loop
-  in *any* mod stalls the entire game loop, not just that mod's own update —
-  worse blast radius than a stalled HTTP handler, since a stalled request
-  only blocks the one client (in a single-threaded server, also blocks the
-  loop — same shared-thread caveat `daemon-isolation.md` itself accepts for
-  tier 1). Instruction-count budgeting (not yet wall-clock) means budget
-  tuning is JIT-state-dependent, per Section 2.
+## Still genuinely open
 
-### Option B — coroutine + wall-clock preemption
+Do not treat any of these as decided; none of them were.
 
-Same in-process model as A, but each control-stage callback runs as a
-coroutine, and the count-hook installed on it checks wall-clock deadline
-(`time_fn() - start_ns > budget_ns`) rather than a raw instruction count —
-implementing `daemon-isolation.md`'s currently-unbuilt build-order step 3,
-generalized to control-stage's per-tick calling shape instead of per-request.
+- **What a game-state-affecting cap (if any) gates over.** See Section 1.
+  The "one attenuatable cap" framing floated in design discussion was not
+  grounded and should not be read as settled vocabulary.
+- **Cap-call IPC mechanism for the genuine I/O caps**, for whichever
+  process-isolated implementation is used: shared-memory ring buffer vs.
+  Unix domain socket vs. something else is not chosen. Only rough latency
+  numbers have been sourced (shared memory ~270ns, UDS ~4.6–5.9µs, one blog
+  benchmark) — with a methodology caveat: it's unclear whether that measured
+  a blocking wait or a busy-spin, which matters significantly for a design
+  where a caller actually blocks on the call.
+- **Process-pool sizing and lifecycle** for the supervisor-based
+  implementation (2b above) — not designed.
+- **Whether a given game host is single- or multi-threaded is explicitly not
+  crescent's call.** It's a downstream game author's per-game decision, not
+  something this document (or any future one) should resolve on their
+  behalf — implementation (a) above documents the precondition rather than
+  assuming an answer.
+- **What capability bundle is the control-stage default**, and **per-mod vs.
+  per-manifest-declared caps** — both restated from Section 1, unresolved by
+  anything decided above; they depend on engine substrate that doesn't exist
+  yet (`genre-battery-design.md`'s "Prerequisites") and on a mod-distribution
+  trust model that's separately unresolved.
+- **Tick-frequency overhead of any process/thread-boundary implementation**
+  — not measured; `daemon-isolation.md`'s per-request numbers do not transfer
+  to a per-tick calling shape without new measurement.
 
-- **Pros:** Time-based budget is what actually matters for a real-time game
-  loop (a mod's control code needs to fit inside this tick's frame budget,
-  regardless of whether the JIT has warmed up yet) — closes Option A's
-  JIT-state-dependent tuning problem. Coroutine framing also gives mods a
-  legitimate way to `coroutine.yield` across ticks for multi-tick behavior
-  without being killed, if the mod loader chooses to expose that (a
-  mod-loader-shape decision this document doesn't make).
-- **Cons:** Still shares every tier-1 gap Option A has (no memory quota,
-  hung-C-call blind spot, shared-state blast radius) — this option only
-  changes *what* the budget measures, not what happens when a C-level call
-  never returns control to a bytecode dispatch. The JIT-trace/count-hook
-  interaction is unbenchmarked (Section 3) and this option depends on it
-  more heavily, since a wall-clock check has to run frequently enough to
-  catch overruns promptly without adding meaningful per-bytecode overhead —
-  a tuning problem `daemon-isolation.md` explicitly deferred to its own
-  future benchmarking, not solved. Building the coroutine-scheduling
-  interaction correctly (an app's own internal `coroutine.*` calls must
-  stay invisible to the outer quota coroutine, per `daemon-isolation.md`'s
-  "Coroutine hijacking defense" non-goal note) is real engineering work,
-  not a config flag.
+## Design options (historical — superseded)
 
-### Option C — separate `lua_State` (or process) per mod, hybrid with A/B
+The three options below are the original proposal's framing, kept for
+record. **A and B are REJECTED** — their bounding mechanism (`debug.sethook`
+count-hook / wall-clock-in-count-hook) is confirmed non-viable as a security
+boundary on LuaJIT (see Section 2, "Rejected"). **C is subsumed** by
+"Decided direction" above, which resolves its "hybrid with A/B, no
+recommendation" framing into concrete, named, independent implementations —
+read that section instead of this one for anything actionable. This section
+is retained only so the reasoning trail (why A/B looked plausible before the
+count-hook finding) isn't lost.
 
-Escalate to `daemon-isolation.md`'s tier 2 or tier 3 for control-stage
-specifically, keeping Option A or B's in-process budget as the first line of
-defense and adding a hard OS/VM-level boundary as backstop: each mod (or
-each mod's control-stage entry point) runs in its own `lua_State`
-(tier 2) or its own OS process (tier 3), so a hung C-level call or a
-JIT-miscompile-triggered escape is contained to that mod's state/process and
-can be forcibly killed from outside without corrupting the host engine's own
-Lua state.
+### Option A (REJECTED) — reuse `lib/sandbox.run` as-is, per-invocation instruction budget
 
-- **Pros:** The only option that actually answers "a script that's genuinely
-  hung may need a harder stop than a returned error" from the brief — a
-  count-hook cannot interrupt a stuck C call from inside the same OS thread,
-  but an external supervisor (watching a per-mod deadline) can kill a
-  separate `lua_State`'s host thread or an OS process outright. Also the
-  only option that bounds memory per mod (an OS process has an OS-enforced
-  memory ceiling; a shared `lua_State` structurally does not, per
-  `daemon-isolation.md`'s own non-goals section). Matches Factorio's actual
-  security posture more closely if third-party mod distribution is ever in
-  scope (`genre-battery-design.md`'s mod-loader-shape section names Workshop-
-  style paradigms as in scope for *some* mod-loading paradigm, though not
-  necessarily control-stage specifically).
-- **Cons:** This is exactly the tradeoff `daemon-isolation.md` measured and
-  explicitly declined to build speculatively for its own workload ("Do not
-  build tier 2 speculatively"). Every cap call a mod makes into engine state
-  crosses a state or process boundary — serialization or `lua_xmove` for
-  tier 2, IPC for tier 3 — and `daemon-isolation.md` estimates 5-10x overhead
-  for a naive serialization bridge on cap-heavy workloads, unmeasured for a
-  `lua_xmove`-based shim. At per-tick call frequency (Section 2's tick-rate
-  point) this cost multiplies by however many ticks/second the engine runs,
-  which is a fundamentally different call-volume profile than the daemon's
-  per-HTTP-request case that produced the "don't build tier 2 speculatively"
-  call — this option needs its own measurement against control-stage's
-  actual calling shape before any tier decision transfers from the daemon
-  context. Substantially more implementation and lifecycle complexity (state/
-  process creation, teardown, crash telemetry) than A or B.
+Control-stage mod callbacks invoked through `sandbox.run(code_or_fn, env,
+{ budget = N })` directly, no new mechanism. Rejected because the
+`opts.budget` count-hook does not fire once a hot loop gets JIT-traced (see
+Section 2) — a hostile or genuinely buggy tight loop is not bounded by this
+at all, unconditionally. Remains valid as a *cooperative* bound (see
+"Decided direction," interruption mechanism (c)), just not as the sole or
+primary defense this option originally proposed it as.
+
+### Option B (REJECTED) — coroutine + wall-clock preemption
+
+Same in-process model as A, with the count-hook checking wall-clock deadline
+instead of raw instruction count. Rejected for the identical reason as A:
+the underlying `debug.sethook` mechanism stops firing once the loop is
+JIT-traced, regardless of what the hook body checks. A wall-clock check
+inside a hook that may never fire again provides no additional bound over A.
+
+### Option C (superseded) — separate `lua_State` (or process) per mod
+
+Originally framed as "hybrid with A/B... no recommendation between tier 2 and
+tier 3." "Decided direction" above replaces this framing: both process
+isolation and thread-based `lua_State` isolation are now named as concrete,
+independent implementations (not a single "escalate to tier N" choice), and
+interruption is itself multiple selectable mechanisms rather than bundled
+into the isolation tier choice. The specific overhead and lifecycle
+questions this option raised (serialization/IPC cost at tick frequency,
+process-pool sizing) are carried forward as open items above, not resolved.
 
 ## What this document does not do
 
-No recommendation between A/B/C. No decision on the control-stage default
-capability bundle. No decision on per-mod-declared vs. fixed caps. No
-benchmark of the count-hook/JIT-trace interaction — flagged as unresolved
-everywhere it's relevant, not run. No mod-loader-shape decision. All of these
-are named as open in the relevant section above rather than guessed at.
+No IPC mechanism chosen for cap calls. No pool sizing or lifecycle design
+for the supervisor implementation. No definition of what a game-state cap
+(if one is even needed) gates over — an earlier "one attenuatable cap"
+framing was floated and explicitly not grounded; do not read it as settled.
+No decision on the control-stage default capability bundle for the caps that
+do apply. No decision on per-mod-declared vs. fixed caps. No measurement of
+any isolation tier's overhead at control-stage's per-tick calling frequency.
+No mod-loader-shape decision. All of these are named as open in the relevant
+section above rather than guessed at.
