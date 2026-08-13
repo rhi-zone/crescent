@@ -48,7 +48,7 @@ astar, bayesian_filter, bezier, complex, constraint_solver, convex_hull, datetim
 SQLite FFI (`lib/sqlite/`), conversation tree, db abstraction, ecs (SQLite) + entity_component (in-memory) parallel, mini_orm, query_builder, raft state machine, schema migrations.
 
 ## OS / FFI / platform
-asm (CPU detect + kernel compile), caps (type aliases), env + env_schema, fs, path, process, exec, signal, stb (image FFI tiered). Wip: dynamic_library, linux /proc, posix. `lib/platform/` is the runner (tarball loader + sandboxed entrypoints + cap dispatch + daemon).
+asm (CPU detect + kernel compile), caps (type aliases), env + env_schema, fs, path, process, exec, signal, stb (image FFI tiered). `lib/os_isolation/` — OS-level process/thread isolation + interruption (fork_direct, fork_supervisor, thread; interrupt_kill, interrupt_ptrace, interrupt_cooperative), distinct from `lib/sandbox`'s in-process capability restriction. Wip: dynamic_library, linux /proc, posix. `lib/platform/` is the runner (tarball loader + sandboxed entrypoints + cap dispatch + daemon).
 
 ## Apps and demos
 `lib/crescent_examples/` (demos, not a library). `lib/platform/apps/`: charactercardv2, library (collection browser), system_dashboard (BFF — packs + projections), sillytavern (wip).

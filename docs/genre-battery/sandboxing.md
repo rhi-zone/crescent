@@ -362,6 +362,113 @@ These decisions concern architecture shape and which mechanisms are real vs.
 dead. They do not specify pool sizing, IPC wire format, cap-call latency
 budget, or any other implementation parameter — those are open, below.
 
+## Implemented: `lib/os_isolation`
+
+The isolation/interruption mechanisms above are built, as `lib/os_isolation/`
+— a new module, deliberately separate from `lib/sandbox` (which keeps its
+existing name and scope unchanged: in-process capability restriction via a
+`require` whitelist + curated globals, same OS process/thread as the
+caller). The split is not a rename; it is two genuinely different failure
+domains kept visibly apart per the repo owner's explicit instruction, not
+defaulted into one module: `lib/sandbox` restricts what code can *reach*;
+`lib/os_isolation` restricts what a failure or a hang can *do to the rest of
+the process*. They compose — run `lib.sandbox`-restricted code inside an
+`lib.os_isolation`-isolated child for both properties at once.
+
+- **`fork_direct.lua`** — implementation (a) above. Direct `fork()`, no
+  `exec()`, same LuaJIT image; `spawn(fn)` runs a Lua closure in the child
+  (COW gives it the caller's captured state for free — no serialization for
+  inputs), `handle.join()` blocks for the result. The single-threaded
+  precondition is checked on Linux via `/proc/self/status`'s `Threads:`
+  line and REFUSED (not silently risked) when violated — confirmed
+  end-to-end: a real second OS thread (via `thread.lua`) calling
+  `fork_direct.spawn` while the main thread is still alive is detected and
+  rejected with an explanatory error, not a silent corruption. Best-effort
+  only (a thread starting between the check and the syscall is still a real
+  gap, and the check doesn't run at all off Linux) — the module header says
+  so plainly.
+- **`fork_supervisor.lua`** — implementation (b) above, plus
+  `supervisor_main.lua` (the supervisor's own entry point, run via
+  `bin/cr`). Resolves the "process-pool sizing and lifecycle" item that was
+  open below: v1 is deliberately simple — one supervisor process per
+  `start()` call, no pre-warmed pool, spawn-on-demand. `spawn()` does not
+  block on the child (the supervisor forks and replies with the pid
+  immediately), so multiple children spawned through one supervisor run
+  concurrently; only the supervisor's own request/response bookkeeping is
+  serial. This is a first-implementation default, not a claim that pooling
+  or pre-warming is unnecessary — a caller wanting either builds it on top.
+  Only Lua source text + JSON-representable args cross the boundary (no
+  closures — genuinely a different process image).
+- **`thread.lua`** — the separate-`lua_State`-per-OS-thread implementation.
+  Built via a pure-FFI callback pattern (create a second `lua_State` with
+  `luaL_newstate()`, run a bootstrap chunk on it from the calling thread
+  that builds an FFI callback, hand the callback's raw pointer to
+  `pthread_create()`) — no vendored C shim, following the pattern LuaJIT's
+  author (Mike Pall) described directly for this scenario and that
+  `github.com/luapower/pthread` + `luapower/luastate` implement as real,
+  running code. Verified against this repo's own vendored LuaJIT binary:
+  `luaL_newstate`/`luaL_openlibs`/`luaL_loadstring`/`lua_pcall`/`lua_close`
+  and the string/field accessors used to move code, args, and results
+  across are all reachable via `ffi.C`. **One open safety question is
+  carried, not resolved**: no primary source (not the mailing-list post,
+  not LuaJIT's FFI docs, not `lj_ccallback.c`) confirms or rules out a
+  GC-phase or reentrancy hazard specific to the callback's first invocation
+  happening on a brand-new OS thread LuaJIT's runtime has never seen. This
+  module's own testing (dozens of spawn/join cycles, workloads from trivial
+  to 200M+ loop iterations) surfaced no crash or corruption — a data point,
+  not a safety proof. **A second, distinct finding from that same testing**:
+  the full `lib/os_isolation` test suite occasionally took far longer to
+  complete than its normal sub-few-seconds run time — most reliably
+  reproduced by running several full copies of the suite in parallel (an
+  artificial stress case), but also observed, less often, on a single
+  serial `bin/cr test` invocation. Each individual workload run in
+  isolation (up to tens of millions of loop iterations) consistently
+  completed in well under a second on its own; the slowdowns showed up
+  specifically running the FULL suite (many spawns across many test
+  files), which points at ordinary CPU contention across many concurrently
+  forked processes and pthreads rather than a hang in the mechanism itself
+  — but this is circumstantial timing evidence, not a proof, and it is not
+  ruled out as something worse. A caller running many `thread.lua` units
+  concurrently should not assume a short fixed timeout is safe. Gives
+  GC/heap separation
+  between units, explicitly NOT fault containment (shared address space —
+  an FFI/C bug in one unit can still corrupt the whole process) and NOT a
+  cheap forced-stop, exactly as this section already said above.
+- **`interrupt_kill.lua`** — mechanism (a). `SIGKILL` against a real pid.
+  Confirmed to actually stop an unconditional infinite loop in a
+  `fork_direct`/`fork_supervisor` child (not merely documented as
+  process-granularity-only — exercised).
+- **`interrupt_ptrace.lua`** — mechanism (b). `PTRACE_SEIZE` +
+  `PTRACE_INTERRUPT` suspend, `PTRACE_CONT` resume, `PTRACE_DETACH`. Linux
+  only, reports unavailable via `(nil, errmsg)` elsewhere, per this repo's
+  tiering convention (no pure-Lua fallback exists — ptrace is inherently a
+  syscall). **Confirmed working against a real `fork_direct` child pid**
+  with no special privilege needed (parent/child ptrace is always allowed).
+  **Confirmed FAILING with `EPERM` against a `thread.lua` unit's own tid in
+  this repo's own sandboxed dev/CI environment**, despite `ptrace(2)`
+  documenting same-thread-group self-attach as "always allowed" independent
+  of Yama's `ptrace_scope` — verified via `errno`, not assumed (this
+  environment's effective capability set was observed empty even though
+  `cap_sys_ptrace` was present in the bounding set, and `ptrace_scope` was
+  `1`). The module now surfaces `errno` and a specific note for this case
+  rather than a bare "failed" message. Whether same-thread-group ptrace
+  works is environment-dependent, not guaranteed by this module alone.
+- **`interrupt_cooperative.lua`** — mechanism (c). Opt-in `checker:tick()`
+  calls the author places inline in their own loop; verified it bounds
+  exactly the loop shape this document's "Rejected: `debug.sethook`
+  count-hook budgets" section documents as escaping a hook-based budget
+  once JIT-traced (an inline call is ordinary code the trace must include).
+
+Tests: each implementation has its own `*_test.lua`
+(`fork_direct_test.lua`, `fork_supervisor_test.lua`, `thread_test.lua`,
+`interrupt_kill_test.lua`, `interrupt_ptrace_test.lua`,
+`interrupt_cooperative_test.lua`), plus `os_isolation_parity_test.lua`
+exercising the same logical programs (success, JSON-args-round-trip, error
+propagation) across all three isolation implementations and asserting
+convergent `(ok, result)` outcomes, per this repo's "parity tests... not
+optional polish" convention. No benchmarks yet — see "still genuinely open"
+below.
+
 ## Still genuinely open
 
 Do not treat any of these as decided; none of them were.
@@ -376,8 +483,12 @@ Do not treat any of these as decided; none of them were.
   benchmark) — with a methodology caveat: it's unclear whether that measured
   a blocking wait or a busy-spin, which matters significantly for a design
   where a caller actually blocks on the call.
-- **Process-pool sizing and lifecycle** for the supervisor-based
-  implementation (2b above) — not designed.
+- **Process-pool sizing and lifecycle beyond `fork_supervisor.lua`'s v1**
+  — v1 (one supervisor process per `start()`, spawn-on-demand, no
+  pre-warming — see "Implemented" above) is a deliberately simple first
+  default, not a claim that pre-warmed pools or multi-supervisor scaling
+  are unneeded. Sizing/warm-pool policy for callers that need higher
+  throughput is still open.
 - **Whether a given game host is single- or multi-threaded is explicitly not
   crescent's call.** It's a downstream game author's per-game decision, not
   something this document (or any future one) should resolve on their
@@ -390,7 +501,32 @@ Do not treat any of these as decided; none of them were.
   trust model that's separately unresolved.
 - **Tick-frequency overhead of any process/thread-boundary implementation**
   — not measured; `daemon-isolation.md`'s per-request numbers do not transfer
-  to a per-tick calling shape without new measurement.
+  to a per-tick calling shape without new measurement. No benchmarks exist
+  yet for `lib/os_isolation`'s three implementations at all (single-shot
+  spawn/join timing was observed informally while testing — sub-second even
+  for a 200M-iteration workload — but nothing recorded to
+  `docs/perf/log.md`, and per-CLAUDE.md convention it should be before any
+  tick-frequency viability claim is made).
+- **`thread.lua`'s behavior under heavy concurrent spawn load is not fully
+  diagnosed**, only observed — see "Implemented" above. Circumstantial
+  evidence points at CPU contention (isolated/serial runs of the identical
+  workload were consistently fast; many-way-parallel runs of the same
+  workload were not), not a hang in the mechanism itself, but this was not
+  proven, and it was not ruled out as the GC-phase/reentrancy hazard the
+  callback-on-a-foreign-thread open safety question already names. Needs
+  real profiling (not more manual `timeout`-wrapped trials) before any
+  claim stronger than "works in the common case, degrades unpredictably
+  under self-constructed extreme concurrent load" is warranted.
+- **`interrupt_ptrace.lua` against a `thread.lua` tid is environment-
+  dependent, confirmed by observation, not just by reading the man page.**
+  Works against a real child process (fork_direct/fork_supervisor) with no
+  special privilege in this repo's own sandbox; fails with `EPERM` against
+  a same-thread-group tid in that same sandbox, despite `ptrace(2)`
+  documenting that case as always allowed. Not diagnosed further (Yama vs.
+  a stripped effective capability set vs. something else specific to this
+  container) — a caller relying on ptrace-against-a-thread needs to verify
+  it works in their own deployment target, not assume the `ptrace(2)`
+  guarantee holds through whatever sandboxing layer they run under.
 
 ## Design options (historical — superseded)
 

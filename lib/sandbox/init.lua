@@ -4,6 +4,14 @@
 -- define and compose them. This library is the mechanism; it does not decide
 -- what is safe to expose.
 --
+-- Scope note: this restricts what a script can REACH (require whitelist +
+-- curated globals) while running in the SAME OS process/thread as the
+-- caller. It does not provide fault containment or a forced external stop
+-- -- for that, see lib/os_isolation (separate OS processes/threads,
+-- SIGKILL/ptrace/cooperative-check interruption). The two compose: run
+-- sandbox-restricted code inside an os_isolation-isolated child for both
+-- properties at once.
+--
 -- API:
 --   sandbox.env(cap, ...)         -> env table with whitelist require
 --   sandbox.run(code, env, opts?) -> ok, result|err
