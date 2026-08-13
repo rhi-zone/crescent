@@ -6134,3 +6134,132 @@ replaced.
   fix this entry accompanies. Any new sandboxed-loop test with a `budget`
   large enough to plausibly get traced should stay under this threshold or
   explicitly account for it.
+
+## Session pause — fractal port + agent-design status snapshot (2026-08-13)
+
+A long session porting fractal (`~/git/rhizone/fractal`, a TypeScript
+monorepo of 11 packages) to `lib/fractal/`, plus related agent-design and
+HTTP-substrate work, is pausing. Verified against `git log`, current file
+state, and `git worktree`/`git status` before writing this down, so nothing
+gets lost.
+
+- [ ] **`docs/agent-design.md` is still a draft — nothing in it is
+  implemented yet.** The doc's own header says "Status: draft. Not
+  implemented." Everything landed since it was written has been prior-art
+  research (the fractal port, whose "one core, N thin projections" pattern
+  is cited in the doc's "One authoritative store" section as verified
+  precedent) plus one concrete piece of substrate: `lib/platform/caps/fs.lua`
+  gained `stat`/`mkdir`/`delete`/`rename`/`list_recursive` plus
+  per-operation attenuation flags (commit `b7232a75`), whose own commit
+  message says it "backs the **planned** file-browser app" — the app itself
+  does not exist (`lib/platform/apps/` has no file-browser/file-management
+  entry; `lib/` has no file-management library either). Open question 8 in
+  the doc is marked resolved (owner decision, `docs/agent-design.md:130`):
+  build both a narrow instance (a file-management app) and a small
+  generalist instance as two separate first apps, sequenced library-first —
+  "build the library now, with UI projections (plain now, agent-driven
+  later) on top." Neither has been started. The small generalist's scope is
+  explicitly left open in the same paragraph: "not decided, left open below
+  alongside the rest of the unresolved items." Open questions 1, 2, 3, 4, 5,
+  7, and 9 in the doc (`docs/agent-design.md:122-132`) are all still
+  unresolved as written; none needed rewriting for this entry.
+
+- [ ] **`lib/fractal`'s http-api-projector port is mid-flight and
+  substantially blocked.** Landed and tested: `http_value.lua` (deferred-
+  producer response model), `http_adapter.lua`, `http_meta.lua`,
+  `http_route.lua`, `http_client.lua`, `http_client_extension.lua`, plus
+  multi-valued query-string support in `lib/url`. Not yet ported from
+  fractal's `packages/http-api-projector`: run/dispatch, the compile-time
+  matcher pass (`compile.ts`), `verbs.ts`, `layers.ts`, `preset.ts`,
+  `openapi.ts`, `codegen.ts`, `dx.ts` (`crud()`/`httpProjection()`), the ten
+  client extensions, `webhook.ts`, `idempotency.ts`, `tracing.ts`. No
+  dedicated TODO entries exist yet for these unported files individually —
+  only for gaps within files that HAVE landed (see the `http_route.lua`
+  decode.ts-duplication entry and the several `type_ref_json_rpc.lua`/
+  `cli_projector.lua` entries above, all still open, not duplicated here).
+
+  Several validation-shape design forks came up while scoping this work and
+  were resolved during the session; none of these resolutions were written
+  down anywhere before now (a repo-wide grep for their distinguishing terms
+  turned up nothing outside `docs/node_modules/`), so future work on the
+  unported files should treat these as settled rather than re-litigating
+  them:
+  - `{}` ambiguity (object vs. array on the wire): bias toward array,
+    matching the msgpack/cbor convention already used elsewhere in this
+    repo — not record, which is JSON's own convention.
+  - Single-value query-param shape: always-array (single-element), not
+    polymorphic. A real LuaJIT benchmark measured polymorphic as
+    ~180-210ns/req faster, but that is ~0.02% of a 1ms request — below the
+    bar for overriding consistency with the multi-valued case.
+  - Multipart file field: pass the raw `DecodedPart` table from
+    `lib/multipart` straight through, no wrapper type. No existing consumer
+    and no evidence a wrapper would help; revisit if http-projector's own
+    handler code ends up repeating unwrapping logic.
+  - `ResponseOverride.body` promise: await it immediately at the point the
+    handler's return value is captured, not deferred to a later dispatch
+    stage — matching fractal's own `wrapResponse`, which is `async` and
+    always awaits immediately.
+  - `date`/`datetime` kinds: implement explicit ISO-8601 validators for
+    these kinds. The parentless-kind registration only governs the
+    ancestor-fallback path; it does not forbid an explicit handler.
+  - `int64`/`bytes` kinds: `int64` is a plain Lua number with a safe-range
+    check (53-bit clamp, matching JS — no bigint tier); `bytes` is a base64
+    string, not a raw byte array.
+  - Stream predicate: use `lib/fractal/stream.lua`'s existing `M.is_stream`
+    directly. No new predicate needed.
+  - The 5 built-in format validators (uuid/email/time/duration/bytes):
+    hand-code each as a dedicated Lua validator, not routed through a
+    general regex engine — all 5 are fixed simple grammars needing no
+    backtracking/lookahead. The general user-supplied `meta.pattern` field
+    stays explicitly out of scope (fractal's own http-api-projector already
+    excludes it too). **Do not block http-projector validation work on the
+    open `lib/regex`/`lib/regexp` items below** — they're unrelated; this
+    work was deliberately routed around them.
+  - type-ir's `compile.ts` wire-profile section (query/path param string
+    coercion, JSON-body date coercion, roughly lines 1131-2374 as audited
+    this session) is confirmed in scope — actively used by
+    http-api-projector today, not dead code to skip porting.
+
+- [ ] **Two unresolved questions block landing the RFC 9112 §6.2 204/1xx/304
+  Content-Length fix** logged above (`serialize_response synthesizes
+  content-length: 0 on a 204`, 2026-08-04 entry). Verified current
+  `lib/http/format.lua` still synthesizes `content-length` unconditionally
+  on every bodyless response (no status exemption) — the fix described in
+  that entry has not been implemented. An agent halted on these two
+  questions this session, checked against RFC 9110 §8.6 directly, without
+  implementing anything:
+  1. If a handler sets a body on a 1xx/204/304 response — which becomes
+     unframed/corrupting on a keep-alive connection once content-length
+     synthesis is removed for those statuses — should the fix silently drop
+     the body, or error loudly?
+  2. CONNECT 2xx and HEAD also carry MUST-NOT-send-Content-Length rules
+     (RFC 9110 §8.6), but distinguishing them needs the request method,
+     which `serialize_response` does not currently receive. Is threading
+     request-method info through in scope as part of this fix, or is that
+     its own follow-up?
+  These are separate from the http-api-projector work above and not on its
+  critical path.
+
+- [ ] **`mcp-api-projector` (one of the 11 original fractal packages
+  inventoried for this port) has not been started.** Verified: `lib/fractal/`
+  has no mcp-projector file; the only "mcp" hits in the directory are
+  cross-reference comments in `stream.lua`, `input.lua`, `result.lua`,
+  `jsonrpc_server.lua`, and `jsonrpc_project.lua` describing how those
+  modules' abstractions would eventually apply to an MCP projector, not an
+  MCP projector itself. Not blocked on anything specific — simply not yet
+  reached in the port order.
+
+- [ ] **`graphql-api-projector` was deprioritized, not started.**
+  Investigation this session found real duplication between `lib/graphql`
+  (has an executor, a weaker parser) and `lib/graphql_parser` (a stronger
+  parser, no executor) — confirmed still the case: both directories exist
+  independently today, each with its own `init.lua` and test file, no
+  shared code between them. This needs resolving (consolidate the two, or
+  pick one and explicitly defer reconciling the other) before a graphql
+  projector could be built on top of either. No decision has been made on
+  which way to go — flagging the fork, not proposing an answer.
+
+- [ ] **`auth-oidc` was explicitly deferred** ("skip for now" on the OIDC
+  crypto-tier question — pure-Lua RSA/ECDSA vs. extending the FFI libcrypto
+  binding). Verified: no oidc-related file exists anywhere under `lib/`. Not
+  started, not blocking anything else in this list.
