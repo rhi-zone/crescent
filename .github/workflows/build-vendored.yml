@@ -481,6 +481,8 @@ jobs:
       - uses: actions/checkout@v4
       - name: Install build tools
         run: apk add --no-cache build-base
+      - name: Apply dep/tcc/patches (assembler/opcode-table fixes; see dep/tcc/patches/ and docs/native-tiers.md)
+        run: git apply dep/tcc/patches/0001-plt-suffix.patch dep/tcc/patches/0002-libressl-sse-aesni-opcodes.patch
       - name: Bootstrap tcc (built with the container's own gcc, per dep/tcc/README's documented ./configure && make)
         run: |
           cd dep/tcc
@@ -501,6 +503,8 @@ jobs:
     runs-on: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@v4
+      - name: Apply dep/tcc/patches (assembler/opcode-table fixes; see dep/tcc/patches/ and docs/native-tiers.md)
+        run: git apply dep/tcc/patches/0001-plt-suffix.patch dep/tcc/patches/0002-libressl-sse-aesni-opcodes.patch
       - name: Build (via Alpine Docker)
         run: |
           docker run --rm -v "$PWD:/work" -w /work/dep/tcc alpine:latest sh -c "
@@ -523,6 +527,8 @@ jobs:
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
+      - name: Apply dep/tcc/patches (assembler/opcode-table fixes; see dep/tcc/patches/ and docs/native-tiers.md)
+        run: git apply dep/tcc/patches/0001-plt-suffix.patch dep/tcc/patches/0002-libressl-sse-aesni-opcodes.patch
       - name: Bootstrap tcc
         run: |
           cd dep/tcc
@@ -544,6 +550,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: microsoft/setup-msbuild@v2
+      - name: Apply dep/tcc/patches (assembler/opcode-table fixes; see dep/tcc/patches/ and docs/native-tiers.md)
+        run: git apply dep/tcc/patches/0001-plt-suffix.patch dep/tcc/patches/0002-libressl-sse-aesni-opcodes.patch
       - name: Bootstrap tcc (win32/build-tcc.bat, per dep/tcc/win32/tcc-win32.txt build docs)
         shell: cmd
         run: |
@@ -568,6 +576,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: microsoft/setup-msbuild@v2
+      - name: Apply dep/tcc/patches (assembler/opcode-table fixes; see dep/tcc/patches/ and docs/native-tiers.md)
+        run: git apply dep/tcc/patches/0001-plt-suffix.patch dep/tcc/patches/0002-libressl-sse-aesni-opcodes.patch
       - name: Bootstrap tcc (win32/build-tcc.bat, per dep/tcc/win32/tcc-win32.txt build docs)
         shell: cmd
         run: |
@@ -597,14 +607,30 @@ jobs:
   #   - sqlite3: builds cleanly, needs an explicit -lm (tcc does not
   #     auto-link libm the way gcc/clang's driver does).
   #   - zlib: builds cleanly, no extra flags needed.
-  #   - luajit: FAILS. buildvm-generated lj_vm.S uses GNU-as-only symbol
-  #     syntax (`call pow@PLT`) that tcc's integrated assembler does not
-  #     support ("end of line expected"). This is a hard blocker, not a
-  #     flag/CFLAGS issue — not attempted here.
-  #   - libressl: not locally verified (out of the local test list in the
-  #     original brief). Wired below with --disable-asm per the settled
-  #     decision that tcc cannot handle libressl's hand-written/perlasm
-  #     assembly; unverified until a real run confirms it.
+  #   - luajit: NOT wired here. buildvm-generated lj_vm.S uses GNU-as-only
+  #     `sym@PLT` relocation-suffix syntax that tcc's integrated assembler
+  #     used to reject outright ("end of line expected"); dep/tcc/patches/
+  #     0001-plt-suffix.patch (applied above) fixes that specific parser
+  #     gap and was verified with a standalone `call sym@PLT` / `jmp
+  #     sym@PLT` assembly test (correct R_X86_64_PLT32 relocations,
+  #     byte-identical to GNU as). A full LuaJIT-with-tcc build was NOT
+  #     attempted (no vendored LuaJIT source in this repo to build against
+  #     locally) — leaving LuaJIT unwired here until that's verified for
+  #     real, per TODO.md.
+  #   - libressl: dep/tcc/patches/0002-libressl-sse-aesni-opcodes.patch
+  #     (applied above) adds the SSE2/AES-NI opcode-table entries the
+  #     vendored perlasm-generated *-elf-x86_64.S files need (movdqa/u,
+  #     pshufd, shufps, xorps, pslldq/psrldq, paddq, pinsrw, and the full
+  #     aesenc/aesdec/aesenclast/aesdeclast/aesimc/aeskeygenassist AES-NI
+  #     family) — verified byte-identical to real GNU `as` output, and the
+  #     patched tcc cleanly assembles dep/libressl/crypto/aes/aes-elf-x86_64.S,
+  #     rc4/rc4-elf-x86_64.S, and bn/{modexp512,mont,mont5}-elf-x86_64.S.
+  #     BUT: assembling aesni-elf-x86_64.S and modes/ghash-elf-x86_64.S
+  #     surfaced a SEPARATE, previously-undiscovered gap — this vendored
+  #     tcc has no xmm8-xmm15 (or r8-r15) register support at all, which
+  #     those two files need and the opcode-table patch does not address.
+  #     --disable-asm is therefore kept below; flipping it off would break
+  #     this job. See TODO.md for the new register-support gap.
   tcc-build-deps-linux-x86_64:
     if: github.event_name == 'workflow_dispatch'
     needs: tcc-bootstrap-linux-x86_64

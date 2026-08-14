@@ -1,0 +1,24 @@
+--- a/dep/tcc/tccasm.c
++++ b/dep/tcc/tccasm.c
+@@ -230,6 +230,21 @@
+ 		pe->pcrel = 0;
+             }
+             next();
++            /* GNU-as relocation-suffix syntax: `sym@PLT`. gen_disp32()
++               already emits R_X86_64_PLT32 for external call/jmp targets
++               unconditionally, so the suffix carries no extra semantics
++               here -- it is discarded once confirmed. Only `@PLT` is
++               handled; other GAS suffixes (`@GOT`, `@GOTPCREL`, `@TLSGD`,
++               ...) are intentionally left unrecognized and still error
++               as before. */
++            if (tok == '@') {
++                next();
++                if (tok >= TOK_IDENT && !strcmp(get_tok_str(tok, NULL), "PLT")) {
++                    next();
++                } else {
++                    unget_tok('@');
++                }
++            }
+         } else {
+             tcc_error("bad expression syntax [%s]", get_tok_str(tok, &tokc));
+         }

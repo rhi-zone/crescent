@@ -23,24 +23,78 @@ See `docs/roadmap-v2.md` for the authoritative project roadmap and sequencing. T
   grep `luajit_ref` in the workflow to find them), re-vendor `dep/tcc/` from the new SHA,
   and re-run `bin/cr test` plus a manual `nix develop`-shell tcc bootstrap smoke test.
 
-- [ ] **tcc (mob@2ba12e83b3599ca8f5d50c179fe5138fe956f0c9) cannot build LuaJIT — confirmed
-  by actually building it, not assumed.** `buildvm`'s generated `lj_vm.S` contains GNU-as-only
-  relocation-suffix syntax (`call pow@PLT`) that tcc's integrated assembler rejects outright
-  (`buildvm_x86.dasc:417: error: end of line expected` when tcc tries to assemble the
-  generated `.S` file). This is a hard syntax gap in tcc's assembler, not a missing flag —
-  no CFLAGS/build-option combination was found to route around it, and none was invented to
-  paper over it. LuaJIT is NOT wired into the `tcc-build-deps-*` CI job for this reason; the
-  vendored LuaJIT binaries and the existing gcc/clang-based `luajit-*` CI jobs remain the
-  only way LuaJIT gets built. Revisit if/when tcc's assembler gains `@PLT`/`@GOT` suffix
-  support upstream, or if `lj_vm.S` generation itself changes to avoid the syntax.
+- [x] **tcc's assembler rejected GNU-as `sym@PLT` relocation-suffix syntax outright — now
+  patched (`dep/tcc/patches/0001-plt-suffix.patch`), verified in isolation, LuaJIT still NOT
+  wired in.** Root cause was purely a parser gap in `tccasm.c`'s `asm_expr_unary`: after
+  resolving a bare identifier as a symbol it called `next()` with zero lookahead for a
+  trailing `@PLT`, so `sym@PLT` tokenized as three separate tokens and choked on `@`.
+  `i386-asm.c`'s `gen_disp32` already emitted the correct `R_X86_64_PLT32` relocation for
+  external call/jmp targets unconditionally, so the fix is purely syntactic: peek for `@`
+  followed by the identifier `PLT` and discard both if present (leaving the symbol resolution
+  untouched), restoring the original tokens via `unget_tok` if it's any other suffix (`@GOT`,
+  `@GOTPCREL`, `@TLSGD`, ... — deliberately NOT handled, still errors as before). Verified by
+  actually building tcc from the patched source (`nix develop`'s system gcc bootstraps it) and
+  assembling a standalone `call pow@PLT` / `jmp bar@PLT` test file: correct `R_X86_64_PLT32`
+  relocations emitted, byte-identical to real GNU `as` output; a `sym@GOTPCREL` test still
+  errors as before, confirming the narrow scope held. **NOT verified: a full LuaJIT build
+  with this tcc** — no LuaJIT source is vendored in this repo to build `lj_vm.S` against
+  locally, and generating it requires bootstrapping LuaJIT's own host tools first. LuaJIT
+  remains unwired in `tcc-build-deps-*`; the vendored LuaJIT binaries and the existing
+  gcc/clang-based `luajit-*` CI jobs remain the only way LuaJIT gets built. Revisit (rewire
+  LuaJIT into `tcc-build-deps-*`) only once a real `lj_vm.S` has actually been assembled and
+  linked successfully with this patched tcc.
 
-- [ ] **libressl's `--disable-asm` tcc build path (`tcc-build-deps-linux-x86_64` CI job)
-  is wired but NOT locally verified** — sqlite3 and zlib were actually built and functionally
-  tested with the vendored tcc in a local sandbox (both succeed: sqlite3 needs an explicit
-  `-lm` that tcc's driver doesn't add automatically; zlib needs nothing extra), but libressl
-  was out of the local verification pass. Run the `tcc-build-deps-linux-x86_64` job for real
-  (`workflow_dispatch`) and confirm libressl actually configures/builds/links before treating
-  this path as trustworthy.
+- [x] **libressl's perlasm-generated `*-elf-x86_64.S` files use SSE2/AES-NI opcodes tcc's
+  assembler had zero table entries for — now patched
+  (`dep/tcc/patches/0002-libressl-sse-aesni-opcodes.patch`), but this does NOT fully unblock
+  `--disable-asm` removal (see the new gap below).** Confirmed by grepping the actual
+  vendored files (not the originally-assumed opcode list — `pclmulqdq` turned out to be
+  unused; `paddq` and `pinsrw` turned out to be needed and were missing from the initial
+  list) that `dep/tcc/x86_64-asm.h` (the table actually used by the x86_64 target — a
+  *separate* file from `i386-asm.h`, discovered while implementing this) had no entries for
+  `movdqa`/`movdqu`, `pshufd`, `shufps`, `xorps`, `pslldq`/`psrldq`, `paddq`, `pinsrw`, or the
+  AES-NI family (`aesenc`/`aesdec`/`aesenclast`/`aesdeclast`/`aesimc`/`aeskeygenassist`).
+  Table-only entries sufficed for everything except the AES-NI family, which needs the 0F38/
+  0F3A three-byte-opcode escape maps that the existing 16-bit opcode/prefix-byte table
+  encoding has no room for — `dep/tcc/i386-asm.c` gained two new instr_type flags
+  (`OPC_0F38`, `OPC_0F3A`, using previously-unused bits) and a small addition to the opcode
+  emission switch to insert the extra escape byte; this is shared code so it also compiles
+  (as dead code, no vendored i386-asm.h entries reference the new flags) for the 32-bit
+  `windows-x86` target without touching 32-bit behavior. Verified by building tcc from the
+  patched source and assembling every new/changed opcode form (both operand directions where
+  applicable) side-by-side with real GNU `as` — objdump output is byte-identical across all
+  21 forms. Verified further against the real vendored files: `aes-elf-x86_64.S`,
+  `rc4-elf-x86_64.S` (needs `pinsrw`), and `bn/{modexp512,mont,mont5}-elf-x86_64.S` all
+  assemble cleanly with the patched tcc.
+  **New gap found in the process, NOT fixed here:** `aesni-elf-x86_64.S` and
+  `modes/ghash-elf-x86_64.S` still fail — not on opcodes, but because this vendored tcc
+  (mob@2ba12e83b3599ca8f5d50c179fe5138fe956f0c9) defines no `xmm8`–`xmm15` registers at all
+  (and, checked at the same time, no `r8`–`r15` general-purpose registers either) under
+  `TCC_TARGET_X86_64` — `dep/tcc/i386-tok.h` only defines `xmm0`–`xmm7`. This is a
+  substantially larger gap than the opcode-table one (needs new register tokens plus
+  REX.R/X/B extension-bit plumbing through the ModRM/SIB encoding, most of which doesn't
+  exist yet for *any* register class) and is out of scope for this session's two targeted
+  fixes — recorded here, not attempted. Because of this, `--disable-asm` in
+  `tcc-build-deps-linux-x86_64` was deliberately left in place (not flipped): removing it
+  would make that CI job fail on these two files. sqlite3 and zlib remain the two
+  locally-verified-working deps from before; libressl's `--disable-asm` path itself (i.e.
+  configuring/building/linking successfully) is still not locally verified end-to-end — this
+  sandbox's tcc could not build its own `libtcc1.a` runtime helper library (unrelated
+  environment issue: tcc couldn't find `stdio.h` under this NixOS sandbox's default include
+  path), which blocks a full local `./configure && make` link test regardless of the asm
+  question. Run `tcc-build-deps-linux-x86_64` for real (`workflow_dispatch`) to confirm.
+
+- [ ] **This vendored tcc (mob@2ba12e83b3599ca8f5d50c179fe5138fe956f0c9) defines no
+  `xmm8`–`xmm15` SSE registers and no `r8`–`r15` general-purpose registers at all under
+  `TCC_TARGET_X86_64`** (`dep/tcc/i386-tok.h` stops at `xmm7`/has no `r8`+ entries whatsoever)
+  — discovered while verifying the SSE/AES-NI opcode-table patch above, by actually
+  assembling `dep/libressl/crypto/aes/aesni-elf-x86_64.S` and
+  `dep/libressl/crypto/modes/ghash-elf-x86_64.S` with a patched tcc and hitting `unknown
+  register %xmm8`. This blocks those two files (and presumably any code using the extended
+  register set) regardless of the opcode-table fix above. Not attempted here: fixing it
+  needs new register-name tokens plus REX.R/X/B extension-bit plumbing through the ModRM/SIB
+  encoding in `i386-asm.c`/`i386-gen.c`/`x86_64-gen.c`, which is a materially bigger change
+  than adding opcode-table entries and wasn't part of this session's scope.
 
 - [ ] **tcc-built `.so` files may fail to `dlopen` on modern glibc unless the loading
   process sets `GLIBC_TUNABLES=glibc.rtld.execstack=2` (or tcc is patched/flagged to emit a

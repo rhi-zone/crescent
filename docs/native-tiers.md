@@ -129,13 +129,32 @@ produced today.
 **Known gap, found by actually building with it:** tcc (mob branch,
 `dep/tcc/VERSION` pin) cleanly builds `sqlite3.c` and zlib's sources (the
 former needs an explicit `-lm`; tcc's driver doesn't auto-link libm the way
-gcc/clang's does). It cannot build LuaJIT: `buildvm`'s generated `lj_vm.S`
-uses GNU-as-only relocation syntax (`call pow@PLT`) that tcc's integrated
-assembler rejects outright ("end of line expected"). LuaJIT continues to
-require a real system compiler (or a pre-vendored binary) — tcc does not
-extend tier-4 coverage to LuaJIT's own build. libressl's `--disable-asm`
-tcc path (needed because tcc can't handle libressl's hand-written/perlasm
-assembly) is wired into CI but not yet locally verified — see TODO.md.
+gcc/clang's does). It still does not build LuaJIT end-to-end: `buildvm`'s
+generated `lj_vm.S` used GNU-as-only `sym@PLT` relocation-suffix syntax that
+tcc's assembler rejected outright ("end of line expected") — that specific
+parser gap is now patched (see below) and verified in isolation, but a full
+LuaJIT build with the patched tcc has not been attempted (no LuaJIT source
+is vendored locally), so LuaJIT stays unwired in the `tcc-build-deps-*` CI
+job. libressl's `--disable-asm` tcc path is still wired (kept, not flipped):
+the perlasm-generated `*-elf-x86_64.S` files' SSE2/AES-NI opcode gap is now
+patched, but assembling them surfaced a *separate* gap — this vendored tcc
+defines no `xmm8`–`xmm15` (or `r8`–`r15`) registers at all — that still
+blocks two of the seven asm files. See TODO.md for the full breakdown.
+
+**Patch mechanism (`dep/tcc/patches/`):** `dep/tcc/`'s vendored source stays
+pristine — bugs found in it are fixed as unified diffs under
+`dep/tcc/patches/*.patch` (numbered, e.g. `0001-plt-suffix.patch`), applied
+via `git apply dep/tcc/patches/*.patch` (order matters; apply in numeric
+order) as a CI step in each `tcc-bootstrap-*` job in
+`.github/workflows/build-vendored.yml`, immediately after checkout and
+before the tcc build step. This is the only place in the repo that patches
+vendored source rather than either vendoring it modified or forking it
+outright; it exists because tcc is infrastructure we actively extend
+(assembler/opcode-table gaps) rather than a dependency we only consume
+as-is. Currently: `0001-plt-suffix.patch` (tccasm.c, GNU-as `sym@PLT`
+suffix parsing) and `0002-libressl-sse-aesni-opcodes.patch`
+(x86_64-asm.h + i386-asm.c, SSE2/AES-NI opcode-table entries for
+libressl's perlasm output).
 
 ## Vendored binary layout
 

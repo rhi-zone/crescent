@@ -1,0 +1,85 @@
+--- a/dep/tcc/x86_64-asm.h
++++ b/dep/tcc/x86_64-asm.h
+@@ -496,6 +496,7 @@
+     DEF_ASM_OP2(punpcklwd, 0x0f61, 0, OPC_MODRM, OPT_EA | OPT_MMXSSE, OPT_MMXSSE )
+     DEF_ASM_OP2(punpckldq, 0x0f62, 0, OPC_MODRM, OPT_EA | OPT_MMXSSE, OPT_MMXSSE )
+     DEF_ASM_OP2(pxor, 0x0fef, 0, OPC_MODRM, OPT_EA | OPT_MMXSSE, OPT_MMXSSE )
++    DEF_ASM_OP2(paddq, 0x0fd4, 0, OPC_MODRM, OPT_EA | OPT_MMXSSE, OPT_MMXSSE )
+ 
+     /* sse */
+     DEF_ASM_OP1(ldmxcsr, 0x0fae, 2, OPC_MODRM, OPT_EA)
+@@ -521,6 +522,7 @@
+     DEF_ASM_OP2(mulps, 0x0f59, 0, OPC_MODRM, OPT_EA | OPT_SSE, OPT_SSE )
+     DEF_ASM_OP2(pavgb, 0x0fe0, 0, OPC_MODRM, OPT_EA | OPT_SSE, OPT_SSE )
+     DEF_ASM_OP2(pavgw, 0x0fe3, 0, OPC_MODRM, OPT_EA | OPT_SSE, OPT_SSE )
++    DEF_ASM_OP3(pinsrw, 0x660fc4, 0, OPC_MODRM, OPT_IM8, OPT_EA | OPT_REG32, OPT_SSE )
+     DEF_ASM_OP2(pmaxsw, 0x0fee, 0, OPC_MODRM, OPT_EA | OPT_MMXSSE, OPT_MMXSSE )
+     DEF_ASM_OP2(pmaxub, 0x0fde, 0, OPC_MODRM, OPT_EA | OPT_MMXSSE, OPT_MMXSSE )
+     DEF_ASM_OP2(pminsw, 0x0fea, 0, OPC_MODRM, OPT_EA | OPT_MMXSSE, OPT_MMXSSE )
+@@ -534,6 +536,29 @@
+     /* sse2 */
+     DEF_ASM_OP2(andpd, 0x660f54, 0, OPC_MODRM, OPT_EA | OPT_SSE, OPT_SSE)
+     DEF_ASM_OP2(sqrtsd, 0xf20f51, 0, OPC_MODRM, OPT_EA | OPT_SSE, OPT_SSE)
++    DEF_ASM_OP2(xorps, 0x0f57, 0, OPC_MODRM, OPT_EA | OPT_SSE, OPT_SSE)
++    DEF_ASM_OP3(shufps, 0x0fc6, 0, OPC_MODRM, OPT_IM8, OPT_EA | OPT_SSE, OPT_SSE)
++    DEF_ASM_OP3(pshufd, 0x660f70, 0, OPC_MODRM, OPT_IM8, OPT_EA | OPT_SSE, OPT_SSE)
++    DEF_ASM_OP2(pslldq, 0x660f73, 7, OPC_MODRM, OPT_IM8, OPT_SSE)
++    DEF_ASM_OP2(psrldq, 0x660f73, 3, OPC_MODRM, OPT_IM8, OPT_SSE)
++    DEF_ASM_OP2(movdqa, 0x660f6f, 0, OPC_MODRM, OPT_EA | OPT_SSE, OPT_SSE)
++ALT(DEF_ASM_OP2(movdqa, 0x660f7f, 0, OPC_MODRM, OPT_SSE, OPT_EA | OPT_SSE))
++    DEF_ASM_OP2(movdqu, 0xf30f6f, 0, OPC_MODRM, OPT_EA | OPT_SSE, OPT_SSE)
++ALT(DEF_ASM_OP2(movdqu, 0xf30f7f, 0, OPC_MODRM, OPT_SSE, OPT_EA | OPT_SSE))
++
++    /* aes-ni: 66 0F 38 xx / 66 0F 3A xx escape maps -- needs OPC_0F38/
++       OPC_0F3A (see i386-asm.c), since the 16-bit opcode/prefix-byte table
++       encoding used for plain 0F-map SSE insns above has no room for the
++       extra 0x38/0x3A escape byte. Opcode literals below hold only the
++       mandatory-prefix byte (0x66) and the final opcode byte; OPC_0F is
++       passed explicitly for the same reason (the table's usual auto-detect
++       of OPC_0F from an embedded 0x0f literal byte doesn't fire here). */
++    DEF_ASM_OP2(aesenc, 0x66dc, 0, OPC_MODRM | OPC_0F | OPC_0F38, OPT_EA | OPT_SSE, OPT_SSE)
++    DEF_ASM_OP2(aesenclast, 0x66dd, 0, OPC_MODRM | OPC_0F | OPC_0F38, OPT_EA | OPT_SSE, OPT_SSE)
++    DEF_ASM_OP2(aesdec, 0x66de, 0, OPC_MODRM | OPC_0F | OPC_0F38, OPT_EA | OPT_SSE, OPT_SSE)
++    DEF_ASM_OP2(aesdeclast, 0x66df, 0, OPC_MODRM | OPC_0F | OPC_0F38, OPT_EA | OPT_SSE, OPT_SSE)
++    DEF_ASM_OP2(aesimc, 0x66db, 0, OPC_MODRM | OPC_0F | OPC_0F38, OPT_EA | OPT_SSE, OPT_SSE)
++    DEF_ASM_OP3(aeskeygenassist, 0x66df, 0, OPC_MODRM | OPC_0F | OPC_0F3A, OPT_IM8, OPT_EA | OPT_SSE, OPT_SSE)
+ 
+     /* movnti should only accept REG32 and REG64, we accept more */
+     DEF_ASM_OP2(movnti, 0x0fc3, 0, OPC_MODRM, OPT_REG, OPT_EA)
+--- a/dep/tcc/i386-asm.c
++++ b/dep/tcc/i386-asm.c
+@@ -46,6 +46,16 @@
+ 
+ #define OPC_0F        0x100 /* Is secondary map (0x0f prefix) */
+ #define OPC_48        0x200 /* Always has REX prefix */
++/* 0F38/0F3A three-byte-opcode escape maps (SSSE3/SSE4/AES-NI). Only
++   meaningful together with OPC_0F (an extra 0x38 or 0x3a byte is emitted
++   right after the 0x0f byte, before the final opcode byte); the table's
++   opcode field can't hold this extra byte itself since it stores at most
++   one prefix byte + one final opcode byte, so instructions using these
++   maps must pass OPC_0F explicitly too (see the aes-ni entries in
++   x86_64-asm.h) rather than relying on the usual embedded-0x0f-literal
++   auto-detect in the O()/T() macros below. */
++#define OPC_0F38      0x400
++#define OPC_0F3A      0x800
+ #ifdef TCC_TARGET_X86_64
+ # define OPC_WLQ     0x1000  /* accepts w, l, q or no suffix */
+ # define OPC_BWLQ    (OPC_B | OPC_WLQ) /* accepts b, w, l, q or no suffix */
+@@ -965,8 +975,16 @@
+         case 0xdc: case 0xdd: case 0xde: case 0xdf: break;
+         default: tcc_error("bad prefix 0x%2x in opcode table", p); break;
+     }
+-    if (pa->instr_type & OPC_0F)
++    if (pa->instr_type & OPC_0F) {
+         v = ((v & ~0xff) << 8) | 0x0f00 | (v & 0xff);
++        /* 0F38/0F3A three-byte-opcode escape maps (AES-NI etc): insert the
++           extra 0x38/0x3a escape byte between the 0x0f byte and the final
++           opcode byte just emitted into v above. */
++        if (pa->instr_type & OPC_0F38)
++            v = ((v & ~0xff) << 8) | 0x3800 | (v & 0xff);
++        else if (pa->instr_type & OPC_0F3A)
++            v = ((v & ~0xff) << 8) | 0x3a00 | (v & 0xff);
++    }
+     if ((v == 0x69 || v == 0x6b) && nb_ops == 2) {
+         /* kludge for imul $im, %reg */
+         nb_ops = 3;
