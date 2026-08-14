@@ -6,15 +6,11 @@
 -- PTRACE_CONT), where SIGKILL only ever terminates. Targets a pid (integer)
 -- in either sense this module's siblings produce: a real CHILD PROCESS from
 -- fork_direct.lua / fork_supervisor.lua, OR a Linux thread id (tid) from
--- thread.lua's handle.tid() -- ptrace(2) addresses both the same way on
--- Linux (a tid IS a pid from the kernel's point of view; self-attach from a
--- sibling thread in the same thread group is explicitly permitted per
--- ptrace(2), "If the calling thread and the target thread are in the same
--- thread group, access is always allowed"). interrupt_kill.lua's SIGKILL
--- cannot do this for a thread.lua target (SIGKILL and friends are
--- process-granularity only on Linux, per that module's header) -- this is
--- the one interrupt mechanism that actually works against a thread.lua
--- unit while it runs.
+-- thread.lua's handle.tid() -- a tid IS a pid from the kernel's point of
+-- view, and ptrace(2)'s request constants apply to both alike. HOWEVER,
+-- the two targets are NOT symmetric in practice: see "THREAD.LUA TARGETS
+-- CANNOT WORK" below -- this module's coverage of thread.lua units is
+-- fundamentally narrower than its header once claimed.
 --
 -- Linux-specific: ptrace(2)'s request constants and self-attach permission
 -- rules are Linux uapi, not portable (e.g. macOS's ptrace has a different,
@@ -28,20 +24,68 @@
 -- suspend() fails if the target is already being traced by something else
 -- (an actual debugger, strace, another interrupt_ptrace caller, etc.).
 --
--- OBSERVED PLATFORM CAVEAT (found writing this module's own tests, not
--- merely theoretical): ptrace(2) documents same-thread-group self-attach as
--- "always allowed," independent of Yama's ptrace_scope. In THIS repo's own
--- sandboxed dev/CI environment, attaching to a real CHILD PROCESS (a
--- fork_direct/fork_supervisor pid) succeeds with no special privilege, but
--- attaching to a sibling THREAD's tid (a thread.lua unit) fails with EPERM
--- despite that documented exemption -- confirmed via errno, not assumed.
--- The container/sandbox's security layering (Yama, seccomp, or a stripped
--- effective capability set -- CapEff was observed all-zero even though
--- CapBnd listed cap_sys_ptrace) is evidently stricter here than bare
--- ptrace(2) semantics promise. Treat "PTRACE against a thread.lua unit
--- works" as environment-dependent, not guaranteed by this module alone --
--- suspend()/resume()/detach() report the errno and, specifically for EPERM,
--- a one-line note pointing at this caveat rather than a bare "failed."
+-- THREAD.LUA TARGETS CANNOT WORK -- root cause diagnosed, not environmental
+-- (2026-08-14 investigation; corrects this module's original header, which
+-- wrongly blamed a "container/sandbox security layer"). suspend() against a
+-- thread.lua unit's own tid, called from the SAME process that spawned that
+-- thread (the only way any caller could ever get that tid in the first
+-- place -- thread.lua is pthread-based, in-process, not fork-based), fails
+-- with EPERM UNCONDITIONALLY, on every Linux kernel, at every privilege
+-- level, in every environment -- this is NOT the "container/sandbox denies
+-- an otherwise-permitted case" story this module originally told.
+--
+-- Root cause, cited: Linux kernel/ptrace.c's ptrace_attach() (the function
+-- backing BOTH PTRACE_ATTACH and PTRACE_SEIZE) contains, before it ever
+-- calls the permission-check helper __ptrace_may_access():
+--     if (unlikely(task->flags & PF_KTHREAD)) return -EPERM;
+--     if (same_thread_group(task, current)) return -EPERM;
+-- i.e. the kernel unconditionally REFUSES to let one thread ptrace-attach a
+-- sibling thread in its own thread group. This is separate from, and prior
+-- to, the "ptrace access mode checking" algorithm ptrace(2) describes with
+-- "If the calling thread and the target thread are in the same thread
+-- group, access is always allowed" -- that sentence is true, but it
+-- describes __ptrace_may_access() / security_ptrace_access_check(), the
+-- permission helper also used for things like /proc/<pid>/mem access; it is
+-- NOT the whole story for the actual attach syscall, which has its own,
+-- separate, unconditional same-thread-group rejection layered in front.
+-- Verified two ways on this machine (not guessed): (1) read the actual
+-- kernel source for ptrace_attach() and confirmed the same_thread_group()
+-- check above; (2) reproduced empirically in bare C (no Lua/FFI involved,
+-- ruling out any TID-capture bug in this repo's own code) -- a pthread
+-- sibling obtained its own tid via a raw SYS_gettid syscall, and the main
+-- thread's PTRACE_SEIZE against that genuine tid failed with EPERM every
+-- time, with strace confirming the syscall itself (not some wrapper) is
+-- what returns EPERM. A separate control reproduction confirmed
+-- parent-process-vs-real-child-process ptrace (the fork_direct/
+-- fork_supervisor case) succeeds with no special privilege, exactly as
+-- documented below -- the failure is specific to the same-thread-group
+-- case, not a general breakage of ptrace on this machine.
+-- Ruled out, specifically: Yama ptrace_scope (this machine has it at `1`,
+-- but same_thread_group() short-circuits ptrace_attach() before Yama's
+-- LSM hook is even reached -- Yama is provably not the cause here, though
+-- it separately DOES restrict the cross-process case, confirmed in the
+-- same investigation); a container or seccomp filter (this shell is not
+-- inside a container -- no /.dockerenv, cgroup path is the host's
+-- `init.scope`, not a container cgroup -- and Seccomp: 0 in
+-- /proc/self/status); a missing CAP_SYS_PTRACE (irrelevant -- the
+-- unconditional check fires before any capability check); a pthread_t
+-- vs. kernel-tid confusion in thread.lua's own code (checked -- thread.lua
+-- already captures the real kernel tid via a raw `syscall(SYS_gettid)`,
+-- not pthread_self(), so that hypothesis does not apply here; also
+-- independently ruled out by the pure-C reproduction above, which used no
+-- Lua/FFI code path at all and hit the identical EPERM).
+-- Practical consequence: there is no configuration knob (ptrace_scope,
+-- capabilities, container privilege) that makes suspend() succeed against
+-- a thread.lua tid when called from that thread's own process -- it is not
+-- a deployment requirement to document, it is a permanent architectural
+-- dead end for this specific pairing. The only way ptrace COULD ever
+-- suspend a thread.lua unit is via a genuinely separate OS process acting
+-- as tracer (not the process that spawned the thread) -- which then
+-- reintroduces the ordinary cross-process ptrace permission rules
+-- (Yama/capabilities) this module already handles correctly for
+-- fork_direct/fork_supervisor pids. That is a different architecture (a
+-- dedicated tracer-process helper), not a fix to this module, and is not
+-- implemented here.
 --
 -- API:
 --   interrupt_ptrace.available() -> true | (nil, errmsg)
@@ -89,7 +133,7 @@ local function errno_suffix(action)
 	local errnum = ffi.errno()
 	local msg = ffi.string(ffi.C.strerror(errnum))
 	local perm_note = errnum == EPERM
-		and " -- EPERM: ptrace(2) documents same-thread-group self-attach as always allowed, but a container/sandbox security layer (Yama ptrace_scope, seccomp, missing CAP_SYS_PTRACE) can still deny it in practice; this is an environment permission outcome, not necessarily a bug in the caller"
+		and " -- EPERM: two distinct causes are possible and cannot be told apart from errno alone. (1) If the target is a thread.lua tid belonging to THIS SAME PROCESS, this is unconditional and permanent: Linux's kernel/ptrace.c ptrace_attach() refuses same-thread-group self-attach outright (`if (same_thread_group(task, current)) return -EPERM;`), before any capability or LSM check runs -- no privilege, capability, or ptrace_scope setting changes this outcome; see interrupt_ptrace.lua's module header for the full citation. (2) If the target is a genuinely separate process (fork_direct/fork_supervisor pid) or a thread owned by a different process, this is the ordinary cross-process ptrace permission check, and IS environment/config-dependent: Yama's ptrace_scope (see /proc/sys/kernel/yama/ptrace_scope; 0=classic, 1=restricted-to-descendants, 2=admin-only, 3=no-attach), CAP_SYS_PTRACE, or a same-uid/parent-child relationship requirement can each cause this and can each be adjusted in deployment"
 		or ""
 	return action .. " failed: errno " .. errnum .. " (" .. msg .. ")" .. perm_note
 end

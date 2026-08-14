@@ -507,15 +507,54 @@ the process*. They compose — run `lib.sandbox`-restricted code inside an
   tiering convention (no pure-Lua fallback exists — ptrace is inherently a
   syscall). **Confirmed working against a real `fork_direct` child pid**
   with no special privilege needed (parent/child ptrace is always allowed).
-  **Confirmed FAILING with `EPERM` against a `thread.lua` unit's own tid in
-  this repo's own sandboxed dev/CI environment**, despite `ptrace(2)`
-  documenting same-thread-group self-attach as "always allowed" independent
-  of Yama's `ptrace_scope` — verified via `errno`, not assumed (this
-  environment's effective capability set was observed empty even though
-  `cap_sys_ptrace` was present in the bounding set, and `ptrace_scope` was
-  `1`). The module now surfaces `errno` and a specific note for this case
-  rather than a bare "failed" message. Whether same-thread-group ptrace
-  works is environment-dependent, not guaranteed by this module alone.
+  **`EPERM` against a `thread.lua` unit's own tid is now ROOT-CAUSED, not
+  merely observed (2026-08-14 follow-up investigation) — and the cause is
+  permanent, not environmental.** Linux's `kernel/ptrace.c` `ptrace_attach()`
+  (the function backing both `PTRACE_ATTACH` and `PTRACE_SEIZE`) contains,
+  before it calls the `__ptrace_may_access()` permission helper:
+  `if (unlikely(task->flags & PF_KTHREAD)) return -EPERM;` then
+  `if (same_thread_group(task, current)) return -EPERM;` — an unconditional
+  refusal to let one thread `ptrace`-attach a sibling thread in its own
+  thread group, regardless of privilege, capabilities, or Yama
+  `ptrace_scope`. This is a DIFFERENT code path from the "ptrace access mode
+  checking" algorithm `ptrace(2)` documents with "If the calling thread and
+  the target thread are in the same thread group, access is always
+  allowed" — that sentence is true of `__ptrace_may_access()` (also used for
+  `/proc/<pid>/mem`-style checks) but does not describe the attach syscall's
+  own separate, earlier, unconditional same-thread-group rejection. Verified
+  two independent ways, not assumed: (1) read the actual kernel source for
+  `ptrace_attach()` and confirmed the `same_thread_group()` check quoted
+  above; (2) reproduced in bare C with no Lua/FFI involved — a pthread
+  sibling obtained its own tid via a raw `syscall(SYS_gettid)`, and the
+  main thread's `PTRACE_SEIZE` against that genuine tid failed with `EPERM`
+  every time (`strace` confirmed the syscall itself returns it), while a
+  control test in the same investigation confirmed real
+  parent-process-to-child-process `ptrace` (the `fork_direct`/
+  `fork_supervisor` case above) succeeds with no special privilege, and a
+  second control confirmed a genuinely separate (forked, non-ancestor)
+  process attempting the same sibling-thread tid is independently denied
+  by Yama's `ptrace_scope` (`1` on this machine, restricted-to-descendants)
+  — a different, config-dependent EPERM cause than the unconditional
+  same-thread-group one, correctly distinguishable only by knowing which
+  relationship the target has to the caller, not from errno alone. Also
+  ruled out during this investigation: a container/seccomp boundary (this
+  shell is not containerized — no `/.dockerenv`, host `init.scope` cgroup,
+  `Seccomp: 0`) and a `pthread_t`-vs-kernel-tid confusion in `thread.lua`'s
+  own code (`thread.lua` already captures the real kernel tid via a raw
+  `syscall(SYS_gettid)`, not `pthread_self()` — confirmed correct by
+  reading the code, and independently by the pure-C reproduction using no
+  Lua/FFI path at all yet hitting the identical `EPERM`). **Practical
+  consequence: there is no deployment/config knob that makes
+  `interrupt_ptrace.lua` suspend a `thread.lua` unit from the process that
+  spawned it — that specific pairing is a permanent architectural dead
+  end, not a "verify in your deployment target" caveat.** The module's
+  error message and header now state this plainly instead of blaming an
+  environment/sandbox layer. The only way `ptrace` could ever suspend a
+  `thread.lua` unit is a genuinely separate OS process acting as tracer
+  (not the spawning process) — which then falls under the ordinary
+  cross-process rules (Yama/capabilities) this module already handles
+  correctly for `fork_direct`/`fork_supervisor` pids — a different
+  architecture (a dedicated tracer-process helper), not implemented here.
 - **`interrupt_cooperative.lua`** — mechanism (c). Opt-in `checker:tick()`
   calls the author places inline in their own loop; verified it bounds
   exactly the loop shape this document's "Rejected: `debug.sethook`
@@ -582,16 +621,13 @@ Do not treat any of these as decided; none of them were.
   real profiling (not more manual `timeout`-wrapped trials) before any
   claim stronger than "works in the common case, degrades unpredictably
   under self-constructed extreme concurrent load" is warranted.
-- **`interrupt_ptrace.lua` against a `thread.lua` tid is environment-
-  dependent, confirmed by observation, not just by reading the man page.**
-  Works against a real child process (fork_direct/fork_supervisor) with no
-  special privilege in this repo's own sandbox; fails with `EPERM` against
-  a same-thread-group tid in that same sandbox, despite `ptrace(2)`
-  documenting that case as always allowed. Not diagnosed further (Yama vs.
-  a stripped effective capability set vs. something else specific to this
-  container) — a caller relying on ptrace-against-a-thread needs to verify
-  it works in their own deployment target, not assume the `ptrace(2)`
-  guarantee holds through whatever sandboxing layer they run under.
+- ~~`interrupt_ptrace.lua` against a `thread.lua` tid is environment-
+  dependent~~ — **RESOLVED (2026-08-14), moved out of "open": it is not
+  environment-dependent, it is permanently impossible for that specific
+  pairing.** See `interrupt_ptrace.lua`'s "Implemented" entry above for the
+  full root-cause citation (an unconditional `same_thread_group()` check in
+  Linux's own `ptrace_attach()`, verified via kernel source and a bare-C
+  reproduction). Nothing remains open here to diagnose further.
 
 ## Design options (historical — superseded)
 

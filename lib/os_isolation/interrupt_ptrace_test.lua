@@ -55,7 +55,7 @@ T.describe("interrupt_ptrace against a real child process (fork_direct)", functi
 end)
 
 T.describe("interrupt_ptrace against a thread.lua unit's tid", function()
-	T.it("suspends and resumes a running thread by tid (the mechanism SIGKILL cannot offer here)", function()
+	T.it("fails with EPERM, deterministically -- not a skip-worthy environment quirk (see interrupt_ptrace.lua's module header: Linux's kernel/ptrace.c ptrace_attach() unconditionally refuses same-thread-group self-attach, verified via kernel source + a bare-C repro, independent of privilege/Yama/capabilities)", function()
 		if not interrupt_ptrace.available() then
 			T.skip("ptrace unavailable on this platform")
 		end
@@ -100,30 +100,31 @@ T.describe("interrupt_ptrace against a thread.lua unit's tid", function()
 		end
 
 		local sok, serr = interrupt_ptrace.suspend(tid)
-		if not sok and serr and serr:find("EPERM") then
-			-- Observed in this repo's own sandboxed dev/CI environment: see
-			-- interrupt_ptrace.lua's "OBSERVED PLATFORM CAVEAT" -- ptrace(2)
-			-- documents same-thread-group self-attach as always allowed,
-			-- but a stricter container/sandbox security layer here denies
-			-- it anyway (confirmed via errno, not assumed). This is an
-			-- environment permission outcome this module surfaces
-			-- correctly (nil, errmsg), not a correctness bug to fail on --
-			-- the identical mechanism against a real fork_direct/
-			-- fork_supervisor pid IS exercised, unskipped, above.
-			T.skip("ptrace against a same-thread-group tid denied by this sandbox's security layer (EPERM) -- see interrupt_ptrace.lua header")
-		end
 		if not sok and serr and serr:find("errno 3 ") then
 			-- ESRCH ("No such process"): the busy-work thread finished (and
 			-- its tid became invalid) between h.tid() reporting it and this
 			-- suspend() call -- a benign timing race in THIS TEST's margin,
 			-- not a defect in interrupt_ptrace.lua (which correctly reports
 			-- the syscall failure rather than hanging or corrupting state).
+			h.join()
 			T.skip("target thread finished before suspend() reached it (benign timing race, not a defect)")
 		end
-		T.ok(sok, serr)
-		local rok, rerr = interrupt_ptrace.resume(tid)
-		T.ok(rok, rerr)
+		-- EXPECTED, DETERMINISTIC OUTCOME: EPERM, always, on every Linux
+		-- kernel and every privilege level -- not an environment quirk.
+		-- Linux's kernel/ptrace.c ptrace_attach() (backing both
+		-- PTRACE_ATTACH and PTRACE_SEIZE) contains
+		-- `if (same_thread_group(task, current)) return -EPERM;` ahead of
+		-- its permission-check helper, unconditionally refusing to let one
+		-- thread ptrace-attach a sibling thread in its own thread group.
+		-- Root-caused via kernel source + a bare-C (no Lua/FFI) repro --
+		-- see interrupt_ptrace.lua's module header for the full citation.
+		-- The identical mechanism against a real fork_direct/
+		-- fork_supervisor pid IS exercised and expected to SUCCEED, above.
+		T.fail(sok)
+		T.ok(type(serr) == "string" and serr:find("EPERM") ~= nil, serr)
 
+		-- Nothing to resume -- suspend() never attached. Clean up by
+		-- letting the busy-work thread run to completion.
 		local ok, result = h.join()
 		T.ok(ok)
 		T.eq(result, "done")
