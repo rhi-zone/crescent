@@ -341,15 +341,36 @@ directly for this decision). Concretely:
     gets a clean, kernel-enforced kill.
   - **(b) `ptrace`-based single-thread suspend, for the thread-based
     implementation.** `PTRACE_SEIZE` + `PTRACE_INTERRUPT` is genuinely
-    per-thread (distinct from SIGSTOP's whole-process group-stop), and
-    self-attach from a sibling thread in the same process is explicitly
-    permitted per `ptrace(2)` ("If the calling thread and the target thread
-    are in the same thread group, access is always allowed" — no separate
-    tracer process required). Real and usable, but debugger/checkpoint-
-    tool-grade (the pattern gdb non-stop mode, `rr`, and CRIU use) — heavy
-    for an everyday primitive, and only one tracer may attach to a tracee at
-    a time, which breaks if the process is already being debugged or
-    profiled by something else.
+    per-thread (distinct from SIGSTOP's whole-process group-stop). Real and
+    usable **against a genuinely separate process** (fork_direct/
+    fork_supervisor pid), but debugger/checkpoint-tool-grade (the pattern
+    gdb non-stop mode, `rr`, and CRIU use) — heavy for an everyday
+    primitive, and only one tracer may attach to a tracee at a time, which
+    breaks if the process is already being debugged or profiled by
+    something else. **CORRECTION (2026-08-14, superseding the claim this
+    bullet originally made):** self-attach from a sibling thread in the
+    same process is NOT permitted, contrary to what this bullet said when
+    written. The sentence being quoted from `ptrace(2)` ("If the calling
+    thread and the target thread are in the same thread group, access is
+    always allowed") describes the permission-check HELPER
+    (`__ptrace_may_access()`, also used for `/proc` access), not the attach
+    syscall as a whole — Linux's `ptrace_attach()` (`kernel/ptrace.c`)
+    contains its own, separate, unconditional
+    `if (same_thread_group(task, current)) return -EPERM;` ahead of that
+    helper, so a thread can never `PTRACE_SEIZE`/`PTRACE_ATTACH` a sibling
+    thread in its own thread group, on any kernel, at any privilege level.
+    This was diagnosed empirically (kernel source read + a bare-C, no-Lua
+    reproduction) while investigating `interrupt_ptrace.lua`'s observed
+    `EPERM` against `thread.lua` targets — see that module's "Implemented"
+    entry below for the full citation. Consequence for THIS mechanism: (b)
+    is real and usable only against implementation (a)'s separate-process
+    targets (fork_direct/fork_supervisor); it cannot suspend a thread-based
+    implementation's own units from the process that spawned them, at all
+    — the parenthetical this bullet used to end with ("no separate tracer
+    process required") is exactly backwards for that case, a separate
+    tracer process is the only thing that could ever make (b) apply to a
+    thread.lua unit, and doing so is a different architecture, not
+    implemented here.
   - **(c) Manually-instrumented loop checks (cooperative).** In-code budget
     checks the mod/game author opts into and pays the per-iteration cost
     for. Earlier explored and rejected as a *mandatory universal* mechanism
@@ -410,27 +431,69 @@ the process*. They compose — run `lib.sandbox`-restricted code inside an
   `luaL_newstate`/`luaL_openlibs`/`luaL_loadstring`/`lua_pcall`/`lua_close`
   and the string/field accessors used to move code, args, and results
   across are all reachable via `ffi.C`. **One open safety question is
-  carried, not resolved**: no primary source (not the mailing-list post,
-  not LuaJIT's FFI docs, not `lj_ccallback.c`) confirms or rules out a
-  GC-phase or reentrancy hazard specific to the callback's first invocation
-  happening on a brand-new OS thread LuaJIT's runtime has never seen. This
-  module's own testing (dozens of spawn/join cycles, workloads from trivial
-  to 200M+ loop iterations) surfaced no crash or corruption — a data point,
-  not a safety proof. **A second, distinct finding from that same testing**:
-  the full `lib/os_isolation` test suite occasionally took far longer to
-  complete than its normal sub-few-seconds run time — most reliably
-  reproduced by running several full copies of the suite in parallel (an
-  artificial stress case), but also observed, less often, on a single
-  serial `bin/cr test` invocation. Each individual workload run in
-  isolation (up to tens of millions of loop iterations) consistently
-  completed in well under a second on its own; the slowdowns showed up
-  specifically running the FULL suite (many spawns across many test
-  files), which points at ordinary CPU contention across many concurrently
-  forked processes and pthreads rather than a hang in the mechanism itself
-  — but this is circumstantial timing evidence, not a proof, and it is not
-  ruled out as something worse. A caller running many `thread.lua` units
-  concurrently should not assume a short fixed timeout is safe. Gives
-  GC/heap separation
+  carried, narrowed by follow-up but not resolved**: no primary source (not
+  the mailing-list post, not LuaJIT's FFI docs, not `lj_ccallback.c`)
+  confirms or rules out a GC-phase or reentrancy hazard specific to the
+  callback's first invocation happening on a brand-new OS thread LuaJIT's
+  runtime has never seen. Follow-up investigation searched
+  `github.com/luapower/pthread`'s own issue tracker (empty, nothing
+  relevant) and `LuaJIT/LuaJIT`'s issue tracker directly, and found a real,
+  confirmed, FIXED bug in the closest matching category:
+  [LuaJIT/LuaJIT#1498](https://github.com/LuaJIT/LuaJIT/issues/1498), "FFI
+  callback invoked from C leaves `cur_L` stale — crash in `lj_trace_exit`
+  when the compiled callback takes a trace exit" (filed 2026-07-31, fixed
+  2026-08-01). Its precondition is a shared `global_State` whose `cur_L`
+  (last thread to enter the VM, not updated by the FFI callback entry path)
+  points at a different coroutine/thread than the one the callback actually
+  fires on. Structural analysis of `thread.lua`'s own shape (not the
+  upstream fix itself) shows this precondition doesn't arise there: each
+  `spawn()` owns an independent `global_State` (its own `luaL_newstate()`,
+  never shared with another `spawn()` or given coroutines by this module),
+  and the bootstrap's synchronous `lua_pcall` — run on the calling thread,
+  before `pthread_create` — already sets that `global_State`'s `cur_L` to
+  the only `lua_State` it will ever have, before the new pthread exists.
+  This rules out this SPECIFIC known bug for this SPECIFIC code shape by
+  source-grounded reasoning, not just absence of a report — but does not
+  cover every possible hazard (notably not
+  [#1506](https://github.com/LuaJIT/LuaJIT/issues/1506), "`store to dead GC
+  object` in FFI callback," a different GC-liveness mechanism, still open
+  upstream as of 2026-08-14, not analyzed to the same depth here). This
+  repo's own vendored LuaJIT (`bin/luajit-bin`, tracking the `v2.1` branch,
+  last updated 2026-07-25) predates the #1498 fix (2026-08-01) by about a
+  week — re-running `.github/workflows/build-vendored.yml` would pick it
+  up, but that workflow re-vendors LuaJIT/sqlite3/zlib/libressl/wepoll
+  together across every supported platform, a repo-wide call left as an
+  explicit recommendation rather than made unilaterally here. **Empirically**,
+  a new permanent regression test,
+  `lib/os_isolation/thread_stress_test.lua`, exercises concurrent spawns
+  under deliberate GC pressure on both parent and child sides and asserts
+  exact per-thread result correctness (cross-thread corruption would show as
+  a wrong value, not require a crash). Beyond its own runs, this
+  investigation additionally ran it by hand repeatedly (20 serial + 8
+  parallel invocations) plus a heavier one-off variant (150 concurrent
+  threads under GC pressure, singly and as 6 parallel copies) — several
+  thousand additional spawn/join cycles under deliberate concurrent GC
+  pressure, on top of the earlier "dozens of spawn/join cycles, trivial to
+  200M+ loop iterations" testing. Zero crashes, zero corruption, zero wrong
+  results in any run — still not a safety proof, but real adversarial
+  exercise of the exact mechanism, not merely "nobody has written about
+  this." **A second, distinct finding from the original testing**: the full
+  `lib/os_isolation` test suite occasionally took far longer to complete
+  than its normal sub-few-seconds run time — most reliably reproduced by
+  running several full copies of the suite in parallel (an artificial
+  stress case), but also observed, less often, on a single serial `bin/cr
+  test` invocation. Each individual workload run in isolation (up to tens
+  of millions of loop iterations) consistently completed in well under a
+  second on its own; the slowdowns showed up specifically running the FULL
+  suite (many spawns across many test files), which points at ordinary CPU
+  contention across many concurrently forked processes and pthreads rather
+  than a hang in the mechanism itself — but this is circumstantial timing
+  evidence, not a proof, and it is not ruled out as something worse. The
+  additional parallel stress runs above did NOT reproduce this slowdown, a
+  further data point against it being that hazard, but not a resolution —
+  it was rare before, so its absence in a handful of runs doesn't rule it
+  back in or out. A caller running many `thread.lua` units concurrently
+  should not assume a short fixed timeout is safe. Gives GC/heap separation
   between units, explicitly NOT fault containment (shared address space —
   an FFI/C bug in one unit can still corrupt the whole process) and NOT a
   cheap forced-stop, exactly as this section already said above.
@@ -466,8 +529,10 @@ Tests: each implementation has its own `*_test.lua`
 exercising the same logical programs (success, JSON-args-round-trip, error
 propagation) across all three isolation implementations and asserting
 convergent `(ok, result)` outcomes, per this repo's "parity tests... not
-optional polish" convention. No benchmarks yet — see "still genuinely open"
-below.
+optional polish" convention, plus `thread_stress_test.lua` (see
+`thread.lua`'s implementation note above) as a permanent regression check
+for the callback-on-a-foreign-thread open safety question specifically. No
+benchmarks yet — see "still genuinely open" below.
 
 ## Still genuinely open
 

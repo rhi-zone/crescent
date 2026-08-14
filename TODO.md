@@ -10,6 +10,39 @@ See `docs/roadmap-v2.md` for the authoritative project roadmap and sequencing. T
 
 - [ ] **An `ffi.new(...)`-typed module-level local's cdata element type only resolves concretely, file-wide, once at least one UNANNOTATED (inference/synthesis-mode) function in the same file has called an `ffi.C.*` member — a `--:`-annotated (checking-mode) function whose own body is the FIRST `ffi.C.*` call in the file leaves that cdata typed `?` for the rest of the file, including inside `ffi.string(buf, n)` calls in OTHER functions.** Confirmed via repeated minimal repros (see session transcript): a `--: (integer, integer|nil) -> (string|nil, string|nil)`-annotated function whose body is the first thing in the file to touch `ffi.C.read`/`ffi.C.close` leaves `ffi.string(buf, len)` erroring `cannot pass ? where integer & { [0]: integer } expected` on `buf` — even though `buf` is a plain `local buf = ffi.new("char[65536]")` with no cast at all. Adding one extra, textually EARLIER, UNANNOTATED function that calls any `ffi.C.*` member (its body's own content is irrelevant — confirmed with a no-op `ffi.C.close(fd)` and, separately, an unrelated `ffi.C.read` probe call) makes every later annotated function's `ffi.string`/cdata usage resolve correctly, file-wide, regardless of ordering after that point. Root cause not diagnosed beyond "checking-mode suppresses whatever bidirectional cdata-element-type elaboration synthesis-mode performs against `$FfiC`, and that elaboration is a global one-time-per-file effect once it fires." Worked around in `lib/os_isolation/fork_direct.lua`, `fork_supervisor.lua`, `supervisor_main.lua`, and `thread.lua` via a `-- TYPECHECKER WORKAROUND:`-labeled unannotated local `_prime(fd)` (or `_prime(L)` in `thread.lua`) function defined immediately after each file's `ffi.cdef` block and called at every `ffi.C.close`/`ffi.C.lua_close` site (both a working priming mechanism AND, incidentally, real cleanup code, so it isn't pure dead weight) — but the ordering dependency itself, and the fact that a purely STATIC (never-called) unannotated function definition alone was sufficient to fix it in isolated repros, indicates a genuine elaboration-order bug, not an intended API. Revert `_prime` back to plain `ffi.C.close`/`ffi.C.lua_close` calls (removing the workaround function and its call sites) once this ordering dependency is fixed, keeping each file's public functions `--:`-annotated as originally intended.
 
+## lib/os_isolation/thread.lua open safety question — follow-up (2026-08-14)
+
+- [ ] **Re-vendor LuaJIT to pick up the `LuaJIT/LuaJIT#1498` fix.** This
+  repo's vendored `bin/luajit-bin` (built by
+  `.github/workflows/build-vendored.yml`, tracking the `v2.1` branch, last
+  updated 2026-07-25 per commit `c651bc4e`) predates the fix for
+  [LuaJIT/LuaJIT#1498](https://github.com/LuaJIT/LuaJIT/issues/1498) ("FFI
+  callback invoked from C leaves `cur_L` stale — crash in `lj_trace_exit`
+  when the compiled callback takes a trace exit," merged 2026-08-01) by
+  about a week. `thread.lua`'s own code shape was analyzed and shown NOT to
+  hit this bug's precondition (see `thread.lua`'s module header and
+  `docs/genre-battery/sandboxing.md`'s `thread.lua` note) — but the fix is
+  still a straightforwardly good pickup given how structurally close the
+  bug is to this module's mechanism (an FFI callback invoked with no Lua
+  frame active, on a thread the VM didn't just enter through). Re-running
+  the workflow re-vendors LuaJIT + sqlite3 + zlib + libressl + wepoll
+  together across every supported platform in one shot — a repo-wide
+  infrastructure change, left here as an explicit recommendation rather
+  than done unilaterally during the investigation that found this.
+- [ ] **`LuaJIT/LuaJIT#1506`, "`store to dead GC object` in FFI callback,"
+  is still open upstream as of 2026-08-14** — a different GC-liveness
+  mechanism than `#1498` (an FFI-visible-only callback with no Lua-side
+  anchor getting collected out from under a live C pointer to it), not
+  analyzed against `thread.lua`'s specific shape to the same depth as
+  `#1498` was. `thread.lua`'s BOOTSTRAP chunk keeps its callback anchored
+  via the Lua-level `cb` local for the bootstrap pcall's duration and hands
+  only the raw pointer (not the cdata) to `pthread_create`, which differs
+  from `#1506`'s repro (a callback stored only behind a C global, never a
+  Lua variable) — but this difference has not been checked with the same
+  rigor as the `#1498` analysis. Revisit once `#1506` is resolved upstream,
+  or sooner if someone wants to do the same depth of structural analysis
+  against it that `#1498` got.
+
 ## Typechecker substrate gaps (found while implementing lib/type/v10_toy/{init,w,v10_toy_test}.lua, 2026-08-11)
 
 - [ ] **For a self-recursive discriminated union (a variant whose own field type is `T[]`/`{[K]:T[]}` referencing the alias `T` being defined), assignability of ANY value against `T` only ever checks the union's FIRST declared arm — never the others, regardless of the value's actual `kind`/discriminant, and regardless of cast strategy.** Confirmed via multiple minimal repros outside `lib/type/v10_toy/`: (1) reading a self-recursive field off an already-narrowed variant (e.g. `node.premises: Node[]` after `node.kind == "rule"`) infers `never`, independent of branch order/position (`if`/`elseif` positive or negated, first or later branch) — a checked cast on the FIELD READ (`node.premises --[[: Node[] ]]`) recovers the real type fine, since that's a normal (non-recursive-union-target) cast. (2) Assigning or returning a freshly-constructed table literal, or a named local built from one, AS the recursive union type itself (not reading a field FROM it) is checked ONLY against the first-declared arm — reordering the union's arms changes which ONE shape passes, never more than one at a time; even routing the value through `unknown` first and casting `unknown -> T` still only accepts the first arm. Force casts are separately rejected outright ("fix the upstream type annotation instead"), and even `--[[:! T]]` on the exact same value reports "force cast has no overlap" between the literal's inferred shape and the union's first arm specifically. (3) The ONE construct that reliably works for passing a differently-shaped value INTO a parameter typed as the self-recursive union: widen the constructing local to `unknown` at its declaration (`local n = {...} --[[: unknown]]`), then narrow with a bare `type(n) == "table"` check (no further cast) immediately before use/passing — a value narrowed only to plain `table` (not `unknown`, not a concrete literal shape) is NOT checked structurally against the union at all and is accepted regardless of which arm it actually is at runtime. Worked around throughout `lib/type/v10_toy/` (`init.lua`'s `replay_node`/`M.replay`, `w.lua`'s `rule_node`/`axiom_node`/`emit`/`M.infer`, `v10_toy_test.lua`'s hand-built derivation nodes) by: giving `Node`-touching functions `unknown` where their signature would otherwise need the recursive union in a position other than "value already known to be `Node`, being read structurally"; and threading every externally-constructed node through a `type(x) == "table"` guard before use. This is a broad, escalation-worthy gap (recursive discriminated unions are an ordinary, expected pattern — ASTs, certificate/derivation trees, JSON-like values) — related to, but structurally distinct from, the array-element narrowing gap and the `[unknown]`-keyed-map gap already on record above (2026-07-28 entries): those are about narrowing an already-correctly-typed union value; this one is about the union type itself refusing to accept any shape but its first arm as a target, which is a strictly more basic failure (constructing/assigning, not narrowing-after-construction).

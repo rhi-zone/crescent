@@ -14,9 +14,18 @@
 -- cheap forced-stop (pthread_cancel's deferred-mode cancellation points are
 -- never hit by a tight compute loop with no blocking syscalls, and async
 -- cancellation is documented unsafe for arbitrary code -- see
--- docs/genre-battery/sandboxing.md). interrupt_ptrace.lua can suspend a
--- running unit by its Linux tid (see handle.tid below); interrupt_kill.lua
--- cannot -- SIGKILL is process-granularity only.
+-- docs/genre-battery/sandboxing.md). interrupt_kill.lua cannot stop a unit
+-- spawned here -- SIGKILL is process-granularity only. interrupt_ptrace.lua
+-- ALSO cannot, despite once being documented as the mechanism that could:
+-- suspending a thread by its Linux tid (handle.tid below) via ptrace, from
+-- the SAME process that spawned it (the only process that ever has that
+-- tid), fails with EPERM unconditionally on Linux -- the kernel's
+-- ptrace_attach() hard-refuses same-thread-group self-attach regardless of
+-- privilege or environment. See interrupt_ptrace.lua's module header for
+-- the full root-cause citation. No interrupt mechanism in this repo can
+-- force-stop a running thread.lua unit from its own process; only
+-- cooperative (interrupt_cooperative.lua) or waiting for it to finish
+-- (join()) are real options here.
 --
 -- MECHANISM (pure FFI, no vendored C shim): create a second lua_State via
 -- luaL_newstate() -- an ordinary FFI call against symbols this repo's own
@@ -47,29 +56,79 @@
 -- primary source found (not the mailing list post, not the LuaJIT FFI docs,
 -- not lj_ccallback.c) confirms or rules out a GC-phase or reentrancy hazard
 -- specific to that first foreign-thread invocation. github.com/luapower/pthread
--- is real, exercised code -- evidence this runs, not a safety proof. This
--- module's own testing (dozens of spawn/join cycles, both trivial and
--- million-plus-iteration workloads) did not surface a crash or corruption,
--- which is also not a safety proof, only a data point. One CONCRETE
--- operational finding from that testing, distinct from the open safety
--- question above: this module's full test suite occasionally takes far
--- longer to complete than its normal sub-few-seconds run time -- most
--- reliably reproduced by running several full copies of the suite in
--- parallel (an artificial stress case), but also observed, less often, on
--- a single serial `bin/cr test` invocation. Isolated single-shot runs of
--- the individual workload each test uses (up to tens of millions of loop
--- iterations) consistently completed in well under a second on their own;
--- the slowdowns showed up specifically when running the FULL suite (many
--- spawn()s across many test files), which points at ordinary CPU
--- contention across many concurrently forked processes and pthreads rather
--- than a hang in the mechanism itself -- but this is circumstantial timing
--- evidence, not a proof.
--- Not confirmed as CPU contention beyond this circumstantial timing
--- evidence; also not ruled out as something worse. A caller running many
--- thread.lua units concurrently under heavy system load should not assume
--- a fixed short timeout is safe. Treat this implementation as carrying a
--- genuinely open question, not as
--- fully vetted.
+-- is real, exercised code -- evidence this runs, not a safety proof.
+--
+-- FOLLOW-UP INVESTIGATION (searched github.com/luapower/pthread's own issue
+-- tracker -- empty, no relevant reports -- and LuaJIT/LuaJIT's issue tracker
+-- directly, not just the one old mailing-list thread): found a REAL, CONFIRMED,
+-- FIXED bug in exactly this category -- LuaJIT/LuaJIT#1498, "FFI callback
+-- invoked from C leaves cur_L stale -- crash in lj_trace_exit when the
+-- compiled callback takes a trace exit" (filed 2026-07-31, fixed 2026-08-01,
+-- commit 4886b676a698acc4bbdf54adfabb3e33a8c020e8). Its precondition: an
+-- FFI-cast Lua function invoked from C with no active Lua VM frame on the C
+-- stack, where the callback's own state (cts->L) differs from global_State's
+-- cur_L (which tracks "last thread that entered the VM" and is NOT updated
+-- by the FFI callback entry path) -- concretely, this arises when one
+-- global_State is shared by multiple coroutines/threads and the FFI callback
+-- fires on one that isn't the one cur_L currently points to; a subsequent
+-- JIT-compiled trace exit inside the callback then restores state against
+-- the WRONG lua_State, segfaulting (if its cframe is NULL) or silently
+-- corrupting an unrelated thread's stack (if not). This is a structurally
+-- close cousin of this module's mechanism (an FFI callback invoked with no
+-- Lua frame active, on a thread the VM didn't just enter through) -- but
+-- ANALYSIS OF THIS MODULE'S OWN SHAPE (not the upstream fix) shows the
+-- precondition does not arise here: each spawn() creates its OWN independent
+-- global_State via its own luaL_newstate() call (never shared with another
+-- spawn(), never given coroutines by this module), and the bootstrap chunk's
+-- synchronous lua_pcall (line ~249, run on the CALLING thread before
+-- pthread_create) already sets that global_State's cur_L to this L before
+-- the new pthread is even created -- so when the callback fires for the
+-- first (and only) time on the new pthread, cur_L already correctly points
+-- at the only lua_State that global_State has ever had. This reasoning does
+-- NOT rule out every possible hazard (in particular: it does not by itself
+-- cover #1506, "`store to dead GC object` in FFI callback", still OPEN
+-- upstream as of 2026-08-14 -- a callback-anchoring/GC-liveness issue, a
+-- different mechanism than #1498's cur_L staleness, not analyzed here in the
+-- same depth) -- but it is a concrete, source-grounded reason the SPECIFIC
+-- known bug closest to this module's pattern does not apply to this
+-- module's specific code shape, not just an absence of evidence either way.
+--
+-- ACTIONABLE, NOT YET DONE: this repo's own vendored LuaJIT binary
+-- (bin/luajit-bin, built by .github/workflows/build-vendored.yml tracking
+-- the v2.1 branch, last updated 2026-07-25 per commit c651bc4e) PREDATES the
+-- #1498 fix (merged 2026-08-01) by about a week. Re-running that workflow
+-- would pick up the fix (and whatever else landed on v2.1 since), which is a
+-- straightforwardly good idea given how close #1498 sits to this module's
+-- mechanism -- but that workflow re-vendors LuaJIT + sqlite3 + zlib +
+-- libressl + wepoll together across every platform this repo supports, a
+-- repo-wide infrastructure change outside this module's scope to trigger
+-- unilaterally. Left as an explicit recommendation, not done as part of this
+-- investigation.
+--
+-- EMPIRICAL: lib/os_isolation/thread_stress_test.lua is a permanent
+-- regression test (not a throwaway script) built specifically to exercise
+-- this hazard -- concurrent spawns under deliberate GC pressure on BOTH the
+-- parent and child sides, asserting exact per-thread result correctness (so
+-- cross-thread corruption would show up as a wrong value, not require a
+-- crash to notice). Beyond that file's own runs, this investigation ran it
+-- repeatedly by hand (20 serial invocations, 8 parallel invocations of the
+-- 40-thread-concurrent + 60-serial-cycle suite; plus a one-off heavier
+-- variant, 150 concurrently spawned threads under GC pressure, run singly
+-- and as 6 parallel copies) -- combined, several thousand additional
+-- spawn/join cycles under deliberate concurrent GC pressure this session,
+-- on top of this module's earlier "dozens of spawn/join cycles, trivial to
+-- 200M+ loop iterations" testing. Zero crashes, zero corruption, zero wrong
+-- results, in any run. This is still not a safety proof (absence of a crash
+-- in N runs never is), but it is real adversarial exercise of the exact
+-- mechanism, not merely "nobody has written about this."
+--
+-- The full-test-suite occasional-slowdown finding from earlier testing (see
+-- prior revision of this comment) was NOT reproduced by the additional
+-- parallel runs above -- a further data point against it being the hazard
+-- this section is about, but not a resolution: it was observed rarely
+-- before, so a handful of clean parallel runs now doesn't rule it back in
+-- or out. Treat this implementation as carrying a genuinely open question,
+-- narrowed by the above but not closed, not as fully vetted.
 --
 -- Only Lua SOURCE CODE (a string) and JSON-representable args cross into
 -- the new state -- like fork_supervisor.lua and unlike fork_direct.lua, a
