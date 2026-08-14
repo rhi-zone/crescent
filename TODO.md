@@ -110,6 +110,54 @@ See `docs/roadmap-v2.md` for the authoritative project roadmap and sequencing. T
   above). That removes the "no source to build `lj_vm.S` against locally" blocker
   specifically; the "bootstrapping LuaJIT's own host tools" and the actual tcc-as-`CC`
   wiring into `tcc-build-deps-*` are still unattempted and still the open work.
+  **Update 2 (2026-08-14) — actually wired in and verified end to end for real, in the
+  exact `alpine:latest` container this job runs in (not a substitute host); found a genuine
+  compiler-intrinsics gap, not fixed:**
+  - **Two pre-existing bugs found and fixed, unrelated to LuaJIT, that were silently
+    breaking `tcc-bootstrap-linux-x86_64`/`-aarch64` and `tcc-build-deps-linux-x86_64` for
+    sqlite3/zlib too** (both jobs are `workflow_dispatch`-only, so nobody had actually run
+    them for real since they were written): (1) `tcc-bootstrap-linux-{x86_64,aarch64}` ran
+    `./configure` with no flag inside an Alpine (musl) container; tcc's own configure does
+    NOT autodetect musl, so it took the glibc-assuming branch, and `lib/bcheck.c` (built
+    into `libtcc1.a`) calls the glibc-only `__ctype_b_loc()`/`__ctype_tolower_loc()`, which
+    musl lacks — `make` failed `bcheck.c:1068: error: pointer expected` and the whole
+    bootstrap job would have failed on every real invocation. Fix: `./configure
+    --config-musl`. Reproduced the failure verbatim, then confirmed the fix, both inside a
+    real `alpine:latest` Docker container matching the CI image exactly. (2)
+    `tcc-build-deps-linux-x86_64`'s "Prepare tcc" step put `libtcc1.a` at
+    `tcc-bin/lib/libtcc1.a`; tcc's own `CONFIG_TCC_LIBPATHS` (`tcc.h`) resolves to `"{B}" ":"
+    "/usr/lib"` for this target — no implicit `/lib` suffix under `-B` — so that layout is
+    silently never found and even a trivial `tcc -B tcc-bin hello.c -o hello` failed `tcc:
+    error: file 'libtcc1.a' not found`. Fix: place it directly at `tcc-bin/libtcc1.a`.
+    Re-verified sqlite3 and zlib both build cleanly against tcc with both fixes applied
+    (previously only claimed "verified" from a non-Alpine sandbox that never hit either
+    bug). Both fixes are now in `build-vendored.yml` with comments explaining why.
+  - **LuaJIT itself: genuine substrate gap, confirmed, NOT fixed, NOT worked around.**
+    `dep/tcc` (mob@2ba12e83b3599ca8f5d50c179fe5138fe956f0c9) defines only `__TINYC__` in its
+    predefined macros — never `__GNUC__` or `__clang__` — and provides none of the
+    `__builtin_ctz`/`__builtin_clz`/`__builtin_ctzll`/`__builtin_clzll` builtins. LuaJIT's
+    `lj_def.h` has exactly three branches for `lj_ffs`/`lj_fls`/bit-scan helpers: GCC/clang
+    (via `__GNUC__`/`__clang__`, using those builtins), MSVC (via `_MSC_VER`, using
+    `_BitScanForward`/`_BitScanReverse` intrinsics), and a `_M_PPC`+`LUAJIT_NO_UNALIGNED`-only
+    manual fallback — anything else, including tcc, falls through to `#error "missing
+    defines for your compiler"`. This fires at `host/buildvm.o` (a LuaJIT host tool needed
+    to generate `lj_vm.S` and friends), i.e. before the `sym@PLT`/`lj_vm.S`
+    assembler question the 0001-plt-suffix.patch item above was scoped to ever gets
+    reached — `host/minilua` (no GNUC dependency) builds and runs fine under tcc, but
+    `buildvm` does not compile at all. Exact repro: `make -C dep/luajit/src CC="<tcc> -B
+    <tcc-bin>" XCFLAGS="-DLUAJIT_ENABLE_GC64"` inside the same `alpine:latest` container,
+    after both tcc fixes above → `In file included from host/buildvm.c:17: ... ./lj_def.h:322:
+    error: "missing defines for your compiler"`. Confirmed via `tcc -E -dD` macro dump that
+    tcc predefines `__TINYC__` and nothing else relevant. Closing this needs either a
+    `__TINYC__` branch added to LuaJIT's own `lj_def.h` (an upstream LuaJIT change, not a
+    local patch) or teaching tcc to define `__GNUC__`-compatible builtins (substantially
+    larger than either existing `dep/tcc/patches/*.patch`) — neither attempted here, per
+    CLAUDE.md's no-special-casing/no-fake-success rule. `tcc-build-deps-linux-x86_64` now has
+    a real (not commented-out, not `continue-on-error`) "Build LuaJIT with tcc" step that
+    will fail exactly this way until the gap above is closed — the job is expected to be red
+    on `workflow_dispatch` until then. This does not affect the five gcc/clang-based
+    `luajit-*` CI jobs (linux-x86_64/aarch64, macos-arm64, windows-x86_64/x86), which remain
+    the only working way LuaJIT gets built and are unaffected by any of this.
 
 - [x] **libressl's perlasm-generated `*-elf-x86_64.S` files use SSE2/AES-NI opcodes tcc's
   assembler had zero table entries for — now patched
