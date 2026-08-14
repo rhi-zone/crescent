@@ -15,6 +15,40 @@ on:
       - "dep/libressl/**"
 
 jobs:
+  # ── Version pinning ─────────────────────────────────────────────────────────
+  # dep/X/VERSION is the pin: the version this workflow should build. Compared
+  # against dep/X/VENDORED_VERSION, the marker the commit job writes alongside
+  # the binaries it commits, recording what's currently vendored. When they
+  # match, the corresponding build jobs below skip their (expensive)
+  # build+upload steps entirely.
+
+  version-check:
+    runs-on: ubuntu-latest
+    outputs:
+      sqlite3_skip: ${{ steps.check.outputs.sqlite3_skip }}
+      zlib_skip: ${{ steps.check.outputs.zlib_skip }}
+      libressl_skip: ${{ steps.check.outputs.libressl_skip }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compare pinned VERSION to vendored VERSION per dep
+        id: check
+        run: |
+          check_dep() {
+            dep="$1"
+            pinned="$(cat "dep/$dep/VERSION" 2>/dev/null || true)"
+            vendored="$(cat "dep/$dep/VENDORED_VERSION" 2>/dev/null || true)"
+            if [ -n "$pinned" ] && [ "$pinned" = "$vendored" ]; then
+              echo "Skipping $dep: pinned VERSION ($pinned) already vendored"
+              echo "${dep}_skip=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "Building $dep: pinned VERSION ($pinned) != vendored ($vendored)"
+              echo "${dep}_skip=false" >> "$GITHUB_OUTPUT"
+            fi
+          }
+          check_dep sqlite3
+          check_dep zlib
+          check_dep libressl
+
   # ── LuaJIT ────────────────────────────────────────────────────────────────
 
   luajit-linux-x86_64:
@@ -40,6 +74,7 @@ jobs:
         with:
           name: luajit-linux-x86_64
           path: out/
+          retention-days: 1
 
   luajit-linux-aarch64:
     runs-on: ubuntu-24.04-arm
@@ -60,6 +95,7 @@ jobs:
         with:
           name: luajit-linux-aarch64
           path: out/
+          retention-days: 1
 
   luajit-macos-arm64:
     runs-on: macos-14
@@ -80,6 +116,7 @@ jobs:
         with:
           name: luajit-macos-arm64
           path: out/
+          retention-days: 1
 
   luajit-windows-x86_64:
     runs-on: windows-latest
@@ -105,6 +142,7 @@ jobs:
         with:
           name: luajit-windows-x86_64
           path: out/
+          retention-days: 1
 
   luajit-windows-x86:
     runs-on: windows-latest
@@ -130,10 +168,13 @@ jobs:
         with:
           name: luajit-windows-x86
           path: out/
+          retention-days: 1
 
   # ── sqlite3 ───────────────────────────────────────────────────────────────
 
   sqlite3-linux-x86_64:
+    needs: version-check
+    if: needs.version-check.outputs.sqlite3_skip != 'true'
     runs-on: ubuntu-latest
     container:
       image: alpine:latest
@@ -149,8 +190,11 @@ jobs:
         with:
           name: sqlite3-linux-x86_64
           path: out/
+          retention-days: 1
 
   sqlite3-linux-aarch64:
+    needs: version-check
+    if: needs.version-check.outputs.sqlite3_skip != 'true'
     runs-on: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@v4
@@ -165,8 +209,11 @@ jobs:
         with:
           name: sqlite3-linux-aarch64
           path: out/
+          retention-days: 1
 
   sqlite3-macos-arm64:
+    needs: version-check
+    if: needs.version-check.outputs.sqlite3_skip != 'true'
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
@@ -178,8 +225,11 @@ jobs:
         with:
           name: sqlite3-macos-arm64
           path: out/
+          retention-days: 1
 
   sqlite3-windows-x86_64:
+    needs: version-check
+    if: needs.version-check.outputs.sqlite3_skip != 'true'
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -194,8 +244,11 @@ jobs:
         with:
           name: sqlite3-windows-x86_64
           path: out/
+          retention-days: 1
 
   sqlite3-windows-x86:
+    needs: version-check
+    if: needs.version-check.outputs.sqlite3_skip != 'true'
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -210,10 +263,13 @@ jobs:
         with:
           name: sqlite3-windows-x86
           path: out/
+          retention-days: 1
 
   # ── zlib ──────────────────────────────────────────────────────────────────
 
   zlib-linux-x86_64:
+    needs: version-check
+    if: needs.version-check.outputs.zlib_skip != 'true'
     runs-on: ubuntu-latest
     container:
       image: alpine:latest
@@ -229,8 +285,11 @@ jobs:
         with:
           name: zlib-linux-x86_64
           path: out/
+          retention-days: 1
 
   zlib-linux-aarch64:
+    needs: version-check
+    if: needs.version-check.outputs.zlib_skip != 'true'
     runs-on: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@v4
@@ -245,8 +304,11 @@ jobs:
         with:
           name: zlib-linux-aarch64
           path: out/
+          retention-days: 1
 
   zlib-macos-arm64:
+    needs: version-check
+    if: needs.version-check.outputs.zlib_skip != 'true'
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
@@ -258,8 +320,11 @@ jobs:
         with:
           name: zlib-macos-arm64
           path: out/
+          retention-days: 1
 
   zlib-windows-x86_64:
+    needs: version-check
+    if: needs.version-check.outputs.zlib_skip != 'true'
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -274,8 +339,11 @@ jobs:
         with:
           name: zlib-windows-x86_64
           path: out/
+          retention-days: 1
 
   zlib-windows-x86:
+    needs: version-check
+    if: needs.version-check.outputs.zlib_skip != 'true'
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -290,10 +358,13 @@ jobs:
         with:
           name: zlib-windows-x86
           path: out/
+          retention-days: 1
 
   # ── libressl (libtls/libssl/libcrypto) ─────────────────────────────────────
 
   libressl-linux-x86_64:
+    needs: version-check
+    if: needs.version-check.outputs.libressl_skip != 'true'
     runs-on: ubuntu-latest
     container:
       image: alpine:latest
@@ -322,6 +393,7 @@ jobs:
         with:
           name: libressl-linux-x86_64
           path: out/
+          retention-days: 1
 
   # ── wepoll ────────────────────────────────────────────────────────────────
 
@@ -340,6 +412,7 @@ jobs:
         with:
           name: wepoll-windows-x86_64
           path: out/
+          retention-days: 1
 
   wepoll-windows-x86:
     runs-on: windows-latest
@@ -356,6 +429,7 @@ jobs:
         with:
           name: wepoll-windows-x86
           path: out/
+          retention-days: 1
 
   # ── Commit all artifacts back to the repo ─────────────────────────────────
 
@@ -398,31 +472,59 @@ jobs:
           cp artifacts/luajit32.exe                    bin/luajit32.exe
           cp artifacts/ld-musl-x86_64.so.1             bin/
           cp artifacts/ld-musl-aarch64.so.1            bin/
-          cp artifacts/libsqlite3-linux-x86_64.so      dep/sqlite3/
-          cp artifacts/libsqlite3-linux-aarch64.so     dep/sqlite3/
-          cp artifacts/libsqlite3-macos-arm64.dylib    dep/sqlite3/
-          cp artifacts/sqlite.dll                      dep/sqlite3/sqlite3-x64.dll
-          cp artifacts/sqlite-x86.dll                  dep/sqlite3/sqlite3-x86.dll
-          cp artifacts/libz-linux-x86_64.so           dep/zlib/
-          cp artifacts/libz-linux-aarch64.so          dep/zlib/
-          cp artifacts/libz-macos-arm64.dylib         dep/zlib/
-          cp artifacts/zlib.dll                       dep/zlib/zlib-x64.dll
-          cp artifacts/zlib-x86.dll                   dep/zlib/zlib-x86.dll
+
+          # sqlite3/zlib/libressl build jobs are skipped (no artifact produced)
+          # when their dep/X/VERSION pin already matches dep/X/VENDORED_VERSION.
+          # Only copy + touch the vendored files when the corresponding
+          # artifact was actually produced this run.
+          copy_if_present() {
+            src="artifacts/$1"
+            dst="$2"
+            if [ -e "$src" ]; then
+              cp "$src" "$dst"
+            fi
+          }
+
+          copy_if_present libsqlite3-linux-x86_64.so   dep/sqlite3/
+          copy_if_present libsqlite3-linux-aarch64.so  dep/sqlite3/
+          copy_if_present libsqlite3-macos-arm64.dylib dep/sqlite3/
+          copy_if_present sqlite.dll                   dep/sqlite3/sqlite3-x64.dll
+          copy_if_present sqlite-x86.dll               dep/sqlite3/sqlite3-x86.dll
+
+          copy_if_present libz-linux-x86_64.so         dep/zlib/
+          copy_if_present libz-linux-aarch64.so        dep/zlib/
+          copy_if_present libz-macos-arm64.dylib       dep/zlib/
+          copy_if_present zlib.dll                     dep/zlib/zlib-x64.dll
+          copy_if_present zlib-x86.dll                 dep/zlib/zlib-x86.dll
+
           cp artifacts/wepoll-x64.dll                 dep/wepoll/
           cp artifacts/wepoll-x86.dll                 dep/wepoll/
-          cp artifacts/libcrypto.so.57                dep/libressl/linux-x86_64/
-          cp artifacts/libssl.so.60                   dep/libressl/linux-x86_64/
-          cp artifacts/libtls.so.33                   dep/libressl/linux-x86_64/
-          ln -sf libcrypto.so.57 dep/libressl/linux-x86_64/libcrypto.so
-          ln -sf libssl.so.60    dep/libressl/linux-x86_64/libssl.so
-          ln -sf libtls.so.33    dep/libressl/linux-x86_64/libtls.so
+
+          copy_if_present libcrypto.so.57              dep/libressl/linux-x86_64/
+          copy_if_present libssl.so.60                 dep/libressl/linux-x86_64/
+          copy_if_present libtls.so.33                 dep/libressl/linux-x86_64/
+          if [ -e dep/libressl/linux-x86_64/libcrypto.so.57 ]; then
+            ln -sf libcrypto.so.57 dep/libressl/linux-x86_64/libcrypto.so
+            ln -sf libssl.so.60    dep/libressl/linux-x86_64/libssl.so
+            ln -sf libtls.so.33    dep/libressl/linux-x86_64/libtls.so
+          fi
+
+          # Sync the vendored-version markers to the pins. A no-op when the
+          # build was skipped (they already matched); reflects the freshly
+          # built version when it wasn't.
+          cp dep/sqlite3/VERSION  dep/sqlite3/VENDORED_VERSION
+          cp dep/zlib/VERSION     dep/zlib/VENDORED_VERSION
+          cp dep/libressl/VERSION dep/libressl/VENDORED_VERSION
+
           chmod +x bin/luajit bin/luajit-aarch64 \
                    bin/luajit-bin bin/luajit-aarch64-bin bin/luajit-macos-aarch64 \
                    bin/luajit.exe bin/luajit32.exe \
                    bin/ld-musl-x86_64.so.1 bin/ld-musl-aarch64.so.1
-          chmod +x dep/libressl/linux-x86_64/libcrypto.so.57 \
-                   dep/libressl/linux-x86_64/libssl.so.60 \
-                   dep/libressl/linux-x86_64/libtls.so.33
+          if [ -e dep/libressl/linux-x86_64/libcrypto.so.57 ]; then
+            chmod +x dep/libressl/linux-x86_64/libcrypto.so.57 \
+                     dep/libressl/linux-x86_64/libssl.so.60 \
+                     dep/libressl/linux-x86_64/libtls.so.33
+          fi
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add bin/ dep/
