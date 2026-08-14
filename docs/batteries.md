@@ -2281,7 +2281,13 @@ so the binary doesn't change without a deliberate commit. Vendoring it means:
   all auditable, all yours
 
 The only external dependency left is a C compiler for any FFI work that needs
-it — which is as close to a universal assumption as exists.
+it — which is as close to a universal assumption as exists. Where even that
+assumption doesn't hold (a bare CI runner or minimal container without gcc/
+clang), `dep/tcc/` vendors TinyCC's source as a fallback compiler: bootstrap
+it once with whatever compiler *is* present, then use it to build the C-tier
+deps that need compiling. It's not a runtime dependency of crescent itself —
+see `docs/native-tiers.md` for how it fits the native-code tier model and
+what it can and can't build.
 
 ## The typed ecosystem flywheel
 

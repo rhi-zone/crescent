@@ -98,6 +98,45 @@ earn their place. All five criteria must pass:
 
 ---
 
+## TinyCC: enabling tier 4, not a tier
+
+TinyCC (`tcc`, vendored source in `dep/tcc/`, prebuilt binaries in `bin/tcc-*`)
+is not a sixth tier alongside the five above. Tier 4 ("C build") already
+assumes *some* C compiler is available to run `build.lua`; tcc exists to
+supply that compiler on a platform or CI runner that doesn't have gcc/clang
+available, so tier 4 stays reachable everywhere rather than silently
+degrading straight to tier 5 (pure Lua) for want of a compiler.
+
+This is infrastructure underneath tier 4, not a new point in the priority
+order — tier selection at load time is unaffected; `M._tier` still only
+ever reports one of the five values above. `tcc` never appears as a load-time
+tier because it doesn't produce a different runtime artifact than tier 4
+does; it's a different way of *reaching* tier 4's output.
+
+**Where it helps:** any tier-4 CI job or developer machine that lacks gcc/
+clang/cl — a bare Alpine container without `build-base`, a minimal cross
+target, or a contributor machine mid-setup. `.github/workflows/build-vendored.yml`'s
+`workflow_dispatch`-only tcc jobs bootstrap tcc (built once with the
+runner's own system compiler) and then use it as `CC` for the C-build tier.
+
+**What it does not change:** tcc is never a substitute for the vendored
+binaries in `lib/stb/vendor/` etc. — those are still built with gcc/clang/cl
+in the primary CI path (`.github/workflows/build-vendored.yml`'s
+push-triggered jobs), unmodified. tcc is a fallback path for regenerating
+tier-4 output, not a replacement for how the shipped vendored binaries are
+produced today.
+
+**Known gap, found by actually building with it:** tcc (mob branch,
+`dep/tcc/VERSION` pin) cleanly builds `sqlite3.c` and zlib's sources (the
+former needs an explicit `-lm`; tcc's driver doesn't auto-link libm the way
+gcc/clang's does). It cannot build LuaJIT: `buildvm`'s generated `lj_vm.S`
+uses GNU-as-only relocation syntax (`call pow@PLT`) that tcc's integrated
+assembler rejects outright ("end of line expected"). LuaJIT continues to
+require a real system compiler (or a pre-vendored binary) — tcc does not
+extend tier-4 coverage to LuaJIT's own build. libressl's `--disable-asm`
+tcc path (needed because tcc can't handle libressl's hand-written/perlasm
+assembly) is wired into CI but not yet locally verified — see TODO.md.
+
 ## Vendored binary layout
 
 ```

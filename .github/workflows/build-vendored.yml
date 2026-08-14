@@ -4,8 +4,15 @@ on:
   workflow_dispatch:
     inputs:
       luajit_ref:
-        description: "LuaJIT git ref (branch/tag/SHA)"
-        default: "v2.1"
+        # LuaJIT's v2.1 is a floating branch ref, not a tag — pinning a
+        # moving branch defeats reproducibility (two builds on different
+        # days can vendor different code from an unreviewed diff). Pinned
+        # to a commit SHA instead, same reasoning as dep/tcc/VERSION below.
+        # This SHA does not auto-track upstream: bump it manually
+        # (`git ls-remote https://github.com/LuaJIT/LuaJIT v2.1`) when a
+        # new v2.1 commit is wanted. See TODO.md for the standing reminder.
+        description: "LuaJIT git ref (branch/tag/SHA) — defaults to the pinned v2.1 commit"
+        default: "1edc3e52b67eaf6ce5f809be8e17d6862594b8bc"
         required: false
   push:
     paths:
@@ -60,7 +67,16 @@ jobs:
       - name: Install build tools
         run: apk add --no-cache build-base git
       - name: Clone LuaJIT
-        run: git clone --depth 1 --branch ${{ inputs.luajit_ref || 'v2.1' }} https://github.com/LuaJIT/LuaJIT /tmp/luajit
+        # `--branch <SHA>` does not work for an arbitrary commit (git only
+        # resolves --branch against refs, not bare SHAs). `git fetch <url>
+        # <SHA>` does work shallowly against GitHub (protocol v2 supports
+        # fetching any reachable SHA) and also still accepts branch/tag
+        # names, so it's used unconditionally here regardless of whether
+        # the input is a SHA or a ref name.
+        run: |
+          mkdir -p /tmp/luajit && cd /tmp/luajit && git init -q
+          git fetch --depth 1 https://github.com/LuaJIT/LuaJIT ${{ inputs.luajit_ref || '1edc3e52b67eaf6ce5f809be8e17d6862594b8bc' }}
+          git checkout -q FETCH_HEAD
       - name: Build
         run: |
           make -C /tmp/luajit/src \
@@ -84,7 +100,10 @@ jobs:
         run: |
           docker run --rm -v "$PWD:/work" -w /work alpine:latest sh -c "
             apk add --no-cache build-base git &&
-            git clone --depth 1 --branch ${{ inputs.luajit_ref || 'v2.1' }} https://github.com/LuaJIT/LuaJIT /tmp/luajit &&
+            mkdir -p /tmp/luajit && cd /tmp/luajit && git init -q &&
+            git fetch --depth 1 https://github.com/LuaJIT/LuaJIT ${{ inputs.luajit_ref || '1edc3e52b67eaf6ce5f809be8e17d6862594b8bc' }} &&
+            git checkout -q FETCH_HEAD &&
+            cd /work &&
             make -C /tmp/luajit/src XCFLAGS='-DLUAJIT_ENABLE_GC64' LDFLAGS='-Wl,-E -static-libgcc' &&
             strip --strip-debug /tmp/luajit/src/luajit &&
             mkdir -p /work/out &&
@@ -102,7 +121,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Clone LuaJIT
-        run: git clone --depth 1 --branch ${{ inputs.luajit_ref || 'v2.1' }} https://github.com/LuaJIT/LuaJIT /tmp/luajit
+        run: |
+          mkdir -p /tmp/luajit && cd /tmp/luajit && git init -q
+          git fetch --depth 1 https://github.com/LuaJIT/LuaJIT ${{ inputs.luajit_ref || '1edc3e52b67eaf6ce5f809be8e17d6862594b8bc' }}
+          git checkout -q FETCH_HEAD
       - name: Build
         run: |
           make -C /tmp/luajit/src \
@@ -124,7 +146,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: LuaJIT/LuaJIT
-          ref: ${{ inputs.luajit_ref || 'v2.1' }}
+          ref: ${{ inputs.luajit_ref || '1edc3e52b67eaf6ce5f809be8e17d6862594b8bc' }}
       - uses: microsoft/setup-msbuild@v2
       - name: Build (x64)
         shell: cmd
@@ -150,7 +172,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: LuaJIT/LuaJIT
-          ref: ${{ inputs.luajit_ref || 'v2.1' }}
+          ref: ${{ inputs.luajit_ref || '1edc3e52b67eaf6ce5f809be8e17d6862594b8bc' }}
       - uses: microsoft/setup-msbuild@v2
       - name: Build (x86)
         shell: cmd
@@ -430,6 +452,234 @@ jobs:
           name: wepoll-windows-x86
           path: out/
           retention-days: 1
+
+  # ── TinyCC (tcc) — C-compiler fallback tier ────────────────────────────────
+  #
+  # tcc is infrastructure, not one of the 5 native-code tiers itself (see
+  # docs/native-tiers.md "TinyCC: enabling tier 4, not a tier"): it exists so
+  # tier 4 "C build" has a compiler to fall back on when a platform/CI runner
+  # lacks a system C compiler. Source is vendored as-is in dep/tcc/ (mob
+  # branch, pinned via dep/tcc/VERSION to a commit SHA — mob is untagged and
+  # rolling, so a SHA pin is used the same way as the luajit_ref default
+  # above; see TODO.md for the bump reminder). dep/tcc does NOT participate
+  # in the version-check skip machinery above: that machinery exists to skip
+  # *rebuilding prebuilt binaries* on every push for deps with a push
+  # trigger; tcc has no push trigger (dispatch-only, per the brief — this is
+  # a dev-facing fallback tier, not default trigger surface) so there is
+  # nothing to skip against.
+  #
+  # These jobs are gated to workflow_dispatch only and are never part of the
+  # `commit` job's `needs:` graph below, so the push-triggered sqlite3/zlib/
+  # wepoll/libressl jobs and their commit behavior are completely unaffected.
+
+  tcc-bootstrap-linux-x86_64:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    container:
+      image: alpine:latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build tools
+        run: apk add --no-cache build-base
+      - name: Bootstrap tcc (built with the container's own gcc, per dep/tcc/README's documented ./configure && make)
+        run: |
+          cd dep/tcc
+          ./configure
+          make -j"$(nproc)"
+          strip --strip-debug tcc
+          mkdir -p "$GITHUB_WORKSPACE"/out
+          cp tcc "$GITHUB_WORKSPACE"/out/tcc-linux-x86_64
+          cp libtcc1.a "$GITHUB_WORKSPACE"/out/libtcc1-linux-x86_64.a
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tcc-linux-x86_64
+          path: out/
+          retention-days: 1
+
+  tcc-bootstrap-linux-aarch64:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build (via Alpine Docker)
+        run: |
+          docker run --rm -v "$PWD:/work" -w /work/dep/tcc alpine:latest sh -c "
+            apk add --no-cache build-base &&
+            ./configure &&
+            make -j\$(nproc) &&
+            strip --strip-debug tcc &&
+            mkdir -p /work/out &&
+            cp tcc /work/out/tcc-linux-aarch64 &&
+            cp libtcc1.a /work/out/libtcc1-linux-aarch64.a
+          "
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tcc-linux-aarch64
+          path: out/
+          retention-days: 1
+
+  tcc-bootstrap-macos-arm64:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Bootstrap tcc
+        run: |
+          cd dep/tcc
+          ./configure
+          make -j"$(sysctl -n hw.ncpu)"
+          strip tcc
+          mkdir -p "$GITHUB_WORKSPACE"/out
+          cp tcc "$GITHUB_WORKSPACE"/out/tcc-macos-aarch64
+          cp libtcc1.a "$GITHUB_WORKSPACE"/out/libtcc1-macos-aarch64.a
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tcc-macos-arm64
+          path: out/
+          retention-days: 1
+
+  tcc-bootstrap-windows-x86_64:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: microsoft/setup-msbuild@v2
+      - name: Bootstrap tcc (win32/build-tcc.bat, per dep/tcc/win32/tcc-win32.txt build docs)
+        shell: cmd
+        run: |
+          for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do set VSPATH=%%i
+          call "%VSPATH%\VC\Auxiliary\Build\vcvars64.bat"
+          cd /d "%GITHUB_WORKSPACE%\dep\tcc\win32"
+          build-tcc.bat -c cl
+      - name: Copy artifact
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force out
+          Copy-Item "dep\tcc\win32\tcc.exe" "out\tcc-windows-x86_64.exe"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tcc-windows-x86_64
+          path: out/
+          retention-days: 1
+
+  tcc-bootstrap-windows-x86:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: microsoft/setup-msbuild@v2
+      - name: Bootstrap tcc (win32/build-tcc.bat, per dep/tcc/win32/tcc-win32.txt build docs)
+        shell: cmd
+        run: |
+          for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do set VSPATH=%%i
+          call "%VSPATH%\VC\Auxiliary\Build\vcvars32.bat"
+          cd /d "%GITHUB_WORKSPACE%\dep\tcc\win32"
+          build-tcc.bat -c cl
+      - name: Copy artifact
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force out
+          Copy-Item "dep\tcc\win32\tcc.exe" "out\tcc-windows-x86.exe"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tcc-windows-x86
+          path: out/
+          retention-days: 1
+
+  # Use the freshly bootstrapped tcc to build the other vendored deps.
+  # Wired for linux-x86_64 only: that is the only combination exercised
+  # locally so far (see TODO.md for the per-dep findings). Extending to
+  # other platforms or deps is future work, not something to silently
+  # generalize to here.
+  #
+  # Per-dep results found when actually building each with tcc (mob@2ba12e8)
+  # in a local sandbox:
+  #   - sqlite3: builds cleanly, needs an explicit -lm (tcc does not
+  #     auto-link libm the way gcc/clang's driver does).
+  #   - zlib: builds cleanly, no extra flags needed.
+  #   - luajit: FAILS. buildvm-generated lj_vm.S uses GNU-as-only symbol
+  #     syntax (`call pow@PLT`) that tcc's integrated assembler does not
+  #     support ("end of line expected"). This is a hard blocker, not a
+  #     flag/CFLAGS issue — not attempted here.
+  #   - libressl: not locally verified (out of the local test list in the
+  #     original brief). Wired below with --disable-asm per the settled
+  #     decision that tcc cannot handle libressl's hand-written/perlasm
+  #     assembly; unverified until a real run confirms it.
+  tcc-build-deps-linux-x86_64:
+    if: github.event_name == 'workflow_dispatch'
+    needs: tcc-bootstrap-linux-x86_64
+    runs-on: ubuntu-latest
+    container:
+      image: alpine:latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: tcc-linux-x86_64
+          path: tcc-bin
+      - name: Install build tools (tcc still needs perl/make for libressl's build, and glibc-less musl's own crt/headers are already present in this image)
+        run: apk add --no-cache build-base perl
+      - name: Prepare tcc
+        run: |
+          chmod +x tcc-bin/tcc-linux-x86_64
+          mkdir -p tcc-bin/lib
+          cp tcc-bin/libtcc1-linux-x86_64.a tcc-bin/lib/libtcc1.a
+          cp -r dep/tcc/include tcc-bin/include
+      - name: Build sqlite3 with tcc
+        run: |
+          mkdir -p out
+          tcc-bin/tcc-linux-x86_64 -B"$PWD"/tcc-bin -shared -fPIC -O2 -DSQLITE_ENABLE_FTS5 \
+            dep/sqlite3/sqlite3.c -lm -o out/libsqlite3-tcc-linux-x86_64.so
+      - name: Build zlib with tcc
+        run: |
+          tcc-bin/tcc-linux-x86_64 -B"$PWD"/tcc-bin -shared -fPIC -O2 -include unistd.h \
+            dep/zlib/*.c -o out/libz-tcc-linux-x86_64.so
+      - name: Build libressl with tcc (--disable-asm; UNVERIFIED — see comment above the job)
+        run: |
+          cp -rp dep/libressl /tmp/build-libressl-tcc
+          cd /tmp/build-libressl-tcc
+          CC="$GITHUB_WORKSPACE/tcc-bin/tcc-linux-x86_64 -B$GITHUB_WORKSPACE/tcc-bin" \
+            ./configure --disable-tests --disable-asm
+          make -j"$(nproc)"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tcc-built-deps-linux-x86_64
+          path: out/
+          retention-days: 1
+
+  tcc-commit:
+    if: github.event_name == 'workflow_dispatch'
+    needs:
+      - tcc-bootstrap-linux-x86_64
+      - tcc-bootstrap-linux-aarch64
+      - tcc-bootstrap-macos-arm64
+      - tcc-bootstrap-windows-x86_64
+      - tcc-bootstrap-windows-x86
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          pattern: tcc-*
+          merge-multiple: true
+      - name: Copy tcc binaries and commit
+        run: |
+          mkdir -p bin
+          cp artifacts/tcc-linux-x86_64      bin/tcc-linux-x86_64
+          cp artifacts/tcc-linux-aarch64     bin/tcc-linux-aarch64
+          cp artifacts/tcc-macos-aarch64     bin/tcc-macos-aarch64
+          cp artifacts/tcc-windows-x86_64.exe bin/tcc-windows-x86_64.exe
+          cp artifacts/tcc-windows-x86.exe    bin/tcc-windows-x86.exe
+          chmod +x bin/tcc-linux-x86_64 bin/tcc-linux-aarch64 bin/tcc-macos-aarch64
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add bin/tcc-*
+          git diff --cached --quiet || \
+            git commit -m "chore(bin): update vendored tcc binaries"
+          git push
 
   # ── Commit all artifacts back to the repo ─────────────────────────────────
 

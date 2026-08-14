@@ -6,6 +6,55 @@
 
 See `docs/roadmap-v2.md` for the authoritative project roadmap and sequencing. The roadmap provides the current strategic direction informed by the value landscape analysis.
 
+## TinyCC (tcc) fallback compiler tier (vendored, 2026-08-14)
+
+- [ ] **`dep/tcc/VERSION` (mob branch commit SHA) and the `luajit_ref` workflow_dispatch
+  default in `.github/workflows/build-vendored.yml` (LuaJIT `v2.1` branch commit SHA) are
+  both pinned to a specific commit and do NOT auto-track upstream — bump them manually,
+  periodically, by design.** This is an intentional reproducibility-over-freshness
+  tradeoff, not a bug or an oversight: `mob` and `v2.1` are both untagged, actively-moving
+  branches, so pinning "the branch name" (as the old `luajit_ref` default did) means two
+  builds on different days silently vendor different, unreviewed code. A commit SHA pin
+  means the vendored code only changes on a deliberate commit that bumps the pin. Cost:
+  neither dependency's security fixes or improvements land until someone manually re-pins.
+  To bump: `git ls-remote https://github.com/TinyCC/tinycc mob` /
+  `git ls-remote https://github.com/LuaJIT/LuaJIT v2.1`, update `dep/tcc/VERSION` and/or
+  the `luajit_ref` default (all five clone/checkout sites read the same default expression;
+  grep `luajit_ref` in the workflow to find them), re-vendor `dep/tcc/` from the new SHA,
+  and re-run `bin/cr test` plus a manual `nix develop`-shell tcc bootstrap smoke test.
+
+- [ ] **tcc (mob@2ba12e83b3599ca8f5d50c179fe5138fe956f0c9) cannot build LuaJIT — confirmed
+  by actually building it, not assumed.** `buildvm`'s generated `lj_vm.S` contains GNU-as-only
+  relocation-suffix syntax (`call pow@PLT`) that tcc's integrated assembler rejects outright
+  (`buildvm_x86.dasc:417: error: end of line expected` when tcc tries to assemble the
+  generated `.S` file). This is a hard syntax gap in tcc's assembler, not a missing flag —
+  no CFLAGS/build-option combination was found to route around it, and none was invented to
+  paper over it. LuaJIT is NOT wired into the `tcc-build-deps-*` CI job for this reason; the
+  vendored LuaJIT binaries and the existing gcc/clang-based `luajit-*` CI jobs remain the
+  only way LuaJIT gets built. Revisit if/when tcc's assembler gains `@PLT`/`@GOT` suffix
+  support upstream, or if `lj_vm.S` generation itself changes to avoid the syntax.
+
+- [ ] **libressl's `--disable-asm` tcc build path (`tcc-build-deps-linux-x86_64` CI job)
+  is wired but NOT locally verified** — sqlite3 and zlib were actually built and functionally
+  tested with the vendored tcc in a local sandbox (both succeed: sqlite3 needs an explicit
+  `-lm` that tcc's driver doesn't add automatically; zlib needs nothing extra), but libressl
+  was out of the local verification pass. Run the `tcc-build-deps-linux-x86_64` job for real
+  (`workflow_dispatch`) and confirm libressl actually configures/builds/links before treating
+  this path as trustworthy.
+
+- [ ] **tcc-built `.so` files may fail to `dlopen` on modern glibc unless the loading
+  process sets `GLIBC_TUNABLES=glibc.rtld.execstack=2` (or tcc is patched/flagged to emit a
+  `PT_GNU_STACK` segment marking the stack non-executable).** Found while locally testing:
+  tcc's linker does not emit a `PT_GNU_STACK` program header at all, and glibc ≥2.41's
+  dynamic loader treats a missing `PT_GNU_STACK` as "this object wants an executable stack"
+  and refuses to load it by default on hardened configurations (observed on this NixOS
+  sandbox's glibc 2.42; error is `cannot enable executable stack as shared object requires:
+  Invalid argument`). Not yet confirmed whether this reproduces on the Alpine/musl (Alpine's
+  musl libc historically doesn't enforce this the same way) and Ubuntu glibc versions CI
+  actually runs on — flagging as a real interoperability risk for any consumer that tries to
+  `ffi.load()` a tcc-built `.so` on a glibc distro new enough to default-enforce this, not
+  fixed or worked around here.
+
 ## Typechecker substrate gaps (found while implementing lib/os_isolation/, 2026-08-14)
 
 - [ ] **An `ffi.new(...)`-typed module-level local's cdata element type only resolves concretely, file-wide, once at least one UNANNOTATED (inference/synthesis-mode) function in the same file has called an `ffi.C.*` member — a `--:`-annotated (checking-mode) function whose own body is the FIRST `ffi.C.*` call in the file leaves that cdata typed `?` for the rest of the file, including inside `ffi.string(buf, n)` calls in OTHER functions.** Confirmed via repeated minimal repros (see session transcript): a `--: (integer, integer|nil) -> (string|nil, string|nil)`-annotated function whose body is the first thing in the file to touch `ffi.C.read`/`ffi.C.close` leaves `ffi.string(buf, len)` erroring `cannot pass ? where integer & { [0]: integer } expected` on `buf` — even though `buf` is a plain `local buf = ffi.new("char[65536]")` with no cast at all. Adding one extra, textually EARLIER, UNANNOTATED function that calls any `ffi.C.*` member (its body's own content is irrelevant — confirmed with a no-op `ffi.C.close(fd)` and, separately, an unrelated `ffi.C.read` probe call) makes every later annotated function's `ffi.string`/cdata usage resolve correctly, file-wide, regardless of ordering after that point. Root cause not diagnosed beyond "checking-mode suppresses whatever bidirectional cdata-element-type elaboration synthesis-mode performs against `$FfiC`, and that elaboration is a global one-time-per-file effect once it fires." Worked around in `lib/os_isolation/fork_direct.lua`, `fork_supervisor.lua`, `supervisor_main.lua`, and `thread.lua` via a `-- TYPECHECKER WORKAROUND:`-labeled unannotated local `_prime(fd)` (or `_prime(L)` in `thread.lua`) function defined immediately after each file's `ffi.cdef` block and called at every `ffi.C.close`/`ffi.C.lua_close` site (both a working priming mechanism AND, incidentally, real cleanup code, so it isn't pure dead weight) — but the ordering dependency itself, and the fact that a purely STATIC (never-called) unannotated function definition alone was sufficient to fix it in isolated repros, indicates a genuine elaboration-order bug, not an intended API. Revert `_prime` back to plain `ffi.C.close`/`ffi.C.lua_close` calls (removing the workaround function and its call sites) once this ordering dependency is fixed, keeping each file's public functions `--:`-annotated as originally intended.
