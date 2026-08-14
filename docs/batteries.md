@@ -2280,6 +2280,15 @@ so the binary doesn't change without a deliberate commit. Vendoring it means:
 - Full vertical ownership: libraries, tooling, and runtime are all in one place,
   all auditable, all yours
 
+LuaJIT's *source* is vendored too (`dep/luajit/`, pinned via `dep/luajit/VERSION` to a
+commit SHA and hash-verified via `dep/luajit/SOURCE_SHA256`), not just the compiled
+binaries — `build-vendored.yml`'s `luajit-*` jobs build from that committed source
+directly, with no `git fetch` against github.com/LuaJIT/LuaJIT at CI time. Every other
+vendored dep (`dep/sqlite3/`, `dep/zlib/`, `dep/libressl/`, `dep/wepoll/`, `dep/tcc/`)
+follows the same pattern: source committed, pinned to an exact version/commit, and
+content-hash-verified — see `docs/native-tiers.md` and
+`tooling/scripts/vendor-verify.sh`.
+
 The only external dependency left is a C compiler for any FFI work that needs
 it — which is as close to a universal assumption as exists. Where even that
 assumption doesn't hold (a bare CI runner or minimal container without gcc/

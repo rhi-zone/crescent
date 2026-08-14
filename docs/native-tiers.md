@@ -133,9 +133,14 @@ gcc/clang's does). It still does not build LuaJIT end-to-end: `buildvm`'s
 generated `lj_vm.S` used GNU-as-only `sym@PLT` relocation-suffix syntax that
 tcc's assembler rejected outright ("end of line expected") — that specific
 parser gap is now patched (see below) and verified in isolation, but a full
-LuaJIT build with the patched tcc has not been attempted (no LuaJIT source
-is vendored locally), so LuaJIT stays unwired in the `tcc-build-deps-*` CI
-job. libressl's `--disable-asm` tcc path is still wired (kept, not flipped):
+LuaJIT build with the patched tcc has not been attempted. LuaJIT source is
+now vendored locally (`dep/luajit/`, pinned via `dep/luajit/VERSION`; used
+by the gcc/clang/cl `luajit-*` jobs in `build-vendored.yml`) — the tcc gap
+here is specifically about wiring that vendored source into the
+`tcc-build-deps-*` job's tcc-as-`CC` path, which hasn't been attempted, not
+about the source's availability. LuaJIT stays unwired in `tcc-build-deps-*`
+until that's verified for real (see TODO.md). libressl's `--disable-asm`
+tcc path is still wired (kept, not flipped):
 the perlasm-generated `*-elf-x86_64.S` files' SSE2/AES-NI opcode gap is now
 patched, but assembling them surfaced a *separate* gap — this vendored tcc
 defines no `xmm8`–`xmm15` (or `r8`–`r15`) registers at all — that still

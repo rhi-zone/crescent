@@ -6,22 +6,85 @@
 
 See `docs/roadmap-v2.md` for the authoritative project roadmap and sequencing. The roadmap provides the current strategic direction informed by the value landscape analysis.
 
+## Vendoring reproducibility: LuaJIT source + hash-signature verification (2026-08-14)
+
+- [x] **LuaJIT source vendored into `dep/luajit/`, closing the zero-dependency violation
+  where `build-vendored.yml` `git fetch`ed github.com/LuaJIT/LuaJIT at CI time instead of
+  building from committed source like every other vendored dep.** Vendored at the commit
+  already pinned (`1edc3e52b67eaf6ce5f809be8e17d6862594b8bc`, cloned live from upstream and
+  verified byte-identical against `.git`'s fetched tree, then copied in without `.git/`).
+  `dep/luajit/VERSION` records the pin; all five `luajit-*` jobs in
+  `.github/workflows/build-vendored.yml` (linux-x86_64, linux-aarch64, macos-arm64,
+  windows-x86_64, windows-x86) now `make -C dep/luajit/src` / run `msvcbuild.bat` against
+  the local tree — no `git fetch`/`git clone`/cross-repo `checkout` of LuaJIT/LuaJIT remains
+  anywhere in the workflow. The `luajit_ref` workflow_dispatch input is removed (it
+  controlled a fetch that no longer happens; bumping LuaJIT now means re-vendoring
+  `dep/luajit/`, same procedure as `dep/tcc/` — see the TinyCC section below). Verified the
+  vendored source actually builds and runs (`make -C dep/luajit/src XCFLAGS=...` under
+  `nix develop`'s gcc, produced a working `luajit -v`). `dep/luajit/` also got the
+  VERSION/VENDORED_VERSION skip-logic parity that sqlite3/zlib/libressl already have (skips
+  rebuilding when the pin hasn't moved).
+
+- [x] **Content-hash verification added for every vendored dep's source tree** — sqlite3,
+  zlib, libressl, wepoll, tcc, luajit. `dep/<name>/VERSION` only ever proved someone typed
+  the right version string; nothing previously caught a hand-edit to committed vendored
+  source that left `VERSION` untouched. `tooling/scripts/vendor-verify.sh` computes a
+  manifest hash (sorted `path  sha256(file)` lines, itself sha256'd) over each dep's pinned
+  source files — excluding prebuilt binaries CI writes back (`*.so`/`*.dylib`/`*.dll`,
+  `dep/libressl/linux-x86_64/`) and the metadata files themselves — and records it in
+  `dep/<name>/SOURCE_SHA256`. Wired into two real, failing gates (not decorative): (1)
+  `build-vendored.yml`'s `version-check` job runs `vendor-verify.sh verify` for all six deps
+  before anything builds, and every build job (`luajit-*`, `sqlite3-*`, `zlib-*`,
+  `libressl-*`, `wepoll-*`, `tcc-bootstrap-*`) now `needs: version-check`, so a hash mismatch
+  blocks the whole workflow; (2) `.githooks/pre-commit` runs the same check against any
+  staged `dep/<name>/**` change and rejects the commit on mismatch, with the fix command
+  printed. Verified both fire for real: tampered `dep/wepoll/wepoll.c` by hand, confirmed
+  `vendor-verify.sh verify` and the pre-commit hook both fail loudly with the mismatch and
+  the exact recorded/computed hashes; restored and reverified clean.
+
+- [x] **`dep/wepoll/` had no VERSION pin at all — gave it one.** Diffed the vendored
+  `dep/wepoll/wepoll.c` + `wepoll.h` against upstream (github.com/piscisaureus/wepoll,
+  `dist` branch, which carries the same bundled single-file layout already vendored here):
+  byte-identical to commit `0598a791bf9cbbf480793d778930fc635b044980`, tagged `v1.5.8`
+  (the tip of `dist` at clone time — no ambiguity, exact match found on the first diff, no
+  guessing required). `dep/wepoll/VERSION` = `1.5.8`; `dep/wepoll/VENDORED_VERSION` set to
+  match (binaries already reflect this exact source); `dep/wepoll/SOURCE_SHA256` added.
+  Wired into the same version-check skip-logic and push-trigger machinery sqlite3/zlib/
+  libressl already use (wepoll was already push-triggered on `dep/wepoll/**`; it now also
+  skips rebuilding when the pin hasn't moved, and its two Windows build jobs are hash-gated
+  like everything else).
+
+- [ ] **Not done, out of scope for this pass:** wiring the vendored `dep/luajit/` source
+  into the tcc-as-`CC` `tcc-build-deps-*` job (still unattempted — see the TinyCC section's
+  update note below). Extending hash verification or VERSION/VENDORED_VERSION skip-logic to
+  platforms/deps beyond what's listed above (e.g. macOS/Windows sqlite3/zlib binaries are
+  still built unconditionally by the `commit` job's per-artifact `copy_if_present`, unrelated
+  to this pass). `dep/xterm-js` and `dep/acorn` (JS deps for `docs/`) were not touched —
+  they're contributor tooling, not part of the zero-dependency runtime vendoring set this
+  task scoped to.
+
 ## TinyCC (tcc) fallback compiler tier (vendored, 2026-08-14)
 
-- [ ] **`dep/tcc/VERSION` (mob branch commit SHA) and the `luajit_ref` workflow_dispatch
-  default in `.github/workflows/build-vendored.yml` (LuaJIT `v2.1` branch commit SHA) are
-  both pinned to a specific commit and do NOT auto-track upstream — bump them manually,
-  periodically, by design.** This is an intentional reproducibility-over-freshness
-  tradeoff, not a bug or an oversight: `mob` and `v2.1` are both untagged, actively-moving
-  branches, so pinning "the branch name" (as the old `luajit_ref` default did) means two
-  builds on different days silently vendor different, unreviewed code. A commit SHA pin
-  means the vendored code only changes on a deliberate commit that bumps the pin. Cost:
-  neither dependency's security fixes or improvements land until someone manually re-pins.
-  To bump: `git ls-remote https://github.com/TinyCC/tinycc mob` /
-  `git ls-remote https://github.com/LuaJIT/LuaJIT v2.1`, update `dep/tcc/VERSION` and/or
-  the `luajit_ref` default (all five clone/checkout sites read the same default expression;
-  grep `luajit_ref` in the workflow to find them), re-vendor `dep/tcc/` from the new SHA,
-  and re-run `bin/cr test` plus a manual `nix develop`-shell tcc bootstrap smoke test.
+- [ ] **`dep/tcc/VERSION` (mob branch commit SHA) is pinned to a specific commit and does
+  NOT auto-track upstream — bump it manually, periodically, by design.** This is an
+  intentional reproducibility-over-freshness tradeoff, not a bug or an oversight: `mob` is
+  an untagged, actively-moving branch, so pinning "the branch name" means two builds on
+  different days silently vendor different, unreviewed code. A commit SHA pin means the
+  vendored code only changes on a deliberate commit that bumps the pin. Cost: tcc's
+  security fixes or improvements don't land until someone manually re-pins. To bump:
+  `git ls-remote https://github.com/TinyCC/tinycc mob`, update `dep/tcc/VERSION`,
+  re-vendor `dep/tcc/` from the new SHA, regenerate its hash
+  (`tooling/scripts/vendor-verify.sh update tcc`), and re-run `bin/cr test` plus a manual
+  `nix develop`-shell tcc bootstrap smoke test.
+  **LuaJIT's equivalent pin moved to the same mechanism (2026-08-14):** the old
+  `luajit_ref` workflow_dispatch input that `git fetch`ed
+  github.com/LuaJIT/LuaJIT at CI time is gone — LuaJIT source is now vendored in
+  `dep/luajit/` (same treatment as tcc/sqlite3/zlib/libressl: `dep/luajit/VERSION` pins the
+  commit SHA, `dep/luajit/SOURCE_SHA256` hash-verifies the tree, `build-vendored.yml`'s
+  five `luajit-*` jobs build from `dep/luajit/src` directly, no network fetch). To bump:
+  `git ls-remote https://github.com/LuaJIT/LuaJIT v2.1`, re-vendor `dep/luajit/` from the
+  new SHA (update `dep/luajit/VERSION`, replace the source tree, regenerate the hash with
+  `tooling/scripts/vendor-verify.sh update luajit`), and rebuild.
 
 - [x] **tcc's assembler rejected GNU-as `sym@PLT` relocation-suffix syntax outright — now
   patched (`dep/tcc/patches/0001-plt-suffix.patch`), verified in isolation, LuaJIT still NOT
@@ -37,12 +100,16 @@ See `docs/roadmap-v2.md` for the authoritative project roadmap and sequencing. T
   assembling a standalone `call pow@PLT` / `jmp bar@PLT` test file: correct `R_X86_64_PLT32`
   relocations emitted, byte-identical to real GNU `as` output; a `sym@GOTPCREL` test still
   errors as before, confirming the narrow scope held. **NOT verified: a full LuaJIT build
-  with this tcc** — no LuaJIT source is vendored in this repo to build `lj_vm.S` against
-  locally, and generating it requires bootstrapping LuaJIT's own host tools first. LuaJIT
-  remains unwired in `tcc-build-deps-*`; the vendored LuaJIT binaries and the existing
+  with this tcc** — building `lj_vm.S` requires bootstrapping LuaJIT's own host tools first.
+  LuaJIT remains unwired in `tcc-build-deps-*`; the vendored LuaJIT binaries and the existing
   gcc/clang-based `luajit-*` CI jobs remain the only way LuaJIT gets built. Revisit (rewire
   LuaJIT into `tcc-build-deps-*`) only once a real `lj_vm.S` has actually been assembled and
   linked successfully with this patched tcc.
+  **Update (2026-08-14):** the "no LuaJIT source is vendored in this repo" premise above no
+  longer holds — LuaJIT source is now vendored in `dep/luajit/` (see the pin-bump item
+  above). That removes the "no source to build `lj_vm.S` against locally" blocker
+  specifically; the "bootstrapping LuaJIT's own host tools" and the actual tcc-as-`CC`
+  wiring into `tcc-build-deps-*` are still unattempted and still the open work.
 
 - [x] **libressl's perlasm-generated `*-elf-x86_64.S` files use SSE2/AES-NI opcodes tcc's
   assembler had zero table entries for — now patched

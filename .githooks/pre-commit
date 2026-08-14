@@ -26,8 +26,10 @@ set -euo pipefail
 repo_root="$(git rev-parse --show-toplevel)"
 cd "$repo_root"
 
+mapfile -t all_staged < <(git diff --cached --name-only --diff-filter=ACMR || true)
+
 mapfile -t staged < <(
-  git diff --cached --name-only --diff-filter=ACMR \
+  printf '%s\n' "${all_staged[@]}" \
     | grep -E '^lib/.*\.lua$' \
     | grep -vE '^lib/type/analysis/corpus/' \
     || true
@@ -36,6 +38,35 @@ mapfile -t staged < <(
 # falsification corpus of known checker gaps. Fixtures are deliberately
 # written to exercise errors; they must not be held to the zero-new-errors
 # bar. See lib/type/analysis/corpus/corpus.md for the methodology.
+
+# ── Vendored dep content-hash check ────────────────────────────────────────
+# Any staged change under dep/<name>/ must come with an updated
+# dep/<name>/SOURCE_SHA256 (tooling/scripts/vendor-verify.sh) — otherwise a
+# hand-edit to vendored source would silently pass with a stale hash, and CI
+# would only catch it later. Checked against the working tree (post
+# `git add`, which for a normal commit matches staged content). This runs
+# independently of the lib/*.lua typecheck gate below (which early-exits
+# when no Lua files are staged), since a dep/-only commit must still be
+# gated.
+declare -A dep_touched=()
+for f in "${all_staged[@]}"; do
+  if [[ "$f" =~ ^dep/([^/]+)/ ]]; then
+    dep_touched["${BASH_REMATCH[1]}"]=1
+  fi
+done
+
+if [ "${#dep_touched[@]}" -gt 0 ]; then
+  echo "pre-commit: verifying vendored source hashes for: ${!dep_touched[*]}"
+  if ! tooling/scripts/vendor-verify.sh verify "${!dep_touched[@]}"; then
+    echo "" >&2
+    echo "pre-commit: a dep/ change is staged without a matching SOURCE_SHA256 update." >&2
+    echo "If this is deliberate re-vendoring, regenerate the hash and re-stage it:" >&2
+    for d in "${!dep_touched[@]}"; do
+      echo "  tooling/scripts/vendor-verify.sh update $d && git add dep/$d/SOURCE_SHA256" >&2
+    done
+    exit 1
+  fi
+fi
 
 if [ "${#staged[@]}" -eq 0 ]; then
   exit 0
