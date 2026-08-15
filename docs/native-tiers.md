@@ -157,9 +157,15 @@ vendored source rather than either vendoring it modified or forking it
 outright; it exists because tcc is infrastructure we actively extend
 (assembler/opcode-table gaps) rather than a dependency we only consume
 as-is. Currently: `0001-plt-suffix.patch` (tccasm.c, GNU-as `sym@PLT`
-suffix parsing) and `0002-libressl-sse-aesni-opcodes.patch`
+suffix parsing), `0002-libressl-sse-aesni-opcodes.patch`
 (x86_64-asm.h + i386-asm.c, SSE2/AES-NI opcode-table entries for
-libressl's perlasm output).
+libressl's perlasm output), and `0004-asm-section-flags-alloc.patch`
+(tccasm.c, `.section NAME,"flags"` directive: `SHF_ALLOC` was hardcoded
+into every parsed section's flags and the flag-parsing loop never
+recognized `a` at all, so an explicit `"w"`-only section came out
+allocatable and an empty flags string still got `SHF_ALLOC` — both wrong
+against real GNU `as`, which only sets `SHF_ALLOC` when `a` is actually
+present.
 
 ## Vendored binary layout
 

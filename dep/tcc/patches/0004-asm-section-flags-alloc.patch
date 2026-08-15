@@ -1,0 +1,20 @@
+--- a/dep/tcc/tccasm.c
++++ b/dep/tcc/tccasm.c
+@@ -896,7 +896,7 @@ static void asm_parse_directive(TCCState *s1, int global)
+         {
+             char sname[256];
+ 	    int old_nb_section = s1->nb_sections;
+-            int flags = SHF_ALLOC;
++            int flags = 0;
+ 
+ 	    tok1 = tok;
+             /* XXX: support more options */
+@@ -916,6 +916,8 @@ static void asm_parse_directive(TCCState *s1, int global)
+                 if (tok != TOK_STR)
+                     expect("string constant");
+                 for (p = tokc.str.data; *p; ++p) {
++                    if (*p == 'a')
++                        flags |= SHF_ALLOC;
+                     if (*p == 'w')
+                         flags |= SHF_WRITE;
+                     if (*p == 'x')

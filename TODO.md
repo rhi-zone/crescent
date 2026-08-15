@@ -211,6 +211,52 @@ See `docs/roadmap-v2.md` for the authoritative project roadmap and sequencing. T
   encoding in `i386-asm.c`/`i386-gen.c`/`x86_64-gen.c`, which is a materially bigger change
   than adding opcode-table entries and wasn't part of this session's scope.
 
+- [x] **tcc's `.section NAME,"flags"` assembler directive hardcoded `SHF_ALLOC` into
+  every parsed section's flags and never recognized `a` in the flags string at all — now
+  patched (`dep/tcc/patches/0004-asm-section-flags-alloc.patch`), verified against real
+  GNU `as`.** Root cause was in `tccasm.c`'s `TOK_ASMDIR_section`/`TOK_ASMDIR_pushsection`
+  handler: `int flags = SHF_ALLOC;` initialized the flags unconditionally regardless of
+  whether an explicit flags string was given at all, and the flag-parsing loop for the
+  explicit-string case only ever set `SHF_WRITE` (`w`) and `SHF_EXECINSTR` (`x`) — `a`
+  (alloc) was parsed nowhere, so it was structurally impossible to end up WITHOUT
+  `SHF_ALLOC`. Real GNU `as` semantics (confirmed against the actual `as` binary): an empty
+  flags string (`.section foo,""`) gets no `SHF_ALLOC`; `"a"` present sets it; `"w"` alone
+  is write-only, no alloc unless `a` is also present. Fixed by changing the default to
+  `int flags = 0;` and adding an `a` → `SHF_ALLOC` case to the parsing loop. Pre-created
+  sections (`.text`/`.data`/`.bss`, allocated via `new_section()` in `tccelf.c` before any
+  `.section` directive runs) are unaffected by construction, independent of the fix: the
+  flags-overwrite block in `tccasm.c` only fires when `use_section`/`push_section` just
+  allocated a NEW section (`old_nb_section != s1->nb_sections`), and `.text`/`.data`/`.bss`
+  already exist by the time any `.section` directive executes, so that block never runs for
+  them. Verified empirically: built tcc from the patched source (plain `./configure && make tcc`,
+  this sandbox's system gcc) and assembled a repro `.S` exercising `.text`/`.data`/`.bss`
+  plus `.section` with `""`, `"a"`, `"w"`, `"wa"`, `"ax"` flag strings; compared
+  `readelf -SW` output against real system `as` on the same file — flags matched exactly for
+  every case (`.sec_empty` → none, `.sec_a` → `A`, `.sec_w` → `W`, `.sec_wa` → `WA`,
+  `.sec_ax` → `AX`, and `.text`/`.data`/`.bss` → `AX`/`WA`/`WA` in both). Cross-checked
+  against the UNFIXED tcc build on the same file to confirm the bug and its blast radius
+  precisely: unfixed tcc produced `.sec_empty` → `A` (wrong, should be none) and `.sec_w` →
+  `WA` (wrong, should be `W` only) — exactly the two cases the fix corrects, nothing else
+  changed. Regression-checked against the vendored libressl `*-elf-x86_64.S` files used to
+  verify `0002-libressl-sse-aesni-opcodes.patch`: with `0001`+`0002`+this patch applied
+  together, `aes-elf-x86_64.S`, `rc4-elf-x86_64.S`, and `bn/{modexp512,mont,mont5}
+  -elf-x86_64.S` still assemble cleanly; `aesni-elf-x86_64.S` and `modes/ghash-elf-x86_64.S`
+  still fail on the pre-existing, separately-recorded `xmm8`–`xmm15` register gap above, not
+  on anything section-flags-related — no regression introduced.
+  **Separate, deeper, NOT-fixed bug found while re-confirming this area of `tccasm.c`,
+  intentionally left alone (`x86_64-gen.c` not touched):** `gen_addr32()` in
+  `dep/tcc/x86_64-gen.c` (~line 265) hardcodes `R_X86_64_32S` for every 32-bit
+  symbol+addend relocation regardless of context. Real `as` uses `R_X86_64_32` for
+  unsigned contexts (e.g. `.long`, `movl $sym,%eax`) and reserves `R_X86_64_32S` for
+  signed-extension contexts (e.g. `movq $sym,%rax`); naively flipping the constant would
+  break the case tcc already gets right, so this needs a context-aware fix, not a one-line
+  swap. Additionally, tcc has no section-symbol allocation / local-to-section-symbol
+  relocation-rewriting subsystem at all — real `as` targets a section symbol for
+  relocations against static data rather than the local label directly, and tcc has no
+  equivalent mechanism. This is missing infrastructure requiring its own scoped design
+  pass (per CLAUDE.md's substrate-before-consumers rule), not a quick fix — not attempted
+  here.
+
 - [ ] **tcc-built `.so` files may fail to `dlopen` on modern glibc unless the loading
   process sets `GLIBC_TUNABLES=glibc.rtld.execstack=2` (or tcc is patched/flagged to emit a
   `PT_GNU_STACK` segment marking the stack non-executable).** Found while locally testing:
