@@ -1,0 +1,567 @@
+--- a/dep/tcc/tcc.h
++++ b/dep/tcc/tcc.h
+@@ -664,6 +664,7 @@
+     struct TokenString *prev;
+     const int *prev_ptr;
+     char alloc;
++    char is_unget;  /* pushback from unget_tok(): excluded from tok_capture */
+ } TokenString;
+ 
+ /* GNUC attribute definition */
+@@ -1402,6 +1403,21 @@
+ ST_FUNC void parse_define(void);
+ ST_FUNC void skip_to_eol(int warn);
+ ST_FUNC void preprocess(int is_bof);
++/* Debug state that accumulates per assembly pass.  tcc_debug_start/end
++   bracket the whole relaxation iteration (they derive the unit identity
++   from the lexer file stack, which only pass 0 has), but the line
++   program itself accumulates on every pass and must be wound back so
++   that only the final, converged pass contributes to it. */
++/* field names are prefixed: several of the plain names (last_line_num,
++   new_file, ...) are #defines onto s1->dState inside tccdbg.c */
++typedef struct DebugPassState {
++    int sv_line_size, sv_cur_file, sv_last_file, sv_last_pc, sv_last_line;
++    int sv_last_line_num, sv_new_file;
++} DebugPassState;
++ST_FUNC void tcc_debug_pass_save(TCCState *s1, DebugPassState *p);
++ST_FUNC void tcc_debug_pass_restore(TCCState *s1, DebugPassState *p);
++
++ST_DATA TokenString *tok_capture;
+ ST_FUNC void next(void);
+ ST_INLN void unget_tok(int last_tok);
+ ST_FUNC void preprocess_start(TCCState *s1, int filetype);
+--- a/dep/tcc/tccpp.c
++++ b/dep/tcc/tccpp.c
+@@ -1001,6 +1001,7 @@
+     s->len = s->need_spc = 0;
+     s->allocated_len = 0;
+     s->last_line_num = -1;
++    s->is_unget = 0;
+ }
+ 
+ ST_FUNC TokenString *tok_str_alloc(void)
+@@ -2624,9 +2625,18 @@
+         PEEKC(c, p);
+         if ((tok_flags & TOK_FLAG_BOL) && 
+             (parse_flags & PARSE_FLAG_PREPROCESS)) {
++            TokenString *sav_capture = tok_capture;
+             tok_flags &= ~TOK_FLAG_BOL;
+             file->buf_ptr = p;
++            /* Directive bodies (#if conditions, #define replacement lists,
++               macro arguments consumed by the expression evaluator) reach
++               next() too, but they are preprocessor input, not output --
++               capturing them would replay `#if defined X' to the assembler
++               as an instruction. The capture stream holds only what the
++               preprocessor *produces*. */
++            tok_capture = NULL;
+             preprocess(tok_flags & TOK_FLAG_BOF);
++            tok_capture = sav_capture;
+             p = file->buf_ptr;
+             goto maybe_newline;
+         } else {
+@@ -3466,11 +3476,42 @@
+     return nosubst;
+ }
+ 
++/* When non-NULL, every token produced by next() is appended here, giving
++   the post-preprocessing token stream of the unit.  The assembler uses it
++   to replay a translation unit for LEB128 relaxation without re-running
++   the preprocessor (re-running it would re-evaluate #include/#pragma once
++   against already-mutated state and silently change the input).
++   tok_str_add_tok() also emits TOK_LINENUM markers, which next() consumes
++   at the top of the macro_ptr loop, so replayed passes report true source
++   line numbers in diagnostics. */
++ST_DATA TokenString *tok_capture;
++/* Set by next_uncaptured() to say where the token it just produced came
++   from.  Tokens replayed out of an unget_tok() pushback must NOT be
++   captured: either they were already captured when first read (the
++   parser pushed back a token it had consumed), or they are synthetic
++   tokens the parser injected that were never in the input at all
++   (i386-asm.c's asm_parse_regvar() invents a register name and a '%').
++   In both cases the parser re-performs the same pushback during replay,
++   so capturing them would duplicate them. */
++static int tok_from_unget;
++
+ /* return next token with macro substitution */
++static void next_uncaptured(void);
++
+ ST_FUNC void next(void)
+ {
++    next_uncaptured();
++    if (tok_capture && tok != TOK_EOF && !tok_from_unget)
++        tok_str_add_tok(tok_capture);
++}
++
++static void next_uncaptured(void)
++{
+     int t;
+     while (macro_ptr) {
++        /* record the provenance of the token about to be produced, so
++           next() knows whether it belongs in the capture stream */
++        tok_from_unget = macro_stack && macro_stack->is_unget;
+ redo:
+         t = *macro_ptr;
+         if (TOK_HAS_VALUE(t)) {
+@@ -3498,6 +3539,7 @@
+         return;
+     }
+ 
++    tok_from_unget = 0;  /* straight from the lexer: always capturable */
+     next_nomacro();
+     t = tok;
+     if (t >= TOK_IDENT && (parse_flags & PARSE_FLAG_PREPROCESS)) {
+@@ -3535,6 +3577,7 @@
+     if (tok != TOK_EOF)
+         tok_str_add2(str, tok, &tokc);
+     tok_str_add(str, 0);
++    str->is_unget = 1;
+     begin_macro(str, alloc);
+     tok = last_tok;
+ }
+--- a/dep/tcc/tccasm.c
++++ b/dep/tcc/tccasm.c
+@@ -45,6 +45,30 @@
+ 
+ static AsmFixup *asm_fixups;
+ 
++/* One `.uleb128'/`.sleb128' site whose value -- and therefore whose
++   encoded width -- is not known when it is parsed.  See the commentary
++   above tcc_assemble() for why the layout is re-run rather than patched. */
++typedef struct AsmLeb {
++    Section *sec;
++    unsigned long offset;   /* start of the reserved bytes (this pass) */
++    int width;              /* bytes reserved; the guess, persists across passes */
++    int is_signed;
++    Sym *sym1;              /* minuend; NULL only if already folded */
++    Sym *sym2;              /* subtrahend, or NULL when folded into addend */
++    int64_t addend;
++} AsmLeb;
++
++static AsmLeb *asm_lebs;
++static int asm_nb_lebs;      /* sites recorded so far in the current pass */
++static int asm_lebs_alloc;
++static int asm_relax_ok;     /* deferred LEB128 permitted (whole-file .S only) */
++static AsmLeb *asm_leb_site(void);
++
++/* Per-pass rewind state.  The snapshot is taken from inside the assembly
++   loop, after the first token -- see the comment at that point. */
++static int asm_snap_pending;
++static void asm_snapshot_here(TCCState *s1);
++
+ /* Encode V into BUF as (un)signed LEB128; returns the byte count.
+    Both forms are minimal-width, matching what GNU as emits. */
+ static int asm_leb128_encode(unsigned char *buf, uint64_t v, int is_signed)
+@@ -825,11 +849,33 @@
+             for(;;) {
+                 ExprValue e;
+                 asm_expr_defer(s1, &e);
+-                if (e.sym2)
+-                    tcc_error("unsupported: LEB128 of an unresolved symbol "
+-                              "difference (needs variable-width relaxation)");
+-                if (e.sym)
+-                    expect("constant");
++                if (e.sym2 || e.sym) {
++                    /* Value not known yet: its width is what relaxation is
++                       solving for.  Reserve the current guess and record
++                       the site; tcc_assemble() iterates to a fixed point
++                       and writes the encoding then.  `sym - definedlabel'
++                       arrives here with sym2 already folded into e.v by
++                       asm_expr_sum()'s PC-relative case, which is why a
++                       lone e.sym is deferred too rather than rejected. */
++                    AsmLeb *L;
++                    if (!asm_relax_ok)
++                        tcc_error("LEB128 of an unresolved symbol difference "
++                                  "is not supported inside inline asm "
++                                  "(it cannot be re-assembled safely); "
++                                  "use a separate .S file");
++                    if (sec->sh_type == SHT_NOBITS)
++                        tcc_error("LEB128 with a symbol in a NOBITS section");
++                    L = asm_leb_site();
++                    L->sec = sec;
++                    L->offset = ind;
++                    L->is_signed = is_signed;
++                    L->sym1 = e.sym;
++                    L->sym2 = e.sym2;
++                    L->addend = (int64_t)e.v;
++                    for (i = 0; i < L->width; i++)
++                        g(0);
++                    goto leb_next;
++                }
+                 len = asm_leb128_encode(buf, e.v, is_signed);
+                 if (sec->sh_type != SHT_NOBITS) {
+                     for (i = 0; i < len; i++)
+@@ -837,6 +883,7 @@
+                 } else {
+                     ind += len;
+                 }
++            leb_next:
+                 if (tok != ',')
+                     break;
+                 next();
+@@ -1294,6 +1341,17 @@
+         next();
+         if (tok == TOK_EOF)
+             break;
++        /* Rewind point for LEB128 relaxation.  It is taken here, after the
++           first token, rather than before the loop: lexing that token pops
++           the <command line> buffer, and that pop emits the N_EINCL closing
++           the N_BINCL tcc_debug_start() opened (tccpp.c -> tcc_debug_eincl).
++           Like tcc_debug_start() itself, that is a preprocessing-lifecycle
++           event which only ever happens on the first pass, so it has to sit
++           outside the rewound region or it would be discarded and never
++           re-emitted.  Nothing is written to any section before this point,
++           so the section state here is the same as before the loop. */
++        if (asm_snap_pending)
++            asm_snapshot_here(s1);
+         tcc_debug_line(s1);
+         parse_flags |= PARSE_FLAG_LINEFEED; /* XXX: suppress that hack */
+     redo:
+@@ -1344,19 +1402,300 @@
+     return 0;
+ }
+ 
++/* ------------------------------------------------------------------ */
++/* LEB128 relaxation.
++
++   `.uleb128 L2-L1' where L1/L2 are not both defined yet cannot be encoded
++   when it is parsed: the value is unknown, so the *width* is unknown too.
++   Unlike a fixed-width field (handled by AsmFixup above) there is nothing
++   to reserve, because the number of bytes is itself what we are solving
++   for, and every byte a site occupies shifts everything after it.
++
++   Patching the emitted output afterwards is not an option.  Section
++   content is a flat buffer and offsets into it are baked, unrecoverably,
++   in several places: same-section branch displacements are written as
++   bare immediates with no relocation (i386-asm.c gen_disp32), forward
++   jump chains are threaded through the not-yet-patched displacement
++   fields themselves (x86_64-gen.c gsym_addr), and `.align' padding is a
++   function of the absolute position, so a delta is not even uniform
++   across a section.  Any of those would be corrupted silently.
++
++   So layout is re-run instead: assemble the unit, measure, and if any
++   site's width was wrong, rewind all state and assemble it again with
++   the better guess.  Widths only ever grow, which bounds the iteration
++   (a LEB128 is at most 10 bytes) and yields the same minimal fixed point
++   GNU as computes.  Passes after the first replay a captured token
++   stream rather than re-reading the source, so the preprocessor runs
++   exactly once -- re-running it would re-evaluate #include/#pragma once
++   against already-mutated state and silently change the input. */
++
++/* Number of bytes minimal LEB128 encoding of V needs. */
++static int asm_leb_width(int64_t v, int is_signed)
++{
++    unsigned char buf[16];
++    return asm_leb128_encode(buf, (uint64_t)v, is_signed);
++}
++
++/* Write V into N bytes of LEB128.  N is normally the minimal width, but
++   relaxation can over-reserve: `.align' can absorb an earlier site's
++   growth and make a difference smaller again, and widths never shrink
++   (shrinking risks oscillation).  In that case pad, which DWARF permits
++   explicitly -- continuation bit set on every byte but the last. */
++static void asm_leb_write(unsigned char *p, int n, int64_t v, int is_signed)
++{
++    unsigned char buf[16];
++    int len = asm_leb128_encode(buf, (uint64_t)v, is_signed), i;
++    if (len > n)
++        tcc_error("internal error: LEB128 width shrank during relaxation");
++    for (i = 0; i < len; i++)
++        p[i] = buf[i];
++    for (; i < n; i++)
++        p[i] = 0x80;            /* continuation, zero payload */
++    if (len < n)
++        p[n - 1] = is_signed && v < 0 ? 0x7f : 0x00;
++}
++
++/* Claim the next site slot for this pass.  Sites are encountered in the
++   same order every pass, so the index is a stable identity and the width
++   guess carries over. */
++static AsmLeb *asm_leb_site(void)
++{
++    AsmLeb *L;
++    if (asm_nb_lebs >= asm_lebs_alloc) {
++        asm_lebs_alloc = asm_lebs_alloc ? asm_lebs_alloc * 2 : 16;
++        asm_lebs = tcc_realloc(asm_lebs, asm_lebs_alloc * sizeof(AsmLeb));
++        memset(asm_lebs + asm_nb_lebs, 0,
++               (asm_lebs_alloc - asm_nb_lebs) * sizeof(AsmLeb));
++    }
++    L = &asm_lebs[asm_nb_lebs++];
++    if (L->width == 0)
++        L->width = 1;           /* start minimal, grow to the fixed point */
++    return L;
++}
++
++/* Resolve one site against the label values of the pass just finished. */
++static int64_t asm_leb_value(AsmLeb *L)
++{
++    ElfSym *e1 = NULL, *e2 = NULL;
++    int64_t v = L->addend;
++    if (L->sym1) {
++        e1 = elfsym(L->sym1);
++        if (!e1 || e1->st_shndx == SHN_UNDEF)
++            tcc_error("undefined symbol '%s' in LEB128 expression",
++                      get_tok_str(L->sym1->v, NULL));
++        v += (int64_t)e1->st_value;
++    }
++    if (L->sym2) {
++        e2 = elfsym(L->sym2);
++        if (!e2 || e2->st_shndx == SHN_UNDEF)
++            tcc_error("undefined symbol '%s' in LEB128 expression",
++                      get_tok_str(L->sym2->v, NULL));
++        v -= (int64_t)e2->st_value;
++    }
++    if (e1 && e2 && e1->st_shndx != e2->st_shndx)
++        tcc_error("invalid operation with label");
++    /* A lone symbol must be section-relative to be encodable at all: a
++       LEB128 field cannot carry a relocation. */
++    if (e1 && !e2 && e1->st_shndx == SHN_ABS)
++        ;                       /* absolute: fine */
++    else if (e1 && !e2 && !L->sym2 && e1->st_shndx != cur_text_section->sh_num
++             && L->sec->sh_num != e1->st_shndx)
++        tcc_error("LEB128 of a symbol outside the current section");
++    return v;
++}
++
++/* Returns non-zero if another pass is needed.  On convergence the final
++   encodings are written into the reserved bytes. */
++static int asm_relax_iterate(TCCState *s1)
++{
++    int i, changed = 0;
++    for (i = 0; i < asm_nb_lebs; i++) {
++        AsmLeb *L = &asm_lebs[i];
++        int need = asm_leb_width(asm_leb_value(L), L->is_signed);
++        if (need > L->width)
++            L->width = need, changed = 1;
++    }
++    if (changed)
++        return 1;
++    for (i = 0; i < asm_nb_lebs; i++) {
++        AsmLeb *L = &asm_lebs[i];
++        asm_leb_write(L->sec->data + L->offset, L->width,
++                      asm_leb_value(L), L->is_signed);
++    }
++    return 0;
++}
++
++/* ---- state rewind between passes ---------------------------------- */
++
++struct AsmSnapshot {
++    int nb_sections;
++    unsigned long *data_offset;
++    unsigned long *reloc_offset;
++    int *sh_addralign;
++    int *sh_flags;
++    Sym *global_mark;
++    Section *cur_sec, *last_text;
++    int ind, nocode_wanted, asmgoto;
++    /* `.file' rewrites file->filename via tccpp_putfile(), and
++       tcc_debug_start() reads it for the STT_FILE symbol.  Left alone, a
++       replayed pass would name the unit after the last .file of the
++       previous pass instead of the real input. */
++    char filename[1024];
++    int line_num;
++    DebugPassState dbg;
++};
++typedef struct AsmSnapshot AsmSnapshot;
++static AsmSnapshot *asm_snap;   /* where the pending snapshot is written */
++
++static void asm_snapshot_take(TCCState *s1, AsmSnapshot *S)
++{
++    int i, n = s1->nb_sections;
++    S->nb_sections = n;
++    S->data_offset = tcc_malloc(n * sizeof *S->data_offset);
++    S->reloc_offset = tcc_malloc(n * sizeof *S->reloc_offset);
++    S->sh_addralign = tcc_malloc(n * sizeof *S->sh_addralign);
++    S->sh_flags = tcc_malloc(n * sizeof *S->sh_flags);
++    for (i = 0; i < n; i++) {
++        /* index 0 is the ELF null section placeholder */
++        Section *s = s1->sections[i];
++        if (!s) {
++            S->data_offset[i] = S->reloc_offset[i] = 0;
++            S->sh_addralign[i] = S->sh_flags[i] = 0;
++            continue;
++        }
++        S->data_offset[i] = s->data_offset;
++        S->reloc_offset[i] = s->reloc ? s->reloc->data_offset : 0;
++        S->sh_addralign[i] = s->sh_addralign;
++        S->sh_flags[i] = s->sh_flags;
++    }
++    S->global_mark = global_stack;
++    S->cur_sec = cur_text_section;
++    S->last_text = last_text_section;
++    S->ind = ind;
++    S->nocode_wanted = nocode_wanted;
++    S->asmgoto = asmgoto_n;
++    /* Save the *resolved* unit name -- the same expression tcc_debug_start()
++       reads.  Which BufferedFile holds it moves between passes: on the first
++       pass `file' is the <command line> buffer with the real source as its
++       prev, and once that buffer is popped `file' is the source itself. */
++    pstrcpy(S->filename, sizeof S->filename,
++            file->prev ? file->prev->filename : file->filename);
++    S->line_num = file->line_num;
++}
++
++static void asm_snapshot_here(TCCState *s1)
++{
++    asm_snap_pending = 0;
++    asm_snapshot_take(s1, asm_snap);
++    tcc_debug_pass_save(s1, &asm_snap->dbg);
++}
++
++static void asm_snapshot_restore(TCCState *s1, AsmSnapshot *S)
++{
++    int i;
++    /* Symbols and the ELF symbol table must be rewound together: Sym.c is
++       an index into symtab_section->data, so truncating one without the
++       other leaves elfsym() pointing at reused storage. */
++    sym_pop(&global_stack, S->global_mark, 0);
++    for (i = 0; i < s1->nb_sections; i++) {
++        Section *s = s1->sections[i];
++        unsigned long keep;
++        if (!s)
++            continue;
++        keep = i < S->nb_sections ? S->data_offset[i] : 0;
++        if (s->data && s->data_offset > keep)
++            memset(s->data + keep, 0, s->data_offset - keep);
++        s->data_offset = keep;
++        if (s->reloc)
++            s->reloc->data_offset =
++                i < S->nb_sections ? S->reloc_offset[i] : 0;
++        if (i < S->nb_sections) {
++            s->sh_addralign = S->sh_addralign[i];
++            s->sh_flags = S->sh_flags[i];
++        }
++        s->prev = NULL;         /* drop any unbalanced .pushsection */
++    }
++    cur_text_section = S->cur_sec;
++    last_text_section = S->last_text;
++    ind = S->ind;
++    nocode_wanted = S->nocode_wanted;
++    asmgoto_n = S->asmgoto;
++    {   /* put it back wherever tcc_debug_start() will look for it */
++        BufferedFile *bf = file->prev ? file->prev : file;
++        pstrcpy(bf->filename, sizeof bf->filename, S->filename);
++    }
++    file->line_num = S->line_num;
++    tcc_debug_pass_restore(s1, &S->dbg);
++    asm_free_fixups();
++    asm_nb_lebs = 0;            /* widths persist in asm_lebs[] */
++}
++
++static void asm_snapshot_free(AsmSnapshot *S)
++{
++    tcc_free(S->data_offset);
++    tcc_free(S->reloc_offset);
++    tcc_free(S->sh_addralign);
++    tcc_free(S->sh_flags);
++}
++
+ /* Assemble the current file */
+ ST_FUNC int tcc_assemble(TCCState *s1, int do_preprocess)
+ {
+-    int ret;
++    int ret = 0, pass;
++    AsmSnapshot snap;
++    TokenString capture;
++
++    /* an empty unit never reaches the snapshot point, so make the
++       teardown below safe regardless */
++    memset(&snap, 0, sizeof snap);
++    tok_str_new(&capture);
++    asm_nb_lebs = 0;
++    asm_lebs_alloc = 0;
++    asm_lebs = NULL;
++    asm_relax_ok = 1;
++
++    /* tcc_debug_start() derives the unit identity from the lexer file
++       stack (`file->prev ? file->prev->filename : file->filename'), and
++       that stack only has its original shape on the first pass -- the
++       <command line> buffer sitting above the source is popped once the
++       source hits EOF.  Running it per pass would therefore name the unit
++       differently on a replay.  So it runs exactly once, here, and the
++       per-pass rewind point is taken after it. */
+     tcc_debug_start(s1);
+-    /* default section is text */
+-    cur_text_section = text_section;
+-    ind = cur_text_section->data_offset;
+-    nocode_wanted = 0;
+-    ret = tcc_assemble_internal(s1, do_preprocess, 1);
+-    cur_text_section->data_offset = ind;
+-    asm_resolve_fixups(s1);
++    asm_snap = &snap;
++    asm_snap_pending = 1;
++
++    for (pass = 0;; pass++) {
++        cur_text_section = text_section;
++        ind = cur_text_section->data_offset;
++        nocode_wanted = 0;
++        if (pass == 0) {
++            /* preprocess once, recording the resulting token stream */
++            tok_capture = &capture;
++            ret = tcc_assemble_internal(s1, do_preprocess, 1);
++            tok_capture = NULL;
++            /* TOK_EOF terminates without popping the string (next() leaves
++               macro_ptr alone for it), so the pop below is unconditional */
++            tok_str_add(&capture, TOK_EOF);
++        } else {
++            begin_macro(&capture, 0);
++            ret = tcc_assemble_internal(s1, do_preprocess, 1);
++            end_macro();
++        }
++        cur_text_section->data_offset = ind;
++        asm_resolve_fixups(s1);
++        if (!asm_relax_iterate(s1))
++            break;
++        asm_snapshot_restore(s1, &snap);
++    }
++
++    /* reads the line program built by the final, converged pass */
+     tcc_debug_end(s1);
++    asm_relax_ok = 0;
++    asm_nb_lebs = asm_lebs_alloc = 0;
++    tcc_free(asm_lebs), asm_lebs = NULL;
++    asm_snapshot_free(&snap);
++    tok_str_free_str(capture.str);
+     return ret;
+ }
+ 
+--- a/dep/tcc/tccdbg.c
++++ b/dep/tcc/tccdbg.c
+@@ -1291,6 +1291,37 @@
+ static void fix_debug_forw_hash(TCCState *s1, int global, int start);
+ 
+ /* put end of translation unit info */
++/* Save/restore the debug state that one assembly pass accumulates, so a
++   re-assembled pass does not append to the previous pass's line program.
++   Only the per-pass cursor and the line-program length are touched: the
++   directory/filename tables and section start offsets are established
++   once by tcc_debug_start() and are the same for every pass. */
++ST_FUNC void tcc_debug_pass_save(TCCState *s1, DebugPassState *p)
++{
++    if (!s1->do_debug)
++        return;
++    p->sv_line_size = dwarf_line.line_size;
++    p->sv_cur_file = dwarf_line.cur_file;
++    p->sv_last_file = dwarf_line.last_file;
++    p->sv_last_pc = dwarf_line.last_pc;
++    p->sv_last_line = dwarf_line.last_line;
++    p->sv_last_line_num = last_line_num;
++    p->sv_new_file = new_file;
++}
++
++ST_FUNC void tcc_debug_pass_restore(TCCState *s1, DebugPassState *p)
++{
++    if (!s1->do_debug)
++        return;
++    dwarf_line.line_size = p->sv_line_size;
++    dwarf_line.cur_file = p->sv_cur_file;
++    dwarf_line.last_file = p->sv_last_file;
++    dwarf_line.last_pc = p->sv_last_pc;
++    dwarf_line.last_line = p->sv_last_line;
++    last_line_num = p->sv_last_line_num;
++    new_file = p->sv_new_file;
++}
++
+ ST_FUNC void tcc_debug_end(TCCState *s1)
+ {
+ 

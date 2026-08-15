@@ -169,16 +169,33 @@ difference (`.long .LEND-.LSTART` written before either label is defined
 — the DWARF CIE/FDE length-prefix idiom) is now deferred via an
 `AsmFixup` list and resolved once the whole input is read, instead of
 erroring immediately as "invalid operation with label". Deliberately
-does *not* implement variable-width LEB128 relaxation: a label
-difference inside `.uleb128`/`.sleb128` is a documented, explicit hard
-error ("needs variable-width relaxation") rather than being silently
-mis-encoded — see TODO.md), and `0004-asm-section-flags-alloc.patch`
+does *not* implement variable-width LEB128 relaxation — that landed
+separately as `0005`, below), `0004-asm-section-flags-alloc.patch`
 (tccasm.c, `.section NAME,"flags"` directive: `SHF_ALLOC` was hardcoded
 into every parsed section's flags and the flag-parsing loop never
 recognized `a` at all, so an explicit `"w"`-only section came out
 allocatable and an empty flags string still got `SHF_ALLOC` — both wrong
 against real GNU `as`, which only sets `SHF_ALLOC` when `a` is actually
-present).
+present), and `0005-asm-leb128-relaxation.patch` (tcc.h + tccpp.c +
+tccasm.c + tccdbg.c, variable-width LEB128 relaxation — the gap `0003`
+documented). A `.uleb128`/`.sleb128` whose operand is an unresolved label
+difference has an unknown *width*, not just an unknown value, so nothing
+can be reserved at parse time; and the emitted bytes cannot be patched
+afterwards, because tcc writes same-section branch displacements as bare
+immediates with no relocation, threads forward-jump chains through the
+displacement fields themselves, and computes `.align` padding from the
+absolute position — so a size delta is neither findable nor uniform.
+Implemented as real multi-pass re-layout: assemble, measure, and if any
+width was wrong rewind all state and assemble again with a larger guess.
+Widths only grow, bounding the iteration and giving the same minimal
+fixed point GNU `as` computes. Passes after the first replay a captured
+token stream instead of re-reading source, so the preprocessor runs
+exactly once (re-running it would re-evaluate `#include`/`#pragma once`
+against mutated state). Relaxation is an explicit error inside
+function-body inline `asm()`, which cannot be safely re-assembled. Note
+this is general assembler infrastructure with no current in-tree
+consumer: `lj_vm.S` and every `vm_*.dasc` target use only literal
+constants as LEB128 operands.
 
 ## Vendored binary layout
 

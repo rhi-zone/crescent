@@ -279,8 +279,7 @@ See `docs/roadmap-v2.md` for the authoritative project roadmap and sequencing. T
   after relaxation, which this patch doesn't attempt; it is instead a documented, explicit
   hard error (`"unsupported: LEB128 of an unresolved symbol difference (needs
   variable-width relaxation)"`) rather than being silently mis-encoded at the wrong width.
-  This is a separate, larger piece of infrastructure being scoped/built independently —
-  not started here, not blocked on here. Verified empirically: regenerated a complete,
+  That relaxation infrastructure landed separately as `0005` — see below. Verified empirically: regenerated a complete,
   untruncated `dep/luajit/lj_vm.S` from source via buildvm (including its full
   `.eh_frame`/`.debug_frame` tail, which exercises exactly this forward-label-difference
   idiom), assembled it with the patched tcc, and confirmed `.text` and `.debug_frame` are
@@ -304,6 +303,51 @@ See `docs/roadmap-v2.md` for the authoritative project roadmap and sequencing. T
   0003. The *shape* of the evidence (0003 adds zero new failures) is solid via the
   differential; the absolute count differs by environment (container/config differences
   affecting which test targets run) and hasn't been reconciled.
+
+- [x] **`.uleb128`/`.sleb128` with an unresolved label difference now relax to their true
+  minimal width instead of hard-erroring — `dep/tcc/patches/0005-asm-leb128-relaxation.patch`.**
+  Closes the gap `0003` documented. A LEB128 operand's *width* is what the value determines,
+  so unlike a fixed-width field there is nothing to reserve at parse time. Patching the
+  emitted bytes afterwards is not possible in tcc: same-section branch displacements are
+  written as bare immediates with no relocation (`i386-asm.c` `gen_disp32`), forward-jump
+  chains are threaded through the not-yet-patched displacement fields themselves
+  (`x86_64-gen.c` `gsym_addr`), and `.align` padding is a function of absolute position, so
+  a size delta is not even uniform across a section. Any of those corrupts silently.
+  Implemented instead as genuine multi-pass re-layout: assemble, measure every site, and if
+  any width was wrong rewind all state and assemble again with the better guess. Widths only
+  grow, which bounds the iteration (a LEB128 is ≤10 bytes) and yields the same minimal fixed
+  point GNU `as` computes. Passes after the first replay a captured token stream
+  (`tok_capture` in `tccpp.c`) rather than re-reading source, so the preprocessor runs exactly
+  once — re-running it would re-evaluate `#include`/`#pragma once` against already-mutated
+  state and silently change the input. Three non-obvious correctness points, each found by a
+  forced-multipass idempotence check (force ≥3 passes; output must be byte-identical) rather
+  than by reading: (1) capture must exclude tokens replayed from an `unget_tok()` pushback —
+  they were either already captured or are synthetic tokens the parser invents
+  (`i386-asm.c` `asm_parse_regvar`), and the parser re-performs the pushback on replay;
+  (2) capture must be suppressed inside `preprocess()`, or `#if defined X` gets replayed to
+  the assembler as an instruction; (3) `tcc_debug_start`/`tcc_debug_end` must bracket the
+  *whole* iteration, not each pass, because they derive the unit identity from the lexer file
+  stack (`file->prev ? file->prev->filename : file->filename`) which only has its original
+  shape on pass 0 — and for the same reason the rewind point is taken *after* the first
+  token, since lexing it pops the `<command line>` buffer and that pop emits the `N_EINCL`
+  closing `tcc_debug_start`'s `N_BINCL`. Per-pass DWARF/stabs line state is wound back via
+  `tcc_debug_pass_save`/`_restore` (`tccdbg.c`). Relaxation is rejected with an explicit
+  error inside function-body inline `asm()`, which genuinely cannot be replayed — non-local
+  labels hard-error on redefinition, relocations have no removal API, and `nocode_wanted`
+  is not normalized there. Verified: 9 purpose-built test cases byte-match real GNU `as 2.44`
+  (including the genuinely-iterative ones — a site inside the range it measures, where `as`
+  guesses 1 byte, finds 128, and regrows to `8101`; growth absorbed by `.align`; and
+  relocation offsets that land correctly only because an earlier site grew); 28/28 inputs
+  byte-identical under forced 3-pass replay with and without `-g`; `lj_vm.S` byte-identical
+  to the pre-patch tcc and `.text`/`.debug_frame` byte-identical to `as`; C front-end output
+  byte-identical across tcc's own `lib/*.c` plus an inline-asm/macro test; zero byte diffs
+  and zero status changes against the `0001`–`0004` baseline on libressl `*-elf-x86_64.S`,
+  `asmtest.S` and `lib/*.S`; end-to-end luajit link+run (JIT active, `pcall` unwinding
+  through a jit-compiled loop, ffi). Note `lj_vm.S` itself contains **no** label-difference
+  LEB128 operands — all 37 of its `.uleb128`/`.sleb128` are literal constants, as are those
+  in every `vm_*.dasc` target, and a repo-wide grep over `dep/` finds none. This patch is
+  therefore general assembler infrastructure with no current consumer in-tree, landed
+  deliberately as such.
 
 - [ ] **tcc-built `.so` files may fail to `dlopen` on modern glibc unless the loading
   process sets `GLIBC_TUNABLES=glibc.rtld.execstack=2` (or tcc is patched/flagged to emit a
