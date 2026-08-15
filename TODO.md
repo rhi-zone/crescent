@@ -257,6 +257,54 @@ See `docs/roadmap-v2.md` for the authoritative project roadmap and sequencing. T
   pass (per CLAUDE.md's substrate-before-consumers rule), not a quick fix — not attempted
   here.
 
+- [x] **tcc's assembler broke `.file`-directive string parsing for the rest of the
+  translation unit, and had no way to fold a same-section forward-forward label
+  difference (`.long .LEND-.LSTART` written before either label is defined — the DWARF
+  CIE/FDE length-prefix idiom) — now patched
+  (`dep/tcc/patches/0003-asm-forward-label-diff-and-leb128.patch`), verified against real
+  GNU `as 2.44`.** Two related bugs in `tccasm.c`'s `TOK_ASMDIR_file` handler and
+  `asm_expr_sum()`. (1) The `.file` handler cleared `PARSE_FLAG_TOK_STR` to lex the raw
+  file name as a non-string token, but only restored it on one exit path — the early
+  `skip_to_eol` path left it cleared permanently, so every later `.section`/`.string`/
+  `.ascii`/`.asciz` in the same translation unit saw `TOK_PPSTR` and failed. Fixed by
+  saving/restoring the flag on every exit path. (2) `label2 - label1` where at least one
+  label is still a forward reference previously hit `tcc_error("invalid operation with
+  label")` unconditionally — real `as` defers such expressions and resolves them once the
+  whole input is read. Fixed by adding a deferred-fixup mechanism (`ExprValue.sym2`,
+  `AsmFixup` list, `asm_resolve_fixups()` called after `tcc_assemble_internal()` and after
+  inline `asm()` statements): `.byte`/`.word`/`.long`/`.quad` reserve the field's bytes and
+  register a fixup when the difference can't be folded immediately, patched in once both
+  labels are defined. **Deliberately does NOT implement variable-width LEB128 relaxation**
+  — a label difference used as a `.uleb128`/`.sleb128` operand is a fixed-size field only
+  after relaxation, which this patch doesn't attempt; it is instead a documented, explicit
+  hard error (`"unsupported: LEB128 of an unresolved symbol difference (needs
+  variable-width relaxation)"`) rather than being silently mis-encoded at the wrong width.
+  This is a separate, larger piece of infrastructure being scoped/built independently —
+  not started here, not blocked on here. Verified empirically: regenerated a complete,
+  untruncated `dep/luajit/lj_vm.S` from source via buildvm (including its full
+  `.eh_frame`/`.debug_frame` tail, which exercises exactly this forward-label-difference
+  idiom), assembled it with the patched tcc, and confirmed `.text` and `.debug_frame` are
+  byte-identical to real GNU `as 2.44` output (`--nocompress-debug-sections`, since gas
+  defaults to compressed debug sections and tcc doesn't support them). Full end-to-end
+  luajit link+run against the tcc-assembled object: JIT active, error unwinding through a
+  jit-compiled loop via `pcall`, ffi working. Regression-checked against the libressl
+  `*-elf-x86_64.S` files (same set used for `0002`/`0004`) plus tcc's own test suite: zero
+  new failures vs. the `0001`+`0002`+`0004` baseline, confirmed by a direct differential
+  run (patched-with-0003 vs. patched-without-0003, otherwise identical scratch builds) —
+  byte-for-byte identical failure logs modulo multithreaded-test timing/ordering noise.
+  **Re-verified after `0004` landed** (this patch was originally authored and verified
+  before `0004` existed): all four patches apply together cleanly in numeric order,
+  `.text`/`.debug_frame` byte-identity against real `as` reconfirmed, end-to-end
+  luajit run reconfirmed, libressl regression pattern reconfirmed unchanged. One
+  unresolved discrepancy from re-verification, noted rather than silently corrected: the
+  originally-recorded "8 pre-existing failures" baseline could not be reproduced in the
+  re-verification sandbox, which found only 4 failing top-level `make test` targets
+  (`test3`, `memtest`, `cross-test`, `test1b`, all the same unrelated root cause,
+  `tcctest.c:338: error: exponent digits expected`) — identically present with or without
+  0003. The *shape* of the evidence (0003 adds zero new failures) is solid via the
+  differential; the absolute count differs by environment (container/config differences
+  affecting which test targets run) and hasn't been reconciled.
+
 - [ ] **tcc-built `.so` files may fail to `dlopen` on modern glibc unless the loading
   process sets `GLIBC_TUNABLES=glibc.rtld.execstack=2` (or tcc is patched/flagged to emit a
   `PT_GNU_STACK` segment marking the stack non-executable).** Found while locally testing:

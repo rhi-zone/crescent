@@ -159,13 +159,26 @@ outright; it exists because tcc is infrastructure we actively extend
 as-is. Currently: `0001-plt-suffix.patch` (tccasm.c, GNU-as `sym@PLT`
 suffix parsing), `0002-libressl-sse-aesni-opcodes.patch`
 (x86_64-asm.h + i386-asm.c, SSE2/AES-NI opcode-table entries for
-libressl's perlasm output), and `0004-asm-section-flags-alloc.patch`
+libressl's perlasm output), `0003-asm-forward-label-diff-and-leb128.patch`
+(tccasm.c, two related same-section-label-difference gaps: (1) `.file`
+left `PARSE_FLAG_TOK_STR` cleared on every exit path instead of just the
+one it needed it cleared for, permanently breaking string-directive
+parsing — `.section`/`.string`/`.ascii`/`.asciz` — for the rest of the
+translation unit; (2) a fixed-width forward-forward same-section label
+difference (`.long .LEND-.LSTART` written before either label is defined
+— the DWARF CIE/FDE length-prefix idiom) is now deferred via an
+`AsmFixup` list and resolved once the whole input is read, instead of
+erroring immediately as "invalid operation with label". Deliberately
+does *not* implement variable-width LEB128 relaxation: a label
+difference inside `.uleb128`/`.sleb128` is a documented, explicit hard
+error ("needs variable-width relaxation") rather than being silently
+mis-encoded — see TODO.md), and `0004-asm-section-flags-alloc.patch`
 (tccasm.c, `.section NAME,"flags"` directive: `SHF_ALLOC` was hardcoded
 into every parsed section's flags and the flag-parsing loop never
 recognized `a` at all, so an explicit `"w"`-only section came out
 allocatable and an empty flags string still got `SHF_ALLOC` — both wrong
 against real GNU `as`, which only sets `SHF_ALLOC` when `a` is actually
-present.
+present).
 
 ## Vendored binary layout
 

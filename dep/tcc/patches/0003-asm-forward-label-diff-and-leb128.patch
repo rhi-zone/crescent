@@ -1,0 +1,355 @@
+--- a/dep/tcc/tcc.h
++++ b/dep/tcc/tcc.h
+@@ -700,6 +700,14 @@
+ typedef struct ExprValue {
+     uint64_t v;
+     Sym *sym;
++    /* When non-NULL the expression denotes the unresolved difference
++       (v + sym - sym2).  This happens for `label2 - label1' where at
++       least one of the two is still a forward reference, so neither the
++       section nor the offsets are known yet.  Only the data directives
++       (.byte/.word/.long/.quad) accept such a value; they reserve space
++       and register an AsmFixup resolved once the whole file is read.
++       asm_expr() rejects it for every other caller. */
++    Sym *sym2;
+     int pcrel;
+ } ExprValue;
+ 
+--- a/dep/tcc/tcctok.h
++++ b/dep/tcc/tcctok.h
+@@ -423,6 +423,8 @@
+  DEF_ASMDIR(int)
+  DEF_ASMDIR(symver)
+  DEF_ASMDIR(reloc)
++ DEF_ASMDIR(uleb128)
++ DEF_ASMDIR(sleb128)
+  DEF_ASMDIR(section)    /* must be last directive */
+ 
+ #if defined TCC_TARGET_I386 || defined TCC_TARGET_X86_64
+--- a/dep/tcc/tccasm.c
++++ b/dep/tcc/tccasm.c
+@@ -25,9 +25,121 @@
+ static Section *last_text_section; /* to handle .previous asm directive */
+ static int asmgoto_n;
+ 
++/* Deferred same-section symbol difference.
++   `label2 - label1' can only be folded to a constant once both labels
++   have been defined.  When the expression is parsed before that (the
++   usual forward-reference case) the emitting directive reserves SIZE
++   zero bytes at SEC+OFFSET and records the pending computation here.
++   asm_resolve_fixups() patches the reserved bytes once the input is
++   fully read.  This is deliberately not a relocation: the value is a
++   link-time constant, both symbols being in one section. */
++typedef struct AsmFixup {
++    struct AsmFixup *next;
++    Section *sec;
++    unsigned long offset;
++    int size;           /* 1, 2, 4 or 8 */
++    Sym *sym1;          /* minuend */
++    Sym *sym2;          /* subtrahend */
++    int64_t addend;
++} AsmFixup;
++
++static AsmFixup *asm_fixups;
++
++/* Encode V into BUF as (un)signed LEB128; returns the byte count.
++   Both forms are minimal-width, matching what GNU as emits. */
++static int asm_leb128_encode(unsigned char *buf, uint64_t v, int is_signed)
++{
++    int n = 0, b;
++    if (is_signed) {
++        int64_t sv = (int64_t)v;
++        for (;;) {
++            b = sv & 0x7f;
++            sv >>= 7;
++            if ((sv == 0 && !(b & 0x40)) || (sv == -1 && (b & 0x40))) {
++                buf[n++] = b;
++                break;
++            }
++            buf[n++] = b | 0x80;
++        }
++    } else {
++        do {
++            b = v & 0x7f;
++            v >>= 7;
++            buf[n++] = v ? (b | 0x80) : b;
++        } while (v);
++    }
++    return n;
++}
++
++static void asm_add_fixup(Section *sec, unsigned long offset, int size,
++                          ExprValue *pe)
++{
++    AsmFixup *f = tcc_malloc(sizeof(AsmFixup));
++    f->sec = sec;
++    f->offset = offset;
++    f->size = size;
++    f->sym1 = pe->sym;
++    f->sym2 = pe->sym2;
++    f->addend = (int64_t)pe->v;
++    f->next = asm_fixups;
++    asm_fixups = f;
++}
++
++static void asm_free_fixups(void)
++{
++    AsmFixup *f, *next;
++    for (f = asm_fixups; f; f = next) {
++        next = f->next;
++        tcc_free(f);
++    }
++    asm_fixups = NULL;
++}
++
++/* Resolve every deferred symbol difference.  Called once the whole
++   assembly input has been read, so all labels that are ever going to
++   be defined are defined. */
++static void asm_resolve_fixups(TCCState *s1)
++{
++    AsmFixup *f;
++    ElfSym *esym1, *esym2;
++    int64_t val;
++    unsigned char *p;
++
++    for (f = asm_fixups; f; f = f->next) {
++        esym1 = elfsym(f->sym1);
++        esym2 = elfsym(f->sym2);
++        if (!esym1 || esym1->st_shndx == SHN_UNDEF)
++            tcc_error("undefined symbol '%s' in difference expression",
++                      get_tok_str(f->sym1->v, NULL));
++        if (!esym2 || esym2->st_shndx == SHN_UNDEF)
++            tcc_error("undefined symbol '%s' in difference expression",
++                      get_tok_str(f->sym2->v, NULL));
++        if (esym1->st_shndx != esym2->st_shndx)
++            tcc_error("invalid operation with label");
++        val = (int64_t)(esym1->st_value - esym2->st_value) + f->addend;
++        /* The reserved field must be able to hold the result; GAS
++           diagnoses the same overflow. */
++        if (f->size < 8) {
++            int64_t lim = (int64_t)1 << (f->size * 8 - 1);
++            if (val < -lim || val >= (lim << 1))
++                tcc_error("value 0x%llx out of range for %d-byte field",
++                          (long long)val, f->size);
++        }
++        p = f->sec->data + f->offset;
++        switch (f->size) {
++        case 1: *p = (unsigned char)val; break;
++        case 2: write16le(p, (uint16_t)val); break;
++        case 4: write32le(p, (uint32_t)val); break;
++        default: write64le(p, (uint64_t)val); break;
++        }
++    }
++    asm_free_fixups();
++}
++
+ static int tcc_assemble_internal(TCCState *s1, int do_preprocess, int global);
+ static Sym* asm_new_label(TCCState *s1, int label, int is_local);
+ static Sym* asm_new_label1(TCCState *s1, int label, int is_local, int sh_num, int value);
++static void asm_expr_defer(TCCState *s1, ExprValue *pe);
+ 
+ #if PTR_SIZE == 8
+ /* output constant with relocation if 'r & VT_SYM' is true */
+@@ -146,6 +258,10 @@
+     uint64_t n;
+     const char *p;
+ 
++    /* Only asm_expr_sum() ever produces a deferred difference; every
++       leaf starts out as a plain value. */
++    pe->sym2 = NULL;
++
+     switch(tok) {
+     case TOK_PPNUM:
+         p = tokc.str.data;
+@@ -204,7 +320,7 @@
+ 	break;
+     case '(':
+         next();
+-        asm_expr(s1, pe);
++        asm_expr_defer(s1, pe);
+         skip(')');
+         break;
+     case '.':
+@@ -335,6 +451,26 @@
+             break;
+         next();
+         asm_expr_logic(s1, &e2);
++        /* A pending difference occupies both symbol slots, so it only
++           combines with a plain constant.  Anything else is rejected
++           rather than silently mis-folded. */
++        if (pe->sym2 || e2.sym2) {
++            if (pe->sym2 && e2.sym2)
++                goto cannot_relocate;
++            if (pe->sym2) {
++                if (e2.sym)
++                    goto cannot_relocate;
++                pe->v = op == '+' ? pe->v + e2.v : pe->v - e2.v;
++            } else {
++                /* constant OP pending: only `+' keeps the difference
++                   representable in this one-difference form. */
++                if (pe->sym || op != '+')
++                    goto cannot_relocate;
++                e2.v += pe->v;
++                *pe = e2;
++            }
++            continue;
++        }
+         if (op == '+') {
+             if (pe->sym != NULL && e2.sym != NULL)
+                 goto cannot_relocate;
+@@ -354,19 +490,31 @@
+ 		ElfSym *esym1, *esym2;
+ 		esym1 = elfsym(pe->sym);
+ 		esym2 = elfsym(e2.sym);
+-		if (!esym2)
+-		    goto cannot_relocate;
+-		if (esym1 && esym1->st_shndx == esym2->st_shndx
++		if (esym1 && esym2 && esym1->st_shndx == esym2->st_shndx
+ 		    && esym1->st_shndx != SHN_UNDEF) {
+ 		    /* we also accept defined symbols in the same section */
+ 		    pe->v += (int)(esym1->st_value - esym2->st_value);
+ 		    pe->sym = NULL;
+-		} else if (esym2->st_shndx == cur_text_section->sh_num) {
++		} else if (esym2 && esym2->st_shndx == cur_text_section->sh_num) {
+ 		    /* When subtracting a defined symbol in current section
+ 		       this actually makes the value PC-relative.  */
+ 		    pe->v += (int)(0 - esym2->st_value);
+ 		    pe->pcrel = 1;
+ 		    e2.sym = NULL;
++		} else if (pe->sym
++			   && (!esym1 || esym1->st_shndx == SHN_UNDEF
++			       || !esym2 || esym2->st_shndx == SHN_UNDEF)) {
++		    /* At least one side is still a forward reference, so the
++		       difference cannot be folded yet.  Defer it: once both
++		       labels are defined in one section the result is a plain
++		       constant, computed by asm_resolve_fixups() after the
++		       whole input has been read.  A symbol with no ElfSym yet
++		       has necessarily not been defined either.  This is tested
++		       after the PC-relative case above so that `sym - .',
++		       whose subtrahend is a defined section symbol, still
++		       produces a relocation instead of being deferred to a
++		       definition that will never come.  */
++		    pe->sym2 = e2.sym;
+ 		} else {
+ cannot_relocate:
+ 		    tcc_error("invalid operation with label");
+@@ -418,11 +566,21 @@
+     }
+ }
+ 
+-ST_FUNC void asm_expr(TCCState *s1, ExprValue *pe)
++/* Full expression grammar, permitting an unresolved same-section symbol
++   difference in the result (pe->sym2 != NULL).  Only callers that can
++   reserve space and register an AsmFixup may use this. */
++static void asm_expr_defer(TCCState *s1, ExprValue *pe)
+ {
+     asm_expr_cmp(s1, pe);
+ }
+ 
++ST_FUNC void asm_expr(TCCState *s1, ExprValue *pe)
++{
++    asm_expr_defer(s1, pe);
++    if (pe->sym2)
++        tcc_error("invalid operation with label");
++}
++
+ ST_FUNC int asm_int_expr(TCCState *s1)
+ {
+     ExprValue e;
+@@ -626,9 +784,16 @@
+         next();
+         for(;;) {
+             ExprValue e;
+-            asm_expr(s1, &e);
++            asm_expr_defer(s1, &e);
+             if (sec->sh_type != SHT_NOBITS) {
+-                if (size == 4) {
++                if (e.sym2) {
++                    /* Difference of two labels that are not both defined
++                       yet: reserve the field, fill it in afterwards. */
++                    int i;
++                    asm_add_fixup(sec, ind, size, &e);
++                    for (i = 0; i < size; i++)
++                        g(0);
++                } else if (size == 4) {
+                     gen_expr32(&e);
+ #if PTR_SIZE == 8
+ 		} else if (size == 8) {
+@@ -650,6 +815,34 @@
+             next();
+         }
+         break;
++    case TOK_ASMDIR_uleb128:
++    case TOK_ASMDIR_sleb128:
++        {
++            int is_signed = tok == TOK_ASMDIR_sleb128;
++            unsigned char buf[16];
++            int len, i;
++            next();
++            for(;;) {
++                ExprValue e;
++                asm_expr_defer(s1, &e);
++                if (e.sym2)
++                    tcc_error("unsupported: LEB128 of an unresolved symbol "
++                              "difference (needs variable-width relaxation)");
++                if (e.sym)
++                    expect("constant");
++                len = asm_leb128_encode(buf, e.v, is_signed);
++                if (sec->sh_type != SHT_NOBITS) {
++                    for (i = 0; i < len; i++)
++                        g(buf[i]);
++                } else {
++                    ind += len;
++                }
++                if (tok != ',')
++                    break;
++                next();
++            }
++        }
++        break;
+     case TOK_ASMDIR_fill:
+         {
+             int repeat, size, val, i, j;
+@@ -814,6 +1007,11 @@
+     case TOK_ASMDIR_file:
+         {
+             const char *p;
++            /* The raw file name must not be lexed as a C string, but the
++               flag is global to the rest of the translation unit: leaving
++               it cleared makes every later .section/.string/.ascii/.asciz
++               see TOK_PPSTR and fail.  Restore it on every exit path. */
++            int saved_tok_str = parse_flags & PARSE_FLAG_TOK_STR;
+             parse_flags &= ~PARSE_FLAG_TOK_STR;
+             next();
+             if (tok == TOK_PPNUM)
+@@ -825,9 +1023,11 @@
+                 p = get_tok_str(tok, &tokc);
+             } else {
+                 skip_to_eol(0);
++                parse_flags |= saved_tok_str;
+                 break;
+             }
+             tccpp_putfile(p);
++            parse_flags |= saved_tok_str;
+             next();
+         }
+         break;
+@@ -1153,6 +1353,7 @@
+     nocode_wanted = 0;
+     ret = tcc_assemble_internal(s1, do_preprocess, 1);
+     cur_text_section->data_offset = ind;
++    asm_resolve_fixups(s1);
+     tcc_debug_end(s1);
+     return ret;
+ }
+@@ -1174,6 +1375,10 @@
+     memcpy(file->buffer, str, len);
+     macro_ptr = NULL;
+     tcc_assemble_internal(s1, 0, global);
++    /* an asm() statement is self-contained: nothing later can define a
++       label it left pending, so resolve (or diagnose) here */
++    cur_text_section->data_offset = ind;
++    asm_resolve_fixups(s1);
+     tcc_close();
+ 
+ #if !defined(TCC_TARGET_RISCV64) && !defined(TCC_TARGET_X86_64)
