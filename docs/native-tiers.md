@@ -197,7 +197,7 @@ this is general assembler infrastructure with no current in-tree
 consumer: `lj_vm.S` and every `vm_*.dasc` target use only literal
 constants as LEB128 operands.
 
-Finally, `0006-dwarf-section-flag-and-debug-retention.patch` (tcc.h +
+Next, `0006-dwarf-section-flag-and-debug-retention.patch` (tcc.h +
 tccelf.c + tccpe.c + tccdbg.c) fixes a link-time hard error on foreign
 objects and lets debug sections survive a link without `-g`.
 
@@ -258,6 +258,150 @@ dwarf fix makes the value *correct*. Extending truncation-tolerance to
 foreign `.stab` sections would trade a hard error for silently wrong
 debug data, so `.stab` retention stays gated on `-g`. See TODO.md for
 the resulting known gap.
+
+### `0007-reserved-section-gate-and-eh-frame-retention.patch`
+
+`0007` (tcc.h + tccelf.c + tccdbg.c) closes the section-registry problem
+that `0001`–`0006` kept running into from different directions.
+
+**The structural problem.** tcc has two unrelated ways a section comes
+into being. Around twenty reserved roles (`.got`, `.plt`, `.eh_frame`,
+the dwarf sections, `.dynsym`, `.dynamic`, `.interp`, …) live in
+`TCCState` fields and are created by scattered internal call sites that
+call `new_section()` directly. Separately, ordinary input reaches a
+fully general by-name path — an asm `.section` directive via
+`find_section()`, or `tcc_load_object_file()`'s merge loop, which
+matches an input section against an existing one *by name* and creates a
+new one when nothing matches. Neither world knows about the other.
+`new_section()` appends unconditionally, so whenever input introduced a
+name before the internal creator ran, the output got two sections with
+the same name and the role pointer referred to only one of them. Measured
+on this tree before the patch, a one-line `.section .got` in an assembled
+object produced an executable with two `.got` sections; likewise `.plt`,
+`.interp`, `.dynamic` — silently, with no diagnostic.
+
+**T1 — one creation gate.** Every internal creator of a reserved section
+now goes through `reserved_section()` (tccelf.c) instead of bare
+`new_section()`: look the name up first, and resolve a hit by an explicit
+per-role policy rather than by appending a duplicate. This is not a new
+invention — `add_array()` and `create_bsd_note_section()` already did
+find-or-create-and-upgrade by hand; `0007` makes the idiom uniform. A
+`Section->internal_role` flag records that tcc itself created a section,
+so a second call for the same role rebinds instead of tripping a policy.
+(The `dwlo`/`dwhi` index-range identity mechanism was already replaced by
+the name-based `is_dwarf` flag in `0006`; `0007` does not revisit it.)
+
+**T2 — three genuinely different treatments, not one abstraction.** The
+roles do not share a policy, so the gate does not pretend they do:
+
+- *Container roles* (`.text`, `.data`, `.rodata`, `.bss`) are created in
+  `tccelf_new()` before any input is read. No race exists; unchanged.
+- *tcc-emitted-stream roles* (`.eh_frame`, dwarf, `.stab`) are
+  `SECTION_ROLE_SHARED`: tcc binds to an existing section and appends
+  after whatever is already there. That is well-formed because these
+  formats are chains of self-delimiting records that reference each other
+  by *relative* offset — `tcc_debug_frame_end()` writes its CIE Pointer as
+  `fde_start - s1->eh_start + 4`, and the `.eh_frame_hdr` walker already
+  tracked arbitrary CIE offsets. tcc's own merge loop corroborates the
+  classification: it already exempts `.eh_frame` from its section-type
+  conflict check.
+- *Synthesized-output-only roles* (`.got`, `.plt`, `.interp`, `.dynsym`,
+  `.dynstr`, `.hash`, `.dynamic`, `.gnu.hash`, `.gnu.version`,
+  `.gnu.version_r`, `.shstrtab`, `.eh_frame_hdr`, ARM/RISCV
+  `.attributes`, `.tcov`) are `SECTION_ROLE_PRIVATE`. These are pure
+  outputs of tcc's own linking algorithm, and tcc has no
+  input-section-to-output-section mapping layer that could give input
+  content a meaning under those names — building one would be wildly
+  disproportionate. So the link is refused with
+  `section '.got' is reserved for internal use`, via
+  `tcc_error_noabort()` per tccelf.c's convention, which reports further
+  problems in the same run and then fails before writing output. This
+  removes no working behaviour: the cases it now rejects are exactly the
+  cases that previously produced a silently corrupt executable.
+- *Metadata-table roles* (`.symtab`/`.strtab`/`.hashtab`) are left
+  `SHARED` deliberately. Real toolchains do not protect these either — a
+  `.section .symtab` under GNU `as` also produces broken output — and
+  they are created before any input, so the gate's lookup cannot hit.
+
+**The `.eh_frame` fix is laziness, not collision logic.** tcc emitted the
+`.eh_frame` CIE unconditionally in `tcc_eh_frame_start()` at session
+creation, before reading any input. A CIE describes how to unwind the
+frames its FDEs cover, so a CIE with no FDE after it describes nothing.
+Assembling a `.S` file — where tcc generates no FDEs at all — therefore
+produced an `.eh_frame` section containing only an orphan CIE, where GNU
+`as` emits no `.eh_frame` section whatsoever. `0007` moves CIE emission
+to the first FDE. This fixes the orphan directly *and* means the section
+is usually never reached for at all, so the common `.eh_frame` collision
+disappears without needing any namespace logic.
+
+Note this could not be fixed by creating the section eagerly and only
+deferring its bytes: tcc emits zero-size sections (`.data`, `.bss` come
+out size 0 for pure-asm input), so an eagerly-created empty `.eh_frame`
+would still reach the output. Deferring the *creation* is the only fix.
+
+**Consequence, stated plainly: output is no longer byte-identical to the
+`0006` baseline, by construction.** Because `.eh_frame` is now created
+later, it lands later in the section table — for `tcc -c m.c` it moves
+from index 7 to index 8, swapping with `.rela.text`. Every section's
+*contents* are byte-identical (verified per-section on `m.c` and on
+`dep/sqlite3/sqlite3.c`, whose object is the same size to the byte); only
+the section table order shifts. This is inherent to the fix, not an
+implementation choice.
+
+**T3 — "tcc generates X" is not "X should survive a link".**
+`tcc_load_object_file()` dropped *any* input `.eh_frame` whenever
+`s1->eh_frame_section == NULL`, conflating whether tcc should generate
+unwind info for code it compiles (`-f[no-]asynchronous-unwind-tables`)
+with whether unwind info already present in a linked object survives the
+link. The second must be unconditional, as `ld` does it. This was not a
+quality bug: an object with a relocation into its own `.eh_frame`, linked
+with `-fno-asynchronous-unwind-tables`, failed outright with
+`Invalid relocation entry [ 2] '.rela.text' @ 00000003` — reproduced on
+this tree, and fixed. Retention is now unconditional on every target.
+
+That resolution was a real three-way tradeoff. *Guard by platform* leaves
+the hard link failure standing on PE/mach-o/ARM, where `TCC_EH_FRAME` is
+undefined entirely. *Retain then drop at write time per target* needs a
+new, unmeasured mechanism and reintroduces per-target special-casing.
+*Retain unconditionally* won: its cost is a few hundred bytes of inert
+`.eh_frame`-named data on PE/mach-o, which use `.pdata`/`.xdata` and
+`__TEXT,__eh_frame` respectively — dead weight, not wrong. The BSD
+targets already retained unconditionally, so this makes the other targets
+consistent with what BSD has shipped all along rather than inventing new
+behaviour; the change is a deletion of the non-BSD-only guard.
+
+**Verified.** `lj_vm.S` regenerated fresh via `buildvm` (not the
+committed copy) contains its own `.section .eh_frame` with a hand-written
+CIE, which is exactly the collision case: baseline tcc emitted 144 bytes
+of `.eh_frame` where GNU `as` emits 120, the extra 24 being tcc's orphan
+CIE sitting in front of LuaJIT's records. With `0007` the section is 120
+bytes and **byte-identical to GNU `as`**, with `.text` identical across
+baseline, patched and `as`. A LuaJIT linked with that tcc-assembled VM
+passes JIT trace compilation, ffi calls/structs/buffers, error unwinding
+through `pcall`, deep-recursion unwinding, coroutines and a GC stress
+pass. tcc's own test suite reaches the identical stage and every
+individual target (`abitest`, `btest`, `dlltest`, `vla_test-run`,
+`asm-c-connect-test`, …) has identical pass/fail against the `0006`
+baseline — `dlltest` and `abitest` matter most here, since shared-object
+linking exercises `.got`/`.plt`/`.dynsym`/`.dynamic`/`.interp`, all now
+gated. libressl's seven perlasm files are unchanged in outcome: the same
+two still fail on the documented `%xmm8` register gap, and the five that
+assemble now match GNU `as` by no longer carrying a spurious `.eh_frame`.
+
+The cases above are kept as a harness in `dep/tcc/patches/0007-tests/`
+(`./run.sh /path/to/tcc`): **18 pass** with `0007` applied and **8 fail**
+against an `0001`–`0006` baseline — the eight `0007` fixes, including the
+literal `Invalid relocation entry` and the reserved-name links that baseline
+completes with no diagnostic at all. The other ten pass on both and exist as
+regression guards.
+
+**Known asymmetry, not closed.** The gate protects a role only when input
+introduces the name *before* tcc's internal creator runs. For a role tcc
+creates first — `.tcov` under `-ftest-coverage`, and the `.symtab`
+family — an input section of the same name is still merged into tcc's by
+`tcc_load_object_file()`'s name match, with no diagnostic. Closing that
+direction means gating the merge loop's reuse decision, not just the
+creation sites; recorded in TODO.md rather than papered over.
 
 ## Vendored binary layout
 

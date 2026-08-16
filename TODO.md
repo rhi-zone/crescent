@@ -487,7 +487,7 @@ See `docs/roadmap-v2.md` for the authoritative project roadmap and sequencing. T
   output-affecting change that needs its own before/after comparison — not a cleanup to fold
   into an unrelated patch.
 
-- [ ] **OPEN, needs an owner decision before it can be built: unifying the ~20 out-of-band
+- [x] **RESOLVED by `0007` (2026-08-16): unifying the ~20 out-of-band
   `TCCState` section pointers behind a by-name resolver.** The intended shape is known — a
   name-keyed table of `{name, expected type, expected flags, field offset}`, one uniform loop,
   error-on-mismatch, covering sections a foreign producer can name via `.section` or object
@@ -506,6 +506,73 @@ See `docs/roadmap-v2.md` for the authoritative project roadmap and sequencing. T
   session transcripts, all branches/stashes/worktrees) found NO written record of this direction
   anywhere — it was carried only in conversation. Recorded here as open rather than settled;
   picking a reading unilaterally would mint semantics later work would trust.
+  **Resolution (owner, 2026-08-16), implemented as
+  `dep/tcc/patches/0007-reserved-section-gate-and-eh-frame-retention.patch`:** the two readings
+  are not alternatives — it is one mechanism with a class-dependent outcome. `reserved_section()`
+  (tccelf.c) does the name lookup at every internal creation site (the *creating* reading); what
+  happens ON A HIT is what varies by role class (the *validate/rebind* reading):
+  `SECTION_ROLE_SHARED` binds and upgrades, `SECTION_ROLE_PRIVATE` errors. The
+  creation-ORDER objection above dissolves because there is no single uniform creation loop —
+  each existing `new_section()` call site keeps its place and simply routes through the gate, so
+  tcc's current interleaving is preserved exactly. The one ordering change in `0007` is
+  deliberate and unrelated to the resolver: `.eh_frame` moved from session-start to
+  first-FDE (see the next entry). Container roles were left alone entirely, since they are
+  created before any input and cannot race.
+
+- [x] **`0007` verification: the orphan-CIE bug is fixed and `lj_vm.S`'s `.eh_frame` is now
+  byte-identical to GNU `as`.** Reproduced the bug first rather than trusting the report:
+  `lj_vm.S`, regenerated fresh via `buildvm` (not the committed copy), carries its own
+  `.section .eh_frame` with a hand-written CIE. Baseline (`0001`–`0006`) tcc produced a
+  144-byte `.eh_frame`; GNU `as` produces 120; the extra 24 bytes are tcc's own CIE, emitted
+  unconditionally at session start and sitting in front of LuaJIT's records —
+  `readelf --debug-dump=frames` on the baseline object shows it plainly as a CIE at offset 0.
+  With `0007` the section is 120 bytes and byte-identical to `as`, with `.text` identical across
+  all three. A LuaJIT linked from that tcc-assembled VM (gcc for the C, per the standing scope
+  correction that tcc cannot compile LuaJIT's C at all) passes JIT trace compilation on a hot
+  loop, ffi calls/structs/buffers, `pcall` unwinding, 200-deep recursion unwinding, coroutines
+  and a GC/string-churn pass. Also verified: the same spurious `.eh_frame` disappears from five
+  of libressl's perlasm objects, matching `as`, and the other two still fail identically on the
+  documented `%xmm8` gap. tcc's own suite reaches the identical stage (baseline and patched both
+  stop at `test3` on a pre-existing, environmental `exponent digits expected`), and
+  `abitest`/`btest`/`dlltest`/`vla_test-run`/`asm-c-connect-test`/`asmtest2`/`weaktest`/`test4`
+  each have identical pass/fail against baseline.
+
+- [x] **`0007` fixes a real hard link failure, not just an output-quality bug: input `.eh_frame`
+  is now retained unconditionally.** `tcc_load_object_file()` dropped any input `.eh_frame`
+  whenever `s1->eh_frame_section == NULL`, conflating "should tcc generate unwind info"
+  (`-f[no-]asynchronous-unwind-tables`) with "should unwind info in a linked object survive the
+  link". Reproduced directly: an object with a relocation into its own `.eh_frame`, linked with
+  `-fno-asynchronous-unwind-tables`, failed with
+  `Invalid relocation entry [ 2] '.rela.text' @ 00000003`; the same link succeeds with unwind
+  generation on. After `0007` it links, runs, and retains the section. The BSD targets already
+  retained unconditionally, so the change is a deletion of the non-BSD-only guard rather than
+  new behaviour. Rejected alternatives are recorded in `docs/native-tiers.md`; the accepted cost
+  is a few hundred bytes of inert `.eh_frame`-named data on PE/mach-o, which use
+  `.pdata`/`.xdata` and `__TEXT,__eh_frame` instead.
+
+- [ ] **Known consequence of `0007`, not a defect: `tcc -c` output is no longer byte-identical
+  to the `0006` baseline for inputs that produce both `.eh_frame` and relocation sections.**
+  `.eh_frame` is created at the first FDE now instead of at session start, so it lands later in
+  the section table (index 7 → 8 for `tcc -c m.c`, swapping with `.rela.text`). Every section's
+  CONTENTS are byte-identical — verified per-section on `m.c` and on `dep/sqlite3/sqlite3.c`
+  (object identical in size to the byte, every section digest equal). This is inherent, not an
+  implementation choice: tcc emits zero-size sections (`.data`/`.bss` come out size 0 for
+  pure-asm input), so creating `.eh_frame` eagerly and deferring only its bytes would still
+  leave an empty `.eh_frame` in the output, which is the exact thing being fixed. Recorded so
+  that future byte-identity comparisons against pre-`0007` artifacts are not read as regressions.
+
+- [ ] **Known asymmetry left open by `0007`: the reserved-section gate only protects a role when
+  input names the section BEFORE tcc's internal creator runs.** The gate lives at the creation
+  sites, so it fires when `tcc_load_object_file()` or an asm `.section` directive has already
+  introduced the name. In the reverse order — a role tcc creates first, then an input section of
+  the same name — `tcc_load_object_file()`'s merge loop matches by name and merges the input
+  content into tcc's section with no diagnostic. Affects `.tcov` under `-ftest-coverage`
+  (created from `tccgen.c`'s `tcc_tcov_start()`, before input objects are merged) and the
+  `.symtab` family; confirmed by observing that `.section .tcov` links without error under
+  `-ftest-coverage` while erroring correctly in every other ordering. Closing this means gating
+  the merge loop's reuse decision, which is a different mechanism from the creation gate and was
+  not part of `0007`'s resolved scope. The `.symtab` half is low priority by owner decision:
+  GNU `as` does not protect `.symtab` either.
 
 - [ ] **tcc-built `.so` files may fail to `dlopen` on modern glibc unless the loading
   process sets `GLIBC_TUNABLES=glibc.rtld.execstack=2` (or tcc is patched/flagged to emit a

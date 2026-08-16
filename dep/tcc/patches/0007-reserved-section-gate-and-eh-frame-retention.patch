@@ -1,0 +1,367 @@
+--- a/dep/tcc/tcc.h
++++ b/dep/tcc/tcc.h
+@@ -573,6 +573,10 @@
+     int is_dwarf;            /* dwarf debug section: 32-bit references between
+                                 two such sections are section-relative offsets,
+                                 not addresses (see relocate_section()) */
++    int internal_role;       /* section was created by tcc to fill one of its
++                                own roles (see reserved_section()); a section
++                                without this flag came from input -- an asm
++                                .section directive or a merged object file */
+     int sh_info;             /* elf section info */
+     int sh_addralign;        /* elf section alignment */
+     int sh_entsize;          /* elf entry size */
+@@ -1574,13 +1578,17 @@
+ ST_FUNC void tccelf_begin_file(TCCState *s1);
+ ST_FUNC void tccelf_end_file(TCCState *s1);
+ ST_FUNC Section *new_section(TCCState *s1, const char *name, int sh_type, int sh_flags);
++/* policies for reserved_section(); see its definition in tccelf.c */
++#define SECTION_ROLE_SHARED  0 /* tcc's content may coexist with input content */
++#define SECTION_ROLE_PRIVATE 1 /* name is reserved for tcc's own output */
++ST_FUNC Section *reserved_section(TCCState *s1, const char *name, int sh_type, int sh_flags, int role);
+ ST_FUNC int sec_index_is_dwarf(TCCState *s1, int shndx);
+ ST_FUNC void section_realloc(Section *sec, unsigned long new_size);
+ ST_FUNC size_t section_add(Section *sec, addr_t size, int align);
+ ST_FUNC void *section_ptr_add(Section *sec, addr_t size);
+ ST_FUNC Section *find_section(TCCState *s1, const char *name);
+ ST_FUNC void free_section(Section *s);
+-ST_FUNC Section *new_symtab(TCCState *s1, const char *symtab_name, int sh_type, int sh_flags, const char *strtab_name, const char *hash_name, int hash_sh_flags);
++ST_FUNC Section *new_symtab(TCCState *s1, const char *symtab_name, int sh_type, int sh_flags, const char *strtab_name, const char *hash_name, int hash_sh_flags, int role);
+ ST_FUNC void init_symtab(Section *s);
+ 
+ ST_FUNC int put_elf_str(Section *s, const char *sym);
+--- a/dep/tcc/tccelf.c
++++ b/dep/tcc/tccelf.c
+@@ -74,14 +74,16 @@
+     common_section->sh_num = SHN_COMMON;
+ 
+     /* symbols are always generated for linking stage */
++    /* created before any input is read, so the gate's lookup cannot hit; the
++       .symtab family is left SHARED deliberately (see docs/native-tiers.md) */
+     symtab_section = new_symtab(s, ".symtab", SHT_SYMTAB, 0,
+                                 ".strtab",
+-                                ".hashtab", SHF_PRIVATE);
++                                ".hashtab", SHF_PRIVATE, SECTION_ROLE_SHARED);
+ 
+     /* private symbol table for dynamic symbols */
+     s->dynsymtab_section = new_symtab(s, ".dynsymtab", SHT_SYMTAB, SHF_PRIVATE|SHF_DYNSYM,
+                                       ".dynstrtab",
+-                                      ".dynhashtab", SHF_PRIVATE);
++                                      ".dynhashtab", SHF_PRIVATE, SECTION_ROLE_SHARED);
+     get_sym_attr(s, 0, 1);
+ 
+     if (s->do_debug) {
+@@ -92,7 +94,8 @@
+ #if TCC_EH_FRAME
+     if (s->output_format != TCC_OUTPUT_FORMAT_ELF)
+         s->unwind_tables = 0;
+-    tcc_eh_frame_start(s);
++    /* the .eh_frame CIE is emitted on demand at the first FDE, not here --
++       see tcc_eh_frame_start() */
+ #endif
+ 
+ #ifdef CONFIG_TCC_BCHECK
+@@ -289,14 +292,14 @@
+ ST_FUNC Section *new_symtab(TCCState *s1,
+                            const char *symtab_name, int sh_type, int sh_flags,
+                            const char *strtab_name,
+-                           const char *hash_name, int hash_sh_flags)
++                           const char *hash_name, int hash_sh_flags, int role)
+ {
+     Section *symtab, *strtab, *hash;
+-    symtab = new_section(s1, symtab_name, sh_type, sh_flags);
++    symtab = reserved_section(s1, symtab_name, sh_type, sh_flags, role);
+     symtab->sh_entsize = sizeof(ElfW(Sym));
+-    strtab = new_section(s1, strtab_name, SHT_STRTAB, sh_flags);
++    strtab = reserved_section(s1, strtab_name, SHT_STRTAB, sh_flags, role);
+     symtab->link = strtab;
+-    hash = new_section(s1, hash_name, SHT_HASH, hash_sh_flags);
++    hash = reserved_section(s1, hash_name, SHT_HASH, hash_sh_flags, role);
+     hash->sh_entsize = sizeof(int);
+     symtab->hash = hash;
+     hash->link = symtab;
+@@ -368,6 +371,55 @@
+     return NULL;
+ }
+ 
++/* Find-or-bind-or-create gate for the sections tcc creates to fill one of its
++   own roles (.got, .eh_frame, .debug_*, ...).
++
++   Internal creators must come through here instead of calling new_section()
++   directly.  new_section() appends unconditionally, so an internal creator
++   that runs after input has already introduced a section under the same name
++   -- via an asm .section directive, or by merging an input object -- silently
++   produces a second section with that name, and the role pointer then refers
++   to only one of them.  Looking the name up first turns that collision into an
++   explicit, per-role decision.
++
++   SECTION_ROLE_SHARED: tcc's content can coexist with input content in the
++   section, because the format's records are self-delimiting and reference each
++   other by relative offset (.eh_frame's CIE/FDE chain, the dwarf sections).
++   Bind the role to the existing section and upgrade the header fields the role
++   depends on; tcc's own records are appended after whatever is already there.
++
++   SECTION_ROLE_PRIVATE: the section is a pure output of tcc's own linking
++   algorithm.  tcc has no input-section-to-output-section mapping layer, so
++   there is no meaning it could assign to input content under this name --
++   merging it would corrupt the table and duplicating it produces two
++   identically named sections.  Refuse the link instead: the diagnostic is
++   recorded with tcc_error_noabort, per this file's convention, so the caller
++   reports any further problems in the same run and then fails before writing
++   output.  The role still binds to the section afterwards, so the rest of the
++   pass stays well-defined on the way to that failure.
++
++   A section this function itself created is marked internal_role, so a later
++   call for the same role rebinds to it rather than tripping either policy. */
++ST_FUNC Section *reserved_section(TCCState *s1, const char *name,
++                                  int sh_type, int sh_flags, int role)
++{
++    Section *sec = have_section(s1, name);
++
++    if (!sec)
++        sec = new_section(s1, name, sh_type, sh_flags);
++    else if (!sec->internal_role) {
++        if (role == SECTION_ROLE_PRIVATE)
++            tcc_error_noabort("section '%s' is reserved for internal use", name);
++        /* bind: adopt the input section for this role.  sh_type is set to what
++           the role requires; flags are merged so nothing the input asked for
++           (SHF_ALLOC in particular) is dropped. */
++        sec->sh_type = sh_type;
++        sec->sh_flags |= sh_flags;
++    }
++    sec->internal_role = 1;
++    return sec;
++}
++
+ /* return a reference to a section, and create it if it does not
+    exists */
+ ST_FUNC Section *find_section(TCCState *s1, const char *name)
+@@ -613,7 +665,7 @@
+ 
+     if (0 == nb_sym_versions)
+         return;
+-    versym_section = new_section(s1, ".gnu.version", SHT_GNU_versym, SHF_ALLOC);
++    versym_section = reserved_section(s1, ".gnu.version", SHT_GNU_versym, SHF_ALLOC, SECTION_ROLE_PRIVATE);
+     versym_section->sh_entsize = sizeof(ElfW(Half));
+     versym_section->link = s1->dynsym;
+ 
+@@ -647,8 +699,8 @@
+        dynamic linkers look at their contents even when DTVERNEEDNUM and
+        section size is zero.  */
+     if (nb_versions > 2) {
+-        verneed_section = new_section(s1, ".gnu.version_r",
+-                                      SHT_GNU_verneed, SHF_ALLOC);
++        verneed_section = reserved_section(s1, ".gnu.version_r",
++                                      SHT_GNU_verneed, SHF_ALLOC, SECTION_ROLE_PRIVATE);
+         verneed_section->link = s1->dynsym->link;
+         for (i = nb_sym_versions; i-- > 0;) {
+             struct sym_version *sv = &sym_versions[i];
+@@ -925,7 +977,7 @@
+     Section *dynsym = s1->dynsym;
+     Elf32_Word *ptr;
+ 
+-    gnu_hash = new_section(s1, ".gnu.hash", SHT_GNU_HASH, SHF_ALLOC);
++    gnu_hash = reserved_section(s1, ".gnu.hash", SHT_GNU_HASH, SHF_ALLOC, SECTION_ROLE_PRIVATE);
+     gnu_hash->link = dynsym->hash->link;
+ 
+     nb_syms = dynsym->data_offset / sizeof(ElfW(Sym));
+@@ -1319,7 +1371,7 @@
+ static int build_got(TCCState *s1)
+ {
+     /* if no got, then create it */
+-    s1->got = new_section(s1, ".got", SHT_PROGBITS, SHF_ALLOC | SHF_WRITE);
++    s1->got = reserved_section(s1, ".got", SHT_PROGBITS, SHF_ALLOC | SHF_WRITE, SECTION_ROLE_PRIVATE);
+     s1->got->sh_entsize = 4;
+     /* keep space for _DYNAMIC pointer and two dummy got entries */
+     section_ptr_add(s1->got, 3 * PTR_SIZE);
+@@ -1355,7 +1407,7 @@
+     s_rel = s1->got;
+     if (need_plt_entry) {
+         if (!s1->plt) {
+-            s1->plt = new_section(s1, ".plt", SHT_PROGBITS, SHF_ALLOC | SHF_EXECINSTR);
++            s1->plt = reserved_section(s1, ".plt", SHT_PROGBITS, SHF_ALLOC | SHF_EXECINSTR, SECTION_ROLE_PRIVATE);
+             s1->plt->sh_entsize = 4;
+         }
+         s_rel = s1->plt;
+@@ -2917,7 +2969,7 @@
+         0x1c, 0x01,                      // 'ABI_VFP_args', 'VFP registers'
+         0x22, 0x01                       // 'CPU_unaligned_access', 'v6'
+     };
+-    Section *attr = new_section(s1, ".ARM.attributes", SHT_ARM_ATTRIBUTES, 0);
++    Section *attr = reserved_section(s1, ".ARM.attributes", SHT_ARM_ATTRIBUTES, 0, SECTION_ROLE_PRIVATE);
+     unsigned char *ptr = section_ptr_add(attr, sizeof(arm_attr));
+     attr->sh_addralign = 1;
+     memcpy(ptr, arm_attr, sizeof(arm_attr));
+@@ -2944,7 +2996,7 @@
+         'c','2','p','0','_','z','i','c','s','r','2','p','0','_',
+         'z','i','f','e','n','c','e','i','2','p','0', 0x00,
+     };
+-    Section *attr = new_section(s1, ".riscv.attributes", SHT_RISCV_ATTRIBUTES, 0);
++    Section *attr = reserved_section(s1, ".riscv.attributes", SHT_RISCV_ATTRIBUTES, 0, SECTION_ROLE_PRIVATE);
+     unsigned char *ptr = section_ptr_add(attr, sizeof(riscv_attr));
+     attr->sh_addralign = 1;
+     memcpy(ptr, riscv_attr, sizeof(riscv_attr));
+@@ -3053,7 +3105,7 @@
+         if (!s1->static_link) {
+             if (file_type & TCC_OUTPUT_EXE) {
+                 /* add interpreter section only if executable */
+-                interp = new_section(s1, ".interp", SHT_PROGBITS, SHF_ALLOC);
++                interp = reserved_section(s1, ".interp", SHT_PROGBITS, SHF_ALLOC, SECTION_ROLE_PRIVATE);
+                 interp->sh_addralign = 1;
+                 put_elf_str(interp, s1->elfint);
+                 dyninf.interp = interp;
+@@ -3062,13 +3114,13 @@
+             /* add dynamic symbol table */
+             s1->dynsym = new_symtab(s1, ".dynsym", SHT_DYNSYM, SHF_ALLOC,
+                                     ".dynstr",
+-                                    ".hash", SHF_ALLOC);
++                                    ".hash", SHF_ALLOC, SECTION_ROLE_PRIVATE);
+ 	    /* Number of local symbols (readelf complains if not set) */
+ 	    s1->dynsym->sh_info = 1;
+             dynstr = s1->dynsym->link;
+             /* add dynamic section */
+-            dynamic = new_section(s1, ".dynamic", SHT_DYNAMIC,
+-                                  SHF_ALLOC | SHF_WRITE);
++            dynamic = reserved_section(s1, ".dynamic", SHT_DYNAMIC,
++                                  SHF_ALLOC | SHF_WRITE, SECTION_ROLE_PRIVATE);
+             dynamic->link = dynstr;
+             dynamic->sh_entsize = sizeof(ElfW(Dyn));
+ 
+@@ -3193,7 +3245,7 @@
+     int i;
+     Section *s, *strsec;
+ 
+-    strsec = new_section(s1, ".shstrtab", SHT_STRTAB, 0);
++    strsec = reserved_section(s1, ".shstrtab", SHT_STRTAB, 0, SECTION_ROLE_PRIVATE);
+     put_elf_str(strsec, "");
+     for(i = 1; i < s1->nb_sections; i++) {
+         s = s1->sections[i];
+@@ -3386,11 +3438,15 @@
+ 	       known gap in TODO.md rather than papered over. */
+ 	    if (!s1->do_debug || seencompressed)
+ 	        continue;
+-#if !(TARGETOS_OpenBSD || TARGETOS_FreeBSD || TARGETOS_NetBSD)
+-        } else if (0 == strncmp(sh_name, ".eh_frame", 9)) {
+-            if (NULL == eh_frame_section)
+-                continue;
+-#endif
++        /* .eh_frame arriving from an input object is retained unconditionally,
++           on every target.  Whether tcc generates unwind info for the code it
++           compiles (-f[no-]asynchronous-unwind-tables) is a separate question
++           from whether unwind info already present in a linked object survives
++           the link; it must, exactly as ld does.  Dropping it also broke the
++           link outright rather than merely degrading it, because relocations
++           against the dropped section were left dangling ("Invalid relocation
++           entry").  The BSD targets already retained unconditionally; this is
++           the rest of the targets catching up to them. */
+         } else
+         if (sh->sh_type != SHT_PROGBITS &&
+             sh->sh_type != SHT_NOTE &&
+--- a/dep/tcc/tccdbg.c
++++ b/dep/tcc/tccdbg.c
+@@ -468,18 +468,18 @@
+ 	};
+ 
+         dwarf_info_section =
+-	    new_section(s1, ".debug_info", SHT_PROGBITS, shf);
++	    reserved_section(s1, ".debug_info", SHT_PROGBITS, shf, SECTION_ROLE_SHARED);
+         dwarf_abbrev_section =
+-	    new_section(s1, ".debug_abbrev", SHT_PROGBITS, shf);
++	    reserved_section(s1, ".debug_abbrev", SHT_PROGBITS, shf, SECTION_ROLE_SHARED);
+         dwarf_line_section =
+-	    new_section(s1, ".debug_line", SHT_PROGBITS, shf);
++	    reserved_section(s1, ".debug_line", SHT_PROGBITS, shf, SECTION_ROLE_SHARED);
+         dwarf_aranges_section =
+-	    new_section(s1, ".debug_aranges", SHT_PROGBITS, shf);
++	    reserved_section(s1, ".debug_aranges", SHT_PROGBITS, shf, SECTION_ROLE_SHARED);
+ 	for (i = 0; i < sizeof(debug)/sizeof(debug[0]); i++)
+-	    new_section(s1, debug[i], SHT_PROGBITS, 0)->sh_addralign = 1;
++	    reserved_section(s1, debug[i], SHT_PROGBITS, 0, SECTION_ROLE_SHARED)->sh_addralign = 1;
+ 	shf |= SHF_MERGE | SHF_STRINGS;
+         dwarf_str_section =
+-	    new_section(s1, ".debug_str", SHT_PROGBITS, shf);
++	    reserved_section(s1, ".debug_str", SHT_PROGBITS, shf, SECTION_ROLE_SHARED);
+ 	dwarf_str_section->sh_entsize = 1;
+ 	dwarf_info_section->sh_addralign =
+ 	dwarf_abbrev_section->sh_addralign =
+@@ -488,17 +488,17 @@
+ 	dwarf_str_section->sh_addralign = 1;
+ 	if (s1->dwarf >= 5) {
+             dwarf_line_str_section =
+-	        new_section(s1, ".debug_line_str", SHT_PROGBITS, shf);
++	        reserved_section(s1, ".debug_line_str", SHT_PROGBITS, shf, SECTION_ROLE_SHARED);
+ 	    dwarf_line_str_section->sh_entsize = 1;
+ 	    dwarf_line_str_section->sh_addralign = 1;
+ 	}
+     }
+     else
+     {
+-        stab_section = new_section(s1, ".stab", SHT_PROGBITS, shf);
++        stab_section = reserved_section(s1, ".stab", SHT_PROGBITS, shf, SECTION_ROLE_SHARED);
+         stab_section->sh_entsize = sizeof(Stab_Sym);
+         stab_section->sh_addralign = sizeof ((Stab_Sym*)0)->n_value;
+-        stab_section->link = new_section(s1, ".stabstr", SHT_STRTAB, shf);
++        stab_section->link = reserved_section(s1, ".stabstr", SHT_STRTAB, shf, SECTION_ROLE_SHARED);
+         /* put first entry */
+         put_stabs(s1, "", 0, 0, 0, 0);
+     }
+@@ -808,11 +808,27 @@
+ }
+ 
+ #if TCC_EH_FRAME
++/* Emit the CIE that this translation unit's FDEs share.
++
++   This runs on demand, at the first FDE, rather than once at session start.
++   A CIE describes how to unwind the frames its FDEs cover, so a CIE with no
++   FDE after it describes nothing: emitting one unconditionally left an
++   .eh_frame section on output that contains only an orphan CIE whenever tcc
++   produced no FDEs at all -- assembling a .S file, most visibly, where gas
++   emits no .eh_frame section whatsoever.
++
++   Deferring it also means the section is only reached for once tcc actually
++   has unwind data to put in it, so an .eh_frame arriving from input is left
++   alone in the common case, and when tcc does emit, the CIE is appended after
++   whatever input content is already present.  That is well-formed: .eh_frame
++   is a chain of self-delimiting records, and an FDE identifies its CIE by the
++   distance back to it (see the CIE Pointer in tcc_debug_frame_end), so records
++   from different producers coexist in one section. */
+ ST_FUNC void tcc_eh_frame_start(TCCState *s1)
+ {
+     if (!s1->unwind_tables)
+         return;
+-    eh_frame_section = new_section(s1, ".eh_frame", SHT_PROGBITS, SHF_ALLOC);
++    eh_frame_section = reserved_section(s1, ".eh_frame", SHT_PROGBITS, SHF_ALLOC, SECTION_ROLE_SHARED);
+ 
+     s1->eh_start = eh_frame_section->data_offset;
+     dwarf_data4(eh_frame_section, 0); // length
+@@ -885,6 +901,9 @@
+     int eh_section_sym;
+     unsigned long fde_start;
+ 
++    /* first FDE of the session brings the shared CIE into being */
++    if (!eh_frame_section)
++	tcc_eh_frame_start(s1);
+     if (!eh_frame_section)
+ 	return;
+     eh_section_sym = dwarf_get_section_sym(text_section);
+@@ -1033,7 +1052,7 @@
+ 	return;
+     if (final == 0)
+         eh_frame_hdr_section =
+-	    new_section(s1, ".eh_frame_hdr", SHT_PROGBITS, SHF_ALLOC);
++	    reserved_section(s1, ".eh_frame_hdr", SHT_PROGBITS, SHF_ALLOC, SECTION_ROLE_PRIVATE);
+     eh_frame_hdr_section->data_offset = 0;
+     dwarf_data1(eh_frame_hdr_section, 1); // Version
+     // Pointer Encoding Format
+@@ -2666,8 +2685,9 @@
+         s1->dState = tcc_mallocz(sizeof *s1->dState);
+     memset (&tcov_data, 0, sizeof (tcov_data));
+     if (tcov_section == NULL) {
+-        tcov_section = new_section(tcc_state, ".tcov", SHT_PROGBITS,
+-				   SHF_ALLOC | SHF_WRITE);
++        tcov_section = reserved_section(tcc_state, ".tcov", SHT_PROGBITS,
++					SHF_ALLOC | SHF_WRITE,
++					SECTION_ROLE_PRIVATE);
+ 	section_ptr_add(tcov_section, 4); // pointer to executable name
+     }
+ }
