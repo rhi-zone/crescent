@@ -158,6 +158,16 @@ See `docs/roadmap-v2.md` for the authoritative project roadmap and sequencing. T
     on `workflow_dispatch` until then. This does not affect the five gcc/clang-based
     `luajit-*` CI jobs (linux-x86_64/aarch64, macos-arm64, windows-x86_64/x86), which remain
     the only working way LuaJIT gets built and are unaffected by any of this.
+  - **Scope correction (2026-08-16, found while verifying patch `0006`): this blocker is not
+    confined to `host/buildvm.c`.** The wording above ("fires at `host/buildvm.o`", "`buildvm`
+    does not compile at all") reads as though `buildvm` is the one obstacle and LuaJIT would
+    build once past it. It is not — EVERY LuaJIT C source hits the identical
+    `lj_def.h:322: error: #error "missing defines for your compiler"`. Verified directly against
+    this vendored tcc: `lj_state.c`, `lj_gc.c`, `lj_api.c` and `host/buildvm.c` all fail the
+    same way; only `lj_vm.S` (assembly, which does not include `lj_def.h`) compiles. So the
+    accurate statement is "tcc cannot compile LuaJIT at all", not "tcc cannot build LuaJIT's
+    host tools". This does not change the fix options already recorded above, but it does change
+    the size of the task: closing it unblocks the whole build, not one tool.
 
 - [x] **libressl's perlasm-generated `*-elf-x86_64.S` files use SSE2/AES-NI opcodes tcc's
   assembler had zero table entries for — now patched
@@ -403,6 +413,37 @@ See `docs/roadmap-v2.md` for the authoritative project roadmap and sequencing. T
   relocated `DW_AT_low_pc`), every non-debug section (`.text`/`.data`/`.rodata`/`.bss`/
   `.eh_frame`) stays byte-identical, and a control object with no debug sections links
   byte-identically.
+
+- [x] **`0006` LuaJIT verification: no regression, with an honest limit on what it proves.**
+  `lj_vm.S` regenerated fresh from source (`make clean` then the full
+  `minilua` → `buildvm_arch.h` → `buildvm` → `lj_vm.S` chain) came out byte-identical to the
+  committed `dep/luajit/src/lj_vm.S`, so the committed one is trustworthy. Assembled with the
+  `0001`–`0005` baseline and with `0006` applied: objects byte-identical
+  (`ad81e290…`), and not a null test — the two tcc binaries themselves differ. `.eh_frame`
+  carries `A` and `.debug_frame` is correctly non-ALLOC in gcc, baseline and patched alike.
+  Full `luajit` binaries (gcc for C, tcc for the `.S`, since tcc cannot compile LuaJIT's C at
+  all — see the scope correction above) are byte-identical and run identically: JIT engaging on
+  a hot loop, error unwinding back through a JIT-compiled frame via `pcall` with error-object
+  identity preserved, ffi calls, an ffi callback through `qsort`, plus a coroutine/GC/metatable
+  stress pass. **Stated plainly: `0006` is a linker patch, so `tcc -c` barely exercises it —
+  the identical objects partly reflect that rather than proving the linker changes correct.**
+  The test that does exercise it is tcc-as-linker, where baseline and patched binaries differ
+  by exactly one added section, `.debug_frame` (precisely `0006`'s retention behaviour, and
+  nothing else), with identical runtime output. That test is weakened by the pre-existing defect
+  in the next entry, so: no-regression is well supported; a positive proof of the linker changes
+  under a fully working tcc-linked LuaJIT was not obtainable in this environment.
+
+- [ ] **Pre-existing, NOT caused by `0006`: a tcc-LINKED luajit breaks `pcall` entirely with
+  `PANIC: unprotected error in call to Lua API`.** Found while verifying `0006`. Not
+  JIT-related — reproduces with `-joff` and on a bare
+  `pcall(function() error("e1") end)`. Not the missing `-Wl,-E` either: adding
+  `-Wl,-E -rdynamic` does not help, and `PT_GNU_EH_FRAME`/`.eh_frame_hdr` are both present in
+  the output, so the cause is further in. A gcc-linked control built from the same objects
+  passes the same script. **Baseline and `0006` fail byte-identically**, so this is not a
+  regression from the patch — but it does mean tcc-as-linker is not currently viable for
+  LuaJIT, independently of the `__TINYC__` compile blocker. Also note tcc does not pull the
+  unwinder in by itself: the link needs an explicit `-lgcc_s` or it fails on `_Unwind_GetIP`,
+  `__register_frame` and friends. Root cause not investigated; needs its own scoped pass.
 
 - [ ] **Known gap, deliberately not fixed in `0006`: tcc cannot decompress `SHF_COMPRESSED`
   debug sections, and skips debug retention for an entire object if ANY section in it is
