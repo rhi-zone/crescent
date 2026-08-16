@@ -197,6 +197,68 @@ this is general assembler infrastructure with no current in-tree
 consumer: `lj_vm.S` and every `vm_*.dasc` target use only literal
 constants as LEB128 operands.
 
+Finally, `0006-dwarf-section-flag-and-debug-retention.patch` (tcc.h +
+tccelf.c + tccpe.c + tccdbg.c) fixes a link-time hard error on foreign
+objects and lets debug sections survive a link without `-g`.
+
+A 32-bit reference from one DWARF section to another is an *offset
+within the target section*, not an address, and the linker has to
+resolve it that way. tcc decided which sections those were by testing
+whether a section's index fell in the `dwlo..dwhi` range — the block of
+debug sections tcc creates for itself. That is a proxy for "is this a
+debug section" via creation contiguity, and it breaks for any debug
+section tcc did not create: a real `gcc -gdwarf-4 -fdebug-types-section`
+object carries `.debug_types`, which merges in *outside* that range, so
+its relocations were resolved as absolute addresses and every one of
+them failed `relocation 'R_X86_64_32[S]' out of range`.
+
+What makes it *fail* rather than merely be wrong is where the target
+lands: `.debug_types`' references point at `.debug_abbrev`/`.debug_str`/
+`.debug_line`, which are tcc's own sections and are `SHF_ALLOC` at high
+addresses under `-run` with `-g`, so the absolute value overflows 32
+bits. A foreign section whose 32-bit reference points *within itself*
+(`.debug_frame`'s CIE pointer is the case actually checked here) stays
+at `sh_addr` 0, where the absolute and section-relative readings happen
+to coincide at 0 — misresolved in principle, identical in practice, and
+so it silently worked before and still works now. The flag makes the
+whole class correct rather than accidentally correct.
+
+Replaced with an explicit `Section->is_dwarf` flag set at
+creation in `new_section()`. ELF has no structural marker for this, so
+it is a name check (`.debug_` prefix) — the same classification
+`tcc_load_object_file()` already used to pick retained sections, now
+made once in one place instead of inferred from index arithmetic.
+Per-`Section` granularity is sufficient: correctness depends only on
+which two sections a relocation is between, never on which object it
+came from.
+
+Debug sections from a foreign object are also now retained without `-g`
+(previously gated on `do_debug` and dropped), and their `sh_size` is
+published so they actually reach the output rather than being retained
+at zero length and silently dropped by `alloc_sec_names()`.
+
+**Real limitation, stated plainly: this rarely helps against real-world
+gcc output.** tcc cannot decompress `SHF_COMPRESSED` sections, and skips
+debug retention for an entire object if *any* section in it is
+compressed. Modern gcc compresses debug sections by default, so a
+typical `gcc -g -c` object still contributes no retained debug info at
+all — retention only works for objects built with `-gz=none` or
+equivalent. Adding decompression is new capability and deliberately out
+of scope here; until it exists, treat this as "retains uncompressed
+debug sections correctly", not as "debug section retention works".
+
+`.stab` was deliberately left alone. Its three legacy special cases
+(an out-of-range error suppressed by `.stab` address range in
+`x86_64-link.c`, dynamic relocations dropped in `tccelf.c`, and
+`.stabstr` excluded from strtab ordering) share a trigger but not a
+concept, and none of them is the `is_dwarf` concept: `Stab_Sym.n_value`
+is 32 bits wide, so for stabs there is no correct value for a high
+address and the existing hack merely *tolerates* truncation, whereas the
+dwarf fix makes the value *correct*. Extending truncation-tolerance to
+foreign `.stab` sections would trade a hard error for silently wrong
+debug data, so `.stab` retention stays gated on `-g`. See TODO.md for
+the resulting known gap.
+
 ## Vendored binary layout
 
 ```

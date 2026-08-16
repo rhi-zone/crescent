@@ -1,0 +1,173 @@
+--- a/dep/tcc/tcc.h
++++ b/dep/tcc/tcc.h
+@@ -570,6 +570,9 @@
+     int sh_num;              /* elf section number */
+     int sh_type;             /* elf section type */
+     int sh_flags;            /* elf section flags */
++    int is_dwarf;            /* dwarf debug section: 32-bit references between
++                                two such sections are section-relative offsets,
++                                not addresses (see relocate_section()) */
+     int sh_info;             /* elf section info */
+     int sh_addralign;        /* elf section alignment */
+     int sh_entsize;          /* elf entry size */
+@@ -930,7 +933,6 @@
+     Section *dwarf_aranges_section;
+     Section *dwarf_str_section;
+     Section *dwarf_line_str_section;
+-    int dwlo, dwhi; /* dwarf section range */
+     /* test coverage */
+     Section *tcov_section;
+     /* debug state */
+@@ -1572,6 +1574,7 @@
+ ST_FUNC void tccelf_begin_file(TCCState *s1);
+ ST_FUNC void tccelf_end_file(TCCState *s1);
+ ST_FUNC Section *new_section(TCCState *s1, const char *name, int sh_type, int sh_flags);
++ST_FUNC int sec_index_is_dwarf(TCCState *s1, int shndx);
+ ST_FUNC void section_realloc(Section *sec, unsigned long new_size);
+ ST_FUNC size_t section_add(Section *sec, addr_t size, int align);
+ ST_FUNC void *section_ptr_add(Section *sec, addr_t size);
+--- a/dep/tcc/tccelf.c
++++ b/dep/tcc/tccelf.c
+@@ -235,6 +235,13 @@
+     strcpy(sec->name, name);
+     sec->sh_type = sh_type;
+     sec->sh_flags = sh_flags;
++    /* A 32-bit reference from one dwarf section to another is an offset
++       within the target section, not an address; relocate_section() needs to
++       know which sections those are. ELF carries no structural marker for it,
++       so classify by name -- as tcc_load_object_file() already does when it
++       decides which debug sections to retain. Note reloc sections are named
++       ".rela.debug_*"/".rel.debug_*" and so are correctly not matched here. */
++    sec->is_dwarf = 0 == strncmp(name, ".debug_", 7);
+     switch(sh_type) {
+     case SHT_GNU_versym:
+         sec->sh_addralign = 2;
+@@ -1133,6 +1140,14 @@
+     }
+ }
+ 
++/* is the section a symbol resolves to a dwarf section? st_shndx may be a
++   reserved value (SHN_ABS, SHN_COMMON, ...) which indexes no section. */
++ST_FUNC int sec_index_is_dwarf(TCCState *s1, int shndx)
++{
++    return shndx > 0 && shndx < s1->nb_sections
++        && s1->sections[shndx]->is_dwarf;
++}
++
+ /* relocate a given section (CPU dependent) by applying the relocations
+    in the associated relocation section */
+ static void relocate_section(TCCState *s1, Section *s, Section *sr)
+@@ -1142,7 +1157,7 @@
+     int type, sym_index;
+     unsigned char *ptr;
+     addr_t tgt, addr;
+-    int is_dwarf = s->sh_num >= s1->dwlo && s->sh_num < s1->dwhi;
++    int is_dwarf = s->is_dwarf;
+ 
+     qrel = (ElfW_Rel *)sr->data;
+     for_each_elem(sr, 0, rel, ElfW_Rel) {
+@@ -1157,7 +1172,7 @@
+         tgt += rel->r_addend;
+ #endif
+         if (is_dwarf && type == R_DATA_32DW
+-            && sym->st_shndx >= s1->dwlo && sym->st_shndx < s1->dwhi) {
++            && sec_index_is_dwarf(s1, sym->st_shndx)) {
+             /* dwarf section relocation to each other */
+             add32le(ptr, tgt - s1->sections[sym->st_shndx]->sh_addr);
+             continue;
+@@ -2218,7 +2233,12 @@
+ #ifdef TCC_TARGET_ARM
+                    || s->sh_type == SHT_ARM_ATTRIBUTES
+ #endif
+-                   || s1->do_debug) {
++                   || s1->do_debug
++                   /* dwarf sections retained from a foreign object without -g
++                      still need their size published, or alloc_sec_names()
++                      assigns them no sh_name and sort_sections() drops them
++                      from the output entirely */
++                   || s->is_dwarf) {
+             s->sh_size = s->data_offset;
+         }
+     }
+@@ -3345,8 +3365,25 @@
+ 	  sh = &shdr[sh->sh_info];
+         /* ignore sections types we do not handle (plus relocs to those) */
+         sh_name = strsec + sh->sh_name;
+-        if (0 == strncmp(sh_name, ".debug_", 7)
+-         || 0 == strncmp(sh_name, ".stab", 5)) {
++        if (0 == strncmp(sh_name, ".debug_", 7)) {
++	    /* Retained even without -g: a foreign object's dwarf content is
++	       information tcc was handed and can pass through, and doing so
++	       needs no debug machinery of its own (inter-dwarf relocations
++	       are resolved section-relative via Section->is_dwarf).
++	       SHF_COMPRESSED sections are still skipped -- tcc cannot
++	       decompress them. Since gcc compresses debug sections by
++	       default, that limits how often this helps in practice; see
++	       docs/native-tiers.md and TODO.md. */
++	    if (seencompressed)
++	        continue;
++        } else if (0 == strncmp(sh_name, ".stab", 5)) {
++	    /* .stab retention stays gated on -g, deliberately. Without -g
++	       there is no tcc .stab section, and the out-of-range
++	       suppression in x86_64-link.c is scoped to tcc's own
++	       stab_section -- so retaining a foreign .stab here would turn a
++	       currently-working link into a hard "relocation out of range"
++	       error rather than passing debug info through. Recorded as a
++	       known gap in TODO.md rather than papered over. */
+ 	    if (!s1->do_debug || seencompressed)
+ 	        continue;
+ #if !(TARGETOS_OpenBSD || TARGETOS_FreeBSD || TARGETOS_NetBSD)
+--- a/dep/tcc/tccpe.c
++++ b/dep/tcc/tccpe.c
+@@ -1145,7 +1145,7 @@
+                 continue;
+             if (dwarf) { /* don't runtime-relocate dwarf-to-dwarf */
+                 n = ((ElfSym *)s1->symtab->data + ELFW(R_SYM)(rel[-1].r_info))->st_shndx;
+-                if (n >= s1->dwlo && n < s1->dwhi)
++                if (sec_index_is_dwarf(s1, n))
+                     continue;
+             }
+             if (count == 0) { /* new block */
+@@ -1167,7 +1167,7 @@
+                 rel = (ElfW_Rel *)sr->data;
+                 rel_end = (ElfW_Rel *)(sr->data + sr->data_offset);
+                 sh_addr = s->sh_addr;
+-                dwarf = s->sh_num >= s1->dwlo && s->sh_num < s1->dwhi;
++                dwarf = s->is_dwarf;
+             }
+             s = s->prev;
+             continue;
+--- a/dep/tcc/tccdbg.c
++++ b/dep/tcc/tccdbg.c
+@@ -450,8 +450,13 @@
+ 
+     if (s1->dwarf) {
+ 	int i;
+-	/* The sections below are just to make reloctions with
+-	   R_DATA_32DW work correctly. See tccelf.c */
++	/* These sections are never written by tcc itself. They used to exist
++	   only so that a merged foreign section of the same name would find an
++	   already-created section inside the dwlo..dwhi index range, which was
++	   how R_DATA_32DW relocations used to be recognised. Section->is_dwarf
++	   now classifies by name, so that is no longer why they are needed --
++	   they are kept because dropping them would change which (empty)
++	   section headers appear in the output. See tccelf.c. */
+ 	static const char *const debug[] = {
+ 	    ".debug_macro",
+ 	    ".debug_loc",
+@@ -462,7 +467,6 @@
+ 	    ".debug_addr"
+ 	};
+ 
+-        s1->dwlo = s1->nb_sections;
+         dwarf_info_section =
+ 	    new_section(s1, ".debug_info", SHT_PROGBITS, shf);
+         dwarf_abbrev_section =
+@@ -488,7 +492,6 @@
+ 	    dwarf_line_str_section->sh_entsize = 1;
+ 	    dwarf_line_str_section->sh_addralign = 1;
+ 	}
+-        s1->dwhi = s1->nb_sections;
+     }
+     else
+     {

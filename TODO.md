@@ -349,6 +349,123 @@ See `docs/roadmap-v2.md` for the authoritative project roadmap and sequencing. T
   therefore general assembler infrastructure with no current consumer in-tree, landed
   deliberately as such.
 
+- [x] **A real gcc object carrying a debug section outside tcc's own fixed set (verified case:
+  `.debug_types` from `gcc -gdwarf-4 -fdebug-types-section`) hard-errored
+  at link time with `relocation 'R_X86_64_32[S]' out of range` — fixed by
+  `dep/tcc/patches/0006-dwarf-section-flag-and-debug-retention.patch`.** Pre-existing on the
+  vendored source with zero forks applied. A 32-bit reference between two dwarf sections is a
+  section-relative offset, not an address; tcc recognized those by testing whether a section's
+  index fell inside `dwlo..dwhi` (`tcc.h:924`, checked at `tccelf.c:1145,1159` and
+  `tccpe.c:1148,1170`), which is the block of debug sections tcc creates for itself. Since
+  `R_DATA_32DW` is plain `R_X86_64_32` on x86_64 (`tcc.h:1921`), that index-range test was
+  carrying the entire "is this a debug section" decision, via creation contiguity as a proxy —
+  and the proxy fails for any debug section tcc did not create. Replaced with an explicit
+  `Section->is_dwarf` set once in `new_section()`; ELF has no structural marker, so it is a
+  `.debug_` name check, matching the classification `tcc_load_object_file()` already used.
+  Whether the misresolution actually *errors* depends on where the referenced section lands:
+  `.debug_types` points at `.debug_abbrev`/`.debug_str`/`.debug_line`, which are tcc's own and
+  are `SHF_ALLOC` at high addresses under `-run` with `-g` (`tccdbg.c:445` turns on
+  `do_backtrace`, which sets `shf = SHF_ALLOC` for them), so the absolute value overflows 32
+  bits. A foreign section whose 32-bit reference points within *itself* stays at `sh_addr` 0,
+  where absolute and section-relative coincide — checked explicitly for `.debug_frame`'s CIE
+  pointer, which carries the same `R_X86_64_32`-to-a-debug-section shape but resolves to 0 both
+  ways and so silently worked before and after. Recorded because an earlier framing of this bug
+  listed `.debug_frame` as an affected case; it is affected in principle, not in practice.
+  Per-`Section` granularity is provably sufficient — correctness depends only on which two
+  sections a relocation is between, never on which object contributed it. Verified: repro
+  (`gcc -gdwarf-4 -fdebug-types-section -gz=none -c`, linked `-gdwarf -nostdlib ... -run`) goes
+  from 6 hard errors to exit 0 with the correct computed result, and all 6 relocations were
+  checked to resolve to exactly the right section-relative values (byte-level check against the
+  independently-computed merge offsets, not just "no error"): `.debug_abbrev+0 → 0x14f`,
+  `.debug_line+0 → 0x4e`, four `.debug_str` entries all correct. Byte-identical to the
+  `0001`–`0005` baseline across `-c`/link × `-gdwarf`/`-g`/`-gstabs`/`-g0`/`-O2`, and with
+  merged foreign dwarf-4 and dwarf-5 debug objects. tcc's own test suite run differentially
+  (NixOS needs `--crtprefix`/`--libpaths={B}:...`/`--sysincludepaths`/`--elfinterp` pointed at
+  the nix store, else it dies at `hello-exe` before reaching anything relevant): identical
+  failing-target sets (`test1b`, `test3`, `memtest`, `cross-test`, all the pre-existing
+  `tcctest.c:338: error: exponent digits expected`), logs identical modulo ASLR addresses and
+  multithreaded fib ordering (multisets verified equal). libressl `*-elf-x86_64.S`: 5 assemble
+  byte-identically, 2 fail on the pre-existing `xmm8`–`xmm15` gap with identical messages.
+  `dep/luajit/src/lj_vm.S` (which contains `.debug_frame` and `.eh_frame`) assembles
+  byte-identically. eh_frame orphan-CIE checked in both producer orderings.
+
+- [x] **Debug sections from a foreign object are now retained through a link without `-g`
+  (same patch `0006`).** `tccelf.c:3350`'s `!s1->do_debug` gate dropped them entirely, and
+  `set_sec_sizes` (`tccelf.c:2221`) left their `sh_size` unpublished, which makes
+  `alloc_sec_names()` assign no `sh_name` and `sort_sections()` then class them `0x900`
+  ("won't go to file") — so retention alone was not enough; both sites needed fixing. The
+  `sh_size` predicate gained `|| s->is_dwarf` specifically (not a broader loosening): tracing
+  showed the existing `|| s1->do_debug` is what publishes sizes for `.stab`/`.stabstr` and other
+  non-alloc sections under `-g`, so replacing rather than extending it would have regressed
+  those. Verified: `-g0` link against a `-gdwarf-4 -gz=none` object now retains 6 `.debug_*`
+  sections where baseline retained 0, the retained info genuinely parses (`readelf
+  --debug-dump=info` resolves indirect string offsets to real strings and shows a correctly
+  relocated `DW_AT_low_pc`), every non-debug section (`.text`/`.data`/`.rodata`/`.bss`/
+  `.eh_frame`) stays byte-identical, and a control object with no debug sections links
+  byte-identically.
+
+- [ ] **Known gap, deliberately not fixed in `0006`: tcc cannot decompress `SHF_COMPRESSED`
+  debug sections, and skips debug retention for an entire object if ANY section in it is
+  compressed.** Modern gcc compresses debug sections by default (`-gz=zlib`), so the retention
+  above is close to a no-op against typical real-world gcc output — it only helps for objects
+  built with `-gz=none` or equivalent. Verified directly: a `gcc -gz=zlib` object retains 0
+  debug sections (no error, silently skipped) while the same source with `-gz=none` retains 6.
+  This is a real capability gap, not a correctness bug; closing it means adding decompression,
+  which is new capability and was explicitly ruled out of scope for `0006`. Until then this
+  should be described as "retains uncompressed debug sections correctly", never as "debug
+  section retention works".
+
+- [ ] **Known gap, deliberately not fixed in `0006`: a merged foreign `.stab` section
+  hard-errors under `-gdwarf` when sections land at high addresses (e.g. `-run`), with
+  `relocation 'R_X86_64_32[S]' out of range`.** Found while scoping `0006`; same class as the
+  `.debug_types` bug it fixes, but `.stab` is not `.debug_*` so the `is_dwarf` fix does not
+  cover it. `x86_64-link.c:228-230` suppresses that error only for addresses inside tcc's OWN
+  `stab_section`, which is NULL under `-gdwarf` (`tccdbg.c:495` only creates it in stabs mode),
+  so the guard short-circuits to "always error". Reproduced with a hand-built foreign `.stab`
+  object (gas 2.44 ICEs on `.stab` directly, so it was assembled under a different name and
+  renamed with `objcopy --rename-section`): `-gstabs` works, `-g0` works, `-gdwarf` errors.
+  **Owner's call (2026-08-16): do NOT extend the suppression to foreign `.stab` sections — a
+  loud error beats silent wrong debug data.** The suppression only silences the diagnostic; the
+  truncated value is written regardless (`add32le` runs unconditionally), and `Stab_Sym.n_value`
+  is `unsigned int` (`tcc.h:1543`), so unlike the dwarf case there is no correct 32-bit value
+  for a high address — truncation is lossy by construction. That is why `.stab` was NOT unified
+  into `is_dwarf`: its three legacy special cases (out-of-range suppression in
+  `x86_64-link.c:228`, dynamic relocations dropped at `tccelf.c:1176`, `.stabstr` excluded from
+  strtab ordering at `tccelf.c:2279`) share a trigger but not a concept, and none of them is the
+  `is_dwarf` concept. For the same reason `.stab` is explicitly excluded from `0006`'s retention
+  change: retaining a foreign `.stab` without `-g` was measured to turn the currently-working
+  `-g0` case into this hard error.
+
+- [ ] **Vestigial after `0006`: `tccdbg.c` eagerly creates seven empty `.debug_*` sections
+  (`.debug_macro`, `.debug_loc`, `.debug_ranges`, `.debug_loclists`, `.debug_rnglists`,
+  `.debug_str_offsets`, `.debug_addr`) that tcc itself never writes.** Their original and only
+  purpose was to make a merged foreign section of the same name land inside the `dwlo..dwhi`
+  index range; `Section->is_dwarf` now classifies by name, so that reason is gone. They were
+  kept deliberately, because dropping them changes which (empty) section headers appear in the
+  output and would break `0006`'s byte-identity verification. Removing them is a separate,
+  output-affecting change that needs its own before/after comparison — not a cleanup to fold
+  into an unrelated patch.
+
+- [ ] **OPEN, needs an owner decision before it can be built: unifying the ~20 out-of-band
+  `TCCState` section pointers behind a by-name resolver.** The intended shape is known — a
+  name-keyed table of `{name, expected type, expected flags, field offset}`, one uniform loop,
+  error-on-mismatch, covering sections a foreign producer can name via `.section` or object
+  merge (so: `.text`/`.data`/`.rodata`/`.bss`/`.bounds`/`.lbounds`/`.got`/`.plt`/`.eh_frame`/
+  `.eh_frame_hdr`/`.stab`/`.stabstr`/the six `dwarf_*_section` pointers/`.tcov`/`.gnu.version`/
+  `.gnu.version_r`/`.pdata`), excluding `SHF_PRIVATE` sections (`.common`) and the structurally
+  wired `symtab`/`dynsym`/`shstrtab`. What is NOT decided, and what blocks implementation: does
+  the resolver **create** these sections (replacing the ~20 scattered `new_section()` calls) or
+  **validate/rebind** the pointers when a foreign `.section` directive or object merge names
+  one? The two readings have very different blast radii — the creating reading changes section
+  creation ORDER, which determines ELF section indices and output layout, so a single uniform
+  creation loop cannot reproduce tcc's current interleaving (`.text`/`.data`/`.rodata`/`.bss`
+  first, then symtab, then debug sections only under `-g`, then `.got`/`.plt` on demand) without
+  ceasing to be uniform. An exhaustive search (crescent git history including all commit bodies,
+  every repo under `~/git/rhizone/`, the ecosystem open-threads registry, all handoff docs, all
+  session transcripts, all branches/stashes/worktrees) found NO written record of this direction
+  anywhere — it was carried only in conversation. Recorded here as open rather than settled;
+  picking a reading unilaterally would mint semantics later work would trust.
+
 - [ ] **tcc-built `.so` files may fail to `dlopen` on modern glibc unless the loading
   process sets `GLIBC_TUNABLES=glibc.rtld.execstack=2` (or tcc is patched/flagged to emit a
   `PT_GNU_STACK` segment marking the stack non-executable).** Found while locally testing:
