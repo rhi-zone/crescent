@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# PreToolUse hook for Agent / SendMessage. Prepends style-rules.md content to
-# the outgoing prompt (Agent) or message (SendMessage) field, so subagents —
-# and agents already running when SendMessage is used to talk to them — get
-# the same style guide the main session gets via inject-style-rules.sh
-# (UserPromptSubmit).
+# PreToolUse hook for Agent / SendMessage. Appends style-rules.md content to
+# the end of the outgoing prompt (Agent) or message (SendMessage) field, so
+# subagents — and agents already running when SendMessage is used to talk to
+# them — get the same style guide the main session gets via
+# inject-style-rules.sh (UserPromptSubmit).
 #
 # Mechanism: PreToolUse hooks can return
 #   {"hookSpecificOutput":{"hookEventName":"PreToolUse","updatedInput":{...}}}
@@ -19,7 +19,7 @@
 # open — this one WRITES a new value back into the call. So instead of
 # parsing tool_input into pieces and re-serializing it (real risk: mis-escape
 # something and corrupt/truncate the payload), we splice: find the exact
-# byte offset right after the opening '"' of the target field's value inside
+# byte offset right before the CLOSING '"' of the target field's value inside
 # the ORIGINAL raw tool_input text, and insert the (separately, carefully
 # escaped) style-guide text there. Every other byte of tool_input — every
 # other field, all original escaping — passes through untouched, because it
@@ -80,11 +80,12 @@ escaped_style=$(awk '
     }
 ' "$style_file" | sed '$ s/\\n$//')
 
-inject="${escaped_style}\\n\\n"
+inject="\\n\\n${escaped_style}"
 
-# ── splice: insert right after the opening quote of the field's value,
-# leave every other byte of tool_input untouched. Empty output means the
-# field wasn't found as a top-level string value — no-op. ──────────────────
+# ── splice: insert right before the closing quote of the field's value
+# (i.e. append after the original content, separated by a blank line), leave
+# every other byte of tool_input untouched. Empty output means the field
+# wasn't found as a top-level string value — no-op. ─────────────────────────
 spliced=$(FIELD="$field" INJECT="$inject" awk -f "$dir/lib/splice-field.awk" <<< "$rest")
 
 if [ -z "$spliced" ]; then
