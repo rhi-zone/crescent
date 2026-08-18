@@ -37,7 +37,7 @@ if [[ "${CLAUDE_HOOK_DEBUG:-}" == "1" ]]; then
 fi
 
 # ── denial helper ─────────────────────────────────────────────────────────────
-DENY_MSG="Main session is orchestrator only. Allowed: Agent/SendMessage/Task*/AskUserQuestion/EnterPlanMode/ExitPlanMode/SendUserFile/Skill/ToolSearch/ScheduleWakeup; Bash limited to git commit, git push, git status, git log --oneline (no chaining, no command substitution, no eval/source). Delegate everything else to a subagent."
+DENY_MSG="hi :3 ur job as main session is to talk with {{user}}! sorry but ur access to read/write/edit commands is blocked, for using blocked tool calls use Agent, for basic git stuff use Bash!"
 
 deny() {
     local tool_name="$1"
@@ -135,7 +135,7 @@ fi
 # ── cost-tier enforcement: Agent / Workflow ──────────────────────────────────
 # Cheapest-adequate-model discipline: no silent default to a frontier tier.
 # COST_MSG text matches the marker checked for below ([frontier-approved]).
-COST_MSG="Name the tier: cheapest adequate model (haiku for mechanical/extraction, sonnet for scripted implementation). Frontier tiers require user-approved cost: add model plus [frontier-approved] in the prompt after the user approves a cost estimate."
+COST_MSG="you need explicit model tier (e.g. haiku for mechanical/extraction, sonnet for scripted implementation)! opus/fable needs [frontier-approved] in the prompt to run, BUT only do that if {{user}} explicitly tells you it's allowed for this specific agent!"
 
 if [[ "$tool_name" == "Agent" ]]; then
     model_val=$(printf '%s' "$rest" | awk -v field="model" -f "$dir/lib/extract-field.awk")
@@ -155,7 +155,7 @@ fi
 # cost amplification (resume double-runs, echo stages) is not tier-gateable
 # the way a single Agent call is. Re-enable only by owner editing this hook.
 if [[ "$tool_name" == "Workflow" ]]; then
-    deny "$tool_name" "Workflow tool disabled by owner directive 2026-07-03 (unpredictable cost amplification: resume double-runs, echo stages). Use individual tiered Agent calls. Re-enable only by owner editing this hook."
+    deny "$tool_name" "sorry :c ur not good at writing workflows so its unilaterally disabled :/ instead send agents manually"
 fi
 
 # ── orchestration tools (always allowed) ─────────────────────────────────────

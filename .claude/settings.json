@@ -1,5 +1,5 @@
 {
-  "agent": "general-purpose",
+  "agent": "lily",
   "hooks": {
     "UserPromptSubmit": [
       {
@@ -64,6 +64,15 @@
           {
             "type": "command",
             "command": "${CLAUDE_PROJECT_DIR}/tooling/claude-hooks/require-explicit-agent-type.sh"
+          }
+        ]
+      },
+      {
+        "matcher": "Agent|SendMessage",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PROJECT_DIR}/tooling/claude-hooks/inject-style-rules-agent.sh"
           }
         ]
       }

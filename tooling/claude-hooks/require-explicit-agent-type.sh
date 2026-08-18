@@ -30,6 +30,6 @@ subagent_type=$(printf '%s' "$input" \
   | head -1)
 
 if [ -z "$subagent_type" ]; then
-  printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Agent call is missing subagent_type. The default persona is now a restrictive literal instruction-executor (no unprompted action) — name an explicit agent type (e.g. general-purpose, Explore, Plan, peer, or another listed type) so you consciously choose it over that restrictive default."}}\n'
+  printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"please include an explicit subagent_type! figure out which one is the right one to use here!"}}\n'
   exit 0
 fi
