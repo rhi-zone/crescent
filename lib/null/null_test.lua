@@ -52,7 +52,7 @@ T.describe("lib.null", function()
     end)
 
     T.it("fractal's type_ref re-exports this sentinel for null literals", function()
-      T.eq(require("lib.fractal.type_ref").null, null.null)
+      T.eq(require("lib.type-ir").null, null.null)
     end)
 
     T.it("lib.json's null is this sentinel", function()

@@ -424,12 +424,16 @@ consulted as source material at port time, not linked at runtime.
 
 ## Strategic direction: Fractal projection pattern
 
-Fractal's projection machinery (~/git/rhizone/fractal/) will be ported to Lua
-as `lib/fractal/`. The pattern: define data/API once as a tree, then walk
-that same tree with independent projectors per output format — each
-projector reads the metadata it cares about and ignores the rest, rather
-than each output format maintaining its own parallel definition of the same
-data/API.
+Fractal's projection machinery (~/git/rhizone/fractal/) has been ported to
+Lua, split by upstream package boundary into `lib/api-tree/` (the Node/op/api
+tree builder plus its HTTP/CLI/JSON-RPC projectors), `lib/type-ir/` (the
+TypeRef data model plus its JSON Schema/OpenAPI/Rust/Gleam/ReScript
+projectors), and `lib/ffi-ir/` (the FFI IR plus its per-target backends —
+C#, Java, Python, Ruby, Rust, OCaml, Gleam, ReScript, TypeScript, WIT). The
+pattern: define data/API once as a tree, then walk that same tree with
+independent projectors per output format — each projector reads the metadata
+it cares about and ignores the rest, rather than each output format
+maintaining its own parallel definition of the same data/API.
 
 This serves two motivating-application tracks directly:
 
@@ -439,8 +443,9 @@ This serves two motivating-application tracks directly:
   type declarations, client bindings, etc.
 
 Like the rescribe porting strategy above, this is a port of proven
-architecture (fractal's `packages/api-tree` and `packages/type-ir`), not a
-runtime dependency — `lib/fractal/` is pure Lua once ported.
+architecture (fractal's `packages/api-tree`, `packages/type-ir`, and
+`packages/ffi-ir`), not a runtime dependency — `lib/api-tree/`, `lib/type-ir/`,
+and `lib/ffi-ir/` are pure Lua once ported.
 
 ---
 

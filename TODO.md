@@ -651,13 +651,13 @@ See `docs/roadmap-v2.md` for the authoritative project roadmap and sequencing. T
 
 ## Open bugs
 
-- [ ] **`lib/fractal/http_route.lua` duplicates two constants that belong to the unported `decode.ts` (2026-08-08):** The wire-time source-coverage check needs the HTTP store-name registry (`BUILTIN_HTTP_STORE_NAMES` — `path`, `query`, `header`, `body`, `caller`) and the primary-store-by-method convention (`primaryStoreForMethod` — GET/HEAD/DELETE read `query`, everything else `body`). On the TypeScript side both live in `packages/http-api-projector/src/decode.ts` and are IMPORTED by `route.ts`. `decode.ts` has no crescent port yet, so `http_route.lua` carries its own copies, deliberately module-PRIVATE so nothing downstream can come to depend on this file as their home. When the decode port lands, it should own both outright and `http_route.lua` should require them from there — that is the one direction the TypeScript already establishes, and it creates no cycle (the cycle `route.ts` avoids is with `project.ts`, not `decode.ts`). Until then the duplication is real: adding a store to one copy and not the other makes the coverage check disagree with the decoder it is checking.
+- [ ] **`lib/api-tree/http_route.lua` duplicates two constants that belong to the unported `decode.ts` (2026-08-08):** The wire-time source-coverage check needs the HTTP store-name registry (`BUILTIN_HTTP_STORE_NAMES` — `path`, `query`, `header`, `body`, `caller`) and the primary-store-by-method convention (`primaryStoreForMethod` — GET/HEAD/DELETE read `query`, everything else `body`). On the TypeScript side both live in `packages/http-api-projector/src/decode.ts` and are IMPORTED by `route.ts`. `decode.ts` has no crescent port yet, so `http_route.lua` carries its own copies, deliberately module-PRIVATE so nothing downstream can come to depend on this file as their home. When the decode port lands, it should own both outright and `http_route.lua` should require them from there — that is the one direction the TypeScript already establishes, and it creates no cycle (the cycle `route.ts` avoids is with `project.ts`, not `decode.ts`). Until then the duplication is real: adding a store to one copy and not the other makes the coverage check disagree with the decoder it is checking.
 
-- [ ] **RFC 9112 §6.2: `lib/http/format`'s `serialize_response` synthesizes `content-length: 0` on a 204 (2026-08-04):** Found while porting fractal's JSON-RPC projector (`lib/fractal/jsonrpc_server.lua`), whose HTTP transport answers 204 No Content for a Notification or an all-Notification batch (§6). RFC 9112 §6.2: "A server MUST NOT send a Content-Length header field in any response with a status code of 1xx (Informational) or 204 (No Content)." `serialize_response` synthesizes one for every bodyless response, with no status exemption, so every 204 any handler in this repo produces carries the forbidden field. The fix belongs in the serializer (skip synthesis for 1xx/204, and 304 by the same clause), not in each handler: the alternatives available at the handler are worse — `mod.response_stream` writes a head with no content-length but then owns the socket and must close it, which would drop keep-alive for every notification-only request. Not fixed in the porting commit because it changes shared HTTP behavior for every consumer of `serialize_response`; it is a substrate decision, not a projector one. `lib/fractal/jsonrpc_server.lua`'s `http_handler_from_tree` doc references this entry.
+- [ ] **RFC 9112 §6.2: `lib/http/format`'s `serialize_response` synthesizes `content-length: 0` on a 204 (2026-08-04):** Found while porting fractal's JSON-RPC projector (`lib/api-tree/jsonrpc_server.lua`), whose HTTP transport answers 204 No Content for a Notification or an all-Notification batch (§6). RFC 9112 §6.2: "A server MUST NOT send a Content-Length header field in any response with a status code of 1xx (Informational) or 204 (No Content)." `serialize_response` synthesizes one for every bodyless response, with no status exemption, so every 204 any handler in this repo produces carries the forbidden field. The fix belongs in the serializer (skip synthesis for 1xx/204, and 304 by the same clause), not in each handler: the alternatives available at the handler are worse — `mod.response_stream` writes a head with no content-length but then owns the socket and must close it, which would drop keep-alive for every notification-only request. Not fixed in the porting commit because it changes shared HTTP behavior for every consumer of `serialize_response`; it is a substrate decision, not a projector one. `lib/api-tree/jsonrpc_server.lua`'s `http_handler_from_tree` doc references this entry.
 
-- [ ] **`lib/fractal/type_ref_json_rpc.lua` is a deliberately partial port of type-ir's `json-rpc.ts` (2026-08-04):** Ported: the standard error codes (§5.1) and `error_schema_from_data_schema` (`jsonRpcErrorSchema`), which is all the framework-layer projector needs for error framing. Not ported: `toJsonRpcMethod`/`toJsonRpcMethods` — the TypeRef lowering that turns an `interface` TypeRef into per-method params/result/error schemas, including the `stream`-kind return-type handling that sets `streaming` and describes ONE element. That half belongs with the rest of the `type_ref_*` projection family and depends on `type_ref_json_schema.lua`'s `type_ref_to_json_schema`. Nothing consumes it yet: `jsonrpc_project.lua` reads a caller-supplied `SchemaMap`, exactly as the TypeScript framework layer does. Finish the file when a caller needs schemas derived from a TypeRef rather than handed in.
+- [ ] **`lib/type-ir/json_rpc.lua` is a deliberately partial port of type-ir's `json-rpc.ts` (2026-08-04):** Ported: the standard error codes (§5.1) and `error_schema_from_data_schema` (`jsonRpcErrorSchema`), which is all the framework-layer projector needs for error framing. Not ported: `toJsonRpcMethod`/`toJsonRpcMethods` — the TypeRef lowering that turns an `interface` TypeRef into per-method params/result/error schemas, including the `stream`-kind return-type handling that sets `streaming` and describes ONE element. That half belongs with the rest of the `type_ref_*` projection family and depends on `type_ref_json_schema.lua`'s `type_ref_to_json_schema`. Nothing consumes it yet: `jsonrpc_project.lua` reads a caller-supplied `SchemaMap`, exactly as the TypeScript framework layer does. Finish the file when a caller needs schemas derived from a TypeRef rather than handed in.
 
-- [ ] **Typechecker: narrowing facts are keyed by variable NAME, not by binding — a same-named local in an unrelated scope poisons narrowing file-wide (2026-08-04):** Found while building `lib/fractal/stream.lua`. Minimal repro (checks with 1 spurious error; delete the `outer` function and it checks clean):
+- [ ] **Typechecker: narrowing facts are keyed by variable NAME, not by binding — a same-named local in an unrelated scope poisons narrowing file-wide (2026-08-04):** Found while building `lib/api-tree/stream.lua`. Minimal repro (checks with 1 spurious error; delete the `outer` function and it checks clean):
   ```lua
   --: (v: unknown) -> v is { data: unknown }
   local function is_boxed(v) return type(v) == "table" end
@@ -678,9 +678,9 @@ See `docs/roadmap-v2.md` for the authoritative project roadmap and sequencing. T
     return nil
   end
   ```
-  The `value` bound by `local ok, value = pcall(...)` inside the unannotated inner closure and the `value` parameter of `read` are entirely unrelated bindings in disjoint scopes, but the first one's un-narrowable `unknown` suppresses the narrowing predicate at the second. Renaming either binding fixes it. **Worked around** in `lib/fractal/stream.lua` by naming the producer's pcall result `outcome` instead of the natural `value` (flagged in-file as `TYPECHECKER WORKAROUND`). Revert that rename once narrowing facts are keyed by binding. Belongs to `lib/type/static/`'s narrowing environment.
+  The `value` bound by `local ok, value = pcall(...)` inside the unannotated inner closure and the `value` parameter of `read` are entirely unrelated bindings in disjoint scopes, but the first one's un-narrowable `unknown` suppresses the narrowing predicate at the second. Renaming either binding fixes it. **Worked around** in `lib/api-tree/stream.lua` by naming the producer's pcall result `outcome` instead of the natural `value` (flagged in-file as `TYPECHECKER WORKAROUND`). Revert that rename once narrowing facts are keyed by binding. Belongs to `lib/type/static/`'s narrowing environment.
 
-- [ ] **Typechecker: a trailing `--: T` on the CLOSING line of a multi-line table constructor is mis-associated (2026-08-04):** Found while building `lib/fractal/stream.lua`. `local st = { a = false, b = nil } --: S` (one line) checks clean; the identical annotation written as `} --: S` at the end of a multi-line constructor is not applied to the local, and every later field assignment is then checked against the whole table type instead of the field's — e.g. `st.b = "x"` reports ``cannot assign `"x"` to `{ a: boolean, b: unknown }`: string has no field `a` ``. The preceding-line form (`--: S` on its own line above `local st = {`) and the inline cast form (`} --[[: S]]`) both check clean. This is a placement bug, not a shape one. **Worked around** in `lib/fractal/stream.lua` by putting the `StreamState` annotation on the preceding line (flagged in-file as `TYPECHECKER WORKAROUND`); restore the repo-standard trailing form once the association is fixed. Note `lib/async/init.lua`'s `co_box` uses the broken trailing form today and is only unaffected because nothing assigns to its fields afterwards.
+- [ ] **Typechecker: a trailing `--: T` on the CLOSING line of a multi-line table constructor is mis-associated (2026-08-04):** Found while building `lib/api-tree/stream.lua`. `local st = { a = false, b = nil } --: S` (one line) checks clean; the identical annotation written as `} --: S` at the end of a multi-line constructor is not applied to the local, and every later field assignment is then checked against the whole table type instead of the field's — e.g. `st.b = "x"` reports ``cannot assign `"x"` to `{ a: boolean, b: unknown }`: string has no field `a` ``. The preceding-line form (`--: S` on its own line above `local st = {`) and the inline cast form (`} --[[: S]]`) both check clean. This is a placement bug, not a shape one. **Worked around** in `lib/api-tree/stream.lua` by putting the `StreamState` annotation on the preceding line (flagged in-file as `TYPECHECKER WORKAROUND`); restore the repo-standard trailing form once the association is fixed. Note `lib/async/init.lua`'s `co_box` uses the broken trailing form today and is only unaffected because nothing assigns to its fields afterwards.
 
 - [ ] **`lib/html` doesn't typecheck for its own intended usage (2026-07-30):** No file in the repo consumes `lib/html` (`grep -rl 'require("lib.html")' lib/ | grep -v /html/` returns nothing) -- it has never had a real caller. Two independent problems, found while building `lib/platform/apps/finance/dom.lua` (this app's web frontend): (1) `lib/html/init.lua` itself fails `bin/cr check` at HEAD with 75 pre-existing errors, nearly all `force cast — fix the upstream type annotation instead` on the file's own `--[[:! Element<T, A>]]` casts (every `M.div`/`M.span`/`M.a`/etc. definition at the bottom of the file) -- written against a looser force-cast enforcement that no longer holds, never revisited since. (2) Independently of (1), ordinary *nested* composition -- exactly what `lib/html/html_test.lua` never exercises (it only checks leaf elements in isolation, never e.g. `h.html(...)` containing `h.head(...)` containing `h.title(...)`) -- fails on the consumer side too. Minimal repro: `h.html({ lang = "en", h.head({ h.title("hi") }), h.body({ h.div({ class = "x" }, h.p("hello")) }) })` produces `nominal type TitleElement is not assignable to MetaElement | LinkElement | ScriptElement | StyleElement | TitleElement` -- a value of a type literally listed in a union failing to satisfy that same union once it's inside a table literal passed to a `{ [integer]: ... }`-typed parameter. Per owner decision (2026-07-30), `dom.lua` ships today using plain string-template HTML (with `h.escape` for user data) instead of `lib/html`'s nested element builders, specifically to avoid the force-cast-everywhere workaround the current state would otherwise require. Migrating `dom.lua` to `lib/html` once these are fixed is expected to be a straightforward refactor, not a redesign -- but the fix itself (the `Element<Content, Attrs>` nominal-union machinery, plus lib/html/init.lua's own internal force casts) is unscoped and belongs to `lib/html`/the typechecker, not to this app.
 
@@ -692,7 +692,7 @@ See `docs/roadmap-v2.md` for the authoritative project roadmap and sequencing. T
 
 - [ ] **`fixpoint_prover.lua` (v10 pilot, Phase 3) does not attempt `assign-copy-transfer` at all (2026-07-30):** Neither self-copy (`x = x`) nor a copy from a genuinely different tracked variable is certified — every bare-identifier-copy RHS targeting a loop's invariant variable is a counted skip ("copy source not independently established at the assign point"), regardless of whether the source is itself tracked. Two separate reasons, both recorded in `fixpoint_prover.lua`'s own header ("Known scope reduction"): (1) self-copy needs `holds_at(Pa,X,T)` at the SAME `Pa` as its own conclusion (`Pa = exit_of(the statement's own path)`, per the corrected addressing convention in `prover_addr.lua`'s header) — under this convention that premise is not reachable via `seq-persist` from the pre-statement fact, since `stmt_preserves` requires the statement's target list NOT include `X`, and self-copy's does. The Phase 2 hand-built test (`fixpoint_v1_test.lua`) closes this same shape using a different, now-superseded addressing choice (its own header flags this: "not tied to prover_addr.lua's real conventions") that does not transfer to the corrected convention. (2) A copy from a different tracked variable `Y` would need `Y`'s own fact independently chained forward through the same body prefix (grounded in its own `pilot-initial-facts-v1` citation at `LH`), in parallel with `X`'s own chain — buildable in principle, not attempted under time pressure, no required test exercises it. Both are reported as open design questions rather than resolved unilaterally, per the halt discipline — resolving (1) needs an owner call on whether a different addressing convention specifically for self-copy is acceptable (it would depart from the uniform `Pa = exit_of(own path)` rule); (2) is pure unimplemented generality.
 
-- [ ] **Typechecker: a named-key write to an index-signature-typed table adds that key to the index-signature TYPE as a required field, poisoning every such type in the file (2026-08-04):** Found while porting `lib/fractal/ffi_ir.lua`. Minimal repro, no project dependencies:
+- [ ] **Typechecker: a named-key write to an index-signature-typed table adds that key to the index-signature TYPE as a required field, poisoning every such type in the file (2026-08-04):** Found while porting `lib/ffi-ir/init.lua`. Minimal repro, no project dependencies:
 
   ```lua
   --:: Meta = { [string]: unknown }
@@ -706,22 +706,22 @@ See `docs/roadmap-v2.md` for the authoritative project roadmap and sequencing. T
   end
   ```
 
-  → `cannot assign {} to { ownership: ..., [string]: unknown }: missing field 'ownership'` at the `local out = {} --: Meta` line. Writing `out.ownership` REFINES `Meta` itself, so the empty-table initializer of the very same variable no longer satisfies it. The pollution is not per-variable and not per-alias: a second function in the same file writing `out.provenance` makes BOTH functions' initializers demand BOTH keys, and an inline `--: { [string]: unknown }` annotation instead of the named alias is polluted identically — i.e. every structurally-equal index-signature type in the file is one shared, mutable object. A computed key (`out["ownership"]`) fails the same way. Building an open metadata bag by writing named keys is the single most ordinary use of an index signature, so this is broad, not a corner case. **Worked around** in `lib/fractal/ffi_ir.lua` by routing every write through a `--: (meta: Meta, key: string, value: unknown) -> Meta` `assign` helper, so the key is a `string` parameter and never a literal at the write site (same shape as the pre-existing `assign` helper in `lib/fractal/type_ref_json_schema.lua`, which is presumably there for this same reason). Revert to direct field writes and delete those helpers once fixed.
+  → `cannot assign {} to { ownership: ..., [string]: unknown }: missing field 'ownership'` at the `local out = {} --: Meta` line. Writing `out.ownership` REFINES `Meta` itself, so the empty-table initializer of the very same variable no longer satisfies it. The pollution is not per-variable and not per-alias: a second function in the same file writing `out.provenance` makes BOTH functions' initializers demand BOTH keys, and an inline `--: { [string]: unknown }` annotation instead of the named alias is polluted identically — i.e. every structurally-equal index-signature type in the file is one shared, mutable object. A computed key (`out["ownership"]`) fails the same way. Building an open metadata bag by writing named keys is the single most ordinary use of an index signature, so this is broad, not a corner case. **Worked around** in `lib/ffi-ir/init.lua` by routing every write through a `--: (meta: Meta, key: string, value: unknown) -> Meta` `assign` helper, so the key is a `string` parameter and never a literal at the write site (same shape as the pre-existing `assign` helper in `lib/type-ir/json_schema.lua`, which is presumably there for this same reason). Revert to direct field writes and delete those helpers once fixed.
 
-- [ ] **Typechecker: an alias imported via `require` stops resolving — and silently degrades to `any` — inside the importing module's own `--::` declarations as soon as any consumer uses that module (2026-08-04):** Found while porting `lib/fractal/ffi_ir.lua`; likely the same root cause as the 2026-07-30 "`--::` type visibility breaks across a two-hop require" entry above, but with a much smaller repro. `ffi_ir.lua` requires `lib.fractal.type_ref` for its `TypeRef`/`Meta` aliases and declares e.g. `--:: FfiParam = { name: string, type: TypeRef }`. It checks **0 errors standalone**. Any consumer breaks it:
+- [ ] **Typechecker: an alias imported via `require` stops resolving — and silently degrades to `any` — inside the importing module's own `--::` declarations as soon as any consumer uses that module (2026-08-04):** Found while porting `lib/ffi-ir/init.lua`; likely the same root cause as the 2026-07-30 "`--::` type visibility breaks across a two-hop require" entry above, but with a much smaller repro. `lib/ffi-ir/init.lua` requires `lib.type-ir` for its `TypeRef`/`Meta` aliases and declares e.g. `--:: FfiParam = { name: string, type: TypeRef }`. It checks **0 errors standalone**. Any consumer breaks it:
 
   ```lua
-  local ffi_ir = require("lib.fractal.ffi_ir")
+  local ffi_ir = require("lib.ffi-ir")
   --: (s: unknown) -> unknown
   local function pick(s) return (s --[[: FfiModuleShape]]).name end
   ```
 
-  → `lib/fractal/ffi_ir.lua:263: undefined type 'TypeRef'` + `type contains 'any' — use 'unknown' ...`, reported against the *dependency's* line numbers. The checker re-resolves the required module's `--::` declarations in the CONSUMER's scope, where the dependency's own imports are not bound. The `any` degradation is the dangerous part — an imported alias silently becomes `any` rather than erroring at its declaration, which is exactly what the no-`any` rule exists to prevent. Casting to inline structural types on the consumer side does NOT avoid it: the trigger is the signature of any function the consumer calls, not the consumer's own casts, so no consumer-side formulation works. **Worked around** in `lib/fractal/ffi_ir.lua` (and repeated in each `lib/fractal/ffi_ir_*.lua` backend) by re-declaring `Meta`/`TypeShape`/`TypeRef` verbatim alongside the `require` — a deliberate, documented violation of "Never duplicate type definitions", flagged in-file as `TYPECHECKER WORKAROUND`, and the only formulation found that lets both the module and its consumers check clean. Delete every one of those re-declarations once imported aliases resolve through a consumer.
+  → `lib/ffi-ir/init.lua:263: undefined type 'TypeRef'` + `type contains 'any' — use 'unknown' ...`, reported against the *dependency's* line numbers. The checker re-resolves the required module's `--::` declarations in the CONSUMER's scope, where the dependency's own imports are not bound. The `any` degradation is the dangerous part — an imported alias silently becomes `any` rather than erroring at its declaration, which is exactly what the no-`any` rule exists to prevent. Casting to inline structural types on the consumer side does NOT avoid it: the trigger is the signature of any function the consumer calls, not the consumer's own casts, so no consumer-side formulation works. **Worked around** in `lib/ffi-ir/init.lua` (and repeated in each `lib/ffi-ir/*.lua` backend) by re-declaring `Meta`/`TypeShape`/`TypeRef` verbatim alongside the `require` — a deliberate, documented violation of "Never duplicate type definitions", flagged in-file as `TYPECHECKER WORKAROUND`, and the only formulation found that lets both the module and its consumers check clean. Delete every one of those re-declarations once imported aliases resolve through a consumer.
 
-- [ ] **Typechecker: a second read of an imported tagged union's discriminant, after narrowing on that same discriminant, is typed `never` (2026-08-04):** Found while porting `lib/fractal/ffi_ir_wit.lua`. A union imported through `require` (`ffi_ir.ownership_of` returns `OwnershipDiscipline | nil`) narrows correctly for ONE `kind` test; testing the residual value's `kind` again collapses it to `never`, so the value cannot be used (here: concatenated into an error message naming the unsupported discipline). Minimal repro, run from the repo root so the `require` resolves:
+- [ ] **Typechecker: a second read of an imported tagged union's discriminant, after narrowing on that same discriminant, is typed `never` (2026-08-04):** Found while porting `lib/ffi-ir/wit.lua`. A union imported through `require` (`ffi_ir.ownership_of` returns `OwnershipDiscipline | nil`) narrows correctly for ONE `kind` test; testing the residual value's `kind` again collapses it to `never`, so the value cannot be used (here: concatenated into an error message naming the unsupported discipline). Minimal repro, run from the repo root so the `require` resolves:
 
   ```lua
-  local ffi_ir = require("lib.fractal.ffi_ir")
+  local ffi_ir = require("lib.ffi-ir")
   --:: Meta = { [string]: unknown }
   --:: TypeShape = { kind: string, ... }
   --:: TypeRef = { shape: TypeShape, meta: Meta }
@@ -736,11 +736,11 @@ See `docs/roadmap-v2.md` for the authoritative project roadmap and sequencing. T
   end
   ```
 
-  → `cannot concatenate type 'never'` at `.. k`. A locally-declared union of the same four member types narrows correctly through the identical code, so the collapse is specific to the union arriving across a `require` — likely the same family as the two entries above. **Worked around** in `lib/fractal/ffi_ir_wit.lua`'s `to_wit_type` by reading the discriminant through an open structural cast (`(discipline --[[: { kind: string, ... }]]).kind`) — the same structural-field-read `ffi_ir.ownership_of` uses internally — so the value is a plain `string` at every use. Note the workaround gives up exhaustiveness checking on the union, which is exactly what a discriminant read should provide. Revert to `discipline.kind` once repeated discriminant reads narrow correctly across a require.
+  → `cannot concatenate type 'never'` at `.. k`. A locally-declared union of the same four member types narrows correctly through the identical code, so the collapse is specific to the union arriving across a `require` — likely the same family as the two entries above. **Worked around** in `lib/ffi-ir/wit.lua`'s `to_wit_type` by reading the discriminant through an open structural cast (`(discipline --[[: { kind: string, ... }]]).kind`) — the same structural-field-read `ffi_ir.ownership_of` uses internally — so the value is a plain `string` at every use. Note the workaround gives up exhaustiveness checking on the union, which is exactly what a discriminant read should provide. Revert to `discipline.kind` once repeated discriminant reads narrow correctly across a require.
 
 - [ ] **Other libraries still carry private null sentinels now that `lib/null` exists (2026-08-03):** `lib/null` was created (2026-08-03) because `lib/format/json/{pure,ffi}.lua` already did `pcall(require, "lib.null")` and fell back to a private `{}` — a module referenced but never written. Both now use the shared table, so the two JSON tiers' output is mutually recognizable. Several other libraries still mint their own: `lib/json/init.lua:20`, `lib/jsonschema/init.lua:24`, `lib/bson/init.lua:35`, `lib/y_crdt/encoding.lua:60` (and `lib/pdf/object.lua:77`'s `pdf.null`, which is arguably a PDF-domain object rather than the generic sentinel and may belong outside any migration). Consequence today: a value decoded as null by one of these is NOT `== ` any other's null, so passing decoded data between them silently misreads nulls as ordinary tables. Not migrated here because it is a real design call, not a mechanical sweep: several of these attach a `__tostring` metatable naming the owning module (useful in errors, lost if they share one table), and `lib/json` vs `lib/format/json` are two separate JSON libraries whose relationship is its own open question. Needs an owner decision on whether the generic sentinel is repo-wide vocabulary that every format library adopts, or whether per-format sentinels are deliberate.
 
-- [ ] **Typechecker: a local REASSIGNED inside a conditional branch is typed `nil` at any later use as a METHOD-CALL RECEIVER (found while porting `lib/fractal/ffi_ir_rescript_external.lua`, 2026-08-04):** The natural spelling of "conditionally rewrite a string, then test the result" — the exact formulation `type_ref_rescript_native.lua`'s own `sanitize_label` uses — fails with `cannot call value of type 'nil'` at the second method call. Minimal repro (no project dependencies, no aliasing, literal initializer):
+- [ ] **Typechecker: a local REASSIGNED inside a conditional branch is typed `nil` at any later use as a METHOD-CALL RECEIVER (found while porting `lib/ffi-ir/rescript_external.lua`, 2026-08-04):** The natural spelling of "conditionally rewrite a string, then test the result" — the exact formulation `type_ref_rescript_native.lua`'s own `sanitize_label` uses — fails with `cannot call value of type 'nil'` at the second method call. Minimal repro (no project dependencies, no aliasing, literal initializer):
 
     ```lua
     --: (name: string) -> string
@@ -752,9 +752,9 @@ See `docs/roadmap-v2.md` for the authoritative project roadmap and sequencing. T
     end
     ```
 
-  → `cannot call value of type 'nil'` at `lowered:match`. Only the method-call RECEIVER position is affected: using the same reassigned local in a concatenation (`return lowered .. "!"`) checks clean, which is why other conditionally-reassigned locals in the same file (`attr`, `type_decl`) needed no change. Note `sanitize_label` in `lib/fractal/type_ref_rescript_native.lua` passes today with the natural formulation, but extracted verbatim into a standalone file it fails — so something in that file's surrounding context suppresses it and the real trigger is narrower than the repro alone shows. **Worked around** in `lib/fractal/ffi_ir_rescript_external.lua`'s `external_ident` by hoisting the conditional rewrite into a separate `decapitalize_leading_upper` function (returning the input unchanged on the non-matching path) and spelling the `_`-prefix decision with two returns instead of a reassignment, flagged in-file as `TYPECHECKER WORKAROUND`. Collapse it back into one function with the reassignment once a conditionally-reassigned local keeps its type at a method-call receiver.
+  → `cannot call value of type 'nil'` at `lowered:match`. Only the method-call RECEIVER position is affected: using the same reassigned local in a concatenation (`return lowered .. "!"`) checks clean, which is why other conditionally-reassigned locals in the same file (`attr`, `type_decl`) needed no change. Note `sanitize_label` in `lib/type-ir/rescript_native.lua` passes today with the natural formulation, but extracted verbatim into a standalone file it fails — so something in that file's surrounding context suppresses it and the real trigger is narrower than the repro alone shows. **Worked around** in `lib/ffi-ir/rescript_external.lua`'s `external_ident` by hoisting the conditional rewrite into a separate `decapitalize_leading_upper` function (returning the input unchanged on the non-matching path) and spelling the `_`-prefix decision with two returns instead of a reassignment, flagged in-file as `TYPECHECKER WORKAROUND`. Collapse it back into one function with the reassignment once a conditionally-reassigned local keeps its type at a method-call receiver.
 
-- [ ] **A parenthesized `gsub` call in ARGUMENT position is not truncated to one value (same port, 2026-08-04):** `f((name:gsub(pat, rep)))` is rejected with "argument 1: cannot pass `(string, integer)` where `string` expected", although the identical expression in a `local x = (name:gsub(...))` binding types as `string`. Lua's parentheses truncate a multi-value expression to one value in every position, so argument position should behave the same as binding position. Worked around in `lib/fractal/ffi_ir_rescript_external.lua`'s `external_ident` by binding to a `local` first and passing the local. Not separately flagged in-file (the binding reads naturally either way); revert the extra local once parentheses truncate in argument position.
+- [ ] **A parenthesized `gsub` call in ARGUMENT position is not truncated to one value (same port, 2026-08-04):** `f((name:gsub(pat, rep)))` is rejected with "argument 1: cannot pass `(string, integer)` where `string` expected", although the identical expression in a `local x = (name:gsub(...))` binding types as `string`. Lua's parentheses truncate a multi-value expression to one value in every position, so argument position should behave the same as binding position. Worked around in `lib/ffi-ir/rescript_external.lua`'s `external_ident` by binding to a `local` first and passing the local. Not separately flagged in-file (the binding reads naturally either way); revert the extra local once parentheses truncate in argument position.
 
 ## Strategic decisions
 
@@ -1524,9 +1524,9 @@ Scope cuts made in the same work, none typechecker-related, all deliberate and d
 
 - [ ] **Same class of bug as the `table.remove` entry above, confirmed for `table.sort` too (found while implementing `lib/pdf/write.lua`, 2026-07-22).** Minimal repro: `local a = {} --[[: { [integer]: { x: number } } ]]; table.sort(a, function(p, q) return p.x < q.x end); local b = {} --[[: { [integer]: number } ]]; table.sort(b)` — the second, comparator-less call fails with `cannot pass '{ [integer]: number }' where '{ [integer]: { x: number } }' expected`, i.e. `table.sort`'s generic element type was pinned by the first call and reused for the second regardless of shape. Worked around in `lib/pdf/write.lua` (`write_incremental_update`) by hand-writing an insertion sort over the `nums: { [integer]: number }` array instead of a second `table.sort` call. Revert to `table.sort(nums)` once generic stdlib functions are instantiated fresh per call site (same fix would resolve both this and the `table.remove` entry, since it's the same underlying mechanism).
 
-- [ ] **The same once-per-file generic instantiation applies to PROJECT-DECLARED generics, not only stdlib ones (found while porting `lib/fractal/ffi_ir_csharp_pinvoke.lua`, 2026-08-04):** `lib/fractal/type_ref.lua`'s `resolve` is declared `--: <T>(kind: string, handlers: { [string]: T }) -> T | nil`. Calling it once with a `{ [string]: boolean }` handler map and once with a `{ [string]: string }` one, anywhere in the same file, fails on whichever call is checked second — "argument 2: cannot pass `{ [string]: string }` where `{ [string]: boolean }` expected: indexer value: cannot assign `string` to `boolean`", plus a knock-on return-type mismatch. Same mechanism as the three `table.remove`/`table.sort` entries above, so probably the same fix; logged separately because it establishes the bug is not specific to stdlib declarations. Worked around in `lib/fractal/ffi_ir_csharp_pinvoke.lua` by making the two single-entry lattice probes (`BOOLEAN_PROBE`/`STRING_PROBE`, the bool- and string-marshaling gates) `{ [string]: string }` maps tested with `~= nil` instead of the natural `{ boolean = true }` presence map tested with `== true`, so all three `resolve` call sites in that file instantiate `<T>` at `string`. Revert those two probes to booleans once each call site instantiates the generic freshly.
+- [ ] **The same once-per-file generic instantiation applies to PROJECT-DECLARED generics, not only stdlib ones (found while porting `lib/ffi-ir/csharp_pinvoke.lua`, 2026-08-04):** `lib/type-ir/init.lua`'s `resolve` is declared `--: <T>(kind: string, handlers: { [string]: T }) -> T | nil`. Calling it once with a `{ [string]: boolean }` handler map and once with a `{ [string]: string }` one, anywhere in the same file, fails on whichever call is checked second — "argument 2: cannot pass `{ [string]: string }` where `{ [string]: boolean }` expected: indexer value: cannot assign `string` to `boolean`", plus a knock-on return-type mismatch. Same mechanism as the three `table.remove`/`table.sort` entries above, so probably the same fix; logged separately because it establishes the bug is not specific to stdlib declarations. Worked around in `lib/ffi-ir/csharp_pinvoke.lua` by making the two single-entry lattice probes (`BOOLEAN_PROBE`/`STRING_PROBE`, the bool- and string-marshaling gates) `{ [string]: string }` maps tested with `~= nil` instead of the natural `{ boolean = true }` presence map tested with `== true`, so all three `resolve` call sites in that file instantiate `<T>` at `string`. Revert those two probes to booleans once each call site instantiates the generic freshly.
 
-- [ ] **A checked cast from an open shape (`{ kind: string, ... }`) to a concrete variant whose `kind` is a string LITERAL is rejected, and testing `shape.kind == "resource"` first does not narrow the shape (found while porting `lib/fractal/ffi_ir_csharp_pinvoke.lua`, 2026-08-04):** `local s = ref.shape --[[: FfiResourceShape]]` (where `FfiShape = { kind: string, ... }` and `FfiResourceShape = { kind: "resource", name: string, methods: ... }`) fails with "field 'kind': cannot assign `string` to `\"resource\"`", and wrapping it in `if ref.shape.kind == "resource" then` — or binding `local s = ref.shape` and testing `s.kind` — changes nothing, since narrowing a field of an open record does not narrow the record. The TS source these backends are ported from does exactly this narrow-then-use, so every ffi-ir backend hits it at its four dispatch branches. NOT worked around with a force cast (`--[[:! T]]`), which would be wrong here. Worked around in `lib/fractal/ffi_ir_csharp_pinvoke.lua` by casting to kind-FREE structural views instead (`--[[: { name: string, methods: { [string]: FfiRef }, ... }]]`), which the checker accepts — the same idea `ffi_ir.lua`'s own `FfiFunctionLike` alias already encodes, and the same inline-structural-cast precedent `type_ref.lua`'s `resolve_ref` sets. Consequence: the emitted declaration's own `kind` is not re-checked at the cast, so the dispatch's `kind == ...` test is the only thing tying the branch to the shape. Revert those casts to the concrete `Ffi*Shape` aliases once a literal-`kind` discriminant narrows an open record.
+- [ ] **A checked cast from an open shape (`{ kind: string, ... }`) to a concrete variant whose `kind` is a string LITERAL is rejected, and testing `shape.kind == "resource"` first does not narrow the shape (found while porting `lib/ffi-ir/csharp_pinvoke.lua`, 2026-08-04):** `local s = ref.shape --[[: FfiResourceShape]]` (where `FfiShape = { kind: string, ... }` and `FfiResourceShape = { kind: "resource", name: string, methods: ... }`) fails with "field 'kind': cannot assign `string` to `\"resource\"`", and wrapping it in `if ref.shape.kind == "resource" then` — or binding `local s = ref.shape` and testing `s.kind` — changes nothing, since narrowing a field of an open record does not narrow the record. The TS source these backends are ported from does exactly this narrow-then-use, so every ffi-ir backend hits it at its four dispatch branches. NOT worked around with a force cast (`--[[:! T]]`), which would be wrong here. Worked around in `lib/ffi-ir/csharp_pinvoke.lua` by casting to kind-FREE structural views instead (`--[[: { name: string, methods: { [string]: FfiRef }, ... }]]`), which the checker accepts — the same idea `ffi_ir.lua`'s own `FfiFunctionLike` alias already encodes, and the same inline-structural-cast precedent `type_ref.lua`'s `resolve_ref` sets. Consequence: the emitted declaration's own `kind` is not re-checked at the cast, so the dispatch's `kind == ...` test is the only thing tying the branch to the shape. Revert those casts to the concrete `Ffi*Shape` aliases once a literal-`kind` discriminant narrows an open record.
 
 - [ ] **Third occurrence of the `table.remove`/`table.sort` shape-pinning bug above (found while implementing N0 bracket-pair resolution in `lib/bidi/init.lua`, 2026-07-26).** `resolve_explicit`'s existing `table.remove(stack)` call (shape `{ level, override, isolate, char_index }`) pins the type; the new BD16 bracket-stack code's `table.remove(bstack)` call (shape `{ cp, k }`) then fails with `missing field 'level'`. Same mechanism hit `table.sort` when sorting the discovered bracket-pair list against the earlier `table.sort(RANGES, ...)` call's shape (`{ integer, integer, bidi_type }` vs. `{ integer, integer }`). Worked around in `find_bracket_pairs` (`lib/bidi/init.lua`) by hand-managing the bracket stack's length (nil-ing slots + a separate `bstack_len` counter instead of `table.remove`) and a manual insertion sort for the found-pairs list (bounded small: at most `BD16_MAX_STACK / 2` pairs per isolating run sequence) instead of `table.sort`. Revert both to the stdlib calls once generic stdlib functions are instantiated fresh per call site — same fix as the two entries above.
 
@@ -6194,7 +6194,7 @@ framing.
 - 2b i18n: Bidi complete (including UAX#9 N0 paired brackets), Arabic joining/shaping, digit-system substitution. Total: 212 bidi assertions, 135 locale assertions.
 - 2c bookkeeping: Multi-format import (CSV/OFX/QIF) completed. Unified CSV conversion path prevents import-format duplication. Fixed real `lib/sqlite` NULL-truncation bug. 305 assertions total.
 - 2d (already done): `lib/unified` mdast/hast/remark_gfm substantially built. Rescribe evaluated as prior art, not adopted as canonical.
-- Phase 3 substrate: Fractal projection pattern ported to `lib/fractal/` (op, api, merge_meta, TypeRef). Conventions documented in `docs/roadmap-v2.md` "Strategic direction: Fractal projection pattern" and "Format library porting strategy" sections.
+- Phase 3 substrate: Fractal projection pattern ported to `lib/api-tree/` (op, api, merge_meta), `lib/type-ir/` (TypeRef), and `lib/ffi-ir/`. Conventions documented in `docs/roadmap-v2.md` "Strategic direction: Fractal projection pattern" and "Format library porting strategy" sections.
 
 **Next session (Phase 3 work):**
 - 3a: Personal finance app using fractal projection pattern. Start by defining the chart-of-accounts and report-structure tree once, then project to CLI output, web UI, export formats (CSV, PDF).
@@ -6305,9 +6305,9 @@ as their status.**
   wavefunction collapse. Recorded there as direction, not commitment — nothing here is
   started.
 
-## lib/fractal port — typechecker workarounds and open items (2026-08-03)
+## lib/api-tree port — typechecker workarounds and open items (2026-08-03)
 
-- [ ] Revert TYPECHECKER WORKAROUND in `lib/fractal/result.lua`
+- [ ] Revert TYPECHECKER WORKAROUND in `lib/api-tree/result.lua`
   (`match_kind`): the natural signature is
   `<R>(kind: string, response: R) -> ErrorEncoder<unknown, R>`, which would
   carry the response type through to the composed encoder. It is rejected —
@@ -6319,7 +6319,7 @@ as their status.**
   `response` is typed `unknown` instead, so callers must narrow what comes
   back out of the encoder. Restore the generic signature when this is fixed.
 
-- [x] Revert TYPECHECKER WORKAROUND in `lib/fractal/direct_test.lua`
+- [x] Revert TYPECHECKER WORKAROUND in `lib/api-tree/direct_test.lua`
   (`invoke`): `__call` metatables are not modelled. A table carrying a
   statically-visible `__call` cannot be called — `cannot call value of type
   `{} & { __call: ... }``. `direct.lua` projected a node that is BOTH a leaf
@@ -6338,7 +6338,7 @@ as their status.**
   remains open in the typechecker generally but no longer applies to this
   code.
 
-- [ ] `lib/fractal/result.lua`'s `pipe` is imprecisely typed
+- [ ] `lib/api-tree/result.lua`'s `pipe` is imprecisely typed
   (`(a: unknown, ...(a: unknown) -> unknown) -> unknown`). The TypeScript
   original types `pipe` with a family of fixed-arity overloads, one per stage
   count, which is what lets each stage's output type flow into the next
@@ -6362,7 +6362,7 @@ as their status.**
 
 - [ ] `lib/result`'s design is flagged for a separate future review — its
   `{ _tag, _val }`-plus-methods representation is a different encoding from
-  the `{ kind, value }` shape `lib/fractal/result.lua` needs for wire
+  the `{ kind, value }` shape `lib/api-tree/result.lua` needs for wire
   compatibility with the TypeScript side, and the method-based approach was
   noted as worth revisiting on its own merits. Out of scope for the fractal
   port; `lib/result` is untouched by it. Not a decided change — a review item.
@@ -6371,11 +6371,11 @@ as their status.**
   ported and are not portable as written: they are bound to `ts.Program` (they
   hash the source-file set a TypeScript Program parsed) and to Node's
   `require.resolve` (reading installed package versions as toolchain-identity
-  signals). `lib/fractal/cache.lua` ports only the fingerprinting layer. If a
+  signals). `lib/api-tree/cache.lua` ports only the fingerprinting layer. If a
   Lua-side incremental build cache is ever wanted, it needs its own design for
   the file-closure tier rather than a translation of these.
 
-## lib/fractal type-ir projectors — typechecker gaps and open items (2026-08-04)
+## lib/type-ir projectors — typechecker gaps and open items (2026-08-04)
 
 Filed alongside the port of `type_ref_codegen`, `type_ref_kinds_common`, and
 the rust-serde / wasm-bindgen / gleam-native / rescript-native projectors.
@@ -6495,8 +6495,8 @@ the rust-serde / wasm-bindgen / gleam-native / rescript-native projectors.
   Only matters if byte-identical output against fractal ever becomes a
   requirement rather than a target.
 
-- [ ] Revert TYPECHECKER WORKAROUND in `lib/fractal/ffi_ir.lua`
-  (`ownership_of`) and `lib/fractal/ffi_ir_rust_wasm_bindgen.lua`
+- [ ] Revert TYPECHECKER WORKAROUND in `lib/ffi-ir/init.lua`
+  (`ownership_of`) and `lib/ffi-ir/rust_wasm_bindgen.lua`
   (`declared_discipline_kind`): a `type(rec.kind) ~= "string"` guard on an
   `unknown`-typed record FIELD does not narrow that field to `string`, so the
   post-guard value still can't be returned/reused where the field's narrowed
@@ -6516,10 +6516,10 @@ the rust-serde / wasm-bindgen / gleam-native / rescript-native projectors.
   whole-record cast, once a `type(x) == "string"` check on a record field
   narrows that field.
 
-## lib/fractal CLI projector — omissions, typechecker gaps, open items (2026-08-04)
+## lib/api-tree CLI projector — omissions, typechecker gaps, open items (2026-08-04)
 
 Filed alongside the port of fractal's `packages/cli-api-projector`
-(`src/cli.ts` + `src/completions.ts`) to `lib/fractal/cli_projector.lua`.
+(`src/cli.ts` + `src/completions.ts`) to `lib/api-tree/cli_projector.lua`.
 
 - [ ] `CliOpts.validators` is NOT ported. It wires generated validators onto
   the tree through `wrapValidators`/`isValidatorWrapped`
@@ -6557,7 +6557,7 @@ Filed alongside the port of fractal's `packages/cli-api-projector`
   NON-recursive function of the same signature checks clean; writing the
   recursion through the module table (`M.describe`) instead fails identically,
   so it is the recursion, not the binding form. **Worked around** in
-  `lib/fractal/cli_projector.lua`'s `describe_field_type` by casting the
+  `lib/api-tree/cli_projector.lua`'s `describe_field_type` by casting the
   recursive call's result to the function's own declared return type
   (`--[[: string | nil]]`), flagged in-file as `TYPECHECKER WORKAROUND`.
   Delete the cast once a recursive call is checked against its declaration.
@@ -6570,7 +6570,7 @@ Filed alongside the port of fractal's `packages/cli-api-projector`
   reassignment retroactively defeats the earlier narrowing. Same family as the
   "a local REASSIGNED inside a conditional branch is typed `nil` at a
   method-call receiver" entry above. **Worked around** in
-  `lib/fractal/cli_projector.lua`'s `run_cli_async` by binding a fresh
+  `lib/api-tree/cli_projector.lua`'s `run_cli_async` by binding a fresh
   `streamed` local for the sniff, flagged in-file. Collapse it back once
   narrowing survives a later reassignment.
 
@@ -6578,7 +6578,7 @@ Filed alongside the port of fractal's `packages/cli-api-projector`
   type therefore crosses the module boundary as an unsolved variable: at a
   consumer, `local d = levenshtein.distance(a, b)` narrows to `never` under
   `d ~= nil` and to `_ | integer` under `or 0`, so the value cannot be
-  compared with `<` in any formulation. `lib/fractal/cli_projector.lua`'s
+  compared with `<` in any formulation. `lib/api-tree/cli_projector.lua`'s
   `closest_enum_match` states the type with a `--[[: integer]]` cast at the
   call site. The real fix is annotating `lib/levenshtein/init.lua` (note that
   file already reports 5 errors of its own, so annotating it is its own piece
@@ -6591,7 +6591,7 @@ Filed alongside the port of fractal's `packages/cli-api-projector`
   it — a runtime hazard with no type-level signal. Hit while porting
   `--all-pages`: `stream_all_pages(first, input, ..., paginated_meta, caps)`
   lost `caps` whenever a leaf had no `meta.cli.paginated`. **Worked around**
-  in `lib/fractal/cli_projector.lua` by bundling the walk's arguments into a
+  in `lib/api-tree/cli_projector.lua` by bundling the walk's arguments into a
   single `PageWalk` table. The general fix is `select("#", ...)` plus an
   explicit count in `cancellable`, at which point the bundle can stay or go on
   its own merits.
@@ -6600,12 +6600,12 @@ Filed alongside the port of fractal's `packages/cli-api-projector`
   "call it with an incomplete caps table" is rejected at check time — directly,
   through `pcall`, and through a force cast (refused outright) — so the guard
   can only be exercised by a caller the typechecker does not see. Noted in
-  `lib/fractal/cli_projector_test.lua` where the test would otherwise sit. A
+  `lib/api-tree/cli_projector_test.lua` where the test would otherwise sit. A
   mechanism for deliberately-ill-typed call sites in tests (the thing
   `lib/fsm/fsm_test.lua`'s force casts predate) would close it.
 
 - [ ] Two behavioral divergences from the TypeScript source, both documented
-  in `lib/fractal/cli_projector.lua`'s header, both forced by the substrate
+  in `lib/api-tree/cli_projector.lua`'s header, both forced by the substrate
   rather than chosen:
   - Numeric flag coercion uses Lua's `tonumber`, not JS's `Number`. `""`
     (JS: 0) and `"Infinity"` (JS: Infinity) are rejected here.
@@ -6616,7 +6616,7 @@ Filed alongside the port of fractal's `packages/cli-api-projector`
 
 - [ ] Output key order is SORTED, not authored. The TS source relies on JS
   object insertion order for command listings, completion levels and JSON
-  bodies; LuaJIT randomizes hash iteration, so `lib/fractal/cli_projector.lua`
+  bodies; LuaJIT randomizes hash iteration, so `lib/api-tree/cli_projector.lua`
   sorts every child-name walk and passes `sort_keys` to `lib/json` — the same
   answer `cache.lua` gives to the same problem. Byte-identical output against
   fractal is therefore not achievable for a tree whose authored order differs
@@ -6626,21 +6626,21 @@ Filed alongside the port of fractal's `packages/cli-api-projector`
 - [ ] TYPECHECKER: a function type in UNION RETURN position warns ("wrap each
   function type in parens") and the suggested fix does not silence it —
   `-> ((A) -> B) | nil` and `-> (((A) -> B) | nil)` both warn. Worked around in
-  `lib/fractal/http_client_extension.lua` by naming the function type
+  `lib/api-tree/http_client_extension.lua` by naming the function type
   (`StreamingCallFn`), which the alias makes read better anyway, so nothing
   needs reverting when the grammar gap closes — only the note explaining it.
 
 - [ ] The `unpack`-stops-at-the-first-nil-hole trap listed above for
-  `cli_projector`'s `PageWalk` bites `lib/fractal/http_client.lua` too:
+  `cli_projector`'s `PageWalk` bites `lib/api-tree/http_client.lua` too:
   `perform_async(site, nil, call_opts)` — a no-input call carrying per-call
   options — silently dropped `call_opts`, so a caller's timeout or cancellation
   was ignored. Same fix (`CallBundle`, one table argument), same real fix
   (`select("#", ...)` plus an explicit count in `async.cancellable`), same
   "the bundle can then stay or go on its own merits".
 
-- [ ] `lib/fractal/http_client.lua` has no `create_client(node, opts)` entry
+- [ ] `lib/api-tree/http_client.lua` has no `create_client(node, opts)` entry
   point yet — it needs the `http_projection` rewriter pipeline, which lands
-  with `lib/fractal/http_route.lua`. Everything the wrapper ADDS over the core
+  with `lib/api-tree/http_route.lua`. Everything the wrapper ADDS over the core
   is already there (`opts.node` recovers authored member names and codegen
   names), so the wrapper is
   `create_client_from_route(http_projection(node), { node = node, ... })`.
@@ -6803,7 +6803,7 @@ replaced.
 ## Session pause — fractal port + agent-design status snapshot (2026-08-13)
 
 A long session porting fractal (`~/git/rhizone/fractal`, a TypeScript
-monorepo of 11 packages) to `lib/fractal/`, plus related agent-design and
+monorepo of 11 packages) to `lib/api-tree/`, `lib/type-ir/`, and `lib/ffi-ir/`, plus related agent-design and
 HTTP-substrate work, is pausing. Verified against `git log`, current file
 state, and `git worktree`/`git status` before writing this down, so nothing
 gets lost.
@@ -6829,7 +6829,7 @@ gets lost.
   7, and 9 in the doc (`docs/agent-design.md:122-132`) are all still
   unresolved as written; none needed rewriting for this entry.
 
-- [ ] **`lib/fractal`'s http-api-projector port is mid-flight and
+- [ ] **`lib/api-tree`'s http-api-projector port is mid-flight and
   substantially blocked.** Landed and tested: `http_value.lua` (deferred-
   producer response model), `http_adapter.lua`, `http_meta.lua`,
   `http_route.lua`, `http_client.lua`, `http_client_extension.lua`, plus
@@ -6870,7 +6870,7 @@ gets lost.
   - `int64`/`bytes` kinds: `int64` is a plain Lua number with a safe-range
     check (53-bit clamp, matching JS — no bigint tier); `bytes` is a base64
     string, not a raw byte array.
-  - Stream predicate: use `lib/fractal/stream.lua`'s existing `M.is_stream`
+  - Stream predicate: use `lib/api-tree/stream.lua`'s existing `M.is_stream`
     directly. No new predicate needed.
   - The 5 built-in format validators (uuid/email/time/duration/bytes):
     hand-code each as a dedicated Lua validator, not routed through a
@@ -6906,7 +6906,7 @@ gets lost.
   critical path.
 
 - [ ] **`mcp-api-projector` (one of the 11 original fractal packages
-  inventoried for this port) has not been started.** Verified: `lib/fractal/`
+  inventoried for this port) has not been started.** Verified: `lib/api-tree/`
   has no mcp-projector file; the only "mcp" hits in the directory are
   cross-reference comments in `stream.lua`, `input.lua`, `result.lua`,
   `jsonrpc_server.lua`, and `jsonrpc_project.lua` describing how those

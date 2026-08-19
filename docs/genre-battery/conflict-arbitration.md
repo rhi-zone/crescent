@@ -50,7 +50,7 @@ No other library in the hook/middleware/aspect grep sweep (`http/server`,
 `taskgraph`, `platform/daemon`, `web`, `notify`, `realtime`, `pool`,
 `layout`, `scheduler`, `task_runner`, `connection_pool`, `game_math`,
 `state_machine`, `reactive_store`, `workflow`, `js_pack_validator`,
-`bookkeeping`, `fractal/*`, `pdf/font`) addresses cross-mod ordering over a
+`bookkeeping`, `api-tree/*`, `type-ir/*`, `ffi-ir/*`, `pdf/font`) addresses cross-mod ordering over a
 shared target function; the grep hits there are either literal use of the
 word "hook" in an unrelated FFI/HTTP sense, or unrelated pattern-matching
 hits ("aspect" as in aspect ratio in `game_math`/`layout`). Confirmed by
