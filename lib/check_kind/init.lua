@@ -69,26 +69,15 @@ local is_subtype = kinds.is_subtype
 -- result and lowering entry (`ann_res`, `lower`), and the preceding-line
 -- annotation map (`line_ann`).
 --
--- `ASTNodeArena` / `ListPool` / `StringPool` are not declared in this file —
--- they resolve via cross-file inference through the reused typechecker
--- modules this file already requires (`parse_mod` for the arena shapes,
--- `intern_mod` for the pool). `ctx_types.lua`'s ambient names are deliberately
--- NOT in scope here (self-check-only, see its header comment), so `ann_res`
--- and `lower` are given their own small structural aliases below instead of
--- borrowing those names.
+-- `ASTNodeArena` / `ListPool` are the real shapes declared in
+-- `lib/type/static/ctx_types.lua`, pulled in explicitly below rather than
+-- mirrored locally — `--:: require` makes their names available regardless
+-- of the self-check filename heuristic that otherwise gates ctx_types.lua's
+-- ambient scope. `StringPool` continues to resolve via cross-file inference
+-- through `intern_mod`, which this file already requires.
 ---------------------------------------------------------------------------
 
--- Local mirrors of the reused parser's arena shapes. `--::` type-alias bodies
--- resolve names EAGERLY (at declaration time), unlike `--:` signatures, which
--- resolve lazily against cross-file inferred types — so a bare `ASTNodeArena`
--- token here cannot borrow the name from `lib/type/static/arena.lua` (it is
--- never itself `--::`-declared there; it only exists ambiently for that
--- directory's self-check heuristic). Mirrored locally instead, same as
--- `lib/doc/init.lua`'s `DocCtx*` family and `lib/type/v10_kernel/pilot/*`'s
--- per-file `Ctx` do for the identical shapes.
---:: ASTNode      = { kind: integer, flags: integer, col: integer, line: integer, data: { [integer]: integer, ... } }
---:: ASTNodeArena = { get: (ASTNodeArena, integer) -> ASTNode, alloc: (ASTNodeArena) -> integer, len: integer, ... }
---:: ListPool     = { get: (ListPool, integer) -> integer, ... }
+--:: require "lib.type.static.ctx_types"
 
 -- The parsed-annotation result, as returned by `ann_mod.parse_annotations`.
 -- Open (`...`): we only read the two fields this checker consumes.
