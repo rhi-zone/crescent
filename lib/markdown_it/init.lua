@@ -127,11 +127,6 @@ local function transform_linkify(tree)
         -- Split text around URLs.
         local parts = {}
         local last = 1
-        for s, e, url in value:gmatch("()(" .. url_pat .. ")()") do
-          -- gmatch positions: s=start of match, e=actual url, url captures
-          -- Re-do with find for proper positions.
-          _ = s; _ = e; _ = url  -- suppress unused warning
-        end
         -- Use string.find in a loop for proper indexing.
         local pos = 1
         local len = #value
