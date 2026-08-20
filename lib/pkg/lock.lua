@@ -61,6 +61,7 @@ function lock.parse(content)
 	local current_name = nil --: string | nil
 	local current_pkg = nil --: LockEntry | nil
 	local lnum = 0
+	local seen_version_field = false
 
 	for line in (content .. "\n"):gmatch("([^\n]*)\n") do
 		lnum = lnum + 1

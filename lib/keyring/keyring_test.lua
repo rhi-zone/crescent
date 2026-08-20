@@ -369,7 +369,7 @@ T.describe("keyring module API", function()
 
 			-- list() with no prefix returns all keys (including ours).
 			local all = keyring.list()
-			T.ok(type(all) == "table", tostring(serr))
+			T.ok(type(all) == "table")
 			T.ok(contains(all, svc_a1), "svc_a1 present")
 			T.ok(contains(all, svc_a2), "svc_a2 present")
 			T.ok(contains(all, svc_b1), "svc_b1 present")

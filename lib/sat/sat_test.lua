@@ -61,7 +61,6 @@ end)
 T.describe("3-coloring", function()
   T.it("triangle graph is 3-colorable", function()
     local clauses = {}
-    local enc = M and M.encodings or sat.encodings  -- avoid shadowing
 
     -- Each node gets at least one color
     local function node_vars(n) return {n*3+1, n*3+2, n*3+3} end
