@@ -275,7 +275,7 @@ end
 --: (str: string) -> string
 local encode_string_binary = function (str)
 	local ret = {}
-	_ = gsub(str, ".", function(x)
+	gsub(str, ".", function(x)
 		ret[#ret + 1] = binary(string.byte(x), 8)
 	end)
 	return table.concat(ret)
@@ -393,7 +393,7 @@ local generator_polynomial = {
 --[[Turn a binary string of length 8*x into a table size x of numbers.]]
 local convert_bitstring_to_bytes = function (data)
 	local msg = {}
-	_ = gsub(data, "(........)", function (x) msg[#msg+1] = tonumber(x, 2) end)
+	gsub(data, "(........)", function (x) msg[#msg+1] = tonumber(x, 2) end)
 	return msg
 end
 
@@ -966,7 +966,7 @@ local add_data_to_matrix = function (matrix, data, mask)
 	local dir = "up"
 	local byte_number = 0
 	x, y = size, size
-	_ = gsub(data, ".?.?.?.?.?.?.?.?", function (byte)
+	gsub(data, ".?.?.?.?.?.?.?.?", function (byte)
 		byte_number = byte_number + 1
 		positions, x, y, dir = get_next_free_positions(matrix, x, y, dir, byte)
 		for i=1, #byte do

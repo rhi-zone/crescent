@@ -40,10 +40,9 @@ end
 local function destroy_entry(pool, entry)
   if pool._destroy then
     local destroy_ = pool._destroy --[[:! ( unknown) -> nil]]
-    local ok, err = pcall(destroy_, entry.conn)
+    local ok = pcall(destroy_, entry.conn)
     if not ok then
       -- suppress errors from destroy callbacks
-      _ = err
     end
   end
   pool._stats.destroyed = pool._stats.destroyed + 1

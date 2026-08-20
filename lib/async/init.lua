@@ -80,11 +80,10 @@ settle = function(p, state, value)
   local cbs = p._on_fulfill --: CbList
   if state ~= FULFILLED then cbs = p._on_reject end
   for i = 1, #cbs do
-    local ok, err = pcall(cbs[i], value)
+    local ok = pcall(cbs[i], value)
     if not ok then
       -- Continuations that throw are swallowed; each derived promise
       -- captures its own rejection internally via the inline handlers below.
-      _ = err
     end
   end
   -- Drain the "always" handlers (finally).

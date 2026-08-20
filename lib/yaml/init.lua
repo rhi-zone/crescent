@@ -159,7 +159,6 @@ local function skip_empty_lines(st)
       skip_newline(st)
     else
       -- Non-empty line: st.pos has consumed leading spaces; col reflects that.
-      _ = saved -- suppress unused
       return st.col - 1
     end
   end

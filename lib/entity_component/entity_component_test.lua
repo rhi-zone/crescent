@@ -261,11 +261,10 @@ T.describe("entity_component", function()
       T.eq(w:count(), 0)
       local e1 = w:entity()
       T.eq(w:count(), 1)
-      local e2 = w:entity()
+      w:entity()
       T.eq(w:count(), 2)
       w:destroy(e1)
       T.eq(w:count(), 1)
-      _ = e2
     end)
 
     T.it("count(name) returns entities with that component", function()
@@ -274,10 +273,9 @@ T.describe("entity_component", function()
       w:register("vel", {x=0})
       local e1 = w:entity(); w:add(e1, "pos")
       local e2 = w:entity(); w:add(e2, "pos"); w:add(e2, "vel")
-      local e3 = w:entity()
+      w:entity()
       T.eq(w:count("pos"), 2)
       T.eq(w:count("vel"), 1)
-      _ = e3
     end)
 
     T.it("count(name) on unregistered component returns 0", function()
@@ -309,7 +307,6 @@ T.describe("entity_component", function()
       -- e2 pos unchanged
       local p2 = w:get(e2, "pos")
       T.eq(p2.x, 5)
-      _ = e2
     end)
 
     T.it("system with no matching entities runs cleanly", function()

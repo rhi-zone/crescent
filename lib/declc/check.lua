@@ -189,7 +189,7 @@ end
 function M.tally(result)
 	local counts = { proved = 0, refuted = 0, open = 0 } --: { proved: number, refuted: number, open: number }
 	for _, entry in pairs(result) do
-		local kind, err = kernel.kind(entry.verdict)
+		local kind = kernel.kind(entry.verdict)
 		if kind == "proved" then
 			counts.proved = counts.proved + 1
 		elseif kind == "refuted" then
@@ -197,7 +197,6 @@ function M.tally(result)
 		elseif kind == "open" then
 			counts.open = counts.open + 1
 		end
-		_ = err
 	end
 	return counts
 end

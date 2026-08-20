@@ -494,7 +494,7 @@ function M.fetch(cmd, opts)
 				for _, v in ipairs(prefix_args) do sub_prefix[#sub_prefix + 1] = v end
 				sub_prefix[#sub_prefix + 1] = name
 
-				local sub_schema, sub_err = fetch_recursive(sub_prefix, depth + 1)
+				local sub_schema = fetch_recursive(sub_prefix, depth + 1)
 				if sub_schema then
 					-- Merge fetched schema into stub, preserving name+description from parent.
 					sub.flags      = sub_schema.flags
@@ -502,7 +502,6 @@ function M.fetch(cmd, opts)
 					sub.subcommands = sub_schema.subcommands
 				else
 					-- Keep stub on failure; warn is intentionally suppressed per spec.
-					_ = sub_err
 				end
 			end
 		end

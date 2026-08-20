@@ -190,7 +190,6 @@ Removes crescent installer artifacts:
 		-- Refresh icon/desktop caches (best-effort, ignore failures).
 		os.execute("update-desktop-database " .. xdg_data .. "/applications >/dev/null 2>&1")
 		os.execute("gtk-update-icon-cache " .. xdg_data .. "/icons/hicolor >/dev/null 2>&1")
-		_ = data  -- silence unused
 	elseif plat == "macos" then
 		local home = os.getenv("HOME") or ""
 		remove_with_confirm(opts, home .. "/Applications/Crescent.app")
