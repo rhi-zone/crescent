@@ -207,7 +207,7 @@ fi
 
 # ── orchestration tools (always allowed) ─────────────────────────────────────
 case "$tool_name" in
-    Agent|SendMessage|Task|TaskCreate|TaskUpdate|TaskList|TaskGet|TaskOutput|TaskStop|\
+    Agent|SendMessage|ListAgents|Task|TaskCreate|TaskUpdate|TaskList|TaskGet|TaskOutput|TaskStop|\
     AskUserQuestion|EnterPlanMode|ExitPlanMode|SendUserFile|Skill|ToolSearch|ScheduleWakeup)
         exit 0
         ;;
