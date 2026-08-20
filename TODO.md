@@ -6,6 +6,32 @@
 
 See `docs/roadmap-v2.md` for the authoritative project roadmap and sequencing. The roadmap provides the current strategic direction informed by the value landscape analysis.
 
+## Typechecker wishlist: unused-local-variable checking (2026-08-21)
+
+- [ ] **Want unused-local-variable checking as a real typechecker capability,
+  not a bolt-on lint script.** Surfaced this session while cleaning up 15
+  sites across the repo that used a `_ = expr` idiom (assign-to-discard) to
+  suppress an "unused variable" feel — cruft that only existed because
+  nothing in the toolchain flags unused locals today. User has previously had
+  this via `lua-language-server` (luals) as an editor-side lint and wants the
+  equivalent as a first-class typechecker feature (`bin/cr check`), not a
+  separate script bolted onto the pipeline.
+  This is a **new feature request**, not a restoration of dead-code coverage
+  already present. `lib/type/static/rules/dead_locals.lua` already exists and
+  covers a narrow slice of the same problem — "local assigned but never read"
+  — but it is incomplete on two axes: it only walks top-level statements of
+  the chunk (`M.check`'s `collect_locals` only scans `NODE_LOCAL_STMT` at
+  `chunk.data[0]/data[1]`, i.e. the file's outermost block; anything declared
+  inside a function body, `if`, `for`, `while`, etc. is invisible to it), and
+  it explicitly skips test files (`if filepath:match("_test%.lua$") then
+  return end`, `dead_locals.lua:280`). A real unused-local feature needs to
+  walk into nested scopes (function bodies, blocks) and needs a decision on
+  whether/how to handle test files (many of the 15 `_ = expr` sites found
+  this session were inside `_test.lua` files precisely because the existing
+  rule ignores them). No design work done yet on how this should integrate
+  with the existing `dead_locals` rule (extend it in place vs. new rule) —
+  flagging the gap and its context, not proposing the approach.
+
 ## Vendoring reproducibility: LuaJIT source + hash-signature verification (2026-08-14)
 
 - [x] **LuaJIT source vendored into `dep/luajit/`, closing the zero-dependency violation
