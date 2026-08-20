@@ -168,6 +168,34 @@ end
 -- differing kinds join to `unknown`. nil joins by adding nilability.
 ---------------------------------------------------------------------------
 
+-- kind_equal / fn_equal: structural equality used only by join, to decide
+-- whether two same-tagged K_FUNCTION values actually describe the same
+-- arrow (params + ret) before treating them as a single joined kind.
+-- Absent `params` ("do not check arguments") or `ret` ("result unknown")
+-- only equal another absence — an unknown arrow is not equal to a known one.
+local kind_equal
+
+--: (KindType, KindType) -> boolean
+local function fn_equal(a, b)
+    if (a.params == nil) ~= (b.params == nil) then return false end
+    if a.params and b.params then
+        if #a.params ~= #b.params then return false end
+        for i = 1, #a.params do
+            if not kind_equal(a.params[i], b.params[i]) then return false end
+        end
+    end
+    if (a.ret == nil) ~= (b.ret == nil) then return false end
+    if a.ret and b.ret and not kind_equal(a.ret, b.ret) then return false end
+    return true
+end
+
+--: (KindType, KindType) -> boolean
+kind_equal = function(a, b)
+    if a.k ~= b.k or a.nilable ~= b.nilable then return false end
+    if a.k == M.K_FUNCTION then return fn_equal(a, b) end
+    return true
+end
+
 --: (KindType, KindType) -> KindType
 function M.join(a, b)
     if a.k == M.K_NEVER then return b end
@@ -175,6 +203,11 @@ function M.join(a, b)
     if a.k == M.K_NIL then return M.as_nilable(b) end
     if b.k == M.K_NIL then return M.as_nilable(a) end
     if a.k == b.k then
+        if a.k == M.K_FUNCTION and not fn_equal(a, b) then
+            -- Same tag, different arrow shape: widen to top, matching how
+            -- join already handles genuinely different kinds.
+            return M.UNKNOWN
+        end
         if a.nilable == b.nilable then return a end
         return M.as_nilable(a)
     end

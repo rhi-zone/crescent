@@ -242,7 +242,85 @@ end
 end)
 
 ---------------------------------------------------------------------------
--- 7. Termination / robustness: clean program produces no errors and does not
+-- 7. Excess argument count.
+---------------------------------------------------------------------------
+describe("excess argument count", function()
+    it("REJECTS calling with more args than declared params", function()
+        local src = [[
+--: (number) -> number
+local function f(a)
+    return a
+end
+
+local x = f(1, 2, 3)
+]]
+        T.ok(has_err(src, "call passes 3 arguments, but only 1 is expected"),
+            "should reject a call with too many arguments")
+    end)
+
+    it("ACCEPTS calling with exactly the declared arg count", function()
+        local src = [[
+--: (number) -> number
+local function f(a)
+    return a
+end
+
+local x = f(1)
+]]
+        T.eq(n_errs(src), 0, "matching argument count should be clean")
+    end)
+end)
+
+---------------------------------------------------------------------------
+-- 8. Union-dedup: joining two structurally different function kinds must
+--    widen to unknown rather than collapsing to one arm's arrow shape.
+---------------------------------------------------------------------------
+describe("join of differing function shapes", function()
+    it("does not let (string)->string masquerade as (number)->number after a join", function()
+        local src = [[
+--: (number) -> number
+local function f1(a)
+    return a
+end
+
+--: (string) -> string
+local function f2(a)
+    return a
+end
+
+local g = f1 or f2
+local r = g("hello")
+]]
+        T.ok(not has_err(src, "argument #1 expects `number`"),
+            "joined arrow must not keep enforcing f1's (number) shape on g")
+        T.ok(has_err(src, "may be nil"),
+            "joined arrow of differing shapes should widen to unknown (nilable top), not collapse to one arm's shape")
+    end)
+end)
+
+---------------------------------------------------------------------------
+-- 9. Assigning to an unbound (undeclared) name.
+---------------------------------------------------------------------------
+describe("assignment to an undeclared name", function()
+    it("REJECTS writing to a name that was never declared", function()
+        local src = [[
+someUnboundGlobalName = 5
+]]
+        T.ok(has_err(src, "is undeclared"),
+            "should reject assignment to an undeclared name")
+    end)
+
+    it("ACCEPTS writing to a name declared with `local`", function()
+        local src = [[
+local x = 1
+x = 5
+]]
+        T.eq(n_errs(src), 0, "assignment to a declared local should be clean")
+    end)
+end)
+
+---------------------------------------------------------------------------
+-- 10. Termination / robustness: clean program produces no errors and does not
 --    hang (the harness would time out otherwise).
 ---------------------------------------------------------------------------
 describe("robustness", function()

@@ -365,6 +365,11 @@ EXPR_HANDLERS[defs.NODE_CALL_EXPR] = function(ctx, nid, scope)
                     .. kinds.tostr(want) .. "`, but got `" .. kinds.tostr(got) .. "`")
             end
         end
+        if #argtys > #fty.params then
+            ctx.report(line, col, "call passes " .. #argtys .. " argument"
+                .. (#argtys == 1 and "" or "s") .. ", but only " .. #fty.params
+                .. " " .. (#fty.params == 1 and "is" or "are") .. " expected")
+        end
     end
     if fty and fty.ret then return fty.ret end
     return UNKNOWN
@@ -536,7 +541,9 @@ STMT_HANDLERS[defs.NODE_ASSIGN_STMT] = function(ctx, nid, scope, ret_ty)
                         .. "` expects `" .. kinds.tostr(cur)
                         .. "`, but the value is `" .. kinds.tostr(val_ty) .. "`")
                 elseif cur == nil then
-                    scope_set(scope, name_id, val_ty)
+                    ctx.report(tn.line, tn.col, "assignment to `"
+                        .. (intern_mod.get(ctx.pool, name_id) or "?")
+                        .. "` is undeclared — declare it with `local` first")
                 end
             else
                 -- Target is a field/index — check the base is a table.
