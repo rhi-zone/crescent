@@ -267,7 +267,7 @@ end
 -- ---------------------------------------------------------------------------
 
 -- Reconstruct destination text by applying diffs to source.
-M.apply = function(source, diffs)
+M.apply = function(_source, diffs)
   local parts = {}
   local np = 0
   local pos = 1
@@ -284,7 +284,6 @@ M.apply = function(source, diffs)
       parts[np] = text
     end
   end
-  _ = source -- source is consumed implicitly via pos tracking; kept for API clarity
   return table.concat(parts)
 end
 
