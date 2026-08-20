@@ -4006,9 +4006,11 @@ StmtRule[NODE_ASSIGN_STMT] = function(ctx, nid)
                     ctx._multi_ret[name_id] = { source_tid = assign_call_ret_tid, slot = call_slot, call_uid = nid }
                 end
             else
-                local s = ctx.scope
-                while s.parent do s = s.parent end
-                env_mod.bind(s, name_id, rhs_tid)
+                -- No ambient globals: assigning to a name with no existing
+                -- binding (not a local, not required, not stdlib-declared)
+                -- is an error, same as reading one (see E.UNKNOWN_IDENTIFIER
+                -- at the identifier-read rule above).
+                report(ctx, tn.line, tn.col, E.UNKNOWN_IDENTIFIER, { name = intern_mod.get(ctx.pool, name_id) or "?" })
             end
         elseif tn.kind == NODE_FIELD_EXPR then
             local obj_nid = tn.data[0]
