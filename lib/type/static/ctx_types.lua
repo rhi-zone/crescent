@@ -148,19 +148,6 @@ DefsModule = {
 --:: declare defs = DefsModule
 
 ---------------------------------------------------------------------------
--- Local functions declared in constrain.lua that are referenced before
--- their definition (prescan must see a typed stub, not an inferred var).
--- `report` returns the DiagEntry allocated by errors_mod.error(); callers
--- ignore the return value so -> () is the correct external signature.
----------------------------------------------------------------------------
-
---:: declare report = (ctx: Ctx, line: integer | nil, col: integer | nil, code: integer, args: { [string]: string | integer, ... }) -> ()
---:: declare warn = (ctx: Ctx, line: integer | nil, col: integer | nil, code: integer, args: { [string]: string | integer, ... }) -> ()
---:: declare warn_raw = (ctx: Ctx, line: integer | nil, col: integer | nil, msg: string) -> ()
--- snapshot_table: (ctx, TAG_TABLE type_id) -> (field_ids, indexer_pairs, row_var_id, meta_field_ids)
---:: declare snapshot_table = (ctx: Ctx, type_id: integer) -> ({ [integer]: integer, ... }, { [integer]: integer, ... }, integer, { [integer]: integer, ... })
-
----------------------------------------------------------------------------
 -- Ctx: the central checker state object.
 ---------------------------------------------------------------------------
 

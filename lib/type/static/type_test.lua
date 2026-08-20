@@ -7419,19 +7419,16 @@ end)
 ---------------------------------------------------------------------------
 
 assert.describe("prelude: ctx_types.lua scope isolation", function()
-    assert.it("checker-internal names (report, infer_expr_multi) absent from user scope", function()
-        -- These names are declared in ctx_types.lua, which is only loaded when
-        -- checking typechecker source files (lib/type/static/**). They must
+    assert.it("checker-internal names (defs) absent from user scope", function()
+        -- `defs` is declared in ctx_types.lua, which is only loaded when
+        -- checking typechecker source files (lib/type/static/**). It must
         -- not appear in the scope of an ordinary user file.
         local _, ctx = check_mod.check_string("local x = 1", "user_file.lua")
         local intern_mod2 = require("lib.type.static.intern")
         local env_mod2 = require("lib.type.static.env")
-        local report_id = intern_mod2.intern(ctx.pool, "report")
-        local infer_id  = intern_mod2.intern(ctx.pool, "infer_expr_multi")
-        assert.ok(env_mod2.lookup(ctx.scope, report_id) == nil,
-            "report must not be in user scope")
-        assert.ok(env_mod2.lookup(ctx.scope, infer_id) == nil,
-            "infer_expr_multi must not be in user scope")
+        local defs_id = intern_mod2.intern(ctx.pool, "defs")
+        assert.ok(env_mod2.lookup(ctx.scope, defs_id) == nil,
+            "defs must not be in user scope")
     end)
 
     assert.it("checker-internal names present when checking lib/type/static/ files", function()
@@ -7440,9 +7437,9 @@ assert.describe("prelude: ctx_types.lua scope isolation", function()
         local _, ctx = check_mod.check_string("local x = 1", "lib/type/static/constrain.lua")
         local intern_mod2 = require("lib.type.static.intern")
         local env_mod2 = require("lib.type.static.env")
-        local report_id = intern_mod2.intern(ctx.pool, "report")
-        assert.ok(env_mod2.lookup(ctx.scope, report_id) ~= nil,
-            "report must be in scope for typechecker source files")
+        local defs_id = intern_mod2.intern(ctx.pool, "defs")
+        assert.ok(env_mod2.lookup(ctx.scope, defs_id) ~= nil,
+            "defs must be in scope for typechecker source files")
     end)
 end)
 
