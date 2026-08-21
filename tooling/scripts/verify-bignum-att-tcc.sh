@@ -170,7 +170,9 @@ echo "== runtime differential (default config, gas vs tcc, same process)"
 RT="$(dirname "$0")/verify-bignum-att-tcc-runtime.c"
 FILES="bignum_add bignum_sub bignum_cmadd bignum_cmul bignum_modadd bignum_modsub
        bignum_mul bignum_sqr bignum_mul_4_8_alt bignum_mul_6_12_alt bignum_mul_8_16_alt
-       bignum_sqr_4_8_alt bignum_sqr_6_12_alt bignum_sqr_8_16_alt word_clz"
+       bignum_sqr_4_8_alt bignum_sqr_6_12_alt bignum_sqr_8_16_alt
+       bignum_mul_4_8 bignum_mul_6_12 bignum_mul_8_16
+       bignum_sqr_4_8 bignum_sqr_6_12 bignum_sqr_8_16 word_clz"
 rtok=1
 for b in $FILES; do
   gcc -c -x assembler-with-cpp -I"$INC" -o "$WORK/rt_$b.g.o" "$SRC/$b.S" 2>/dev/null || rtok=0

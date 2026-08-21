@@ -1,0 +1,34 @@
+--- a/dep/tcc/tccasm.c
++++ b/dep/tcc/tccasm.c
+@@ -949,6 +949,7 @@ static void asm_parse_directive(TCCState *s1, int global)
+         {
+             int repeat;
+             TokenString *init_str;
++            TokenString *sav_capture;
+             next();
+             repeat = asm_int_expr(s1);
+             init_str = tok_str_alloc();
+@@ -958,6 +959,15 @@ static void asm_parse_directive(TCCState *s1, int global)
+                 tok_str_add_tok(init_str);
+             }
+             tok_str_add(init_str, TOK_EOF);
++            /* The body tokens were captured once already, on the way in
++               from the file, and the `.rept'/`.endr' bracketing them was
++               captured too -- so a later relaxation pass re-runs this
++               directive from scratch and repeats them itself.  Capturing
++               the replay as well would put the expansion in the stream
++               NEXT TO the directive that produces it, and the later pass
++               would then emit the body repeat+1 times.  */
++            sav_capture = tok_capture;
++            tok_capture = NULL;
+             begin_macro(init_str, 1);
+             while (repeat-- > 0) {
+                 tcc_assemble_internal(s1, (parse_flags & PARSE_FLAG_PREPROCESS),
+@@ -965,6 +975,7 @@ static void asm_parse_directive(TCCState *s1, int global)
+                 macro_ptr = init_str->str;
+             }
+             end_macro();
++            tok_capture = sav_capture;
+             next();
+             break;
+         }

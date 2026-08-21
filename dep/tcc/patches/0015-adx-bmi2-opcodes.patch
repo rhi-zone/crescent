@@ -1,0 +1,282 @@
+--- a/dep/tcc/i386-asm.c
++++ b/dep/tcc/i386-asm.c
+@@ -68,6 +68,13 @@
+ 
+ #define OPC_GROUP_SHIFT 13
+ 
++/* Bits above the 3-bit group field.  instr_type is 32 bits wide (the
++   ASMInstr struct stays 12 bytes: the widening only fills padding that
++   nb_ops/op_type already implied), so these do not compete with the
++   group for the last free low bit.  */
++#define OPC_VEX     0x10000 /* VEX-encoded; see asm_vex() */
++#define OPC_NO16    0x20000 /* has no 16-bit form: reject the `w' suffix */
++
+ /* in order to compress the operand type, we use specific operands and
+    we or only with EA  */
+ enum {
+@@ -110,7 +117,12 @@ enum {
+     OPT_MMXSSE, /* MMX | SSE */
+     OPT_DISP,   /* Like OPT_ADDR, but emitted as displacement (for jumps) */
+     OPT_DISP8,  /* Like OPT_ADDR, but only 8bit (short jumps) */
+-    /* can be ored with any OPT_xxx */
++    /* Role flags, ored with any OPT_xxx above.  The OPT_xxx values are an
++       index the matcher reads back with `& 0x1f', so the enum has room for
++       32 of them (OPT_DISP8 is 30 today) and bits 0x20/0x40/0x80 are free
++       to carry roles instead.  A 32nd OPT_xxx would collide with OPT_VVVV
++       and has to widen the mask first.  */
++    OPT_VVVV = 0x20, /* encoded in VEX.vvvv rather than in the modrm byte */
+     OPT_EA = 0x80
+ };
+ 
+@@ -164,7 +176,7 @@ enum {
+ typedef struct ASMInstr {
+     uint16_t sym;
+     uint16_t opcode;
+-    uint16_t instr_type;
++    uint32_t instr_type;
+     uint8_t nb_ops;
+     uint8_t op_type[MAX_OPERANDS]; /* see OP_xxx */
+ } ASMInstr;
+@@ -656,6 +668,58 @@ static void asm_rex(int width64, Operand *ops, int nb_ops, int *op_type,
+       g(rex);
+   }
+ }
++
++/* Emit the VEX prefix, in place of (never in addition to) the REX prefix,
++   the mandatory-prefix byte and the 0F/0F38/0F3A escape bytes -- VEX folds
++   all four into itself, which is why asm_opcode() suppresses each of them
++   for an OPC_VEX entry.  Layout, Intel SDM Vol.2 2.3.5:
++
++       c4  |  ~R ~X ~B mmmmm  |  W vvvv L pp
++
++   R/X/B extend the same three register fields REX does and are stored
++   inverted; mmmmm names the escape map (1=0F, 2=0F38, 3=0F3A); pp names
++   the mandatory prefix (0=none, 1=66, 2=f3, 3=f2); vvvv is a fourth
++   register operand, also inverted, that has no encoding outside VEX.
++
++   Only the three-byte c4 form is emitted.  The two-byte c5 form can encode
++   neither W=1 nor a map other than 0F, and every VEX instruction in the
++   table needs at least one of those, so c5 would never apply.
++
++   VEX.L is fixed at 0.  Every VEX entry so far is a general-purpose
++   integer instruction, for which the vector-length field is defined as
++   LZ (must be 0).  A 256-bit VEX instruction would need L in the table --
++   as another OPC_ bit -- before it could be added.  */
++static void asm_vex(int width64, Operand *ops, int regi, int rmi, int vvvvi,
++                    int m, int pp)
++{
++    int rxb = 7;     /* R, X, B as 1-bits; inverted on the way out */
++    int vvvv = 15;   /* no vvvv operand: the field must be all-ones */
++
++    if (rmi == -1)
++        tcc_error("VEX encoding requires a mod/rm operand");
++    /* The reg -= 8 fixups mirror asm_rex(): the low three bits stay behind
++       for the modrm/SIB byte asm_modrm() writes afterwards. */
++    if (regi != -1 && ops[regi].reg >= 8) {
++        rxb &= ~4;
++        ops[regi].reg -= 8;
++    }
++    if ((ops[rmi].type & (OP_REG | OP_MMX | OP_SSE | OP_EA))
++        && ops[rmi].reg >= 8) {
++        rxb &= ~1;
++        ops[rmi].reg -= 8;
++    }
++    if ((ops[rmi].type & OP_EA) && ops[rmi].reg2 >= 8) {
++        rxb &= ~2;
++        ops[rmi].reg2 -= 8;
++    }
++    /* vvvv is four bits wide, so unlike modrm.reg it holds %r8-%r15
++       whole -- there is no high bit to split off. */
++    if (vvvvi != -1)
++        vvvv = 15 - ops[vvvvi].reg;
++    g(0xc4);
++    g((rxb << 5) | m);
++    g((width64 ? 0x80 : 0) | (vvvv << 3) | pp);
++}
+ #endif
+ 
+ 
+@@ -709,6 +773,8 @@ ST_FUNC void asm_opcode(TCCState *s1, int opcode)
+     int alltypes;   /* OR of all operand types */
+     int autosize;
+     int p66;
++    int vvvv_index; /* operand encoded in VEX.vvvv, -1 if none */
++    int vex_m, vex_pp; /* VEX escape map and mandatory-prefix selectors */
+ #ifdef TCC_TARGET_X86_64
+     int rex64;
+ #endif
+@@ -805,6 +871,11 @@ again:
+             if (pa->sym != opcode)
+                 continue;
+         }
++        /* An instruction with no 16-bit form rejects the `w' suffix here
++           rather than falling through to a template that would assemble it
++           as the 32-bit form under a stray operand-size prefix.  */
++        if ((pa->instr_type & OPC_NO16) && s == 1)
++            continue;
+         if (pa->nb_ops != nb_ops)
+             continue;
+ #ifdef TCC_TARGET_X86_64
+@@ -909,8 +980,20 @@ again:
+             else
+                 tcc_error("cannot infer opcode suffix");
+         }
++        /* Suffixless form whose register operands made it 16-bit: the
++           template said there is no such encoding.  */
++        if ((pa->instr_type & OPC_NO16) && s == 1)
++            tcc_error("bad operand with opcode '%s'",
++                      get_tok_str(opcode, NULL));
+     }
+ 
++    /* Which operand (if any) the template routes to VEX.vvvv.  It is not a
++       mod/rm operand and must be kept out of both searches below. */
++    vvvv_index = -1;
++    for(i = 0; i < nb_ops; i++)
++        if (pa->op_type[i] & OPT_VVVV)
++            vvvv_index = i;
++
+ #ifdef TCC_TARGET_X86_64
+     rex64 = 0;
+     if (pa->instr_type & OPC_48)
+@@ -965,9 +1048,17 @@ again:
+ 	        && ops[i].type & OP_SSE)
+ 	        p66 = 1;
+     }
+-    if (p66)
++    if (p66) {
++        /* The 66 that VEX could carry is pp, the mandatory prefix from the
++           template -- not this one, which is operand-size.  No VEX template
++           has a 16-bit form, so reaching here means the tables disagree. */
++        if (pa->instr_type & OPC_VEX)
++            tcc_error("operand size prefix is not encodable with VEX");
+         g(0x66);
++    }
+ 
++    vex_m = 0;
++    vex_pp = 0;
+     v = pa->opcode;
+     p = v >> 8;  /* possibly prefix byte(s) */
+     switch (p) {
+@@ -976,13 +1067,32 @@ again:
+         case 0x66:
+         case 0x67:
+         case 0xf2:
+-        case 0xf3: v = v & 0xff; g(p); break;
++        case 0xf3:
++            v = v & 0xff;
++            if (pa->instr_type & OPC_VEX) {
++                /* Under VEX the mandatory prefix is the pp field, not a
++                   byte of its own. */
++                vex_pp = p == 0x66 ? 1 : p == 0xf3 ? 2 : p == 0xf2 ? 3 : -1;
++                if (vex_pp < 0)
++                    tcc_error("bad prefix 0x%2x in VEX opcode table", p);
++            } else {
++                g(p);
++            }
++            break;
+         case 0xd4: case 0xd5: break; /* aam and aad, not prefix, but hardcoded immediate argument "10" */
+         case 0xd8: case 0xd9: case 0xda: case 0xdb: /* x87, no normal prefix */
+         case 0xdc: case 0xdd: case 0xde: case 0xdf: break;
+         default: tcc_error("bad prefix 0x%2x in opcode table", p); break;
+     }
+-    if (pa->instr_type & OPC_0F) {
++    if (pa->instr_type & OPC_VEX) {
++        /* The escape map goes in VEX.mmmmm, so no escape byte is emitted.
++           Every VEX encoding is in one of the escape maps; a template
++           without OPC_0F names none of them. */
++        if (!(pa->instr_type & OPC_0F))
++            tcc_error("VEX opcode table entry without an escape map");
++        vex_m = (pa->instr_type & OPC_0F38) ? 2
++              : (pa->instr_type & OPC_0F3A) ? 3 : 1;
++    } else if (pa->instr_type & OPC_0F) {
+         v = ((v & ~0xff) << 8) | 0x0f00 | (v & 0xff);
+         /* 0F38/0F3A three-byte-opcode escape maps (AES-NI etc): insert the
+            extra 0x38/0x3a escape byte between the 0x0f byte and the final
+@@ -1040,12 +1150,13 @@ again:
+ 	}
+         /* first look for an ea operand */
+         for(i = 0;i < nb_ops; i++) {
+-            if (op_type[i] & OP_EA)
++            if (i != vvvv_index && (op_type[i] & OP_EA))
+                 goto modrm_found;
+         }
+         /* then if not found, a register or indirection (shift instructions) */
+         for(i = 0;i < nb_ops; i++) {
+-            if (op_type[i] & (OP_REG | OP_MMX | OP_SSE | OP_INDIR))
++            if (i != vvvv_index
++                && (op_type[i] & (OP_REG | OP_MMX | OP_SSE | OP_INDIR)))
+                 goto modrm_found;
+         }
+ #ifdef ASM_DEBUG
+@@ -1057,7 +1168,7 @@ again:
+            used instead of group */
+         for(i = 0;i < nb_ops; i++) {
+             int t = op_type[i];
+-            if (i != modrm_index &&
++            if (i != modrm_index && i != vvvv_index &&
+                 (t & (OP_REG | OP_MMX | OP_SSE | OP_CR | OP_TR | OP_DB | OP_SEG))) {
+                 modreg_index = i;
+                 break;
+@@ -1065,7 +1176,13 @@ again:
+         }
+     }
+ #ifdef TCC_TARGET_X86_64
+-    asm_rex (rex64, ops, nb_ops, op_type, modreg_index, modrm_index);
++    /* VEX replaces REX -- the two must never both appear -- and carries
++       the same W bit, so the width decision above feeds either one. */
++    if (pa->instr_type & OPC_VEX)
++        asm_vex (rex64, ops, modreg_index, modrm_index, vvvv_index,
++                 vex_m, vex_pp);
++    else
++        asm_rex (rex64, ops, nb_ops, op_type, modreg_index, modrm_index);
+ #endif
+ 
+     if (pa->instr_type & OPC_REG) {
+--- a/dep/tcc/i386-tok.h
++++ b/dep/tcc/i386-tok.h
+@@ -287,6 +287,15 @@
+  DEF_WLX(tzcnt)
+  DEF_WLX(lzcnt)
+ 
++ /* ADX / BMI2 (x86_64 table only; the i386 table defines no entry for
++    these, so the tokens simply go unused there).  The w-suffixed member of
++    each group exists only to keep the four tokens contiguous the way the
++    OPC_WLX matcher requires -- the table marks all three OPC_NO16, so a
++    w-suffixed mnemonic is rejected rather than assembled. */
++ DEF_WLX(adcx)
++ DEF_WLX(adox)
++ DEF_WLX(mulx)
++
+  DEF_WLX(lar)
+  DEF_WLX(lsl)
+ 
+--- a/dep/tcc/x86_64-asm.h
++++ b/dep/tcc/x86_64-asm.h
+@@ -86,6 +86,27 @@ ALT(DEF_ASM_OP2(popcntw, 0xf30fb8, 0, OPC_MODRM | OPC_WLX, OPT_REGW | OPT_EA, OP
+ ALT(DEF_ASM_OP2(tzcntw, 0xf30fbc, 0, OPC_MODRM | OPC_WLX, OPT_REGW | OPT_EA, OPT_REGW))
+ ALT(DEF_ASM_OP2(lzcntw, 0xf30fbd, 0, OPC_MODRM | OPC_WLX, OPT_REGW | OPT_EA, OPT_REGW))
+ 
++    /* ADX and BMI2: the two independent carry chains (adcx/adox) and the
++       flag-preserving three-operand multiply (mulx) that s2n-bignum's
++       bignum_{mul,sqr}_{4_8,6_12,8_16} are written around.
++
++       adcx and adox share one opcode, 0F 38 F6, and are told apart only by
++       the mandatory prefix -- 66 for adcx, F3 for adox.  That prefix is not
++       an operand-size prefix: REX.W selects the 64-bit form on top of it,
++       exactly as for any other 0F38 instruction, which is why these are
++       ordinary OPC_WLX entries with the prefix byte in the opcode field.
++
++       mulx has no non-VEX encoding at all, so it carries OPC_VEX; its
++       middle operand (destination low half) is the one VEX.vvvv holds,
++       marked with OPT_VVVV.  The implicit second source is %rdx, which is
++       not named in the operand list at all.
++
++       None of the three has a 16-bit form -- ADX and BMI2 define only the
++       32- and 64-bit ones -- hence OPC_NO16. */
++ALT(DEF_ASM_OP2(adcxw, 0x66f6, 0, OPC_MODRM | OPC_0F | OPC_0F38 | OPC_WLX | OPC_NO16, OPT_REGW | OPT_EA, OPT_REGW))
++ALT(DEF_ASM_OP2(adoxw, 0xf3f6, 0, OPC_MODRM | OPC_0F | OPC_0F38 | OPC_WLX | OPC_NO16, OPT_REGW | OPT_EA, OPT_REGW))
++ALT(DEF_ASM_OP3(mulxw, 0xf2f6, 0, OPC_MODRM | OPC_VEX | OPC_0F | OPC_0F38 | OPC_WLX | OPC_NO16, OPT_REGW | OPT_EA, OPT_VVVV | OPT_REGW, OPT_REGW))
++
+      /* prefixes */
+      DEF_ASM_OP0(lock, 0xf0)
+      DEF_ASM_OP0(rep, 0xf3)

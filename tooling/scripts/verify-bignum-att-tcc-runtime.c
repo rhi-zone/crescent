@@ -27,6 +27,17 @@ DECL(void, bignum_mul_8_16_alt, (uint64_t *, const uint64_t *, const uint64_t *)
 DECL(void, bignum_sqr_4_8_alt, (uint64_t *, const uint64_t *))
 DECL(void, bignum_sqr_6_12_alt, (uint64_t *, const uint64_t *))
 DECL(void, bignum_sqr_8_16_alt, (uint64_t *, const uint64_t *))
+// The non-`_alt' forms of the same six routines. They compute the same
+// functions, from ADX and BMI2 instructions (adcx/adox/mulx) instead of the
+// base-ISA sequence, which is why they are worth running twice over: once
+// against their own tcc-assembled twin, and once against the `_alt' routine
+// beside them, which is an independent implementation of the same spec.
+DECL(void, bignum_mul_4_8, (uint64_t *, const uint64_t *, const uint64_t *))
+DECL(void, bignum_mul_6_12, (uint64_t *, const uint64_t *, const uint64_t *))
+DECL(void, bignum_mul_8_16, (uint64_t *, const uint64_t *, const uint64_t *))
+DECL(void, bignum_sqr_4_8, (uint64_t *, const uint64_t *))
+DECL(void, bignum_sqr_6_12, (uint64_t *, const uint64_t *))
+DECL(void, bignum_sqr_8_16, (uint64_t *, const uint64_t *))
 DECL(uint64_t, word_clz, (uint64_t))
 
 static uint64_t st = 0x243F6A8885A308D3ULL;
@@ -40,9 +51,15 @@ static void cmp(const char *who, const uint64_t *a, const uint64_t *b, int n,
 }
 
 int main(void) {
-  uint64_t x[16], y[16], m[16], za[32], zb[32];
+  uint64_t x[16], y[16], m[16], za[32], zb[32], zc[32];
   uint64_t ra, rb;
   const int ITERS = 4000;
+
+  // The non-`_alt' routines execute adcx/adox/mulx unconditionally, so on a
+  // host without ADX and BMI2 calling them is SIGILL, not a wrong answer.
+  // Report the skip rather than crashing or silently passing.
+  int adx = __builtin_cpu_supports("bmi2") && __builtin_cpu_supports("adx");
+  if (!adx) printf("SKIP adx/bmi2 routines: host lacks ADX or BMI2\n");
 
   for (int it = 0; it < ITERS; it++) {
     for (int i = 0; i < 16; i++) { x[i] = rnd(); y[i] = rnd(); m[i] = rnd() | 0x8000000000000000ULL; }
@@ -105,6 +122,27 @@ int main(void) {
     memset(za, 0xAA, sizeof za); memset(zb, 0xAA, sizeof zb);
     bignum_sqr_8_16_alt(za, x); T_bignum_sqr_8_16_alt(zb, x);
     cmp("bignum_sqr_8_16_alt", za, zb, 16, 0, 0);
+
+    if (adx) {
+#define ADX_MUL(name, nz)                                                    \
+      memset(za, 0xAA, sizeof za); memset(zb, 0xAA, sizeof zb);              \
+      memset(zc, 0xAA, sizeof zc);                                           \
+      name(za, x, y); T_##name(zb, x, y); name##_alt(zc, x, y);              \
+      cmp(#name, za, zb, nz, 0, 0);                                          \
+      cmp(#name " vs " #name "_alt", za, zc, nz, 0, 0);
+#define ADX_SQR(name, nz)                                                    \
+      memset(za, 0xAA, sizeof za); memset(zb, 0xAA, sizeof zb);              \
+      memset(zc, 0xAA, sizeof zc);                                           \
+      name(za, x); T_##name(zb, x); name##_alt(zc, x);                       \
+      cmp(#name, za, zb, nz, 0, 0);                                          \
+      cmp(#name " vs " #name "_alt", za, zc, nz, 0, 0);
+      ADX_MUL(bignum_mul_4_8, 8)
+      ADX_MUL(bignum_mul_6_12, 12)
+      ADX_MUL(bignum_mul_8_16, 16)
+      ADX_SQR(bignum_sqr_4_8, 8)
+      ADX_SQR(bignum_sqr_6_12, 12)
+      ADX_SQR(bignum_sqr_8_16, 16)
+    }
 
     // word_clz: cover every leading-zero count plus random words, since the
     // routine is 7 instructions and a random-only sweep would miss 0.

@@ -1,0 +1,498 @@
+--- a/dep/tcc/tcc.h
++++ b/dep/tcc/tcc.h
+@@ -1407,6 +1407,8 @@ ST_FUNC void tok_str_free(TokenString *s);
+ ST_FUNC void tok_str_free_str(int *str);
+ ST_FUNC void tok_str_add(TokenString *s, int t);
+ ST_FUNC void tok_str_add_tok(TokenString *s);
++ST_FUNC void tok_str_add2(TokenString *s, int t, CValue *cv);
++ST_FUNC void tok_get(int *t, const int **pp, CValue *cv);
+ ST_INLN void define_push(int v, int macro_type, int *str, Sym *first_arg);
+ ST_FUNC void define_undef(Sym *s);
+ ST_INLN Sym *define_find(int v);
+--- a/dep/tcc/tccasm.c
++++ b/dep/tcc/tccasm.c
+@@ -713,6 +713,375 @@ static void pop_section(TCCState *s1)
+     use_section1(s1, prev);
+ }
+ 
++/* ------------------------------------------------------------------ */
++/* Conditional assembly: .if / .elseif / .else / .endif.
++ *
++ * These are the assembler's own conditionals, evaluated over assembler
++ * expressions (asm_int_expr), and are a different mechanism from the
++ * preprocessor's #if -- which tcc also runs over a .S file, earlier, over
++ * preprocessor expressions.  Both can appear in the same file and neither
++ * nests inside the other: by the time a token reaches here the #if layer
++ * has already resolved.
++ *
++ * State is one flag per open conditional: whether any arm of that chain
++ * has been taken yet, which is what tells a later .elseif or .else to
++ * skip rather than test.  The stack is per translation unit and is reset
++ * at each entry point, since an error unwinds by longjmp and would
++ * otherwise leave it dirty for the next unit.
++ */
++static unsigned char *asm_cond;   /* per-level "an arm was taken" flags */
++static int asm_cond_depth;
++static int asm_cond_alloc;
++
++static void asm_cond_reset(void)
++{
++    asm_cond_depth = 0;
++}
++
++static void asm_cond_free(void)
++{
++    tcc_free(asm_cond);
++    asm_cond = NULL;
++    asm_cond_alloc = 0;
++    asm_cond_depth = 0;
++}
++
++static void asm_cond_push(int taken)
++{
++    if (asm_cond_depth >= asm_cond_alloc) {
++        asm_cond_alloc = asm_cond_alloc ? asm_cond_alloc * 2 : 16;
++        asm_cond = tcc_realloc(asm_cond, asm_cond_alloc);
++    }
++    asm_cond[asm_cond_depth++] = taken;
++}
++
++/* Skip the tokens of an arm that is not being assembled, and stop on the
++   directive that ends it.  `to_endif' says the whole rest of the chain is
++   dead, so intervening .elseif/.else are skipped too.  Conditionals opened
++   inside the skipped region are matched and stepped over whole.  Returns
++   with tok on the directive it stopped at. */
++static void asm_cond_skip(TCCState *s1, int to_endif)
++{
++    int depth = 0;
++    for (;;) {
++        next();
++        if (tok == CH_EOF || tok == TOK_EOF)
++            tcc_error("%s not found", to_endif ? ".endif" : ".endif/.else");
++        if (tok == TOK_ASMDIR_if) {
++            depth++;
++        } else if (tok == TOK_ASMDIR_endif) {
++            if (depth == 0)
++                return;
++            depth--;
++        } else if (depth == 0 && !to_endif
++                   && (tok == TOK_ASMDIR_elseif || tok == TOK_ASMDIR_else)) {
++            return;
++        }
++    }
++}
++
++/* Handle a whole .if chain from whichever directive opened or continued
++   it, leaving tok on the end of a line so the caller's loop can go on.
++   Either an arm is entered -- and assembly resumes with the tokens that
++   follow it -- or every remaining arm is skipped and .endif is consumed
++   here. */
++static void asm_cond_directive(TCCState *s1, int dir)
++{
++    int live;   /* is this arm's condition still worth testing? */
++
++    if (dir == TOK_ASMDIR_if) {
++        asm_cond_push(0);
++    } else if (asm_cond_depth == 0) {
++        tcc_error("%s without .if", get_tok_str(dir, NULL));
++    }
++
++    live = !asm_cond[asm_cond_depth - 1];
++    if (dir == TOK_ASMDIR_endif) {
++        asm_cond_depth--;
++        next();
++        return;
++    }
++    if (dir == TOK_ASMDIR_else) {
++        if (live) {
++            asm_cond[asm_cond_depth - 1] = 1;
++            next();
++            return;
++        }
++        asm_cond_skip(s1, 1);
++        asm_cond_depth--;
++        next();
++        return;
++    }
++    /* .if or .elseif: test, then keep testing later arms until one is
++       taken or the chain runs out. */
++    for (;;) {
++        if (live) {
++            next();
++            if (asm_int_expr(s1)) {
++                asm_cond[asm_cond_depth - 1] = 1;
++                return;         /* tok is already at end of line */
++            }
++        } else {
++            asm_cond_skip(s1, 1);
++            asm_cond_depth--;
++            next();
++            return;
++        }
++        asm_cond_skip(s1, 0);
++        if (tok == TOK_ASMDIR_endif) {
++            asm_cond_depth--;
++            next();
++            return;
++        }
++        if (tok == TOK_ASMDIR_else) {
++            asm_cond[asm_cond_depth - 1] = 1;
++            next();
++            return;
++        }
++        /* .elseif: loop round and test it */
++    }
++}
++
++/* ------------------------------------------------------------------ */
++/* Assembler macros: .macro / .endm.
++ *
++ * Again a different mechanism from the preprocessor's #define, and a more
++ * capable one in the ways .S files rely on: a macro body is a sequence of
++ * whole statements rather than one expression, it may contain assembler
++ * directives (.if in particular), and it is expanded where a mnemonic is
++ * expected rather than wherever its name appears -- so a macro named like
++ * a register or a symbol is harmless.
++ *
++ * A parameter reference is written `\name'.  Substitution is by token, not
++ * by text: the body is captured once, and each expansion copies it out
++ * with every `\'+name pair replaced by the tokens of the matching
++ * argument.  A `\' that names no parameter is an error rather than being
++ * passed through, since the alternative is emitting a stray backslash into
++ * the instruction stream and diagnosing it somewhere unrelated.
++ *
++ * Not implemented, and rejected rather than misread: parameter defaults
++ * (`\name=value') and qualifiers (`:req', `:vararg'), `<...>'-quoted
++ * arguments, the per-expansion counter `\@', and `.purgem'/`.exitm'.
++ */
++typedef struct AsmMacro {
++    struct AsmMacro *next;
++    int name;               /* mnemonic token that invokes it */
++    int nb_params;
++    int *params;            /* parameter name tokens, in order */
++    TokenString *body;      /* captured tokens, TOK_EOF terminated */
++} AsmMacro;
++
++static AsmMacro *asm_macros;
++static int asm_macro_depth;
++
++/* An expansion that expands itself never terminates and never runs out of
++   memory quickly enough to say why, so it is bounded.  The limit is far
++   above any legitimate nesting; it exists to turn a hang into a message. */
++#define ASM_MACRO_MAX_DEPTH 200
++
++static AsmMacro *asm_macro_find(int name)
++{
++    AsmMacro *m;
++    for (m = asm_macros; m; m = m->next)
++        if (m->name == name)
++            return m;
++    return NULL;
++}
++
++static void asm_macro_reset(void)
++{
++    AsmMacro *m, *next;
++    for (m = asm_macros; m; m = next) {
++        next = m->next;
++        tok_str_free(m->body);
++        tcc_free(m->params);
++        tcc_free(m);
++    }
++    asm_macros = NULL;
++    asm_macro_depth = 0;
++}
++
++/* .macro name [param[, param]...] ... .endm */
++static void asm_macro_define(TCCState *s1)
++{
++    AsmMacro *m;
++    int depth, saved_parse_flags;
++
++    next();
++    if (tok < TOK_IDENT)
++        expect("macro name");
++    if (asm_macro_find(tok))
++        tcc_error("macro '%s' redefined", get_tok_str(tok, NULL));
++    m = tcc_mallocz(sizeof(*m));
++    m->name = tok;
++    next();
++
++    /* Parameter list.  GAS separates parameters by commas or by
++       whitespace; whitespace is not a token here, so both spellings
++       arrive the same way and both are accepted. */
++    while (tok != TOK_LINEFEED && tok != ';' && tok != CH_EOF
++           && tok != TOK_EOF) {
++        if (tok == ',') {
++            next();
++            continue;
++        }
++        if (tok < TOK_IDENT) {
++            tcc_free(m->params);
++            tcc_free(m);
++            expect("macro parameter name");
++        }
++        m->params = tcc_realloc(m->params, (m->nb_params + 1) * sizeof(int));
++        m->params[m->nb_params++] = tok;
++        next();
++        if (tok == '=' || tok == ':')
++            tcc_error("macro parameter defaults and qualifiers "
++                      "are not supported");
++    }
++
++    /* Body.  `\' is a stray everywhere else in an asm file and the lexer
++       refuses it; inside a macro body it introduces a parameter
++       reference, so strays are accepted for exactly this span and the
++       '\\' tokens are resolved at expansion time. */
++    m->body = tok_str_alloc();
++    depth = 0;
++    saved_parse_flags = parse_flags;
++    parse_flags |= PARSE_FLAG_ACCEPT_STRAYS;
++    for (;;) {
++        next();
++        if (tok == CH_EOF || tok == TOK_EOF)
++            tcc_error(".endm not found");
++        if (tok == TOK_ASMDIR_macro) {
++            depth++;
++        } else if (tok == TOK_ASMDIR_endm) {
++            if (depth == 0)
++                break;
++            depth--;
++        }
++        tok_str_add_tok(m->body);
++    }
++    parse_flags = saved_parse_flags;
++    tok_str_add(m->body, TOK_EOF);
++
++    m->next = asm_macros;
++    asm_macros = m;
++    next();
++}
++
++/* Read the arguments of an invocation, which run to the end of the line
++   and are separated by commas, and return the terminating token so the
++   caller can hand it back to its statement loop. */
++static int asm_macro_read_args(AsmMacro *m, TokenString **args)
++{
++    int i;
++
++    for (i = 0; i < m->nb_params; i++)
++        args[i] = NULL;
++    i = 0;
++    while (tok != TOK_LINEFEED && tok != ';' && tok != CH_EOF
++           && tok != TOK_EOF) {
++        if (tok == ',') {
++            i++;
++            if (i >= m->nb_params)
++                tcc_error("too many arguments to macro '%s'",
++                          get_tok_str(m->name, NULL));
++            next();
++            continue;
++        }
++        if (i >= m->nb_params)
++            tcc_error("too many arguments to macro '%s'",
++                      get_tok_str(m->name, NULL));
++        if (!args[i])
++            args[i] = tok_str_alloc();
++        tok_str_add_tok(args[i]);
++        next();
++    }
++    return tok;
++}
++
++/* Copy the body out with parameter references resolved. */
++static void asm_macro_substitute(AsmMacro *m, TokenString **args,
++                                 TokenString *out)
++{
++    const int *p = m->body->str;
++    CValue cval;
++    int t, i;
++
++    for (;;) {
++        tok_get(&t, &p, &cval);
++        if (t == TOK_EOF || t == 0)
++            break;
++        if (t != '\\') {
++            tok_str_add2(out, t, &cval);
++            continue;
++        }
++        tok_get(&t, &p, &cval);
++        if (t < TOK_IDENT)
++            tcc_error("'\\%s' is not a macro parameter reference",
++                      get_tok_str(t, &cval));
++        for (i = 0; i < m->nb_params; i++)
++            if (m->params[i] == t)
++                break;
++        if (i == m->nb_params)
++            tcc_error("macro '%s' has no parameter '%s'",
++                      get_tok_str(m->name, NULL), get_tok_str(t, NULL));
++        /* An argument the invocation left out expands to nothing, as in
++           GAS -- so `.if \arg == 0' with no argument is a syntax error at
++           the use site, not a silent zero. */
++        if (args[i]) {
++            const int *q = args[i]->str;
++            const int *end = args[i]->str + args[i]->len;
++            while (q < end) {
++                int at;
++                CValue acv;
++                tok_get(&at, &q, &acv);
++                if (at == 0)
++                    break;
++                tok_str_add2(out, at, &acv);
++            }
++        }
++    }
++    tok_str_add(out, TOK_EOF);
++}
++
++/* Expand an invocation whose name token has already been consumed; tok is
++   on the first argument token. */
++static void asm_macro_expand(TCCState *s1, AsmMacro *m, int global)
++{
++    TokenString **args;
++    TokenString *out;
++    TokenString *sav_capture;
++    int term, i;
++
++    if (++asm_macro_depth > ASM_MACRO_MAX_DEPTH)
++        tcc_error("macro '%s' expanded too deeply",
++                  get_tok_str(m->name, NULL));
++
++    args = m->nb_params ? tcc_mallocz(m->nb_params * sizeof(*args)) : NULL;
++    term = asm_macro_read_args(m, args);
++    out = tok_str_alloc();
++    asm_macro_substitute(m, args, out);
++    for (i = 0; i < m->nb_params; i++)
++        if (args[i])
++            tok_str_free(args[i]);
++    tcc_free(args);
++
++    /* As for .rept: the invocation and the definition are both in the
++       captured stream already, so a later relaxation pass re-expands them
++       itself.  Capturing the expansion as well would emit it twice. */
++    sav_capture = tok_capture;
++    tok_capture = NULL;
++    begin_macro(out, 1);
++    tcc_assemble_internal(s1, (parse_flags & PARSE_FLAG_PREPROCESS), global);
++    end_macro();
++    tok_capture = sav_capture;
++    asm_macro_depth--;
++
++    /* The whole invocation line was consumed here, including the token
++       that ended it; give that back so the caller sees a finished
++       statement. */
++    tok = term;
++}
++
+ static void asm_parse_directive(TCCState *s1, int global)
+ {
+     int n, offset, v, size, tok1, c;
+@@ -945,6 +1314,18 @@ static void asm_parse_directive(TCCState *s1, int global)
+             }
+         }
+         break;
++    case TOK_ASMDIR_macro:
++        asm_macro_define(s1);
++        break;
++    case TOK_ASMDIR_endm:
++        tcc_error(".endm without .macro");
++        break;
++    case TOK_ASMDIR_if:
++    case TOK_ASMDIR_elseif:
++    case TOK_ASMDIR_else:
++    case TOK_ASMDIR_endif:
++        asm_cond_directive(s1, tok);
++        break;
+     case TOK_ASMDIR_rept:
+         {
+             int repeat;
+@@ -1413,7 +1794,14 @@ static int tcc_assemble_internal(TCCState *s1, int do_preprocess, int global)
+ 		set_symbol(s1, opcode);
+                 goto redo;
+             } else {
+-                asm_opcode(s1, opcode);
++                /* A macro is invoked where a mnemonic would go, and takes
++                   precedence over one -- that is what lets a .S file give
++                   a macro a name the instruction tables also use. */
++                AsmMacro *m = asm_macro_find(opcode);
++                if (m)
++                    asm_macro_expand(s1, m, global);
++                else
++                    asm_opcode(s1, opcode);
+             }
+         }
+         /* end of line */
+@@ -1693,6 +2081,8 @@ ST_FUNC int tcc_assemble(TCCState *s1, int do_preprocess)
+         cur_text_section = text_section;
+         ind = cur_text_section->data_offset;
+         nocode_wanted = 0;
++        asm_cond_reset();
++        asm_macro_reset();
+         if (pass == 0) {
+             /* preprocess once, recording the resulting token stream */
+             tok_capture = &capture;
+@@ -1706,6 +2096,8 @@ ST_FUNC int tcc_assemble(TCCState *s1, int do_preprocess)
+             ret = tcc_assemble_internal(s1, do_preprocess, 1);
+             end_macro();
+         }
++        if (asm_cond_depth)
++            tcc_error("%d unterminated .if at end of file", asm_cond_depth);
+         cur_text_section->data_offset = ind;
+         asm_resolve_fixups(s1);
+         if (!asm_relax_iterate(s1))
+@@ -1720,6 +2112,8 @@ ST_FUNC int tcc_assemble(TCCState *s1, int do_preprocess)
+     tcc_free(asm_lebs), asm_lebs = NULL;
+     asm_snapshot_free(&snap);
+     tok_str_free_str(capture.str);
++    asm_cond_free();
++    asm_macro_reset();
+     return ret;
+ }
+ 
+@@ -1739,7 +2133,11 @@ static void tcc_assemble_inline(TCCState *s1, const char *str, int len, int glob
+     tcc_open_bf(s1, ":asm:", len);
+     memcpy(file->buffer, str, len);
+     macro_ptr = NULL;
++    asm_cond_reset();
++    asm_macro_reset();
+     tcc_assemble_internal(s1, 0, global);
++    if (asm_cond_depth)
++        tcc_error("%d unterminated .if in asm statement", asm_cond_depth);
+     /* an asm() statement is self-contained: nothing later can define a
+        label it left pending, so resolve (or diagnose) here */
+     cur_text_section->data_offset = ind;
+--- a/dep/tcc/tccpp.c
++++ b/dep/tcc/tccpp.c
+@@ -1077,7 +1077,7 @@ ST_FUNC void end_macro(void)
+     }
+ }
+ 
+-static void tok_str_add2(TokenString *s, int t, CValue *cv)
++ST_FUNC void tok_str_add2(TokenString *s, int t, CValue *cv)
+ {
+     int len, *str;
+ 
+@@ -1163,7 +1163,7 @@ static void tok_str_add2_spc(TokenString *s, int t, CValue *cv)
+ }
+ 
+ /* get a token from an integer array and increment pointer. */
+-static inline void tok_get(int *t, const int **pp, CValue *cv)
++ST_FUNC void tok_get(int *t, const int **pp, CValue *cv)
+ {
+     const int *p = *pp;
+     int n, *tab;
+--- a/dep/tcc/tcctok.h
++++ b/dep/tcc/tcctok.h
+@@ -407,6 +407,12 @@
+  DEF_ASMDIR(fill)
+  DEF_ASMDIR(rept)
+  DEF_ASMDIR(endr)
++ DEF_ASMDIR(macro)
++ DEF_ASMDIR(endm)
++ DEF_ASMDIR(if)
++ DEF_ASMDIR(elseif)
++ DEF_ASMDIR(else)
++ DEF_ASMDIR(endif)
+  DEF_ASMDIR(org)
+  DEF_ASMDIR(quad)
+ #if PTR_SIZE == 4

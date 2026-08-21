@@ -733,6 +733,151 @@ produces output identical to that build, and a freshly `buildvm`-generated
 running with the JIT on — that last one a negative control, since the generated
 `lj_vm.S` contains no `$` at all.
 
+### `0015-adx-bmi2-opcodes.patch`
+
+`0015` (i386-asm.c + i386-tok.h + x86_64-asm.h) teaches the assembler `adcx`,
+`adox` and `mulx`, and with them the VEX prefix.
+
+**The gap.** The six s2n-bignum `bignum_{mul,sqr}_{4_8,6_12,8_16}.S` routines
+are built around two carry chains running at once (`adcx` on CF, `adox` on OF)
+fed by a multiply that touches neither (`mulx`). None of the three was in
+tcc's tables at all.
+
+**`adcx`/`adox` are ordinary table entries; `mulx` needed new machinery.** The
+first two are `0F 38 F6` told apart only by a mandatory prefix — `66` for
+`adcx`, `F3` for `adox` — which is *not* an operand-size prefix: `REX.W`
+selects the 64-bit form on top of it. That shape the existing table already
+expresses (`0002` added the `0F38` escape map). `mulx` has no non-VEX encoding
+at all, and tcc had no VEX support whatsoever.
+
+**What the VEX support is, and what it is not.** VEX folds the mandatory
+prefix, the escape map, `REX` and one extra register operand into a two- or
+three-byte prefix. The patch adds `asm_vex()` beside `asm_rex()` (the two are
+mutually exclusive by construction — `asm_opcode()` calls one or the other),
+takes the map from the existing `OPC_0F`/`OPC_0F38`/`OPC_0F3A` bits and the
+`pp` field from the prefix byte already in the opcode column, and takes `W`
+from the same width decision that drives `REX.W`. The one genuinely new thing
+in the table is *which operand* goes in `VEX.vvvv`, since that varies per
+instruction (`mulx` puts its middle operand there; `bextr`, were it added,
+would put its first) — so it is named declaratively, per operand, with an
+`OPT_VVVV` role flag alongside the existing `OPT_EA`, rather than being
+inferred from the mnemonic.
+
+Two boundaries are deliberate and are stated in the code rather than left to
+be discovered. `VEX.L` is fixed at 0: every VEX instruction in the table is a
+general-purpose integer one, for which the field is defined as `LZ`, and a
+256-bit instruction would need `L` in the table before it could be added. And
+only the three-byte `C4` form is emitted, because the two-byte `C5` form can
+encode neither `W=1` nor a map other than `0F`, so it never applies here.
+
+**`OPC_NO16`, so `adcxw` is refused rather than mis-encoded.** None of the
+three has a 16-bit form. Without saying so in the table, `adcxw` would match
+the same template and assemble as the 32-bit operation under a stray
+operand-size prefix — silently wrong output for input GNU `as` rejects
+outright. The flag is a declarative property of the instruction, checked in
+both places a width is settled (the suffix match, and the later inference for
+the unsuffixed spelling).
+
+`instr_type` widens from `uint16_t` to `uint32_t` to hold the two new bits.
+The 3-bit group field occupies the top of the old width and only one low bit
+was free, which is not enough; `ASMInstr` stays 12 bytes either way, since the
+widening only fills padding the trailing `uint8_t`s already implied.
+
+**Verified.** `dep/tcc/patches/0015-tests/run.sh`: **7 pass** — four accepted
+files byte-identical to `as` (every `mulx` operand shape, `adcx` and `adox`
+side by side, the unsuffixed spelling, and the three interleaved with ordinary
+instructions), and three `w`-suffix files rejected exactly as `as` rejects
+them. Byte identity is the right bar there: the files are straight-line, so no
+encoding freedom is left, and a VEX prefix with an un-inverted `vvvv` field
+would still *disassemble* plausibly. Against an `0001`–`0014` baseline:
+**3 pass, 4 fail**.
+
+On the real files, this unblocks `bignum_sqr_4_8.S` and `bignum_sqr_6_12.S` —
+the two of the six that need no macro directives.
+
+### `0016-asm-rept-replay-double-capture.patch`
+
+`0016` (tccasm.c) stops `.rept` from recording its own expansion into the
+token stream the LEB128 relaxation pass replays.
+
+**The gap.** Two mechanisms that each work alone. `.rept` replays its body by
+pushing the recorded tokens back through the assembler. LEB128 relaxation
+(`0005`) records the *whole* token stream on the first pass and re-assembles
+from it when a `.uleb128` width guess was too small. The replayed body was
+being recorded too, landing in the stream immediately after the
+`.rept`/`.endr` that produces it — so a second pass expanded the body and then
+found another copy of it sitting there. In practice it desynchronizes the
+statement loop and the unit fails with `end of line expected`; the shape of
+the bug is duplicated output, and the error is how it happens to surface.
+
+Found while building `0017`, which needs the same replay mechanism and would
+otherwise have inherited the same defect. Fixed separately because it is a
+pre-existing bug in `.rept` with its own reproducer.
+
+**Verified.** `dep/tcc/patches/0016-tests/run.sh`: **3 pass** — `.rept` with
+no second pass (the control), `.rept` plus a forward `.uleb128` label
+difference (the minimal form), and three `.rept` blocks on both sides of the
+relaxation site (which separates a suppression that leaked from one that never
+applied). Against an `0001`–`0015` baseline: **1 pass, 2 fail**.
+
+Nested `.rept` remains unsupported and is not this patch's subject: tcc's body
+scan stops at the first `.endr` rather than counting depth. Recorded in
+TODO.md.
+
+### `0017-asm-macro-and-conditional-directives.patch`
+
+`0017` (tccasm.c + tccpp.c + tcc.h + tcctok.h) adds `.macro`/`.endm` and
+`.if`/`.elseif`/`.else`/`.endif`.
+
+**The gap.** Four of the six remaining bignum files are written as parameter-
+ized macros whose bodies branch on arithmetic over their own parameters —
+`.if ((\i + \j) % 4 == 0)` and so on. tcc had `.rept` and nothing else: no
+named macro directive at all, and no assembler conditionals either. The
+conditionals were an unlisted third gap; `.macro` alone would not have
+assembled a single one of those files.
+
+**Assembler conditionals are not the preprocessor's.** tcc runs `#if` over a
+`.S` file already, at an earlier layer and over preprocessor expressions.
+These evaluate assembler expressions, through the existing `asm_int_expr()` —
+which already had `%`, `==` and the comparisons, and already returns GAS's
+`-1`/`0` — so the directives are control flow over a stack of "has an arm been
+taken yet" flags, and the skipping matches `.endif` to `.if` by depth rather
+than stopping at the first one it meets.
+
+**Substitution is by token, not by text.** The body is captured once and each
+expansion copies it out with every `\`+name pair replaced by the argument's
+tokens. Nesting falls out of that: by the time an inner invocation inside a
+body is read, the outer `\n` has already become a number, so the inner
+expansion sees an ordinary argument.
+
+The one lexer change is narrow and scoped: `\` is a stray everywhere else in
+an asm file and the lexer refuses it, so `PARSE_FLAG_ACCEPT_STRAYS` is set for
+exactly the span between `.macro` and `.endm`. Outside a macro body a stray
+backslash is still an error.
+
+Expansion suppresses the relaxation capture for the same reason `.rept` does
+after `0016` — the definition and the invocation are both already in the
+recorded stream, so a later pass re-expands them itself.
+
+**What is not implemented is refused, not misread.** Parameter defaults
+(`\name=value`), qualifiers (`:req`, `:vararg`), the per-expansion counter
+`\@`, `<...>`-quoted arguments, `.purgem` and `.exitm` are all absent. The
+first three produce a diagnostic naming them; that matters most for defaults,
+where reading `a=5` as a parameter named `a` would make every call site
+relying on the default expand to nothing, quietly. A `\` naming no parameter
+is an error rather than being passed through, since passing it through puts a
+stray backslash into the instruction stream to be diagnosed somewhere
+unrelated. One deliberate strictness difference: GNU `as` warns on a stray
+`.endm` and carries on, this tcc errors.
+
+**Verified.** `dep/tcc/patches/0017-tests/run.sh`: **14 pass** — six accepted
+files byte-identical to `as` (conditionals alone, macros alone, the two
+composed the way the bignum sources compose them, nested macros, expansion
+under relaxation, and macros and `.rept` nested both ways round), five inputs
+`as` rejects and tcc rejects too, and three inputs `as` *accepts* which tcc
+must refuse with a diagnostic rather than misread. Against an `0001`–`0016`
+baseline: **8 pass, 6 fail**.
+
 ### `dep/libressl/patches/`: build-system gaps, not compiler gaps
 
 The same numbered-unified-diff mechanism now also exists for
@@ -881,7 +1026,9 @@ written down here in as much detail as the result.
 
 Re-runnable: `tooling/scripts/verify-bignum-att-tcc.sh <path-to-patched-tcc>`
 (build tcc from `dep/tcc/` with all of `dep/tcc/patches/*.patch` applied in
-numeric order; all 13 apply cleanly at `dep/tcc/VERSION`).
+numeric order; all apply cleanly at `dep/tcc/VERSION`). The counts in this
+subsection are the state at `0013`; `0015`–`0017` close the remaining six —
+see "21/21 after `0015`–`0017`" below.
 
 **Byte identity is the wrong bar here, and that is the whole difficulty.**
 The 84/84 check above compares two objects both produced by GNU `as`, where
@@ -960,6 +1107,45 @@ executable — the verification harness links with `GNU_STACK ... RWE`.
 `0008-pt-gnu-stack.patch` fixed this for tcc acting as the *linker* (it
 emits the `PT_GNU_STACK` program header in its own output); the
 object-emission side is still open. Tracked in TODO.md.
+
+#### 21/21 after `0015`–`0017`
+
+The six files the 15/15 pass could not assemble were blocked on three missing
+capabilities, not two: the ADX/BMI2 opcodes (`0015`), `.macro`/`.endm`, and —
+the one that was not on the original list — `.if`/`.elseif`/`.else`/`.endif`
+(both `0017`). `bignum_sqr_4_8` and `bignum_sqr_6_12` needed only the opcodes;
+the other four needed all three, since their macro bodies are conditionals
+over their own parameters and a macro directive without `.if` would not have
+assembled any of them.
+
+Same harness, same three axes, extended to cover all 21:
+
+- **Axis 1 — instruction stream, all 4 configs.** 21 files × 4 configs = 84
+  comparisons; **80 identical, 0 rejected**. The remaining 4 are the same
+  pre-existing single instruction in `bignum_sqr` in each config (`shr $1`,
+  `D1 /5` against `C1 /5 ib`) that the 15/15 pass already recorded — unchanged
+  by this work, and the only difference in the whole set.
+- **Axis 2 — runtime differential.** Extended from 15 routines to 21, and
+  each of the six new ones is checked *twice*: against its own tcc-assembled
+  twin, and against the `_alt` routine beside it, which is an independent
+  implementation of the same function from base-ISA instructions. 368,000
+  comparisons, **0 mismatches**. The harness now guards the ADX/BMI2 routines
+  behind a CPUID check, since on a host without those features calling them
+  is `SIGILL` rather than a wrong answer.
+- **Axis 3 — link behavior.** Unchanged; the six new files add no new
+  relocation shapes.
+
+**Regression, against the `0001`–`0014` build.** Every earlier patch harness
+(`0005`, `0006`, `0007`, `0009`, `0010`, `0011`, `0012`, `0013`) produces
+output identical to the baseline, and tcc's own `make test` stops at the same
+pre-existing environmental point with the same output. A freshly
+`buildvm`-generated `lj_vm.S` assembles to a **byte-identical object** — same
+hash over the whole `.o` — and the LuaJIT linked from it runs with the JIT on,
+through trace compilation, FFI, `pcall` unwinding, deep recursion unwind,
+coroutines and GC churn. That last one is a negative control in the strict
+sense: the generated `lj_vm.S` contains no macro or conditional directive and
+no ADX/BMI2 instruction at all, so what it establishes is the absence of
+collateral damage, not the presence of the new features.
 
 ## Vendored binary layout
 

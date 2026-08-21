@@ -159,9 +159,12 @@ See `docs/roadmap-v2.md` for the authoritative project roadmap and sequencing. T
   `.note.GNU-stack` section, the way `as`, gcc and clang all do. Not
   attempted.
 
-- [ ] **AT&T mirror of the s2n-bignum files exists and is proven
-  translation-correct, but 6 of 21 are still unbuildable under tcc and none
-  are wired into the build.** `dep/libressl/crypto/bn/arch/amd64/att/`
+- [ ] **AT&T mirror of the s2n-bignum files exists, all 21 now assemble under
+  tcc and are verified correct, but none are wired into the build.**
+  (Was "6 of 21 still unbuildable"; those 6 closed 2026-08-22 by
+  `0015`/`0016`/`0017` — see the completed item below. The per-file gap
+  analysis in the first sub-bullet is kept as the record of what was found.)
+  `dep/libressl/crypto/bn/arch/amd64/att/`
   holds an AT&T-syntax translation of all 21 Intel-syntax files, generated
   with AWS's own upstream `attrofy.sed` (vendored alongside them; see that
   directory's README for provenance). All 21 are verified byte-identical to
@@ -181,6 +184,11 @@ See `docs/roadmap-v2.md` for the authoritative project roadmap and sequencing. T
     file — both gaps have to close. Same class as the `.intel_syntax`
     item above, just deeper (opcode table plus macro preprocessor rather
     than a syntax mode).
+    **Closed 2026-08-22.** The count of gaps was three, not two: the four
+    macro-using files need `.if`/`.elseif`/`.else`/`.endif` as well, which
+    tcc also had none of, and whose absence the "no `.macro`" probe hid.
+    All three closed by `0015`/`0016`/`0017`; all 6 now assemble and are
+    verified on the same three axes as the other 15.
   - The other 15 assemble under tcc **and are verified correct**
     (2026-08-22, re-derived from scratch after two earlier conflicting
     informal reports, neither of which held up). Three independent axes,
@@ -214,7 +222,65 @@ See `docs/roadmap-v2.md` for the authoritative project roadmap and sequencing. T
     static instruction-stream axis but not by execution.
   - Regardless of the above, this task did not flip `--disable-asm` off or
     point any build at `att/` — that's gated on closing the remaining gaps
-    and is explicitly a separate step.
+    and is explicitly a separate step. **Still true after `0015`–`0017`:**
+    the assembler gaps are closed, but nothing points libressl's build at
+    `att/`, and `--disable-asm` is still what every recorded build used.
+    That wiring is its own decision (which files, which arch guard, how the
+    mirror is kept in lockstep with the Intel originals) and is not implied
+    by the files now assembling.
+
+- [x] **tcc assembler: ADX/BMI2 opcodes, `.macro`/`.endm`,
+  `.if`/`.elseif`/`.else`/`.endif`, and a `.rept` replay bug** — 2026-08-22.
+  Three patches; details per patch in `docs/native-tiers.md`.
+  - `0015-adx-bmi2-opcodes.patch` — `adcx`/`adox` (one opcode, `66`/`F3`
+    mandatory prefix) and `mulx`, which brought VEX prefix support with it
+    (`asm_vex()` beside `asm_rex()`, escape map and `pp` from the flags and
+    opcode column already in the table, `W` from the same width decision as
+    `REX.W`, and the `VEX.vvvv` operand named per-entry with an `OPT_VVVV`
+    role flag rather than inferred from the mnemonic). `OPC_NO16` so a `w`
+    suffix on any of the three is refused rather than assembled as the
+    32-bit form under a stray operand-size prefix. `instr_type` widened to
+    `uint32_t` (`ASMInstr` stays 12 bytes). 7/7 in
+    `0015-tests/run.sh`, byte-identical to GNU `as`; 3 pass 4 fail at
+    baseline.
+  - `0016-asm-rept-replay-double-capture.patch` — pre-existing bug, found
+    while building `0017`: `.rept` recorded its own expansion into the token
+    stream the LEB128 relaxation pass (`0005`) replays, so a unit with both
+    a `.rept` and a widening `.uleb128` label difference expanded the body
+    twice. 3/3; 1 pass 2 fail at baseline.
+  - `0017-asm-macro-and-conditional-directives.patch` — token-level `\name`
+    substitution, conditionals over `asm_int_expr()`, `\` accepted as a
+    token only between `.macro` and `.endm`. 14/14; 8 pass 6 fail at
+    baseline.
+  Regression: every earlier patch harness identical to baseline, tcc's own
+  `make test` stops at the same pre-existing environmental point, and a
+  freshly `buildvm`-generated `lj_vm.S` assembles to a byte-identical object
+  with the LuaJIT linked from it running with the JIT on (a negative control:
+  that file contains none of the new constructs).
+
+- [ ] **Nested `.rept` has never worked in tcc.** The body scan
+  (`tccasm.c`, `TOK_ASMDIR_rept`) stops at the first `.endr` instead of
+  counting depth, so an inner `.endr` terminates the outer body and the
+  replay then dies with `we at end of file, .endr not found`. Pre-existing;
+  unchanged by `0016`, which is about a different interaction. GNU `as`
+  supports nesting. Nothing in the repo needs it today, which is why it was
+  left rather than fixed — noted so the next person does not rediscover it
+  as a regression.
+
+- [ ] **`.macro` features deliberately not implemented, all currently
+  refused with a diagnostic.** Parameter defaults (`\name=value`) and
+  qualifiers (`:req`, `:vararg`), the per-expansion counter `\@`,
+  `<...>`-quoted arguments (so an argument cannot contain a comma),
+  `.purgem` and `.exitm`. GNU `as` has all of them. Each rejection is
+  asserted by a `u*.S` case in `0017-tests`, so adding one later means
+  turning that case into a `t*.S` — the refusal is pinned, not incidental.
+  One deliberate strictness difference in the same area: `as` warns on a
+  stray `.endm` and continues, this tcc errors.
+
+- [ ] **tcc's operand parser rejects a SIB address with no base
+  (`(,%reg,scale)`).** Not specific to any instruction; found while writing
+  `0015`'s cases, where the form had to be dropped from `t0_mulx.S`. GNU
+  `as` accepts it. Nothing in the vendored sources uses it.
 
 - [ ] **Nothing in CI applies `dep/libressl/patches/` yet.** The
   `libressl-linux-x86_64` job in `build-vendored.yml` builds with the runner's
