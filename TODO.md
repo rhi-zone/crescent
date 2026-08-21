@@ -244,7 +244,11 @@ See `docs/roadmap-v2.md` for the authoritative project roadmap and sequencing. T
   sandbox's tcc could not build its own `libtcc1.a` runtime helper library (unrelated
   environment issue: tcc couldn't find `stdio.h` under this NixOS sandbox's default include
   path), which blocks a full local `./configure && make` link test regardless of the asm
-  question. Run `tcc-build-deps-linux-x86_64` for real (`workflow_dispatch`) to confirm.
+  question. `tcc-build-deps-linux-x86_64` no longer exists to confirm this via
+  `workflow_dispatch` (removed in `59b4e224`, see the note above); confirming would need a
+  manual local bootstrap of tcc (same `nix develop`-shell approach used for the other tcc
+  verification in this effort, e.g. the smoke test and opcode-table checks recorded above)
+  followed by a local `./configure && make` of libressl with that tcc as `CC`.
 
 - [ ] **This vendored tcc (mob@2ba12e83b3599ca8f5d50c179fe5138fe956f0c9) defines no
   `xmm8`–`xmm15` SSE registers and no `r8`–`r15` general-purpose registers at all under
