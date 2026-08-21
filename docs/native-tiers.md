@@ -663,6 +663,59 @@ identical to the baseline build, as do tcc's own `make test` and `tests2`
 `buildvm`-generated `lj_vm.S` assembles to an object identical to the `0010`
 build's, with the LuaJIT linked from it running with the JIT on.
 
+### `0013-asm-macro-body-dollar-lexing.patch`
+
+`0013` (tccpp.c) makes `$` lex as a plain token inside a `#define` in a `.S`
+file, the way it already does everywhere else in asm mode.
+
+**The gap.** `parse_define()` clears `PARSE_FLAG_ASM_FILE` while tokenizing a
+define, so that `#` stays the stringize operator instead of becoming a line
+comment. The lexer, though, decides `$` is a plain token from that same flag
+rather than from the identifier table — so clearing it for the `#` reason also
+turned `$` into an identifier character for the duration of every `#define`,
+and `$5` in a macro body lexed as **one identifier token**. This is upstream
+mob HEAD (`2ba12e83`) behaviour, unfixed there; the commit that introduced the
+clear (`dd57a348`, 2016) hit the same problem for `.` and compensated through
+`set_idnum()`, but `$` is the one character whose lexing does not go through
+the identifier table alone, so the two mechanisms never composed. `0013`
+extends that same per-character compensation to `$`.
+
+**Two failures, only one of them loud.** Shift and rotate opcodes require an
+8-bit immediate, so the operand — now an absolute address — was rejected with
+`bad operand with opcode 'roll'`. But `mov`, `add`, `and`, `cmp` and `or`
+accept a 32-bit immediate, so the same wrong operand **assembled with no
+diagnostic**, as a load from the address of an undefined symbol literally named
+`$5`. The baseline relocation table reads `R_X86_64_32S $5 + 0`. The silent
+half is the reason `0013-tests` compares bytes rather than exit status.
+
+**Scope.** The change fires only when the enclosing file is already being
+parsed with `PARSE_FLAG_ASM_FILE` set, which no C compilation does — inline
+`asm` in C goes through `tcc_assemble_inline()`, which runs with preprocessing
+off and so processes no `#define`. `-fdollars-in-identifiers` in C is
+untouched. In a `.S` file, `$` can no longer appear in a macro *parameter*
+name; that follows from the file mode and could never have been referenced from
+the body anyway.
+
+**Verified.** `dep/tcc/patches/0013-tests/run.sh`: **10 pass** — a literal
+control, the same sequence through object-like and through function-like
+macros, the other `$` operand spellings, the real `sha1_amd64_generic.S`
+shape, and a case that isolates the silent-wrong-bytes half; each byte-identical
+to `as`, plus the equivalence asserted directly in both assemblers (macro
+immediate == literal immediate). Against an `0001`–`0012` baseline: **1 pass,
+9 fail**.
+
+**The three libressl `crypto/sha/*_amd64_generic.S` files now assemble**
+through tcc's integrated path, with no `tcc -E` pre-expansion. Their
+instruction streams match `as` instruction for instruction; the objects are not
+byte-identical because tcc emits `jmp rel32` where `as` relaxes to `rel8` and
+pads `.align` differently, both pre-existing and unrelated. The seven
+`*-elf-x86_64.S` perlasm objects stay byte-identical to the `0012` build, every
+earlier harness (`0005`, `0006`, `0007`, `0009`, `0010`, `0011`, `0012`)
+produces output identical to that build, and a freshly `buildvm`-generated
+`lj_vm.S` assembles to an identical object with the LuaJIT linked from it
+running with the JIT on — that last one a negative control, since the generated
+`lj_vm.S` contains no `$` at all.
+
 ## Vendored binary layout
 
 ```

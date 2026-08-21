@@ -1,0 +1,36 @@
+--- a/dep/tcc/tccpp.c
++++ b/dep/tcc/tccpp.c
+@@ -1522,6 +1522,7 @@
+     Sym *s, *first, **ps;
+     int v, t, varg, is_vaargs, t0;
+     int saved_parse_flags = parse_flags;
++    int dolid;
+     TokenString str;
+ 
+     v = tok;
+@@ -1534,6 +1535,16 @@
+        macros the argument list must be parsed without '.' being an ID
+        character.  */
+     parse_flags = ((parse_flags & ~PARSE_FLAG_ASM_FILE) | PARSE_FLAG_SPACES);
++    /* Dropping ASM_FILE above also drops the lexer's rule that '$' is a
++       plain token in asm mode (see the "case '$'" in next_nomacro1, which
++       keys off ASM_FILE rather than isidnum_table alone). Without this,
++       '$' becomes an identifier character for the duration of the define
++       and "$5" in a macro body lexes as ONE identifier token, so
++       "#define m() movl $5, %ebx" silently assembles as a load from the
++       address of an undefined symbol named "$5" instead of an immediate.
++       Compensate through the ident table, the same way '.' is handled for
++       the argument list below. */
++    dolid = (saved_parse_flags & PARSE_FLAG_ASM_FILE) ? set_idnum('$', 0) : -1;
+     /* '(' must be just after macro definition for MACRO_FUNC */
+     next_nomacro();
+     parse_flags &= ~PARSE_FLAG_SPACES;
+@@ -1595,6 +1606,8 @@
+         next_nomacro();
+     }
+     parse_flags = saved_parse_flags;
++    if (dolid >= 0)
++        set_idnum('$', dolid);
+     tok_str_add(&str, 0);
+     if (t0 == TOK_PPJOIN)
+ bad_twosharp:

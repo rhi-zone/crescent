@@ -405,6 +405,52 @@ See `docs/roadmap-v2.md` for the authoritative project roadmap and sequencing. T
   an `0001`–`0011` baseline, 1 pass / 4 fail. `ghash-elf-x86_64.S`'s data sections are
   byte-identical to `as`.
 
+- [x] **RESOLVED by `dep/tcc/patches/0013-asm-macro-body-dollar-lexing.patch` (2026-08-21):
+  in a `.S` file, `$` lexed as an identifier character for the duration of every `#define`,
+  so `$5` in a macro body became ONE identifier token.** `parse_define()` (`tccpp.c`) clears
+  `PARSE_FLAG_ASM_FILE` while tokenizing a define so `#` stays the stringize operator instead
+  of becoming a line comment — but the lexer decides `$` is a plain token from that same
+  flag rather than from the identifier table, so clearing it for the `#` reason also changed
+  `$`. Reported as an IM8 operand-width classification bug; it is not — the operand never
+  reaches width classification, and `parse_operand()` is correct as written. Present in
+  upstream mob HEAD (`2ba12e83`, which is mob HEAD as of this session — nothing after it to
+  contain a fix, and no tinycc-devel thread found); the commit that introduced the clear
+  (`dd57a348`, 2016) hit the same problem for `.` and compensated per-character through
+  `set_idnum()`, but `$`'s lexing does not go through the identifier table alone, so the two
+  mechanisms never composed. `0013` extends that same compensation to `$`. **Two failure
+  modes, only one loud:** shift/rotate opcodes need an 8-bit immediate and rejected the
+  now-address operand (`bad operand with opcode 'roll'`), but `mov`/`add`/`and`/`cmp`/`or`
+  accept a 32-bit immediate and **assembled silently wrong** — baseline relocation tables
+  read `R_X86_64_32S $5 + 0`. Verified with `dep/tcc/patches/0013-tests/run.sh`: 10 pass,
+  each byte-identical to `as`, including a case isolating the silent half; against an
+  `0001`–`0012` baseline, 1 pass / 9 fail. The three `dep/libressl/crypto/sha/*_amd64_generic.S`
+  files now assemble through tcc's integrated path with no `tcc -E` pre-expansion.
+
+- [ ] **Two tcc/`as` encoding divergences found while writing `0013`'s cases, both
+  pre-existing and unrelated to macros.** `shll $1, %ecx` — `as` picks the `D1 /r`
+  shift-by-one short form, tcc picks `C1 /r ib` (one byte longer). `addl $5, %eax` — `as`
+  picks `83 /0 ib`, tcc picks the `05 id` accumulator form (three bytes longer); with any
+  other destination register both pick `83 /0 ib`. Both assemble to correct code, so this is
+  size, not correctness, and neither is a blocker for anything vendored. Kept out of
+  `0013-tests` so its cases compare cleanly. Not attempted.
+
+- [ ] **libressl's SHA-NI asm needs eleven missing opcodes, not the two first reported, and
+  one of them needs new operand-matcher substrate.** `dep/libressl/crypto/sha/sha1_amd64_shani.S`
+  and `sha256_amd64_shani.S` use `palignr`, `pinsrd`, `pextrd`, `pshufb`, `pblendw`,
+  `sha1msg1`, `sha1msg2`, `sha1nexte`, `sha1rnds4`, `sha256msg1`, `sha256msg2` and
+  `sha256rnds2`; tcc's tables have none of them (confirmed by reading `x86_64-asm.h`, and by
+  assembling both files, which fail one missing opcode at a time). Ten are ordinary
+  `66 0F 3A`/`66 0F 38` table entries of the shape `0002` established. `sha256rnds2` is not:
+  libressl writes its three-operand form (`sha256rnds2 xmsg, xhs0, xhs1` with `xmsg` defined
+  as `%xmm0`), where the first operand is the *implicit* `%xmm0` that `as` verifies and does
+  not encode. tcc's operand matcher has no class for an implicit fixed SSE register — it has
+  `OPT_EAX`/`OPT_CL`/`OPT_DX`/`OPT_ST0` for the GP and x87 equivalents but no `%xmm0` — so
+  this needs that class added before the entry can be written, rather than an entry that
+  ignores its first operand. `palignr` and `pinsrd` alone were implemented and verified
+  byte-identical to `as` (reg/reg, reg/mem, and REX.R/REX.B extended-register forms) but not
+  committed: on their own they do not make either shani file assemble, so whether they land
+  as a patch of their own or as part of one complete SHA-NI patch is a packaging call.
+
 - [ ] **tcc's 2-byte data directives reject a bare symbol operand.** `.short sym` and
   `.value sym` (and `.short sym+4`) fail with `constant expected`; `.short sym-.` and
   `.long sym` both work, so it is specific to emitting a 16-bit *relocation* —
