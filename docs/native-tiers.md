@@ -584,8 +584,7 @@ with registers. `x86_64-asm.h` types the second operand of `movups`/`movaps`/
 `movhps` as `OPT_EA | OPT_REG32` where the register-to-register form needs
 `OPT_SSE`, so `movaps %xmm0,%xmm1` is rejected on the unpatched tcc too; and
 `.value` (the GAS spelling of `.short`) is not among tcc's assembler
-directives. `0011` below closes the first; the `.value` one is recorded in
-TODO.md.
+directives. Both are closed by `0011` and `0012` below.
 
 ### `0011-sse-mov-operand-types.patch`
 
@@ -626,6 +625,43 @@ baseline: **2 pass, 5 fail** — the register-to-register case failing to
 assemble and all four GP-operand cases failing *by assembling*. On the real
 perlasm, all **450** `movaps`/`movups`/`movhps` instructions in
 `aesni-elf-x86_64.S` encode byte-identically to `as`.
+
+### `0012-asm-value-directive.patch`
+
+`0012` (tcctok.h + tccasm.c) adds the `.value` assembler directive.
+
+**The gap.** `.value` is GAS's x86 spelling of `.short`. tcc had `.word` and
+`.short` but no `value`, so `dep/libressl/crypto/modes/ghash-elf-x86_64.S`
+failed at its `.Lrem_8bit` lookup table with `incorrect number of operands` —
+the directive was not recognized as one, so it fell through to opcode parsing.
+
+**Equivalence checked, not assumed.** Before writing the alias: the same
+content spelled `.short` and spelled `.value` assembles to *byte-identical
+objects* in real `as`, relocations included, across constants, comma-separated
+lists, negatives, expressions, symbol references and label differences. So
+`.value` shares `.short`'s case in `tccasm.c` rather than getting a handler of
+its own.
+
+**Verified.** `dep/tcc/patches/0012-tests/run.sh`: **5 pass** — the `.short`
+control, the identical content as `.value`, the real `.Lrem_8bit` table shape,
+each byte-identical to `as`, plus the equivalence asserted directly in both
+assemblers (`.value` output == `.short` output). Against an `0001`–`0011`
+baseline: **1 pass, 4 fail**. On the real file, `ghash-elf-x86_64.S`'s data
+sections — where the `.value` tables live — are byte-identical to `as`.
+
+One pre-existing limitation is inherited deliberately and recorded in TODO.md:
+tcc's 2-byte data directives reject a bare symbol operand (`constant
+expected`, no `R_X86_64_16`), where `.long` accepts one. That is `.short`'s
+gap; an alias that did not share it would not be an alias.
+
+**All seven libressl perlasm objects now assemble.** With `0010`+`0011`+`0012`,
+`aesni-elf-x86_64.S` and `ghash-elf-x86_64.S` join the five that already
+worked, and those five stay byte-identical to the pre-`0011` build. Every
+earlier harness (`0005`, `0006`, `0007`, `0009`, `0010`) produces output
+identical to the baseline build, as do tcc's own `make test` and `tests2`
+(both stopping at the same pre-existing environmental point), and a freshly
+`buildvm`-generated `lj_vm.S` assembles to an object identical to the `0010`
+build's, with the LuaJIT linked from it running with the JIT on.
 
 ## Vendored binary layout
 

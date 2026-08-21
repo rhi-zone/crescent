@@ -1,0 +1,24 @@
+--- a/dep/tcc/tcctok.h
++++ b/dep/tcc/tcctok.h
+@@ -419,6 +419,7 @@
+  DEF_ASMDIR(option)
+ #endif
+  DEF_ASMDIR(short)
++ DEF_ASMDIR(value)
+  DEF_ASMDIR(long)
+  DEF_ASMDIR(int)
+  DEF_ASMDIR(symver)
+--- a/dep/tcc/tccasm.c
++++ b/dep/tcc/tccasm.c
+@@ -807,6 +807,11 @@
+         goto asm_data;
+     case TOK_ASMDIR_word:
+     case TOK_ASMDIR_short:
++    /* .value is GAS's x86 spelling of .short.  It is not a near-synonym:
++       for the same operands GAS emits byte-identical objects for the two,
++       relocations included, so it shares this case rather than getting a
++       handler of its own. */
++    case TOK_ASMDIR_value:
+         size = 2;
+         goto asm_data;
+     case TOK_ASMDIR_long:

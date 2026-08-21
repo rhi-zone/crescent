@@ -390,12 +390,29 @@ See `docs/roadmap-v2.md` for the authoritative project roadmap and sequencing. T
   **Not done:** `movlhps`/`movhlps` are absent from tcc's tables entirely and were not added
   — that is new capability, not a correction.
 
-- [ ] **tcc's assembler has no `.value` directive** (`dep/tcc/tccasm.c` has
-  `TOK_ASMDIR_word`/`TOK_ASMDIR_short` but nothing for `value`, GAS's x86 spelling of
-  `.short`) — `dep/libressl/crypto/modes/ghash-elf-x86_64.S` fails at line 1004 on its
-  `.Lrem_8bit` table with `incorrect number of operands`, because the name is not recognized
-  as a directive and falls through to opcode parsing. Found while verifying `0010`; unrelated
-  to registers and to `0011`, and the last remaining blocker on `ghash-elf-x86_64.S`.
+- [x] **RESOLVED by `dep/tcc/patches/0012-asm-value-directive.patch` (2026-08-21): tcc's
+  assembler had no `.value` directive**, GAS's x86 spelling of `.short`, so
+  `dep/libressl/crypto/modes/ghash-elf-x86_64.S` failed at line 1004 on its `.Lrem_8bit`
+  table with `incorrect number of operands` — the name was not recognized as a directive and
+  fell through to opcode parsing. The equivalence was confirmed against the `as` binary
+  before writing the alias, rather than assumed from the name: the same content spelled
+  `.short` and spelled `.value` assembles to *byte-identical objects* in `as`, relocations
+  included, across constants, comma-separated lists, negatives, expressions, symbol
+  references and label differences. So `.value` shares `.short`'s case in `tccasm.c` instead
+  of getting a handler of its own. Verified with `dep/tcc/patches/0012-tests/run.sh`: 5 pass
+  — `.short` control, identical content as `.value`, the real `.Lrem_8bit` table shape, each
+  byte-identical to `as`, plus the equivalence asserted directly in both assemblers; against
+  an `0001`–`0011` baseline, 1 pass / 4 fail. `ghash-elf-x86_64.S`'s data sections are
+  byte-identical to `as`.
+
+- [ ] **tcc's 2-byte data directives reject a bare symbol operand.** `.short sym` and
+  `.value sym` (and `.short sym+4`) fail with `constant expected`; `.short sym-.` and
+  `.long sym` both work, so it is specific to emitting a 16-bit *relocation* —
+  `R_X86_64_16`, which real `as` emits happily. Found while building `0012`'s test cases (a
+  `.short sym` line in the control case failed on the unpatched tcc, which is how it was
+  distinguished from anything `0012` introduced). `.value` inherits this by being an alias,
+  which is correct — the gap belongs to `.short`/`.word`. Nothing currently vendored needs
+  it: all seven libressl `*-elf-x86_64.S` files assemble without it. Not attempted.
 
 - [ ] **`dep/tcc/i386-asm.h` carries the identical `OPT_REG32` bug `0011` fixed in
   `x86_64-asm.h`** — same six entries, same wrong operand class, so the 32-bit targets
@@ -406,11 +423,14 @@ See `docs/roadmap-v2.md` for the authoritative project roadmap and sequencing. T
   preferred over changing a shipped target's behavior on an untested path. Closing it needs
   an i386 tcc build plus `as --32` to verify to the same bar.
 
-- [ ] **Six of libressl's seven `*-elf-x86_64.S` files now assemble; `ghash` is the last
-  one** — `0011` closed `aesni-elf-x86_64.S`, and the five that already worked stay
-  byte-identical to the pre-`0011` build. `ghash-elf-x86_64.S` waits on the `.value`
-  directive above. Even with all seven assembling, whether libressl then *configures, builds
-  and links* end to end with tcc as `CC` is a separate unverified question, and dropping
+- [x] **With `0010`+`0011`+`0012`, all seven libressl `*-elf-x86_64.S` files assemble** —
+  the five that already worked stay byte-identical to the pre-`0011` build, and
+  `aesni-elf-x86_64.S` and `ghash-elf-x86_64.S` join them. Remaining divergence from `as` on
+  those two is the pre-existing, separately-recorded set: `.align` padding (tcc emits `0x90`
+  runs where `as` uses multi-byte nops), local labels retained in `.symtab`, and long-form
+  branches with relocations where `as` folds to short. No opcode-encoding divergence.
+  **Still not verified:** whether libressl then *configures, builds and links* end to end
+  with tcc as `CC` — that is a separate question from assembling its perlasm, and dropping
   `--disable-asm` depends on it. See the `tcc-build-deps-linux-x86_64` note above.
 
 - [x] **tcc's `.section NAME,"flags"` assembler directive hardcoded `SHF_ALLOC` into
