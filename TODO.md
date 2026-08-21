@@ -145,6 +145,20 @@ See `docs/roadmap-v2.md` for the authoritative project roadmap and sequencing. T
   Intel-syntax operand parser, which is a much larger job than the existing
   opcode-table patches.
 
+- [ ] **tcc emits no `.note.GNU-stack` section in its object output, so GNU
+  `ld` marks anything linked from a tcc `.o` as needing an executable stack.**
+  Found 2026-08-22 while verifying the AT&T bignum mirror: linking the 15
+  tcc-assembled objects with `gcc` produces `GNU_STACK ... RWE`, and `ld`
+  warns `missing .note.GNU-stack section implies executable stack`. Not
+  specific to `.S` inputs — `tcc -c` on an ordinary `.c` file produces an
+  object with no `.note.GNU-stack` either. `0008-pt-gnu-stack.patch` covers
+  only the case where *tcc itself* is the linker (it emits the
+  `PT_GNU_STACK` program header, `PF_R | PF_W`, in its own output); the
+  object-emission side, which is what GNU `ld` reads, is untouched. The fix
+  is the mirror of `0008`: have `tcc -c` emit an empty, non-executable
+  `.note.GNU-stack` section, the way `as`, gcc and clang all do. Not
+  attempted.
+
 - [ ] **AT&T mirror of the s2n-bignum files exists and is proven
   translation-correct, but 6 of 21 are still unbuildable under tcc and none
   are wired into the build.** `dep/libressl/crypto/bn/arch/amd64/att/`
@@ -158,13 +172,46 @@ See `docs/roadmap-v2.md` for the authoritative project roadmap and sequencing. T
   - `bignum_mul_4_8.S`, `bignum_mul_6_12.S`, `bignum_mul_8_16.S`,
     `bignum_sqr_4_8.S`, `bignum_sqr_6_12.S`, `bignum_sqr_8_16.S` (the ADX
     fast-path routines) are rejected outright by the vendored tcc — no
-    `mulx`/`adcx`/`adox` opcode support, no `.macro`/`.endm`. This is the
-    same class of gap as the `.intel_syntax` item above, just deeper (an
-    opcode-table and macro-preprocessor gap instead of a syntax-mode gap).
-  - The other 15 assemble under tcc without error, but whether tcc's
-    codegen for them is instruction-equivalent to the gcc/gas ground truth
-    is **not yet independently verified** — tracked as separate,
-    in-progress work. Don't assume "assembles" means "correct" for these.
+    `mulx`/`adcx`/`adox` opcode support, no `.macro`/`.endm`. Each of those
+    four constructs was confirmed missing with its own one-line probe
+    (tcc: "unknown opcode"; `as`: accepts), not inferred from a
+    first-error message. All 6 use the opcodes; only 4 of the 6 also use
+    `.macro`/`.endm` (`bignum_sqr_4_8` and `bignum_sqr_6_12` fail on the
+    opcodes alone), so an opcode-table patch alone would not unblock any
+    file — both gaps have to close. Same class as the `.intel_syntax`
+    item above, just deeper (opcode table plus macro preprocessor rather
+    than a syntax mode).
+  - The other 15 assemble under tcc **and are verified correct**
+    (2026-08-22, re-derived from scratch after two earlier conflicting
+    informal reports, neither of which held up). Three independent axes,
+    all re-runnable via
+    `tooling/scripts/verify-bignum-att-tcc.sh <patched-tcc>`; methodology
+    written up in `docs/native-tiers.md`, "Verifying tcc's own codegen":
+    - Instruction stream vs GNU `as`, across the same 4 preprocessor
+      configs as the 84/84 check: 56 of 60 comparisons identical on
+      mnemonics, operand values, branch destinations, external
+      relocations and the GLOBAL symbol table. The 4 that differ are the
+      same one instruction in `bignum_sqr` in each config — `as` picks
+      the `D1 /5` shift-by-one encoding, tcc picks `C1 /5` with `ib = 1`.
+      Same operation, same result, and the following `sub` overwrites the
+      flags, so nothing observes it.
+    - Runtime differential, gas and tcc objects linked into one process
+      (tcc's symbols `T_`-prefixed via `objcopy`) and called side by side:
+      320,000 comparisons, 0 mismatches.
+    - `-shared` link of the tcc objects: no PLT entries and no dynamic
+      relocations for the local labels tcc defers to `R_X86_64_PLT32`.
+    Two encoding-level differences are real but not correctness problems,
+    and are the reason byte comparison is the wrong bar here: tcc does not
+    always pick the shortest encoding, and it defers same-section
+    *forward* branches to relocations instead of resolving them (backward
+    ones it resolves). Cost is size — `bignum_add` 219 bytes vs 185,
+    `bignum_sub` 191 vs 170; the 6 `_alt` files, which have no forward
+    branches, are byte-identical to gas.
+    Remaining uncertainty, stated rather than rounded away: the runtime
+    axis covers the default preprocessor config only, because
+    `-DWINDOWS_ABI=1` changes the calling convention and those objects
+    cannot be called from the SysV ABI. `WINDOWS_ABI` is covered by the
+    static instruction-stream axis but not by execution.
   - Regardless of the above, this task did not flip `--disable-asm` off or
     point any build at `att/` — that's gated on closing the remaining gaps
     and is explicitly a separate step.

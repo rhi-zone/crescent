@@ -856,18 +856,110 @@ directly:
 
 - **6 files reject outright**: `bignum_mul_4_8.S`, `bignum_mul_6_12.S`,
   `bignum_mul_8_16.S`, `bignum_sqr_4_8.S`, `bignum_sqr_6_12.S`,
-  `bignum_sqr_8_16.S` — the ADX/BMI2 fast-path routines. tcc's assembler
-  has no `mulx`/`adcx`/`adox` opcode support and no `.macro`/`.endm`
-  handling, both of which these files use. Closing this is a tcc
-  assembler feature gap, not a translation problem — separate work,
-  tracked in TODO.md.
-- The other **15 files assemble under tcc without error.** Whether the
-  code tcc emits for them is instruction-equivalent to the gcc/gas
-  ground truth (the same kind of check as the 84/84 above, but against
-  tcc's own codegen instead of `as` accepting AT&T syntax) is **not**
-  established by this document — that's a distinct, in-progress
-  verification effort. Until it lands, treat "assembles" and "verified
-  correct" as different claims for these 15.
+  `bignum_sqr_8_16.S` — the ADX/BMI2 fast-path routines. Each of the four
+  constructs was confirmed missing individually, with a one-line probe
+  assembled by both tcc and `as`, rather than inferred from the
+  first-error message: `mulxq`, `adcxq`, `adoxq` and `.macro` are each
+  "unknown opcode" to tcc and each accepted by `as`. All 6 files use
+  `mulx`/`adcx`/`adox`; 4 of the 6 (`bignum_mul_4_8`, `bignum_mul_6_12`,
+  `bignum_mul_8_16`, `bignum_sqr_8_16`) additionally use `.macro`/`.endm`,
+  while `bignum_sqr_4_8` and `bignum_sqr_6_12` fail on the opcodes alone.
+  Closing this is a tcc assembler feature gap, not a translation problem —
+  separate work, tracked in TODO.md.
+- The other **15 files assemble under tcc, and all 15 are verified
+  instruction-equivalent to the gas ground truth** — see the next section
+  for how, and for the two encoding-level differences that verification
+  deliberately looks past.
+
+#### Verifying tcc's own codegen: 15/15, by three independent axes
+
+Re-derived from scratch (2026-08-22) after two earlier, conflicting
+informal reports — one claiming 15/21 verified, one deflating that to 4 —
+neither of which held up. The deflated number turned out to be an artifact
+of the comparison method, not a real finding, which is why the method is
+written down here in as much detail as the result.
+
+Re-runnable: `tooling/scripts/verify-bignum-att-tcc.sh <path-to-patched-tcc>`
+(build tcc from `dep/tcc/` with all of `dep/tcc/patches/*.patch` applied in
+numeric order; all 13 apply cleanly at `dep/tcc/VERSION`).
+
+**Byte identity is the wrong bar here, and that is the whole difficulty.**
+The 84/84 check above compares two objects both produced by GNU `as`, where
+raw bytes are exactly right. tcc is a different assembler, and differs from
+`as` in two ways that change bytes without changing the program:
+
+- it does not always choose the shortest encoding (e.g. `xor $0x3f,%rax`
+  as `48 35 3f 00 00 00` where `as` emits `48 83 f0 3f`), and
+- it does not resolve same-section *forward* branches at assembly time. It
+  emits rel32 plus an `R_X86_64_PLT32` relocation against the local label
+  and lets the linker finish the job. (Backward branches it resolves
+  itself, so the two forms appear side by side in the same file.)
+
+**And naive disassembly-text diffing is what produced the false report.**
+`objdump` labels a jump target with the nearest *preceding* symbol it can
+find. tcc's local symbol table is sparser than gas's, so the same target
+address gets annotated `<f+0x30>` in one dump and `<g>` in the other. That
+is `objdump` guessing, not a difference in the object.
+
+So the comparison normalizes exactly three things, each for a stated
+reason, and compares everything else:
+
+1. **Addresses** — one longer encoding shifts every later address, so
+   instructions are identified by *position* (index) and addresses are
+   never compared.
+2. **`objdump`'s guessed `<...>` labels** — dropped entirely. Branch
+   targets are resolved through the real ELF symbol table instead.
+3. **Branch form** — an assembler-resolved displacement and a
+   `PLT32`-against-a-local-label relocation naming the same destination
+   both reduce to "branch to instruction index N". The form difference is
+   still *reported*, on separate `FORM` lines, so it is normalized for
+   comparison rather than hidden.
+
+What is compared, and must match exactly: mnemonics, all operand values
+(registers, immediates, memory base/index/scale/displacement), branch
+destinations, relocations against symbols the object does not define, and
+the GLOBAL/WEAK symbol table (value, type, bind, visibility, name).
+
+**Axis 1 — instruction stream, all 4 preprocessor configs.** Same configs
+as the 84/84 check (default, `-DWINDOWS_ABI=1`, `-DNO_IBT=1`,
+`-DS2N_BN_HIDE_SYMBOLS=1`). 15 files × 4 configs = 60 comparisons. 56 come
+out identical. The remaining 4 are the same single instruction in
+`bignum_sqr` in each config: `as` emits the `D1 /5` shift-by-one form
+(`49 d1 ec`), tcc emits `C1 /5` with `ib = 1` (`49 c1 ec 01`). Same
+operation, same count, same result; and the next instruction is
+`sub %r8,%rbx`, which overwrites the flags, so even the `OF`-on-1-bit-shift
+subtlety is unobservable. Global symbols match in all 60.
+
+**Axis 2 — runtime differential.** The instruction stream cannot show what
+the *linker* does with those deferred branches, so both assemblers' objects
+are linked into one program (tcc's with every symbol renamed via
+`objcopy --prefix-symbols=T_`, so both copies coexist) and every routine is
+called next to its twin on identical inputs. 320,000 comparisons across all
+15 routines — including a full sweep of `word_clz` over every leading-zero
+count, which random inputs alone would not cover — with **0 mismatches**.
+Default config only: `-DWINDOWS_ABI=1` changes the calling convention, so
+those objects cannot be called from this ABI.
+
+**Axis 3 — link behavior of the deferred branches.** `R_X86_64_PLT32`
+against a *local* label is unusual enough to check rather than assume. The
+15 tcc objects were also linked with `-shared`, the case where a PLT
+indirection would actually be possible: the resulting `.so` has no PLT
+entries and no dynamic relocations for any of those labels — the linker
+resolved every one of them directly. The runtime harness above is itself a
+PIE, so the position-independent case is covered at runtime too.
+
+**Cost, not correctness:** the deferred branches make tcc's `.text` larger
+— `bignum_add` is 219 bytes against gas's 185, `bignum_sub` 191 against
+170. The 6 `_alt` files that contain no forward branches come out
+*byte-identical* to gas.
+
+**One real defect found, unrelated to these files.** tcc emits no
+`.note.GNU-stack` section in *any* object it produces (`-c` on `.c` sources
+too, not just `.S`), so GNU `ld` marks the linked program's stack
+executable — the verification harness links with `GNU_STACK ... RWE`.
+`0008-pt-gnu-stack.patch` fixed this for tcc acting as the *linker* (it
+emits the `PT_GNU_STACK` program header in its own output); the
+object-emission side is still open. Tracked in TODO.md.
 
 ## Vendored binary layout
 

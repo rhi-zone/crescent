@@ -45,14 +45,12 @@ assembled by GNU `as` (via `gcc -c`), across 4 preprocessor configs
 (default, `-DWINDOWS_ABI=1`, `-DNO_IBT=1`, `-DS2N_BN_HIDE_SYMBOLS=1`) —
 `.text` bytes, relocations, and symbols all match. 84/84 checks pass.
 
-Buildability under the vendored tcc (separate from the above, and **not**
-fully verified — see `TODO.md`):
-
-- 6 files (`bignum_mul_4_8.S`, `bignum_mul_6_12.S`, `bignum_mul_8_16.S`,
-  `bignum_sqr_4_8.S`, `bignum_sqr_6_12.S`, `bignum_sqr_8_16.S` — the ADX
-  fast-path routines) are rejected outright by the vendored tcc: it lacks
-  `mulx`/`adcx`/`adox` opcode support and `.macro`/`.endm`. Confirmed by
-  direct assembly attempt.
-- The other 15 assemble under tcc without error. Whether their instruction
-  stream is equivalent to the gcc/gas ground truth is tracked as separate,
-  in-progress work, not independently re-derived here.
+Buildability and correctness under the vendored tcc is a separate question
+with a separate answer: 15 of the 21 assemble and are verified equivalent
+to the GNU `as` build; the 6 ADX fast-path routines are rejected outright.
+That status is **not restated here** — this file lives under `dep/`, which
+is content-hashed by `tooling/scripts/vendor-verify.sh`, so status that
+changes as the tcc gaps close does not belong in it. See
+`docs/native-tiers.md`, "Verifying tcc's own codegen", for the current
+numbers, the methodology, and the re-run command
+(`tooling/scripts/verify-bignum-att-tcc.sh <patched-tcc>`).
