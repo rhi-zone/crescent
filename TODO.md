@@ -63,8 +63,18 @@ See `docs/roadmap-v2.md` for the authoritative project roadmap and sequencing. T
   patch added `-fPIC`. tcc accepts `-fPIC` silently, so carrying upstream's value
   is harmless and keeps us byte-identical to upstream's entry.
 
-- [ ] **`CC=tcc` *without* `LD=tcc` still fails, one step later, on
-  `-Wl,-version-script`.** With GNU ld detected, `with_gnu_ld=yes` and
+- [x] **`CC=tcc` *without* `LD=tcc` still fails, one step later, on
+  `-Wl,-version-script` — resolved by adopting option (a), `LD=tcc`, which is
+  upstream libtool's own documented answer.** The supported invocation for
+  building `dep/libressl` with tcc is therefore `CC=<tcc> LD=<tcc>
+  ./configure --disable-asm`, recorded in `docs/native-tiers.md`. Setting `LD`
+  is not cosmetic: it is what steers libtool out of the `with_gnu_ld=yes`
+  branch, and the version-script problem simply does not arise on the
+  non-GNU-ld path. Options (b) teach tcc `--version-script`, (c) declare
+  `supports_anon_versioning=no` for tcc, and (d) static-only were considered
+  and not taken; (b) remains the only route to a restricted export list should
+  that ever be required (see the symbol-export item below). Original analysis,
+  kept because it explains *why* `LD` matters: With GNU ld detected, `with_gnu_ld=yes` and
   `archive_expsym_cmds` uses an anonymous version script; libressl's
   `crypto/Makefile.am` has `libcrypto_la_LDFLAGS = ... -export-symbols
   crypto_portable.sym`, so that path is taken and tcc errors with `unsupported
@@ -73,12 +83,9 @@ See `docs/roadmap-v2.md` for the authoritative project roadmap and sequencing. T
   `libcompat.la` and dies at `libcrypto.la`. Upstream libtool does not address
   this either — `supports_anon_versioning` is decided by parsing `$LD --version`,
   but when `CC=tcc` links, `$LD` is never invoked at all, so the probe is
-  interrogating a tool that plays no part in the link. Not fixed here because
-  every available answer changes what gets produced and is an owner call:
-  (a) require `LD=tcc` (what upstream documents; what was verified above),
-  (b) teach tcc `--version-script` (a new `dep/tcc/patches/` entry),
-  (c) declare `supports_anon_versioning=no` for tcc in the libtool table, or
-  (d) build the tcc tier static-only.
+  interrogating a tool that plays no part in the link. (libtool NEWS for
+  `cdf127ca`: "making sure to set LD correctly now avoids mis-matching GNU ld
+  with tcc: `./configure CC=tcc LD=tcc`".)
 
 - [x] **SONAME half of the tcc/gcc shared-library divergence: fixed by
   `dep/libressl/patches/0002-libtool-tinycc-soname.patch`.** Upstream libtool's
@@ -142,6 +149,21 @@ See `docs/roadmap-v2.md` for the authoritative project roadmap and sequencing. T
   diagnostic job that *would* have exercised it was removed 2026-08-21 (see the
   comment above `tcc-linux-x86_64` in that file). Wiring a tcc-as-`CC` libressl
   job back in is gated on the two decisions above.
+  **Status 2026-08-21:** the first gate (version-script) is closed — `LD=tcc`.
+  The second is now *half* closed: the SONAME divergence is fixed by
+  `patches/0002-libtool-tinycc-soname.patch`, but the symbol-export divergence
+  is neither fixed nor accepted-or-rejected, and that item's own wording gates
+  it on "before anything ships from it". So the gate has not lifted, and no job
+  is added here. Note also that re-adding `tcc-build-deps-*` is not implied by
+  either decision: it was removed for reasons that still hold (it never
+  produced a committed artifact, and its findings are on record), and the
+  removal comment nominates "re-run it by hand" as the intended mechanism.
+  Whether a tcc-as-`CC` libressl job should exist in CI *at all* is a separate
+  owner call from whether the build works, and is deliberately left open rather
+  than answered by default. What *was* corrected: the comment above
+  `tcc-linux-x86_64` in `build-vendored.yml` claimed the end-to-end tcc libressl
+  build was "still unverified", which is no longer true, and it now records
+  that `LD` must be set alongside `CC` for anyone re-running it by hand.
 
 ## tcc native build: missing dep/tcc/conftest.c blocks ./configure-based jobs (2026-08-21)
 

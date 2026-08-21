@@ -702,6 +702,25 @@ to `as`, plus the equivalence asserted directly in both assemblers (macro
 immediate == literal immediate). Against an `0001`–`0012` baseline: **1 pass,
 9 fail**.
 
+**Already covered — do not re-report.** A separate investigation reported what
+looked like a distinct remaining gap: `#define step(c) adcq $0, c` used as
+`step(%r9)` in a `.S` file emitting `adc 0x0,%r9` plus a bogus
+`R_X86_64_32S $0 + 0` relocation, attributed to `s->dollars_in_identifiers`
+defaulting on (`libtcc.c:882`) with nothing clearing it for the x86_64 `.S`
+path. Reconciled 2026-08-21 by running that exact input against both builds:
+on an `0001`–`0012` build it reproduces the reported bytes and relocation
+character for character; on the `0001`–`0013` build it assembles to
+`49 83 d1 00` / `adc $0x0,%r9` with no relocations, byte-identical to
+`gcc -x assembler-with-cpp`. Same bug, same mechanism — the report predates
+`0013`. The `dollars_in_identifiers` reset that the report points at
+(`tccasm.c`, guarded off for `TCC_TARGET_X86_64`) sits inside
+`tcc_assemble_inline()`, the entry point for C `asm(...)` statements, which is
+not on the `.S` file path at all; the `.S` path reaches the same `$`-as-ident
+state through `parse_define()` instead, which is what `0013` compensates.
+`-fno-dollars-in-identifiers` makes the symptom go away on a pre-`0013` build
+because it flips the underlying ident-table bit, not because the option is the
+right lever — nothing in the build passes it.
+
 **The three libressl `crypto/sha/*_amd64_generic.S` files now assemble**
 through tcc's integrated path, with no `tcc -E` pre-expansion. Their
 instruction streams match `as` instruction for instruction; the objects are not
@@ -741,6 +760,22 @@ path carried no `-soname`, so tcc-built shared libraries had no
 handed. Every other spec in that file which drives a GNU-ld-style linker
 through `$CC` carries `${wl}-soname $wl$soname`; the patch does the same
 for tcc, which accepts the flag in exactly that split spelling.
+
+The supported invocation, with both patches applied:
+
+```bash
+CC=/path/to/tcc LD=/path/to/tcc ./configure --disable-asm
+```
+
+`LD` must be set alongside `CC` — this is upstream libtool's own
+documented answer ("making sure to set LD correctly now avoids
+mis-matching GNU ld with tcc"). Without it, libtool probes `ld` from
+`PATH`, finds GNU ld, sets `with_gnu_ld=yes`, and emits an anonymous
+version script for libcrypto's `-export-symbols`; tcc implements no
+`--version-script` and the link fails. Setting `LD` moves the build onto
+the non-GNU-ld branch where the question never arises. `--disable-asm` is
+needed for a different reason — libressl 4.3.2's s2n-bignum `.S` files
+are Intel syntax and tcc's assembler is AT&T-only.
 
 One divergence from the gcc-built libraries remains and is *not* fixed:
 tcc-built libraries export their full symbol table rather than the set in

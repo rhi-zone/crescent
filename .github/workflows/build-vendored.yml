@@ -477,8 +477,14 @@ jobs:
   # behind that last one are now closed -- `0010` (xmm8-xmm15), `0011`
   # (movaps/movups/movhps operand types) and `0012` (the `.value` directive) --
   # and all seven of libressl's `*-elf-x86_64.S` files assemble with the
-  # patched tcc. Whether libressl then configures, builds and links end to end
-  # with tcc as CC is still unverified; see TODO.md. Re-run it by hand if tcc's viability as an actual
+  # patched tcc. libressl now also configures, builds, links and passes its
+  # own `make check` end to end with tcc as CC -- verified by hand, see
+  # TODO.md -- but only via `CC=<tcc> LD=<tcc> ./configure --disable-asm`
+  # with `dep/libressl/patches/*.patch` applied first. Setting LD is
+  # required, not optional: it is what keeps libtool off the with_gnu_ld
+  # path, whose anonymous version script tcc cannot link. Nothing in CI runs
+  # that build today; whether it should is an open owner call recorded in
+  # TODO.md. Re-run it by hand if tcc's viability as an actual
   # build compiler (not just a fallback binary) needs re-checking later.
 
   tcc-linux-x86_64:
