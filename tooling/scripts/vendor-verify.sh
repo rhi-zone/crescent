@@ -21,6 +21,19 @@
 # Hashing a manifest (not a tar) means the result depends only on file
 # content and relative path, not on mtimes, permissions, or archive tool
 # quirks — reproducible across machines and CI runners.
+#
+# File list comes from `git ls-files`, not a filesystem `find`: a `find`
+# walk picks up whatever happens to be sitting in the working tree —
+# gitignored build byproducts (e.g. `./configure && make` output like
+# config.h/conftest.c) included — so the hash silently depended on local
+# build history instead of only the committed source. That's how dep/tcc's
+# recorded hash went stale without anyone editing tracked source: it was
+# generated on a tree that had untracked configure/make output sitting in
+# dep/tcc/, so those files got baked into the manifest, and a clean CI
+# checkout (which only ever materializes tracked files) computed a
+# different, correct hash and failed verification. git-scoping this makes
+# the hash depend only on what's actually committed, matching what CI
+# (and any clean clone) will ever see.
 set -euo pipefail
 
 repo_root="$(git -C "$(dirname "${BASH_SOURCE[0]}")" rev-parse --show-toplevel)"
@@ -58,7 +71,7 @@ manifest_hash() {
   local excludes=("$@")
   local f rel skip pat
 
-  find "$root" -type f | LC_ALL=C sort | while IFS= read -r f; do
+  git ls-files -z "$root" | LC_ALL=C sort -z | while IFS= read -r -d '' f; do
     rel="${f#"$root"/}"
     case "$rel" in
       VERSION|VENDORED_VERSION|SOURCE_SHA256) continue ;;
