@@ -27,7 +27,9 @@ not the feature.
 
 ## Not covered here
 
-The gate protects a role only when input names the section *before* tcc's
-internal creator runs. The reverse order — `.tcov` under `-ftest-coverage`, and
-the `.symtab` family, both created before input objects are merged — is a known
-open asymmetry recorded in `TODO.md`, not a case this harness asserts.
+The gate this patch adds protects a role only when input names the section
+*before* tcc's internal creator runs. The reverse order — `.tcov` under
+`-ftest-coverage`, created before input objects are merged — is closed by
+`0009` and asserted by `0009-tests/`, not by this harness. The `.symtab` family
+is `SECTION_ROLE_SHARED` by deliberate decision in both patches, so neither
+harness asserts against it.

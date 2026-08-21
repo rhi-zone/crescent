@@ -76,6 +76,15 @@ See `docs/roadmap-v2.md` for the authoritative project roadmap and sequencing. T
   does reproduce there, the fix is presumably splitting each workflow's single `git apply`
   call into 8 sequential calls (one per patch file), but that's a call for whoever picks this
   up, not decided here.
+  **Data point from the `0009` session (2026-08-21), does not close this.** The same multi-arg
+  invocation was re-run in a freshly extracted tree at `36c8ff97` and at `b6547ec2` (the commit
+  this entry names), and also directly in the working tree at `36c8ff97`, now with all 9 patch
+  files: it applies cleanly every time on this host. What DOES reproduce the reported message
+  exactly is adding `--check` — `git apply --check` validates each patch against the
+  *unmodified* tree instead of chaining them, so `0003`'s `tccasm.c` hunks fail against context
+  `0001` has not yet created, giving `patch failed: dep/tcc/tccasm.c:45`. That is a candidate
+  explanation for the original report, not a confirmed account of what was run, so this stays
+  open for whoever can check the actual invocation.
 
 - [ ] **Want unused-local-variable checking as a real typechecker capability,
   not a bolt-on lint script.** Surfaced this session while cleaning up 15
@@ -671,18 +680,39 @@ See `docs/roadmap-v2.md` for the authoritative project roadmap and sequencing. T
   leave an empty `.eh_frame` in the output, which is the exact thing being fixed. Recorded so
   that future byte-identity comparisons against pre-`0007` artifacts are not read as regressions.
 
-- [ ] **Known asymmetry left open by `0007`: the reserved-section gate only protects a role when
-  input names the section BEFORE tcc's internal creator runs.** The gate lives at the creation
-  sites, so it fires when `tcc_load_object_file()` or an asm `.section` directive has already
-  introduced the name. In the reverse order — a role tcc creates first, then an input section of
-  the same name — `tcc_load_object_file()`'s merge loop matches by name and merges the input
-  content into tcc's section with no diagnostic. Affects `.tcov` under `-ftest-coverage`
-  (created from `tccgen.c`'s `tcc_tcov_start()`, before input objects are merged) and the
-  `.symtab` family; confirmed by observing that `.section .tcov` links without error under
-  `-ftest-coverage` while erroring correctly in every other ordering. Closing this means gating
-  the merge loop's reuse decision, which is a different mechanism from the creation gate and was
-  not part of `0007`'s resolved scope. The `.symtab` half is low priority by owner decision:
-  GNU `as` does not protect `.symtab` either.
+- [x] **RESOLVED by `dep/tcc/patches/0009-reserved-section-input-side-gate.patch` (2026-08-21):
+  the asymmetry `0007` left open — the reserved-section gate only protected a role when input
+  named the section BEFORE tcc's internal creator ran.** Re-derived from source rather than
+  taken from this entry, and reproduced first against a local `0001`–`0008` build: with
+  `-ftest-coverage` (so `.tcov` exists before any object is merged) both an input object
+  carrying `.tcov` and an `__asm__(".section .tcov")` linked with exit 0 and no diagnostic,
+  while the same names in the opposite order were refused. Two input-side reuse sites, not one:
+  `tcc_load_object_file()`'s by-name merge loop, and the assembler's `.section`/`.pushsection`
+  via `find_section()` — the entry's own repro was the second of those, so gating only the
+  merge loop would have left the observed symptom in place.
+  **Shape:** shared substrate, not a parallel mechanism. `Section->internal_role` now stores
+  WHICH role a section was created for (`SECTION_ROLE_NONE`/`SHARED`/`PRIVATE`) instead of
+  `0007`'s bare "has a role" bit, and `reserved_section_claim()` reads that role back on the
+  input side; it and `reserved_section()` raise the identical diagnostic through one helper, so
+  both orderings are indistinguishable to a caller. `SHARED` still merges input content
+  unchanged, so `.eh_frame`/dwarf coexistence is untouched, and the `.symtab` family stays
+  `SHARED` per the standing owner decision (GNU `as` does not protect it either) — so that
+  half is deliberately still unprotected, not overlooked.
+  **Scope note (property of creation order, not of the policy):** `.tcov` is the only role
+  reachable in this ordering today; every other `PRIVATE` role is created during
+  `elf_output_file()`, after all input is merged. The gate keys on the role, not the name, so a
+  role that later starts being created earlier is covered without revisiting this.
+  **Verified:** `0009-tests/run.sh` — 10 pass patched, 3 fail on the `0001`–`0008` baseline (the
+  three orderings fixed); `0005`/`0006`/`0007` harnesses identical on both (9/10/18 passing);
+  tcc's `make test` byte-identical, stopping at the same pre-existing environmental `test3`
+  failure, and the eight individually-run targets identical; objects byte-identical across
+  `sqlite3.c`/`tccelf.c`/`.S` under `-g`, `-gdwarf-5`, `-ftest-coverage`,
+  `-fno-asynchronous-unwind-tables`; a freshly `buildvm`-generated `lj_vm.S` assembles
+  byte-identically and the LuaJIT linked from it passes trace compilation, ffi, unwinding,
+  coroutines and GC churn against an all-gcc control; libressl's seven perlasm objects hold the
+  recorded baseline exactly with no new diagnostic; `0008`'s `PT_GNU_STACK`/`dlopen` unchanged.
+  Wired into all 5 `dep/tcc/patches` apply steps in `build-vendored.yml`, `SOURCE_SHA256`
+  regenerated, reasoning recorded in `docs/native-tiers.md`.
 
 - [x] **Fixed (`dep/tcc/patches/0008-pt-gnu-stack.patch`): tcc-built `.so` files failed to
   `dlopen` on modern glibc because tcc's linker never emitted a `PT_GNU_STACK` program

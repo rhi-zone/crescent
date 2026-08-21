@@ -1,0 +1,145 @@
+--- a/dep/tcc/tcc.h
++++ b/dep/tcc/tcc.h
+@@ -573,10 +573,15 @@
+     int is_dwarf;            /* dwarf debug section: 32-bit references between
+                                 two such sections are section-relative offsets,
+                                 not addresses (see relocate_section()) */
+-    int internal_role;       /* section was created by tcc to fill one of its
+-                                own roles (see reserved_section()); a section
+-                                without this flag came from input -- an asm
+-                                .section directive or a merged object file */
++    int internal_role;       /* SECTION_ROLE_* -- which of tcc's own roles this
++                                section was created to fill (see
++                                reserved_section()).  SECTION_ROLE_NONE means
++                                the section came from input: an asm .section
++                                directive or a merged object file.  The role is
++                                kept, not just the fact of having one, so that
++                                the input side can apply the same policy when
++                                the orderings are reversed (see
++                                reserved_section_claim()). */
+     int sh_info;             /* elf section info */
+     int sh_addralign;        /* elf section alignment */
+     int sh_entsize;          /* elf entry size */
+@@ -1579,9 +1584,11 @@
+ ST_FUNC void tccelf_end_file(TCCState *s1);
+ ST_FUNC Section *new_section(TCCState *s1, const char *name, int sh_type, int sh_flags);
+ /* policies for reserved_section(); see its definition in tccelf.c */
+-#define SECTION_ROLE_SHARED  0 /* tcc's content may coexist with input content */
+-#define SECTION_ROLE_PRIVATE 1 /* name is reserved for tcc's own output */
++#define SECTION_ROLE_NONE    0 /* not one of tcc's roles: the section is input */
++#define SECTION_ROLE_SHARED  1 /* tcc's content may coexist with input content */
++#define SECTION_ROLE_PRIVATE 2 /* name is reserved for tcc's own output */
+ ST_FUNC Section *reserved_section(TCCState *s1, const char *name, int sh_type, int sh_flags, int role);
++ST_FUNC int reserved_section_claim(TCCState *s1, Section *sec);
+ ST_FUNC int sec_index_is_dwarf(TCCState *s1, int shndx);
+ ST_FUNC void section_realloc(Section *sec, unsigned long new_size);
+ ST_FUNC size_t section_add(Section *sec, addr_t size, int align);
+--- a/dep/tcc/tccelf.c
++++ b/dep/tcc/tccelf.c
+@@ -398,8 +398,20 @@
+    output.  The role still binds to the section afterwards, so the rest of the
+    pass stays well-defined on the way to that failure.
+ 
+-   A section this function itself created is marked internal_role, so a later
+-   call for the same role rebinds to it rather than tripping either policy. */
++   A section this function itself created records its role, so a later call for
++   the same role rebinds to it rather than tripping either policy -- and the
++   recorded role is what lets the input side apply this same policy when the
++   two arrive in the opposite order (see reserved_section_claim()). */
++
++/* the one diagnostic for a SECTION_ROLE_PRIVATE collision, wherever it is
++   detected.  tcc_error_noabort, per this file's convention: the run continues
++   far enough to report any further problems, then fails before writing
++   output. */
++static int reserved_section_conflict(TCCState *s1, const char *name)
++{
++    return tcc_error_noabort("section '%s' is reserved for internal use", name);
++}
++
+ ST_FUNC Section *reserved_section(TCCState *s1, const char *name,
+                                   int sh_type, int sh_flags, int role)
+ {
+@@ -407,19 +419,40 @@
+ 
+     if (!sec)
+         sec = new_section(s1, name, sh_type, sh_flags);
+-    else if (!sec->internal_role) {
++    else if (sec->internal_role == SECTION_ROLE_NONE) {
+         if (role == SECTION_ROLE_PRIVATE)
+-            tcc_error_noabort("section '%s' is reserved for internal use", name);
++            reserved_section_conflict(s1, name);
+         /* bind: adopt the input section for this role.  sh_type is set to what
+            the role requires; flags are merged so nothing the input asked for
+            (SHF_ALLOC in particular) is dropped. */
+         sec->sh_type = sh_type;
+         sec->sh_flags |= sh_flags;
+     }
+-    sec->internal_role = 1;
++    sec->internal_role = role;
+     return sec;
+ }
+ 
++/* The mirror of reserved_section(): input names a section that tcc has ALREADY
++   created for one of its own roles, and is about to put content into it.  The
++   creation gate cannot see this ordering -- by the time the input arrives the
++   role is bound and no creator runs again -- so the two by-name reuse sites on
++   the input side (the merge loop in tcc_load_object_file(), and the assembler's
++   .section/.pushsection directives) ask here instead.
++
++   The policy is the one the role already carries, so both orderings reach the
++   same outcome for the same section: SECTION_ROLE_PRIVATE refuses, everything
++   else proceeds.  SECTION_ROLE_SHARED is exactly the case where input content
++   and tcc's own records coexist, and SECTION_ROLE_NONE is an ordinary input
++   section that tcc claims no role in.
++
++   Returns -1 when the reuse was refused, 0 when it may proceed. */
++ST_FUNC int reserved_section_claim(TCCState *s1, Section *sec)
++{
++    if (sec->internal_role != SECTION_ROLE_PRIVATE)
++        return 0;
++    return reserved_section_conflict(s1, sec->name);
++}
++
+ /* return a reference to a section, and create it if it does not
+    exists */
+ ST_FUNC Section *find_section(TCCState *s1, const char *name)
+@@ -3498,6 +3531,12 @@
+                 tcc_error_noabort("section type conflict: %s %02x <> %02x", s->name, sh->sh_type, s->sh_type);
+                 goto the_end;
+             }
++            /* the section exists because tcc created it for a role of its own,
++               and this input wants its content merged into it -- the reverse
++               of the ordering the creation gate sees.  Same policy either way
++               (see reserved_section_claim()). */
++            if (reserved_section_claim(s1, s) < 0)
++                goto the_end;
+             if (!strncmp(sh_name, ".gnu.linkonce", 13)) {
+                 /* if a 'linkonce' section is already present, we
+                    do not add it again. It is a little tricky as
+--- a/dep/tcc/tccasm.c
++++ b/dep/tcc/tccasm.c
+@@ -682,16 +682,24 @@
+     ind = cur_text_section->data_offset;
+ }
+ 
++/* .section/.pushsection reaching a section tcc created for a role of its own is
++   the same collision the creation gate handles, arriving in the other order:
++   here the role exists first and the input names it second.  The policy comes
++   from the role itself, so both orderings agree (see reserved_section_claim()).
++   A refusal is recorded and assembly continues -- the error is already logged,
++   and the run fails before writing output. */
+ static void use_section(TCCState *s1, const char *name)
+ {
+     Section *sec;
+     sec = find_section(s1, name);
++    reserved_section_claim(s1, sec);
+     use_section1(s1, sec);
+ }
+ 
+ static void push_section(TCCState *s1, const char *name)
+ {
+     Section *sec = find_section(s1, name);
++    reserved_section_claim(s1, sec);
+     sec->prev = cur_text_section;
+     use_section1(s1, sec);
+ }

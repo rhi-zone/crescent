@@ -395,13 +395,11 @@ literal `Invalid relocation entry` and the reserved-name links that baseline
 completes with no diagnostic at all. The other ten pass on both and exist as
 regression guards.
 
-**Known asymmetry, not closed.** The gate protects a role only when input
-introduces the name *before* tcc's internal creator runs. For a role tcc
-creates first — `.tcov` under `-ftest-coverage`, and the `.symtab`
-family — an input section of the same name is still merged into tcc's by
-`tcc_load_object_file()`'s name match, with no diagnostic. Closing that
-direction means gating the merge loop's reuse decision, not just the
-creation sites; recorded in TODO.md rather than papered over.
+**Known asymmetry, closed by `0009`.** `0007`'s gate protects a role only
+when input introduces the name *before* tcc's internal creator runs. For a
+role tcc creates first — `.tcov` under `-ftest-coverage` — an input section
+of the same name was still merged into tcc's by `tcc_load_object_file()`'s
+name match, with no diagnostic. See `0009` below.
 
 ### `0008-pt-gnu-stack.patch`
 
@@ -452,12 +450,87 @@ at all on this sandbox — reproduce identically without `0008`, confirming
 they predate and are unrelated to this patch).
 
 **Separately noticed, not part of this patch:** `git apply
-dep/tcc/patches/0001-*.patch … 0007-*.patch` fails on a clean checkout of
-current `origin/master` (`patch failed: dep/tcc/tccasm.c:45`), independent
-of any CI-specific environment — i.e. the `0001`–`0007` stack does not
-currently reapply from a bare `git apply` locally. `0008` was verified to
-apply cleanly on its own; the pre-existing `0001`–`0007` failure is
-recorded in TODO.md as a separate, not-yet-diagnosed issue.
+dep/tcc/patches/0001-*.patch … 0007-*.patch` was reported to fail on a clean
+checkout of current `origin/master` (`patch failed: dep/tcc/tccasm.c:45`),
+independent of any CI-specific environment. Recorded in TODO.md as a separate
+issue. *Correction from the `0009` session:* that invocation was re-run at
+`36c8ff97` and at `b6547ec2` (the commit the original report names), in a
+freshly extracted tree both times, and the whole series applies cleanly —
+including `0009`, and including the exact multi-argument form the workflow
+uses. What does reproduce the reported message exactly is adding `--check`:
+`git apply --check` validates every patch against the *unmodified* tree
+rather than chaining them, so `0003`'s `tccasm.c` hunks fail against context
+`0001` has not yet created. That is a candidate explanation for the original
+report, not a confirmed account of what was run; the TODO entry stays open.
+
+### `0009-reserved-section-input-side-gate.patch`
+
+`0009` (tcc.h + tccelf.c + tccasm.c) closes the asymmetry `0007` left open:
+the same policy now applies in both orderings.
+
+**The gap.** `0007`'s `reserved_section()` sits at tcc's creation sites, so
+it only sees the ordering where input named the section first. The reverse —
+tcc creates the section for a role, *then* input claims the name — never
+reaches it, because no creator runs a second time. Both of tcc's by-name
+reuse paths on the input side took the section as-is: the merge loop in
+`tcc_load_object_file()` matches an input section against an existing one by
+name and merges into it, and the assembler's `.section`/`.pushsection` go
+through `find_section()`, which returns the existing section. Reproduced
+before touching anything, against a local `0001`–`0008` build: with
+`-ftest-coverage` (which creates `.tcov` while compiling, before any object
+is merged), both an input object carrying a `.tcov` section and an
+`__asm__(".section .tcov")` linked with **exit 0 and no diagnostic**, their
+content sitting inside tcc's coverage table — while naming the same section
+in the other order was refused, as `0007` intends.
+
+`.tcov` is the whole practical surface today, and that is a property of
+creation order rather than of the role list: every other
+`SECTION_ROLE_PRIVATE` role (`.got`, `.plt`, `.interp`, `.dynamic`,
+`.dynsym`, `.gnu.*`, `.shstrtab`, `.eh_frame_hdr`) is created during
+`elf_output_file()`, after all input has been merged, so input cannot arrive
+second for them. The gate is written against the role, not against `.tcov`,
+so a role that later starts being created earlier is covered without
+revisiting this.
+
+**Shared substrate, not a parallel mechanism.** The role classification
+`0007` established is what decides both directions; only the direction of
+lookup differs. `Section->internal_role` therefore stores *which* role a
+section was created for (`SECTION_ROLE_NONE`/`SHARED`/`PRIVATE`) instead of
+`0007`'s bare "has a role" bit, and `reserved_section_claim()` reads that
+role back on the input side. Both it and `reserved_section()` raise the same
+diagnostic through one helper, so the two orderings are indistinguishable to
+a caller: `section '.tcov' is reserved for internal use`, via
+`tcc_error_noabort()`, output suppressed. `SECTION_ROLE_SHARED` continues to
+merge input content exactly as before — the `.eh_frame`/dwarf coexistence
+`0007` relies on runs through the new check unchanged — and the `.symtab`
+family stays `SHARED` by the same deliberate decision recorded above (GNU
+`as` does not protect it either), so it is untouched here.
+
+**Verified.** `dep/tcc/patches/0009-tests/run.sh`: **10 pass** with `0009`
+applied, **3 fail** against an `0001`–`0008` baseline — the three orderings
+`0009` fixes (object merge, `.section`, `.pushsection`). The other seven are
+regression guards and pass on both: the reverse ordering still refused, an
+input `.tcov` still linking and running when no coverage role exists (the
+reservation follows the role, not the name), `.eh_frame` still merging input
+content into tcc's section in this same "tcc first" ordering, and ordinary
+compile/link/run. `0005`/`0006`/`0007`'s harnesses give identical results on
+patched and baseline builds (9, 10 and 18 passing respectively). tcc's own
+`make test` produces byte-identical output on both, stopping at the same
+pre-existing environmental `test3` failure, and `abitest`/`btest`/`dlltest`/
+`vla_test-run`/`asm-c-connect-test`/`asmtest2`/`weaktest`/`test4`/`tests2`
+have identical results. Objects compiled by both binaries are byte-identical
+across `sqlite3.c`, `tccelf.c` and `.S` inputs under `-g`, `-gdwarf-5`,
+`-ftest-coverage` and `-fno-asynchronous-unwind-tables` (with the compilers'
+own directory equalised: the only difference otherwise is the include path
+tcc records in debug info, an artifact of the two builds living in
+differently named directories). A freshly `buildvm`-generated `lj_vm.S`
+assembles to a byte-identical object, and a LuaJIT linked from it passes
+trace compilation, ffi, `pcall`/callback/coroutine unwinding, deep recursion
+and GC churn identically to an all-gcc control; libressl's seven perlasm
+objects keep the recorded baseline exactly (same five assemble
+byte-identically, `aesni`/`ghash` fail on the same `%xmm8` gap), with no new
+diagnostic from either. `0008`'s `PT_GNU_STACK` header and `dlopen()` still
+behave as recorded.
 
 ## Vendored binary layout
 
