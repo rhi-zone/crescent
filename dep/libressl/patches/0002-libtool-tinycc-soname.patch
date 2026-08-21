@@ -1,0 +1,58 @@
+Subject: [PATCH 2/2] libtool: emit a SONAME from tcc's non-GNU-ld archive_cmds
+
+Applies on top of 0001-libtool-tinycc-compiler-support.patch.
+
+0001 backports upstream GNU libtool's `tcc*)` entries verbatim. One of
+them -- the `linux*)` branch of `_LT_LINKER_SHLIBS` taken when `$LD` is
+not GNU ld, which is exactly the branch reached under upstream's own
+documented `./configure CC=tcc LD=tcc` -- sets
+
+    archive_cmds='$CC -shared $pic_flag -o $lib $libobjs $deplibs $compiler_flags'
+
+with no `-soname`. Every other spec in the same file that drives a
+GNU-ld-style linker through `$CC` carries `${wl}-soname $wl$soname`
+(the gnu-ld branch, sunos4, sysv5, the C++ tag, ...). The omission is
+upstream's, not a property of tcc: tcc's `-Wl,` parser in `libtcc.c`
+matches `soname=|install_name=` and its `link_option()` explicitly
+supports the argument arriving in a following `-Wl,` group ("expecting
+argument with next '-Wl,'"), so libtool's split spelling
+`-Wl,-soname -Wl,libcrypto.so.57` is accepted as-is. tcc also stores it
+into `TCCState.soname` and writes `DT_SONAME` in `tccelf.c`.
+
+Consequence without this patch: a tcc-built `libcrypto.so.57.0.2` has no
+`DT_SONAME`, so anything linking against it records the literal filename
+it was handed rather than the versioned soname, and the resulting
+libraries are not drop-in interchangeable with the gcc-built ones.
+
+This does not address the second half of the divergence -- the tcc-built
+libraries still export their whole symbol table rather than the set in
+`crypto/crypto_portable.sym`. That needs `archive_expsym_cmds`, and both
+spellings libtool has for it (`--version-script`, `--retain-symbols-file`)
+are linker options tcc does not implement, so it is a tcc feature gap
+rather than a libtool spec gap and is not fixable through this mechanism.
+`archive_expsym_cmds` is left empty; `ltmain.sh` guards its use with
+`test -n`, so the `-export-symbols`-bearing links fall back to
+`archive_cmds` and pick the SONAME up too.
+
+--- a/dep/libressl/configure
++++ b/dep/libressl/configure
+@@ -10426,7 +10426,7 @@
+       tcc*)
+ 	# Fabrice Bellard et al's Tiny C Compiler
+ 	ld_shlibs=yes
+-	archive_cmds='$CC -shared $pic_flag -o $lib $libobjs $deplibs $compiler_flags'
++	archive_cmds='$CC -shared $pic_flag -o $lib $libobjs $deplibs $compiler_flags ${wl}-soname $wl$soname'
+ 	hardcode_libdir_flag_spec='${wl}-rpath ${wl}$libdir'
+ 	;;
+       esac
+--- a/dep/libressl/m4/libtool.m4
++++ b/dep/libressl/m4/libtool.m4
+@@ -5357,7 +5357,7 @@
+       tcc*)
+ 	# Fabrice Bellard et al's Tiny C Compiler
+ 	_LT_TAGVAR(ld_shlibs, $1)=yes
+-	_LT_TAGVAR(archive_cmds, $1)='$CC -shared $pic_flag -o $lib $libobjs $deplibs $compiler_flags'
++	_LT_TAGVAR(archive_cmds, $1)='$CC -shared $pic_flag -o $lib $libobjs $deplibs $compiler_flags ${wl}-soname $wl$soname'
+ 	_LT_TAGVAR(hardcode_libdir_flag_spec, $1)='${wl}-rpath ${wl}$libdir'
+ 	;;
+       esac

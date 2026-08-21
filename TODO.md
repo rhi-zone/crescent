@@ -47,7 +47,8 @@ See `docs/roadmap-v2.md` for the authoritative project roadmap and sequencing. T
   automake's rebuild rules see `m4/libtool.m4` as newer than `aclocal.m4` and
   `make` dies on `aclocal-1.18: command not found`.
   Verified end to end on this NixOS box with a tcc built from `dep/tcc` +
-  all twelve `dep/tcc/patches`: `CC=tcc LD=tcc ./configure --disable-asm && make
+  all of `dep/tcc/patches` (13 as of 2026-08-21; an earlier revision of this
+  entry said "twelve" and undercounted): `CC=tcc LD=tcc ./configure --disable-asm && make
   && make check` → **136/136 tests pass**, shared `libcrypto.so.57.0.2`,
   `libssl.so.60.0.2` and `libtls.so.33.0.2` all produced through the normal
   libtool path (no hand-linking), the `openssl` app runs, and a separate C
@@ -79,21 +80,54 @@ See `docs/roadmap-v2.md` for the authoritative project roadmap and sequencing. T
   (c) declare `supports_anon_versioning=no` for tcc in the libtool table, or
   (d) build the tcc tier static-only.
 
-- [ ] **The tcc-built shared libraries differ from the gcc-built vendored ones in
-  two ways; decide whether that is acceptable for the tcc fallback tier before
-  anything ships from it.** Upstream libtool's tcc `archive_cmds` is
+- [x] **SONAME half of the tcc/gcc shared-library divergence: fixed by
+  `dep/libressl/patches/0002-libtool-tinycc-soname.patch`.** Upstream libtool's
+  `tcc*)` `archive_cmds` on the non-GNU-ld `linux*)` path is
   `$CC -shared $pic_flag -o $lib $libobjs $deplibs $compiler_flags` — no
-  `-soname`, no export list. Confirmed with `readelf -d`: the tcc-built
-  `libcrypto.so.57.0.2` has **no `SONAME` entry** (the vendored gcc-built
-  `dep/libressl/linux-x86_64/libcrypto.so.57` has `SONAME libcrypto.so.57`), so
-  consumers record the literal filename they linked against; and with
-  `archive_expsym_cmds` empty the library **exports its full symbol table**
-  rather than the set in `crypto_portable.sym`. tcc does support
-  `-Wl,-soname=`, so the SONAME half looks like an upstream-libtool omission
-  that could be fixed properly rather than accepted.
+  `-soname`. That is an omission in upstream's minimal tcc support, not a tcc
+  limitation: every other spec in the same file driving a GNU-ld-style linker
+  through `$CC` carries `${wl}-soname $wl$soname`, and tcc accepts exactly that
+  split spelling — `libtcc.c`'s `link_option()` matches `soname=|install_name=`
+  and explicitly handles the argument arriving in the *next* `-Wl,` group
+  ("expecting argument with next '-Wl,'"), then `tccelf.c` writes `DT_SONAME`.
+  Checked directly before patching: `tcc -shared -o libs.so s.c -Wl,-soname
+  -Wl,libs.so.9` yields `SONAME libs.so.9`. The patch appends that one flag to
+  the `tcc*)` entry in both `m4/libtool.m4` and the generated `configure`.
+  Verified on a full rebuild (fresh tcc from `dep/tcc` + all 13 patches;
+  `CC=tcc LD=tcc ./configure --disable-asm`): all three libraries now carry
+  `DT_SONAME` and the values match the gcc-built vendored ones exactly —
+  `libcrypto.so.57`, `libssl.so.60`, `libtls.so.33`. `make check` still
+  **136/136**, zero failures or skips. A C program linked against the resulting
+  shared libcrypto records `NEEDED libcrypto.so.57` (the soname, not a path),
+  `ldd` resolves it to the tcc-built object, and SHA-256 of `abc` comes back as
+  the known vector, identically whether the consumer is gcc- or tcc-linked.
+  `archive_expsym_cmds` stays empty and `ltmain.sh` guards its use with
+  `test -n`, so libcrypto — which libressl builds with `-export-symbols
+  crypto_portable.sym` — falls through to `archive_cmds` and picks the SONAME up
+  too; confirmed against the generated `libtool` in the real build rather than
+  inferred.
+
+- [ ] **Export half of that divergence is NOT fixed and is still an owner call:
+  tcc-built libressl exports its full symbol table.** Measured on the verified
+  build, counting defined `GLOBAL`/`WEAK` dynamic symbols: gcc-built = 3263,
+  exactly the line count of `crypto/crypto_portable.sym`; tcc-built = 3920. All
+  657 extras are internals (`aes_decrypt_internal`, `x509_vfy_check_policy`, …)
+  absent from the sym file; nothing that should be exported is missing. This is
+  not fixable through the `0002` mechanism: restricting exports requires
+  `archive_expsym_cmds`, and both spellings libtool has for it
+  (`--version-script`, `--retain-symbols-file`) are linker options tcc does not
+  implement — a tcc feature gap, not a libtool spec gap. Closing it properly
+  means a new `dep/tcc/patches/` entry teaching tcc one of those options.
+  Until then: decide whether an unrestricted export table is acceptable for the
+  tcc fallback tier before anything ships from it.
+  Incidental measurement note for whoever picks this up: tcc additionally emits
+  ~2060 `name@plt` stub entries into `.dynsym` that gcc does not (6182 total
+  entries vs 3378), including libc names like `accept@plt`. They are harmless —
+  the literal `@plt` is part of the symbol name, so they cannot collide with a
+  real lookup — but a naive dynsym count is badly inflated by them.
 
 - [ ] **New tcc assembler gap: `.intel_syntax` is unsupported, so libressl 4.3.2
-  needs `--disable-asm`.** Separate from the twelve existing
+  needs `--disable-asm`.** Separate from the existing
   `dep/tcc/patches` (which closed the gaps in the `*-elf-x86_64.S` files):
   `crypto/bn/arch/amd64/bignum_*.S` (the s2n-bignum imports) are written in Intel
   syntax and tcc's assembler is AT&T-only — `error: unknown opcode

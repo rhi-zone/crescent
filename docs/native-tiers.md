@@ -733,6 +733,22 @@ build time. Two consequences of that layer: the patch must be applied
 with `git apply` from the repo root like the tcc ones, and because it
 touches `m4/libtool.m4` the generated files must then be re-`touch`ed or
 automake's rebuild rules will demand an `aclocal` that is not installed.
+
+`0002-libtool-tinycc-soname.patch` then fixes an omission *in* those
+upstream entries: the `tcc*)` `archive_cmds` reached on the non-GNU-ld
+path carried no `-soname`, so tcc-built shared libraries had no
+`DT_SONAME` at all and consumers recorded whatever filename they were
+handed. Every other spec in that file which drives a GNU-ld-style linker
+through `$CC` carries `${wl}-soname $wl$soname`; the patch does the same
+for tcc, which accepts the flag in exactly that split spelling.
+
+One divergence from the gcc-built libraries remains and is *not* fixed:
+tcc-built libraries export their full symbol table rather than the set in
+`crypto/crypto_portable.sym`. Restricting exports needs
+`archive_expsym_cmds`, and both spellings libtool has for it
+(`--version-script`, `--retain-symbols-file`) are linker options tcc does
+not implement — a tcc feature gap, not a libtool spec gap.
+
 See TODO.md for the verification record and for the gaps that remain
 open behind it.
 
