@@ -81,8 +81,10 @@ See `docs/roadmap-v2.md` for the authoritative project roadmap and sequencing. T
   like everything else).
 
 - [ ] **Not done, out of scope for this pass:** wiring the vendored `dep/luajit/` source
-  into the tcc-as-`CC` `tcc-build-deps-*` job (still unattempted — see the TinyCC section's
-  update note below). Extending hash verification or VERSION/VENDORED_VERSION skip-logic to
+  into the tcc-as-`CC` `tcc-build-deps-*` job (unattempted as of this pass — later wired in
+  and verified end-to-end, see the TinyCC section's "Update 2" note below; that job was
+  subsequently removed entirely, see the note appended after "Update 2"). Extending hash
+  verification or VERSION/VENDORED_VERSION skip-logic to
   platforms/deps beyond what's listed above (e.g. macOS/Windows sqlite3/zlib binaries are
   still built unconditionally by the `commit` job's per-artifact `copy_if_present`, unrelated
   to this pass). `dep/xterm-js` and `dep/acorn` (JS deps for `docs/`) were not touched —
@@ -194,6 +196,15 @@ See `docs/roadmap-v2.md` for the authoritative project roadmap and sequencing. T
     accurate statement is "tcc cannot compile LuaJIT at all", not "tcc cannot build LuaJIT's
     host tools". This does not change the fix options already recorded above, but it does change
     the size of the task: closing it unblocks the whole build, not one tool.
+  - **`tcc-build-deps-linux-x86_64` (and the other `tcc-build-deps-*`/`tcc-bootstrap-*`
+    diagnostic jobs) removed entirely (commit `59b4e224`, "refactor(ci): fold tcc back into
+    build-vendored.yml, full lockstep").** The job never produced a shippable artifact — it
+    existed only to verify tcc-as-`CC` against the vendored deps — and every finding it
+    surfaced (the two pre-existing bootstrap/libpath bugs fixed above, sqlite3/zlib building
+    cleanly, libressl needing `--disable-asm`, and the LuaJIT `__TINYC__`/`lj_def.h`
+    substrate gap) is already captured in this file, so keeping a live CI job around to
+    re-derive already-recorded findings was redundant. This section stays as the durable
+    record of what was found; there is no corresponding job in `build-vendored.yml` anymore.
 
 - [x] **libressl's perlasm-generated `*-elf-x86_64.S` files use SSE2/AES-NI opcodes tcc's
   assembler had zero table entries for — now patched
