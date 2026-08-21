@@ -365,36 +365,53 @@ See `docs/roadmap-v2.md` for the authoritative project roadmap and sequencing. T
   registers and no VEX encoding path at all, so extending to them is a new encoding
   mechanism rather than more register names — out of scope here, not blocking anything known.
 
-- [ ] **`dep/tcc/x86_64-asm.h` types the register-to-register form of `movups`, `movaps`
-  and `movhps` as `OPT_EA | OPT_REG32` where it must be `OPT_EA | OPT_SSE`** — so
-  `movaps %xmm0,%xmm1` is rejected with `bad operand with opcode 'movaps'`. Not
-  extended-register-specific: it fails identically on `xmm0`–`xmm7` and on the unpatched
-  vendored tcc, and it was simply hidden behind the `%xmm8` gap until `0010` closed that.
-  Found while verifying `0010`, by assembling `dep/libressl/crypto/aes/aesni-elf-x86_64.S`,
-  which now reaches line 828 (`movaps %xmm9,%xmm2`) before failing. Same family as
-  `0002-libressl-sse-aesni-opcodes.patch` (opcode-table entries that disagree with real
-  `as`). Probed locally: changing the three entries' `OPT_REG32` to `OPT_SSE` makes the form
-  assemble; the resulting choice between the two `ALT` encodings (`0f28` vs `0f29`) needs
-  checking against real `as` before this is called done, and that check was not run — the
-  probe was reverted rather than kept, to keep `0010` to one concern.
+- [x] **RESOLVED by `dep/tcc/patches/0011-sse-mov-operand-types.patch` (2026-08-21):
+  `dep/tcc/x86_64-asm.h` typed the non-EA operand of `movups`, `movaps` and `movhps` as
+  `OPT_EA | OPT_REG32` — a general-purpose register class on instructions that take an SSE
+  register.** The visible half was `movaps %xmm0,%xmm1` being rejected (`bad operand with
+  opcode 'movaps'`), which is what surfaced it: `0010` let `aesni-elf-x86_64.S` reach line
+  828. The half that matters more was found while writing the tests — `movups %eax,%xmm0`,
+  which real `as` rejects, **assembled**, emitting `movups %xmm0,%xmm0`, taking the GP
+  register number as the xmm of the same number with no diagnostic; and `movhps %eax,%xmm1`
+  emitted `0f 16 c8`, which is `movlhps`, a different instruction. Both predate `0010`.
+  **The two open questions were checked against real `as`, not guessed.** (1) `movhps` is
+  *not* typed like the other two: `as` rejects `movhps %xmm0,%xmm1` with `operand type
+  mismatch`, because `0f16`/`0f17` with `mod=11` are `movlhps`/`movhlps` — so its EA operand
+  takes no register class (`OPT_EA`), while `movups`/`movaps` take `OPT_EA | OPT_SSE`.
+  (2) The `ALT` ambiguity: with both operands SSE both entries of a pair match and tcc takes
+  the first; `as` emits the load-direction opcode for register-to-register (`0f28` for
+  `movaps`, `0f10` for `movups`), which is what tcc's existing ALT order already selects, so
+  the order needed no change. Verified with `dep/tcc/patches/0011-tests/run.sh`: 7 pass —
+  two positive cases byte-identical to `as` (register-to-register across `xmm0`–`xmm15`, and
+  the memory forms in both directions as a regression guard) plus five negative cases where
+  `as` rejects and tcc must too; against an `0001`–`0010` baseline, 2 pass / 5 fail, with all
+  four GP-operand cases failing *by assembling*. All 450 `movaps`/`movups`/`movhps`
+  instructions in `aesni-elf-x86_64.S` encode byte-identically to `as`.
+  **Not done:** `movlhps`/`movhlps` are absent from tcc's tables entirely and were not added
+  — that is new capability, not a correction.
 
 - [ ] **tcc's assembler has no `.value` directive** (`dep/tcc/tccasm.c` has
-  `TOK_ASMDIR_word`/`TOK_ASMDIR_short` but nothing for `value`, GAS's synonym for
-  `.short`) — `dep/libressl/crypto/modes/ghash-elf-x86_64.S` fails at line 1004 on the
-  `.Lrem_8bit` table with `incorrect number of operands`, because `.value` is not recognized
+  `TOK_ASMDIR_word`/`TOK_ASMDIR_short` but nothing for `value`, GAS's x86 spelling of
+  `.short`) — `dep/libressl/crypto/modes/ghash-elf-x86_64.S` fails at line 1004 on its
+  `.Lrem_8bit` table with `incorrect number of operands`, because the name is not recognized
   as a directive and falls through to opcode parsing. Found while verifying `0010`; unrelated
-  to registers, and the second of the two blockers now standing between the current tcc and
-  assembling `ghash-elf-x86_64.S`. Probed locally (a `DEF_ASMDIR(value)` alongside `short`
-  plus a fallthrough case in the emitter is enough to make the file assemble); the probe was
-  reverted rather than kept, to keep `0010` to one concern. Whether GAS's `.value` is exactly
-  `.short` in every respect was not confirmed against the `as` documentation or binary.
+  to registers and to `0011`, and the last remaining blocker on `ghash-elf-x86_64.S`.
 
-- [ ] **With those two fixed, both blocked perlasm files assemble** — confirmed locally by
-  applying `0010` plus both probes above and assembling
-  `dep/libressl/crypto/aes/aesni-elf-x86_64.S` and
-  `dep/libressl/crypto/modes/ghash-elf-x86_64.S` cleanly. That is the remaining distance to
-  dropping `--disable-asm` for libressl; the output was not compared against `as` for those
-  two files under the probes, only under `0010` alone (extended-register instructions only).
+- [ ] **`dep/tcc/i386-asm.h` carries the identical `OPT_REG32` bug `0011` fixed in
+  `x86_64-asm.h`** — same six entries, same wrong operand class, so the 32-bit targets
+  (`tcc-windows-x86`) still reject `movaps %xmm0,%xmm1` and still silently assemble
+  `movups %eax,%xmm0` as `movups %xmm0,%xmm0`. Confirmed by reading the table, not inferred.
+  Deliberately left out of `0011`: this whole effort's verification surface is x86_64 (the
+  libressl perlasm, `lj_vm.S`), and holding `0011` to the target it was verified against was
+  preferred over changing a shipped target's behavior on an untested path. Closing it needs
+  an i386 tcc build plus `as --32` to verify to the same bar.
+
+- [ ] **Six of libressl's seven `*-elf-x86_64.S` files now assemble; `ghash` is the last
+  one** — `0011` closed `aesni-elf-x86_64.S`, and the five that already worked stay
+  byte-identical to the pre-`0011` build. `ghash-elf-x86_64.S` waits on the `.value`
+  directive above. Even with all seven assembling, whether libressl then *configures, builds
+  and links* end to end with tcc as `CC` is a separate unverified question, and dropping
+  `--disable-asm` depends on it. See the `tcc-build-deps-linux-x86_64` note above.
 
 - [x] **tcc's `.section NAME,"flags"` assembler directive hardcoded `SHF_ALLOC` into
   every parsed section's flags and never recognized `a` in the flags string at all — now

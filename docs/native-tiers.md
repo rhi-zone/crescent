@@ -584,7 +584,48 @@ with registers. `x86_64-asm.h` types the second operand of `movups`/`movaps`/
 `movhps` as `OPT_EA | OPT_REG32` where the register-to-register form needs
 `OPT_SSE`, so `movaps %xmm0,%xmm1` is rejected on the unpatched tcc too; and
 `.value` (the GAS spelling of `.short`) is not among tcc's assembler
-directives. Both are recorded in TODO.md.
+directives. `0011` below closes the first; the `.value` one is recorded in
+TODO.md.
+
+### `0011-sse-mov-operand-types.patch`
+
+`0011` (x86_64-asm.h) corrects the operand types of `movups`, `movaps` and
+`movhps`.
+
+**The gap.** All six table entries typed the non-EA operand `OPT_EA |
+OPT_REG32` — a *general-purpose* register class on instructions that take an
+SSE register. That is wrong in both directions at once, and the dangerous
+direction is not the obvious one. `movaps %xmm0,%xmm1` was rejected outright
+(`bad operand with opcode 'movaps'`) — visible, and what surfaced the bug when
+`0010` let `aesni-elf-x86_64.S` reach line 828. But `movups %eax,%xmm0`, which
+real `as` rejects, *assembled*, emitting `movups %xmm0,%xmm0`: the GP register
+number was taken as the xmm of the same number, silently, with no diagnostic.
+`movhps %eax,%xmm1` was worse still, emitting `0f 16 c8` — `movlhps`, a
+different instruction. Both misbehaviours predate `0010` and are independent of
+the extended registers.
+
+**Why `movhps` is not typed like the other two.** Checked against `as` rather
+than assumed: `as` rejects `movhps %xmm0,%xmm1` with `operand type mismatch`,
+because `0f16`/`0f17` with `mod=11` are `movlhps`/`movhlps`, different
+instructions. So `movhps`'s EA operand takes no register class at all
+(`OPT_EA`), while `movups`/`movaps` take `OPT_EA | OPT_SSE`.
+
+**The ALT question.** With both operands SSE, both of a pair's table entries
+match, and tcc takes the first. Checked against `as`: it emits the
+load-direction opcode for the register-to-register form — `0f28` for `movaps`,
+`0f10` for `movups` — which is the entry tcc's existing ALT order already
+selects, so the order needed no change. `movlhps`/`movhlps` are absent from
+tcc's tables entirely and are not added here; that would be new capability
+rather than a correction.
+
+**Verified.** `dep/tcc/patches/0011-tests/run.sh`: **7 pass** — two positive
+cases byte-identical to `as` (register-to-register across `xmm0`–`xmm15`, and
+the memory forms in both directions, which must be undisturbed), and five
+negative cases where `as` rejects and tcc must too. Against an `0001`–`0010`
+baseline: **2 pass, 5 fail** — the register-to-register case failing to
+assemble and all four GP-operand cases failing *by assembling*. On the real
+perlasm, all **450** `movaps`/`movups`/`movhps` instructions in
+`aesni-elf-x86_64.S` encode byte-identically to `as`.
 
 ## Vendored binary layout
 

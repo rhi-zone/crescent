@@ -1,0 +1,65 @@
+/* The register-to-register forms real "as" accepts. Both operands are SSE,
+   so both table entries match and the choice between them is the ALT order:
+   "as" emits the load-direction opcode (0f28 / 0f10), not the store one. */
+	.text
+t0_reg_reg:
+	movaps	%xmm0,%xmm0
+	movups	%xmm0,%xmm0
+	movaps	%xmm0,%xmm1
+	movups	%xmm0,%xmm1
+	movaps	%xmm0,%xmm7
+	movups	%xmm0,%xmm7
+	movaps	%xmm0,%xmm8
+	movups	%xmm0,%xmm8
+	movaps	%xmm0,%xmm15
+	movups	%xmm0,%xmm15
+	movaps	%xmm1,%xmm0
+	movups	%xmm1,%xmm0
+	movaps	%xmm1,%xmm1
+	movups	%xmm1,%xmm1
+	movaps	%xmm1,%xmm7
+	movups	%xmm1,%xmm7
+	movaps	%xmm1,%xmm8
+	movups	%xmm1,%xmm8
+	movaps	%xmm1,%xmm15
+	movups	%xmm1,%xmm15
+	movaps	%xmm7,%xmm0
+	movups	%xmm7,%xmm0
+	movaps	%xmm7,%xmm1
+	movups	%xmm7,%xmm1
+	movaps	%xmm7,%xmm7
+	movups	%xmm7,%xmm7
+	movaps	%xmm7,%xmm8
+	movups	%xmm7,%xmm8
+	movaps	%xmm7,%xmm15
+	movups	%xmm7,%xmm15
+	movaps	%xmm8,%xmm0
+	movups	%xmm8,%xmm0
+	movaps	%xmm8,%xmm1
+	movups	%xmm8,%xmm1
+	movaps	%xmm8,%xmm7
+	movups	%xmm8,%xmm7
+	movaps	%xmm8,%xmm8
+	movups	%xmm8,%xmm8
+	movaps	%xmm8,%xmm15
+	movups	%xmm8,%xmm15
+	movaps	%xmm9,%xmm0
+	movups	%xmm9,%xmm0
+	movaps	%xmm9,%xmm1
+	movups	%xmm9,%xmm1
+	movaps	%xmm9,%xmm7
+	movups	%xmm9,%xmm7
+	movaps	%xmm9,%xmm8
+	movups	%xmm9,%xmm8
+	movaps	%xmm9,%xmm15
+	movups	%xmm9,%xmm15
+	movaps	%xmm15,%xmm0
+	movups	%xmm15,%xmm0
+	movaps	%xmm15,%xmm1
+	movups	%xmm15,%xmm1
+	movaps	%xmm15,%xmm7
+	movups	%xmm15,%xmm7
+	movaps	%xmm15,%xmm8
+	movups	%xmm15,%xmm8
+	movaps	%xmm15,%xmm15
+	movups	%xmm15,%xmm15
