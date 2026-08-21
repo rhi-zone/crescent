@@ -138,10 +138,36 @@ See `docs/roadmap-v2.md` for the authoritative project roadmap and sequencing. T
   `dep/tcc/patches` (which closed the gaps in the `*-elf-x86_64.S` files):
   `crypto/bn/arch/amd64/bignum_*.S` (the s2n-bignum imports) are written in Intel
   syntax and tcc's assembler is AT&T-only — `error: unknown opcode
-  '.intel_syntax'` on all eight files. Every result above was obtained with
-  `--disable-asm`. Closing this means teaching `tccasm.c` the
-  `.intel_syntax`/`.att_syntax` directives and an Intel-syntax operand parser,
-  which is a much larger job than the existing opcode-table patches.
+  '.intel_syntax'` on all 21 files (corrected from an earlier "eight" —
+  confirmed by directory listing while doing the AT&T-mirror work below).
+  Every result above was obtained with `--disable-asm`. Closing this means
+  teaching `tccasm.c` the `.intel_syntax`/`.att_syntax` directives and an
+  Intel-syntax operand parser, which is a much larger job than the existing
+  opcode-table patches.
+
+- [ ] **AT&T mirror of the s2n-bignum files exists and is proven
+  translation-correct, but 6 of 21 are still unbuildable under tcc and none
+  are wired into the build.** `dep/libressl/crypto/bn/arch/amd64/att/`
+  holds an AT&T-syntax translation of all 21 Intel-syntax files, generated
+  with AWS's own upstream `attrofy.sed` (vendored alongside them; see that
+  directory's README for provenance). All 21 are verified byte-identical to
+  their Intel originals when assembled by real GNU `as` across 4
+  preprocessor configs (84/84 checks — see `docs/native-tiers.md`,
+  "libressl bignum: AT&T mirror for tcc", for the methodology). That check
+  is orthogonal to tcc buildability, which is worse:
+  - `bignum_mul_4_8.S`, `bignum_mul_6_12.S`, `bignum_mul_8_16.S`,
+    `bignum_sqr_4_8.S`, `bignum_sqr_6_12.S`, `bignum_sqr_8_16.S` (the ADX
+    fast-path routines) are rejected outright by the vendored tcc — no
+    `mulx`/`adcx`/`adox` opcode support, no `.macro`/`.endm`. This is the
+    same class of gap as the `.intel_syntax` item above, just deeper (an
+    opcode-table and macro-preprocessor gap instead of a syntax-mode gap).
+  - The other 15 assemble under tcc without error, but whether tcc's
+    codegen for them is instruction-equivalent to the gcc/gas ground truth
+    is **not yet independently verified** — tracked as separate,
+    in-progress work. Don't assume "assembles" means "correct" for these.
+  - Regardless of the above, this task did not flip `--disable-asm` off or
+    point any build at `att/` — that's gated on closing the remaining gaps
+    and is explicitly a separate step.
 
 - [ ] **Nothing in CI applies `dep/libressl/patches/` yet.** The
   `libressl-linux-x86_64` job in `build-vendored.yml` builds with the runner's
