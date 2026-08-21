@@ -733,6 +733,104 @@ produces output identical to that build, and a freshly `buildvm`-generated
 running with the JIT on — that last one a negative control, since the generated
 `lj_vm.S` contains no `$` at all.
 
+### `0014-note-gnu-stack-object-marker.patch`
+
+`0014` (tcc.h + libtcc.c + tccelf.c) makes `elf_output_obj()` emit an empty
+`.note.GNU-stack` marker in objects holding tcc-generated code.
+
+**The bug.** GNU `ld` decides an executable's `PT_GNU_STACK` permissions from
+its inputs' `.note.GNU-stack` sections, and its default for an input carrying
+none is *this object requires an executable stack*. One unmarked object makes
+the whole link `RWE`. tcc emitted the section in no object at all, so linking
+any `tcc -c` output with a real `ld` produced an executable-stack binary plus
+binutils 2.44's `missing .note.GNU-stack section implies executable stack`
+warning. Reproduced directly: trivial `.c` → `tcc -c` → `gcc` link →
+`GNU_STACK … RWE`; the same source through gcc gives `RW`.
+
+**Relationship to `0008`.** They are the two halves of one stance and neither
+substitutes for the other. `0008` writes a `PT_GNU_STACK` program header from
+`layout_sections()`, which runs only when tcc performs the final link; `0014`
+marks the object, which is what a foreign `ld` reads. Verified to compose:
+with both applied, tcc-linked binaries still carry `GNU_STACK … RW`, and
+because the marker is not `SHF_ALLOC` it is dropped from executable output
+rather than duplicated there.
+
+**Scope, and why it is narrower than "every object".** The marker is added
+only when tcc's own code generator contributed to the object — a new sticky
+`TCCState.compiler_generated_code`, set on the `tccgen_compile()` branch in
+`tcc_compile()`, sticky because `-r` merges several inputs into one object.
+Two cases are deliberately untouched:
+
+- **Assembled input that said nothing about the stack gets nothing.**
+  Measured, not assumed: neither `as` nor `gcc -c` marks a hand-written `.S`
+  (binutils 2.44 / gcc 15.2.0). The convention is that asm authors declare
+  their own stack-execution needs, and an `.S` that genuinely requires an
+  executable stack but omitted the declaration would start crashing if the
+  compiler answered on its behalf.
+- **Input that supplied the section keeps it verbatim.** `"x"` there is a
+  real requirement, and re-flagging it would discard that requirement with a
+  runtime crash as the only symptom.
+
+**`-r` merges, and parity with `ld -r`.** `-r` puts both kinds of input in
+one object, and the marker is a property of the object, so the two statements
+have to be reconciled. GNU `ld -r` is the incumbent and reconciles by
+upgrading: merging a marked object with an unmarked one yields a marker
+carrying `SHF_EXECINSTR`, so the unmarked input's implicit *I need an
+executable stack* survives rather than being silently dropped. Measured on
+binutils 2.44 — the final link of such a merged object reports `requires
+executable stack (because the .note.GNU-stack section is executable)` and
+produces `GNU_STACK … RWE`.
+
+tcc matches via `TCCState.undeclared_stack_input`, raised by either input
+class that declares nothing: an assembled source, tracked by a per-input flag
+the `.section`/`.pushsection` directive sets when it names the marker; and a
+merged object file with no such section, detected by a single pass over its
+section headers in `tcc_load_object_file()`. The section `elf_output_obj()`
+creates is executable whenever such an input shares the object. Both classes
+have to count — keying only on assembled sources left `tcc -r foo.c bar.o`
+marking the object non-executable on `bar.o`'s behalf, which is worse than
+emitting nothing, since it converts an implicit requirement into an explicit
+denial of it. All seven mixed `-r` shapes now agree with `ld -r` exactly,
+checked side by side.
+
+Two `-r` shapes are deliberately left divergent, both recorded in `TODO.md`,
+and they share a cause: this patch only ever *creates* a marker and never
+rewrites one an input supplied. `-r` over asm sources only where one declares
+the marker and another does not, and `tcc -r a.o b.o` with no compilation at
+all, both get `SHF_EXECINSTR` from `ld -r` and neither gets it here. Closing
+either means deciding whether raising a flag on an input-supplied section
+counts as rewriting it — an input's own statement would only ever be
+strengthened, never weakened — which is a question to settle on its own terms
+rather than inherit from this patch.
+
+**Standing caveat.** binutils 2.44 prints that the missing-marker-implies-
+executable-stack rule is deprecated and slated for removal. That cuts both
+ways here: it is the rule the "emit nothing for undeclared asm" behaviour
+leans on, and it is why the explicit `SHF_EXECINSTR` on merged markers is
+worth more over time than the absence that happens to mean the same thing
+today.
+
+The section is created via `reserved_section()` with `SECTION_ROLE_SHARED`
+and forced to `sh_addralign 1`, matching gcc's output byte for byte rather
+than merely in effect. It is inert on the PE and Mach-O targets, whose
+objects are also written by `elf_output_obj()`: both `tccpe.c` and
+`tccmacho.c` skip non-`SHF_ALLOC` sections when building their own output, so
+no target gate is needed.
+
+**Verified.** `0014-tests/run.sh` scores 6/11 on the `0001`–`0013` +
+`0015`–`0017` baseline, 11/11 with `0014`, and 11/11 against a real gcc — the
+reference being an actual toolchain rather than the patch's own opinion.
+
+**Adjacent gap, not addressed here.** The common real-world idiom guards the
+directive as `#if defined(__linux__) && defined(__ELF__)`, and tcc does not
+define `__ELF__` on Linux targets — `include/tccdefs.h` defines it only under
+the NetBSD branch, confirmed by `tcc -E -dM` on both the vendored binary and
+a local build. The directive is therefore preprocessed away and the object
+comes out unmarked; `dep/libressl`'s AT&T bignum mirror is affected, which is
+where the original `RWE` observation came from. `0014` does not change this,
+and under `0014` those `.S` objects stay unmarked. Tracked separately in
+`TODO.md`.
+
 ### `0015-adx-bmi2-opcodes.patch`
 
 `0015` (i386-asm.c + i386-tok.h + x86_64-asm.h) teaches the assembler `adcx`,

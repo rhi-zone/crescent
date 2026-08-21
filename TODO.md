@@ -145,19 +145,99 @@ See `docs/roadmap-v2.md` for the authoritative project roadmap and sequencing. T
   Intel-syntax operand parser, which is a much larger job than the existing
   opcode-table patches.
 
-- [ ] **tcc emits no `.note.GNU-stack` section in its object output, so GNU
-  `ld` marks anything linked from a tcc `.o` as needing an executable stack.**
-  Found 2026-08-22 while verifying the AT&T bignum mirror: linking the 15
-  tcc-assembled objects with `gcc` produces `GNU_STACK ... RWE`, and `ld`
-  warns `missing .note.GNU-stack section implies executable stack`. Not
-  specific to `.S` inputs — `tcc -c` on an ordinary `.c` file produces an
-  object with no `.note.GNU-stack` either. `0008-pt-gnu-stack.patch` covers
-  only the case where *tcc itself* is the linker (it emits the
-  `PT_GNU_STACK` program header, `PF_R | PF_W`, in its own output); the
-  object-emission side, which is what GNU `ld` reads, is untouched. The fix
-  is the mirror of `0008`: have `tcc -c` emit an empty, non-executable
-  `.note.GNU-stack` section, the way `as`, gcc and clang all do. Not
-  attempted.
+- [ ] **tcc does not define `__ELF__` on Linux targets, so guarded
+  `.note.GNU-stack` directives in real-world asm are preprocessed away.**
+  The common idiom is `#if defined(__linux__) && defined(__ELF__)` around
+  `.section .note.GNU-stack,"",%progbits`; gcc defines both, tcc defines only
+  `__linux__`. Confirmed against the live source and both binaries:
+  `include/tccdefs.h` has a single `#define __ELF__ 1`, inside the
+  `#elif defined __NetBSD__` branch, and `tcc -E -dM` on the vendored
+  `dep/tcc/tcc` and on a local build reports no `__ELF__`; the guard
+  evaluates false under tcc and true under gcc on the same input. Effect:
+  all 14 of `dep/libressl/crypto/bn/arch/amd64/att/bignum_*.S` that assemble
+  under tcc lose their own marker, which is where the `GNU_STACK ... RWE`
+  observation in the AT&T-mirror work actually came from —
+  `0014-note-gnu-stack-object-marker.patch` does not cover it, because that
+  patch deliberately does not speak for assembled input. LuaJIT is
+  unaffected: `buildvm_asm.c` writes the directive into the generated
+  `lj_vm.S` unguarded. Fix is a tccdefs conformance change (define `__ELF__`
+  wherever tcc targets ELF, as gcc and clang do), not a codegen change. Not
+  attempted; scope beyond `__linux__` (which other target branches should
+  also define it) is unexamined.
+
+- [x] **Fixed (`dep/tcc/patches/0014-note-gnu-stack-object-marker.patch`): tcc emitted
+  no `.note.GNU-stack` section in any object, so GNU `ld` marked anything linked from a
+  tcc `.o` as needing an executable stack.** GNU `ld`'s default for an input carrying no
+  marker is "this object requires an executable stack", and one such object makes the
+  whole link `RWE`. Reproduced directly: trivial `.c` → `tcc -c` → `gcc` link →
+  `GNU_STACK ... RWE` plus binutils 2.44's `missing .note.GNU-stack section implies
+  executable stack`; identical source through gcc gives `RW`.
+  `0008-pt-gnu-stack.patch` covers only the case where *tcc itself* is the linker — its
+  `PT_GNU_STACK` phdr is written by `layout_sections()`, which never runs for `tcc -c`.
+  Fix: `elf_output_obj()` creates an empty, zero-size, unflagged PROGBITS marker with
+  `sh_addralign 1` (byte for byte gcc's, not merely equivalent), via `reserved_section()`
+  with `SECTION_ROLE_SHARED`.
+  **Scope, decided by the owner rather than assumed:** only objects holding tcc-generated
+  code get it, tracked by a new sticky `TCCState.compiler_generated_code` set on the
+  `tccgen_compile()` branch (sticky because `-r` merges several inputs into one object).
+  Assembled input that declared nothing is left unmarked — measured, not recalled: neither
+  `as` nor `gcc -c` marks a hand-written `.S`, and an `.S` that genuinely needs an
+  executable stack but omitted the declaration would start crashing if tcc answered for
+  it. Input that supplied the section keeps it verbatim, `"x"` included.
+  **`-r` merges follow `ld -r` rather than a tcc-invented policy.** The marker belongs to
+  the object, so merging inputs that made different statements forces a reconciliation.
+  Measured on binutils 2.44: `ld -r` over a marked and an unmarked object yields a marker
+  carrying `SHF_EXECINSTR`, and the final link then reports `requires executable stack
+  (because the .note.GNU-stack section is executable)` with `GNU_STACK ... RWE` — the
+  unmarked input's implicit requirement survives instead of being dropped. tcc matches via
+  `TCCState.undeclared_stack_input`, raised by either input class that declares nothing —
+  an assembled source (per-input flag set by the `.section`/`.pushsection` directive when
+  it names the marker) and a merged object file carrying no such section (one pass over its
+  section headers in `tcc_load_object_file()`). The created section is executable whenever
+  such an input shares the object. Both classes must count: keying only on assembled
+  sources left `tcc -r foo.c bar.o` marking the object non-executable on `bar.o`'s behalf,
+  converting an implicit requirement into an explicit denial of it — caught in review, not
+  shipped. All seven mixed `-r` shapes now agree with `ld -r` exactly, checked side by side.
+  **Verified:** `0014-tests/run.sh` scores 6/11 on the `0001`–`0013` + `0015`–`0017`
+  baseline, 11/11 with `0014`, and 11/11 against a real gcc. `0008` composes — tcc-linked
+  binaries still carry `GNU_STACK ... RW`, and the non-`SHF_ALLOC` marker is dropped from
+  executable output rather than duplicated. Inert on PE/Mach-O, whose objects also come
+  from `elf_output_obj()`: `tccpe.c` and `tccmacho.c` both skip non-`SHF_ALLOC` sections,
+  so no target gate is needed. Objects byte-identical base vs work apart from the added
+  section and its 16-byte `.shstrtab` name; `.S` objects bit-identical with no
+  normalisation at all, since assembled input is now untouched. Wired into all 5
+  `dep/tcc/patches` apply steps in `build-vendored.yml` (applied between `0013` and
+  `0015`; `0015`–`0017` re-verified to apply after it), reasoning recorded in
+  `docs/native-tiers.md`.
+  **Left open, separately:** the `__ELF__` gap above, which is what actually keeps the
+  libressl AT&T objects unmarked, and the `-r`-over-asm-only case below.
+
+- [ ] **`tcc -r` diverges from `ld -r` whenever the merged object's marker came from
+  input rather than being created.** The general shape: some input supplies a
+  `.note.GNU-stack` section, a *different* input declares nothing, and `ld -r` raises
+  `SHF_EXECINSTR` on the merged marker so the undeclared input's implicit executable-stack
+  requirement survives (measured, binutils 2.44). tcc leaves the input-supplied section
+  exactly as it arrived — or, when nothing supplies one and no compilation happened,
+  creates nothing — and the merged object comes out unflagged, dropping that requirement.
+  Reaches every mix: asm sources only with one declaring and one not; `tcc -r a.o b.o`
+  with no compilation at all; and `tcc -r foo.c marked.o unmarked.o`, where compilation
+  does happen but a marker already exists so none is created. Not closed by
+  `0014-note-gnu-stack-object-marker.patch`: that patch only ever *creates* a marker and
+  never rewrites one an input supplied, which is the property `0014-tests` `t3` exists to
+  protect. Closing this means deciding whether raising a flag on an input-supplied section
+  counts as rewriting it — an input's own statement would only ever be strengthened, never
+  weakened, so the answer is not obvious from `t3`'s rule alone. Needs deciding on its own
+  terms; not attempted. The seven two-input `-r` shapes where compilation happens and no
+  input supplied a marker of its own already match `ld -r` exactly.
+
+- [ ] **tcc segfaults on a truncated object file, or one whose `sh_name` points past the
+  end of `.shstrtab`.** Pre-existing and unrelated to
+  `0014-note-gnu-stack-object-marker.patch` — reproduced identically on builds with and
+  without it, same return code and same empty stderr — but noticed while regression-testing
+  that patch, whose new section-header scan in `tcc_load_object_file()` reads the same
+  unvalidated field a few lines earlier than the existing code that already dereferences it
+  without bounds-checking. A malformed or hostile `.o` should be a diagnostic, not a crash.
+  Not attempted.
 
 - [ ] **AT&T mirror of the s2n-bignum files exists, all 21 now assemble under
   tcc and are verified correct, but none are wired into the build.**

@@ -1,0 +1,180 @@
+diff --git a/dep/tcc/libtcc.c b/dep/tcc/libtcc.c
+index 44ea25f..4337c70 100644
+--- a/dep/tcc/libtcc.c
++++ b/dep/tcc/libtcc.c
+@@ -829,8 +829,12 @@ static int tcc_compile(TCCState *s1, int filetype, const char *str, int fd)
+         } else {
+             tccelf_begin_file(s1);
+             if (filetype & (AFF_TYPE_ASM | AFF_TYPE_ASMPP)) {
++                s1->asm_declared_gnu_stack = 0;
+                 tcc_assemble(s1, !!(filetype & AFF_TYPE_ASMPP));
++                if (!s1->asm_declared_gnu_stack)
++                    s1->undeclared_stack_input = 1;
+             } else {
++                s1->compiler_generated_code = 1;
+                 tccgen_compile(s1);
+             }
+             tccelf_end_file(s1);
+diff --git a/dep/tcc/tcc.h b/dep/tcc/tcc.h
+index 1fcf640..29cd8d8 100644
+--- a/dep/tcc/tcc.h
++++ b/dep/tcc/tcc.h
+@@ -844,6 +844,26 @@ struct TCCState {
+     int output_format;
+     /* nth test to run with -dt -run */
+     int run_test;
++    /* set once tcc's own code generator has contributed to the object being
++       built, as opposed to the object holding only assembled input.  Only
++       the code generator's output can be spoken for -- see
++       create_gnu_stack_section() in tccelf.c.  Sticky across the inputs of
++       one output, because `-r` merges several into a single object. */
++    int compiler_generated_code;
++    /* set when an input declared no .note.GNU-stack section of its own, i.e.
++       made no statement about its stack requirement -- an assembled source
++       without the directive, or a merged object file carrying no such
++       section.  Both are the same statement ("I may need an executable
++       stack") and ld -r keeps it alive across a merge, so both feed one
++       flag.  Also sticky per output, and read together with
++       compiler_generated_code by create_gnu_stack_section(). */
++    int undeclared_stack_input;
++    /* per-input scratch for the above: raised by the .section/.pushsection
++       directive when it names .note.GNU-stack, cleared before each assembled
++       input.  Per-input rather than per-output because the section persists
++       across the inputs of one `-r`, so its mere existence cannot say which
++       input put it there. */
++    int asm_declared_gnu_stack;
+ 
+     /* array of all loaded dlls (including those referenced by loaded dlls) */
+     DLLReference **loaded_dlls;
+diff --git a/dep/tcc/tccasm.c b/dep/tcc/tccasm.c
+index b60bc0a..5d5f7f7 100644
+--- a/dep/tcc/tccasm.c
++++ b/dep/tcc/tccasm.c
+@@ -1207,6 +1207,13 @@ static void asm_parse_directive(TCCState *s1, int global)
+                 }
+             }
+             last_text_section = cur_text_section;
++	    /* Record that THIS input stated its own stack requirement, so
++	       that create_gnu_stack_section() can tell an input which
++	       declined to from one which did (see tcc.h). Keyed on the name
++	       here rather than in use_section(), which the assembler also
++	       reaches for ordinary .text/.data switching. */
++	    if (!strcmp(sname, ".note.GNU-stack"))
++	        s1->asm_declared_gnu_stack = 1;
+ 	    if (tok1 == TOK_ASMDIR_section)
+ 	        use_section(s1, sname);
+ 	    else
+diff --git a/dep/tcc/tccelf.c b/dep/tcc/tccelf.c
+index a1fafdc..ce44d12 100644
+--- a/dep/tcc/tccelf.c
++++ b/dep/tcc/tccelf.c
+@@ -3303,11 +3303,83 @@ static void alloc_sec_names(TCCState *s1, int is_obj)
+     strsec->sh_size = strsec->data_offset;
+ }
+ 
++/* Objects holding tcc-generated code carry an empty .note.GNU-stack marker.
++
++   GNU ld's default policy is that an input object *without* that section is
++   assumed to require an executable stack, and a single such object turns the
++   whole link's PT_GNU_STACK executable -- binutils 2.44 says so out loud:
++   "missing .note.GNU-stack section implies executable stack".  tcc's code
++   generator emits nothing that needs an executable stack, so objects it
++   produced have to say so, in the one place a foreign linker looks: an
++   empty, zero-size, unflagged PROGBITS section with alignment 1, byte for
++   byte what gcc and clang put in every object they compile.
++
++   This is the object-file half of the stance patch 0008 takes for tcc's own
++   linker output.  The two do not overlap and neither can stand in for the
++   other: 0008's PT_GNU_STACK is written by layout_sections(), which only runs
++   when tcc performs the final link, while a `-c` object's fate is usually
++   decided by an ld that never runs tcc code at all.
++
++   Two cases are deliberately left alone.
++
++   Input that supplied the section itself -- an object being merged under
++   `-r`, or an asm `.section .note.GNU-stack` directive -- has already stated
++   its own requirement, and "x" there means "I really do need an executable
++   stack".  Adopting and re-flagging that section would silently discard a
++   requirement whose violation is a runtime crash, so it is kept exactly as
++   it arrived.
++
++   Assembled input that said nothing gets nothing, matching what GNU as,
++   gcc -c and clang -c all do on a .S file: none of them inject this marker.
++   The convention is that hand-written asm declares its own stack-execution
++   needs, and a compiler that answers on its behalf is answering for code it
++   did not write.
++
++   `-r` puts several inputs in one object, and the marker is a property of
++   the object, so their statements have to be reconciled. GNU ld -r is the
++   incumbent and decides it by upgrading: merging a marked object with an
++   unmarked one yields a marker carrying SHF_EXECINSTR, so the unmarked
++   input's implicit "I need an executable stack" survives the merge rather
++   than being silently dropped (measured against binutils 2.44 -- the final
++   link then reports "requires executable stack (because the .note.GNU-stack
++   section is executable)" and produces GNU_STACK RWE). Emitting the marker
++   unflagged in that case would discard a requirement, so the marker tcc
++   creates is executable whenever an input that declared nothing shares the
++   object -- an assembled source without the directive, or a merged object
++   file with no such section (see undeclared_stack_input in tcc.h). Both
++   input classes count: keying only on assembled sources would leave
++   `tcc -r foo.c bar.o` marking the object non-executable on bar.o's behalf,
++   which is the failure this paragraph exists to prevent.
++
++   Note what this does NOT do: when the marker already exists because some
++   input supplied it, that section is left alone even if a *different*,
++   undeclared assembled input is also present. ld -r would raise
++   SHF_EXECINSTR there too. Closing that would mean rewriting an
++   input-supplied section, which is the one thing this function refuses to
++   do, so it is recorded in TODO.md instead of decided here. */
++static void create_gnu_stack_section(TCCState *s1)
++{
++    Section *sec;
++
++    if (!s1->compiler_generated_code)
++        return;
++    if (have_section(s1, ".note.GNU-stack"))
++        return;
++    sec = reserved_section(s1, ".note.GNU-stack", SHT_PROGBITS,
++                           s1->undeclared_stack_input ? SHF_EXECINSTR : 0,
++                           SECTION_ROLE_SHARED);
++    /* new_section()'s default alignment is target word size; the marker is
++       always empty, so this is cosmetic, but it keeps the section identical
++       to the one gcc emits rather than merely equivalent. */
++    sec->sh_addralign = 1;
++}
++
+ /* Output an elf .o file */
+ static int elf_output_obj(TCCState *s1, const char *filename)
+ {
+     Section *s;
+     int i, ret, file_offset;
++    create_gnu_stack_section(s1);
+     /* Allocate strings for section names */
+     alloc_sec_names(s1, 1);
+     file_offset = (sizeof (ElfW(Ehdr)) + 3) & -4;
+@@ -3424,6 +3496,25 @@ invalid:
+     sh = &shdr[ehdr.e_shstrndx];
+     strsec = load_data(fd, file_offset + sh->sh_offset, sh->sh_size);
+ 
++    /* An input object carrying no .note.GNU-stack section has made exactly
++       the statement an assembled source without the directive makes: it may
++       need an executable stack.  ld -r keeps that statement alive across a
++       merge by flagging the merged marker executable, so tcc has to notice
++       it here too -- otherwise `tcc -r foo.c bar.o` would mark the merged
++       object non-executable on bar.o's behalf and drop the requirement.
++       See create_gnu_stack_section(). */
++    {
++        int shn, marked = 0;
++        for (shn = 1; shn < ehdr.e_shnum; shn++) {
++            if (!strcmp(strsec + shdr[shn].sh_name, ".note.GNU-stack")) {
++                marked = 1;
++                break;
++            }
++        }
++        if (!marked)
++            s1->undeclared_stack_input = 1;
++    }
++
+     /* load symtab and strtab */
+     old_to_new_syms = NULL;
+     symtab = NULL;
