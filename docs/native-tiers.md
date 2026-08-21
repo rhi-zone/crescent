@@ -152,11 +152,9 @@ pristine — bugs found in it are fixed as unified diffs under
 via `git apply dep/tcc/patches/*.patch` (order matters; apply in numeric
 order) as a CI step in each `tcc-bootstrap-*` job in
 `.github/workflows/build-vendored.yml`, immediately after checkout and
-before the tcc build step. This is the only place in the repo that patches
-vendored source rather than either vendoring it modified or forking it
-outright; it exists because tcc is infrastructure we actively extend
-(assembler/opcode-table gaps) rather than a dependency we only consume
-as-is. Currently: `0001-plt-suffix.patch` (tccasm.c, GNU-as `sym@PLT`
+before the tcc build step. It exists because tcc is infrastructure we
+actively extend (assembler/opcode-table gaps) rather than a dependency we
+only consume as-is. Currently: `0001-plt-suffix.patch` (tccasm.c, GNU-as `sym@PLT`
 suffix parsing), `0002-libressl-sse-aesni-opcodes.patch`
 (x86_64-asm.h + i386-asm.c, SSE2/AES-NI opcode-table entries for
 libressl's perlasm output), `0003-asm-forward-label-diff-and-leb128.patch`
@@ -715,6 +713,28 @@ produces output identical to that build, and a freshly `buildvm`-generated
 `lj_vm.S` assembles to an identical object with the LuaJIT linked from it
 running with the JIT on — that last one a negative control, since the generated
 `lj_vm.S` contains no `$` at all.
+
+### `dep/libressl/patches/`: build-system gaps, not compiler gaps
+
+The same numbered-unified-diff mechanism now also exists for
+`dep/libressl/`, for a different reason. Compiling libressl with tcc
+surfaced a bug in libressl's *vendored copy of libtool*, not in tcc:
+libtool 2.4.2 has no capability probe for `wl` (the flag that passes
+linker options through the compiler driver) — it is a lookup table keyed
+on autoconf's `__GNUC__` test and then on `$cc_basename`, and tcc defines
+`__TINYC__`, so the table falls through and `wl` comes out empty while
+the *linker*-side specs, chosen by a separate probe that found GNU ld,
+still contain `${wl}`. The result is a bare `--whole-archive` that tcc
+rejects. `0001-libtool-tinycc-compiler-support.patch` backports upstream
+GNU libtool's own `tcc*)` entries (first released in libtool 2.4.3–2.5.4;
+our vendored macros predate all of them) into both `m4/libtool.m4` and
+the tracked generated `configure`, since this repo has no autotools at
+build time. Two consequences of that layer: the patch must be applied
+with `git apply` from the repo root like the tcc ones, and because it
+touches `m4/libtool.m4` the generated files must then be re-`touch`ed or
+automake's rebuild rules will demand an `aclocal` that is not installed.
+See TODO.md for the verification record and for the gaps that remain
+open behind it.
 
 ## Vendored binary layout
 

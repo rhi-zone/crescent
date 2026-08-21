@@ -6,6 +6,109 @@
 
 See `docs/roadmap-v2.md` for the authoritative project roadmap and sequencing. The roadmap provides the current strategic direction informed by the value landscape analysis.
 
+## libressl built with tcc: libtool has no `-Wl,` capability probe (2026-08-21)
+
+- [x] **`CC=<tcc> ./configure` on `dep/libressl` produced `wl=""` while
+  `whole_archive_flag_spec` stayed GNU-ld-shaped, so libtool emitted a bare
+  `--whole-archive ./.libs/libcompat.a --no-whole-archive` that tcc rejects — now
+  fixed by `dep/libressl/patches/0001-libtool-tinycc-compiler-support.patch`.**
+  Root cause re-derived from the vendored macros and `config.log`, not guessed:
+  libtool 2.4.2 (`dep/libressl/m4/libtool.m4`, `ltversion.m4` `macro_version=2.4.2`)
+  has **no capability probe for `wl` at all**. `lt_prog_compiler_wl` is a pure
+  lookup table in `_LT_COMPILER_PIC`, keyed first on `$GCC` (autoconf's
+  `__GNUC__` test) and then on `$host_os` + `$cc_basename`. tcc defines
+  `__TINYC__`, never `__GNUC__`, so `ac_cv_c_compiler_gnu=no` (confirmed in
+  `config.log`), the GCC branch is skipped, and the non-GCC `linux*` table has no
+  `tcc*)` entry — `wl`, `pic` and `static` all stay empty, which is why `pic_flag`
+  came out as just `" -DPIC"`. The one probe that *looks* like a capability check,
+  `lt_cv_prog_compiler_pic_works`, only validates an already-chosen flag, and
+  `-DPIC` is a plain `#define` that compiles under any compiler, so the false
+  negative is invisible in the configure output. Meanwhile `_LT_LINKER_SHLIBS`
+  keys off `$LD` being GNU ld (`lt_cv_prog_gnu_ld=yes`, probed by running `ld`
+  from `PATH`) and therefore installs `${wl}`-bearing specs. Compiler side says
+  "no passthrough", linker side says "GNU ld syntax" → bare `--whole-archive`.
+  tcc itself is not at fault: `libtcc.c`'s `-Wl,` table handles
+  `?whole-archive`, and `-Wl,--whole-archive` was verified accepted while bare
+  `--whole-archive` errors.
+  Fix is a **backport of upstream GNU libtool's own tcc support**, not a local
+  invention — upstream carries `tcc*)` entries in three places, verified against
+  the actual master `m4/libtool.m4`: `_LT_COMPILER_PIC` (commit `cdb4d6a3`,
+  Vincent Lefevre 2013-10-09, first released in **libtool 2.4.3**, i.e. our
+  vendored macros miss it by one release; originally Debian #663945 /
+  GNU debbugs #20622), plus `_LT_LINKER_SHLIBS`'s GNU-ld branch (`e1584d0d`,
+  2.4.4, `-rdynamic`) and its non-GNU-ld branch (`cdf127ca`, 2.4.4 +
+  `7a27cb1b`, 2.5.4, rpath). All three are backported verbatim (modulo 2.4.2's
+  `${wl}` spelling) into both `m4/libtool.m4` (source of truth) and the tracked
+  generated `configure`, since this repo has no autotools at build time and
+  cannot re-run `autogen.sh`.
+  **Applying the patch requires refreshing generated-file timestamps** —
+  `find . \( -name aclocal.m4 -o -name configure -o -name 'Makefile.in' -o -name
+  '*.h.in' \) -print0 | xargs -0 touch` inside `dep/libressl` — otherwise
+  automake's rebuild rules see `m4/libtool.m4` as newer than `aclocal.m4` and
+  `make` dies on `aclocal-1.18: command not found`.
+  Verified end to end on this NixOS box with a tcc built from `dep/tcc` +
+  all twelve `dep/tcc/patches`: `CC=tcc LD=tcc ./configure --disable-asm && make
+  && make check` → **136/136 tests pass**, shared `libcrypto.so.57.0.2`,
+  `libssl.so.60.0.2` and `libtls.so.33.0.2` all produced through the normal
+  libtool path (no hand-linking), the `openssl` app runs, and a separate C
+  program linked against the resulting shared `libcrypto` returns the correct
+  SHA-256 of `abc` and a correct AES-256-CBC block.
+  `LD=tcc` is upstream's documented invocation for this (libtool NEWS for
+  `cdf127ca`: "making sure to set LD correctly now avoids mis-matching GNU ld
+  with tcc: `./configure CC=tcc LD=tcc`"). Notes on `pic_flag`, which was raised
+  alongside the `wl` bug: it is the *same* detection gap, not a separate one, and
+  tcc does not actually need `-fPIC` — tcc has no separate PIC codegen path and
+  the whole build/`make check` also passed with `pic_flag=" -DPIC"` before the
+  patch added `-fPIC`. tcc accepts `-fPIC` silently, so carrying upstream's value
+  is harmless and keeps us byte-identical to upstream's entry.
+
+- [ ] **`CC=tcc` *without* `LD=tcc` still fails, one step later, on
+  `-Wl,-version-script`.** With GNU ld detected, `with_gnu_ld=yes` and
+  `archive_expsym_cmds` uses an anonymous version script; libressl's
+  `crypto/Makefile.am` has `libcrypto_la_LDFLAGS = ... -export-symbols
+  crypto_portable.sym`, so that path is taken and tcc errors with `unsupported
+  linker option '-version-script'` (its `-Wl,` table in `libtcc.c` genuinely has
+  no `--version-script`). Confirmed post-patch: the build now gets *past*
+  `libcompat.la` and dies at `libcrypto.la`. Upstream libtool does not address
+  this either — `supports_anon_versioning` is decided by parsing `$LD --version`,
+  but when `CC=tcc` links, `$LD` is never invoked at all, so the probe is
+  interrogating a tool that plays no part in the link. Not fixed here because
+  every available answer changes what gets produced and is an owner call:
+  (a) require `LD=tcc` (what upstream documents; what was verified above),
+  (b) teach tcc `--version-script` (a new `dep/tcc/patches/` entry),
+  (c) declare `supports_anon_versioning=no` for tcc in the libtool table, or
+  (d) build the tcc tier static-only.
+
+- [ ] **The tcc-built shared libraries differ from the gcc-built vendored ones in
+  two ways; decide whether that is acceptable for the tcc fallback tier before
+  anything ships from it.** Upstream libtool's tcc `archive_cmds` is
+  `$CC -shared $pic_flag -o $lib $libobjs $deplibs $compiler_flags` — no
+  `-soname`, no export list. Confirmed with `readelf -d`: the tcc-built
+  `libcrypto.so.57.0.2` has **no `SONAME` entry** (the vendored gcc-built
+  `dep/libressl/linux-x86_64/libcrypto.so.57` has `SONAME libcrypto.so.57`), so
+  consumers record the literal filename they linked against; and with
+  `archive_expsym_cmds` empty the library **exports its full symbol table**
+  rather than the set in `crypto_portable.sym`. tcc does support
+  `-Wl,-soname=`, so the SONAME half looks like an upstream-libtool omission
+  that could be fixed properly rather than accepted.
+
+- [ ] **New tcc assembler gap: `.intel_syntax` is unsupported, so libressl 4.3.2
+  needs `--disable-asm`.** Separate from the twelve existing
+  `dep/tcc/patches` (which closed the gaps in the `*-elf-x86_64.S` files):
+  `crypto/bn/arch/amd64/bignum_*.S` (the s2n-bignum imports) are written in Intel
+  syntax and tcc's assembler is AT&T-only — `error: unknown opcode
+  '.intel_syntax'` on all eight files. Every result above was obtained with
+  `--disable-asm`. Closing this means teaching `tccasm.c` the
+  `.intel_syntax`/`.att_syntax` directives and an Intel-syntax operand parser,
+  which is a much larger job than the existing opcode-table patches.
+
+- [ ] **Nothing in CI applies `dep/libressl/patches/` yet.** The
+  `libressl-linux-x86_64` job in `build-vendored.yml` builds with the runner's
+  gcc/clang and does not need the patch; the `tcc-build-deps-linux-x86_64`
+  diagnostic job that *would* have exercised it was removed 2026-08-21 (see the
+  comment above `tcc-linux-x86_64` in that file). Wiring a tcc-as-`CC` libressl
+  job back in is gated on the two decisions above.
+
 ## tcc native build: missing dep/tcc/conftest.c blocks ./configure-based jobs (2026-08-21)
 
 - [x] **`dep/tcc/configure` compiles `"$source_path/conftest.c"` (configure:455) as
