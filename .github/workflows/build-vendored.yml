@@ -767,6 +767,21 @@ jobs:
   # ── Commit all artifacts back to the repo ─────────────────────────────────
 
   commit:
+    # Default `needs:` semantics skip a job if ANY needed job was skipped,
+    # not just failed — and the per-dep build jobs below are individually
+    # skip-gated on their own VERSION==VENDORED_VERSION check (see
+    # version-check above), so on any run where at least one dep is
+    # unchanged (nearly every run — all six pins moving in lockstep in one
+    # PR is rare), a needed job is skipped and this job silently never ran,
+    # never committing the binaries that DID successfully build. Confirmed
+    # happening in practice: the 2026-08-21 luajit-only bump built clean on
+    # every luajit-* job but never landed, because wepoll-windows-x86/
+    # x86_64 were (correctly) skipped as unchanged and dragged this job
+    # down with them. Explicit condition: run unless the workflow was
+    # cancelled or something in `needs` actually failed — skipped is fine,
+    # the copy_if_present() logic below already only copies artifacts that
+    # were actually produced this run.
+    if: ${{ !cancelled() && !contains(needs.*.result, 'failure') }}
     needs:
       - luajit-linux-x86_64
       - luajit-linux-aarch64
