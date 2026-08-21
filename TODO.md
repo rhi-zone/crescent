@@ -600,18 +600,39 @@ See `docs/roadmap-v2.md` for the authoritative project roadmap and sequencing. T
   not part of `0007`'s resolved scope. The `.symtab` half is low priority by owner decision:
   GNU `as` does not protect `.symtab` either.
 
-- [ ] **tcc-built `.so` files may fail to `dlopen` on modern glibc unless the loading
-  process sets `GLIBC_TUNABLES=glibc.rtld.execstack=2` (or tcc is patched/flagged to emit a
-  `PT_GNU_STACK` segment marking the stack non-executable).** Found while locally testing:
-  tcc's linker does not emit a `PT_GNU_STACK` program header at all, and glibc ≥2.41's
-  dynamic loader treats a missing `PT_GNU_STACK` as "this object wants an executable stack"
-  and refuses to load it by default on hardened configurations (observed on this NixOS
-  sandbox's glibc 2.42; error is `cannot enable executable stack as shared object requires:
-  Invalid argument`). Not yet confirmed whether this reproduces on the Alpine/musl (Alpine's
-  musl libc historically doesn't enforce this the same way) and Ubuntu glibc versions CI
-  actually runs on — flagging as a real interoperability risk for any consumer that tries to
-  `ffi.load()` a tcc-built `.so` on a glibc distro new enough to default-enforce this, not
-  fixed or worked around here.
+- [x] **Fixed (`dep/tcc/patches/0008-pt-gnu-stack.patch`): tcc-built `.so` files failed to
+  `dlopen` on modern glibc because tcc's linker never emitted a `PT_GNU_STACK` program
+  header at all.** Root cause confirmed by reading upstream tinycc's full git history
+  (`repo.or.cz/tinycc.git`, all branches): `PT_GNU_STACK` is defined in `elf.h` but never
+  referenced anywhere in `layout_sections()`/`elf_output_file()` on any commit — a
+  long-standing upstream gap, not a regression from `0001`–`0007` and not something already
+  partially handled (the one `.note.GNU-stack` mention in `tccelf.c` is unrelated: it only
+  dedups a doubled input `.note.GNU-stack` *section* when merging `crt1.o`, and never fed
+  into program-header emission). glibc ≥2.41's dynamic loader reads the missing header as
+  "this object wants an executable stack" and refuses to load it on hardened configs
+  (reproduced locally: `cannot enable executable stack as shared object requires: Invalid
+  argument`, NixOS glibc 2.42). Fix: `layout_sections()` now unconditionally emits a
+  `PT_GNU_STACK` phdr with `PF_R | PF_W` (no `PF_X`) for every EXE/DLL link — matching the
+  non-executable-by-default stance gcc/clang/binutils ld/lld already take, and safe because
+  tcc generates no code that needs an executable stack (no nested-function trampolines).
+  Verified via a genuine musl/Alpine test (docker, not documentation-only reasoning): musl's
+  `dlopen()` does NOT enforce this even with the header fully absent (unpatched tcc's
+  `.so` loads fine there), and the patched tcc still builds and `dlopen`s/`dlsym`s cleanly
+  under both glibc (NixOS 2.42) and musl (Alpine) — no regression on either libc. Also ran
+  `dep/tcc/patches/0007-tests/run.sh` against both patched and unpatched local builds; results
+  were identical on both (some pre-existing local-environment-only failures — NixOS's `ld.so`
+  stub for directly-executed binaries, a fake `--sysroot` needed to build tcc at all on this
+  sandbox — confirmed unrelated to this patch by reproducing them against an unpatched build
+  too). Wired into all 5 `dep/tcc/patches` apply steps in `build-vendored.yml` and
+  `dep/tcc/SOURCE_SHA256` regenerated to include the new patch file.
+  **Separately noticed while verifying, NOT fixed here (out of this patch's scope, needs its
+  own investigation):** `git apply dep/tcc/patches/0001-*.patch ... 0007-*.patch` fails
+  (`patch failed: dep/tcc/tccasm.c:45`) on a fresh clone of current `origin/master`, before
+  any of my changes — i.e. `0001`–`0007` do not currently reapply cleanly from a clean
+  checkout via a plain `git apply`, independent of build-vendored.yml's CI environment. My
+  new `0008` patch applies cleanly standalone and was verified in isolation; the pre-existing
+  `0001`–`0007` failure needs its own root-cause pass (patch/context drift vs. some CI-only
+  applying mechanism) before relying on `git apply` locally to reproduce the full patch stack.
 
 ## Typechecker substrate gaps (found while implementing lib/os_isolation/, 2026-08-14)
 

@@ -1,0 +1,36 @@
+--- a/dep/tcc/tccelf.c
++++ b/dep/tcc/tccelf.c
+@@ -2247,6 +2247,7 @@ struct dyn_inf {
+     int notes;
+     int ehfr;
+     int dyna;
++    int gnustack;
+ };
+ 
+ /* Decide the layout of sections loaded in memory. This must be done before
+@@ -2418,6 +2419,15 @@ static int layout_sections(TCCState *s1, int *sec_order, struct dyn_inf *d)
+         d->ehfr = phnum++;
+     if (d->relro)
+         d->relro = phnum++;
++    /* Always emit PT_GNU_STACK marking the stack non-executable: tcc never
++       generates code that requires an executable stack (no nested-function
++       trampolines), and its absence is read by glibc >= 2.41's dynamic
++       loader as "this object wants an executable stack", which it then
++       refuses to grant on hardened configurations, so dlopen() fails
++       outright. This matches the non-executable-by-default stance every
++       other mainstream toolchain (gcc, clang, binutils ld, lld) already
++       takes. */
++    d->gnustack = phnum++;
+     d->phnum = phnum;
+     d->phdr = tcc_mallocz(phnum * sizeof(ElfW(Phdr)));
+ 
+@@ -2536,6 +2546,9 @@ static int layout_sections(TCCState *s1, int *sec_order, struct dyn_inf *d)
+         fill_phdr(&d->phdr[d->ehfr], PT_GNU_EH_FRAME, eh_frame_hdr_section);
+     if (d->interp)
+         fill_phdr(&d->phdr[1], PT_INTERP, d->interp);
++    /* PF_R | PF_W, no PF_X: non-executable stack (see comment above where
++       d->gnustack is assigned). */
++    fill_phdr(&d->phdr[d->gnustack], PT_GNU_STACK, NULL)->p_flags = PF_R | PF_W;
+     if (phfill) {
+         ph = &d->phdr[0];
+         ph->p_offset = sizeof(ElfW(Ehdr));

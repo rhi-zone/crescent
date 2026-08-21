@@ -403,6 +403,62 @@ family — an input section of the same name is still merged into tcc's by
 direction means gating the merge loop's reuse decision, not just the
 creation sites; recorded in TODO.md rather than papered over.
 
+### `0008-pt-gnu-stack.patch`
+
+`0008` (tccelf.c) fixes a `dlopen()` failure on modern glibc, unrelated to
+`0001`–`0007`'s section-identity problems.
+
+**The bug.** tcc's ELF linker never emits a `PT_GNU_STACK` program header,
+on any target, in any tinycc release — confirmed by grepping the full
+upstream history (`repo.or.cz/tinycc.git`, all branches): `PT_GNU_STACK`
+is defined in `elf.h` but referenced nowhere in `layout_sections()`. The
+one `.note.GNU-stack` mention already in `tccelf.c` is unrelated — it
+only dedups a doubled input *section* some `crt1.o` builds carry when
+merging objects; it never fed into program-header emission. glibc
+≥2.41's dynamic loader treats a completely absent `PT_GNU_STACK` as "this
+object wants an executable stack" and refuses `dlopen()` on hardened
+configurations: `cannot enable executable stack as shared object
+requires: Invalid argument` (reproduced locally, NixOS glibc 2.42).
+
+**The fix.** `layout_sections()` now unconditionally appends a
+`PT_GNU_STACK` phdr with `PF_R | PF_W` (no `PF_X`) to every EXE/DLL link,
+following the same `struct dyn_inf` index-slot pattern already used for
+`PT_GNU_RELRO`/`PT_NOTE`/`PT_TLS`. This is not gated behind any existing
+flag because none exists — tcc has no `-z execstack`/`-z noexecstack`
+option to preserve, so there is no prior opt-in this could break. It
+matches gcc/clang/binutils `ld`/`lld`'s non-executable-by-default stance,
+and is safe for tcc specifically because tcc generates no code that needs
+an executable stack — no nested-function trampolines, unlike GCC's
+`-fnested-functions`. `elf_output_obj()` (the `.o`/`TCC_OUTPUT_OBJ` path)
+is a separate function that never calls `layout_sections()`, so
+relocatable-object output is untouched; PE and Mach-O outputs bypass
+`elf_output_file()` entirely (`tccpe.c`/`tccmacho.c`), so the change is
+inert there too — it only affects the ELF EXE/DLL path on Linux/BSD
+targets, where the concept applies.
+
+**Verified.** Local repro: a trivial `.so` built with unpatched tcc
+carries no `GNU_STACK` program header at all and fails to `dlopen()` on
+this NixOS glibc 2.42 sandbox with the error above; the same `.so` built
+with `0008` applied carries `GNU_STACK … RW` and loads and `dlsym()`s
+cleanly. Cross-checked on real musl (Alpine, via Docker — not
+documentation-only reasoning): musl's `dlopen()` does **not** enforce
+this even against the fully unpatched, header-absent `.so`, and the
+patched build still produces a working, loadable `.so` there too — no
+regression on either libc. `dep/tcc/patches/0007-tests/run.sh` gives
+identical results against local patched and unpatched builds (the
+harness's own local-only failures — a NixOS `ld.so` stub for
+directly-executed binaries, a synthetic `--sysroot` needed to build tcc
+at all on this sandbox — reproduce identically without `0008`, confirming
+they predate and are unrelated to this patch).
+
+**Separately noticed, not part of this patch:** `git apply
+dep/tcc/patches/0001-*.patch … 0007-*.patch` fails on a clean checkout of
+current `origin/master` (`patch failed: dep/tcc/tccasm.c:45`), independent
+of any CI-specific environment — i.e. the `0001`–`0007` stack does not
+currently reapply from a bare `git apply` locally. `0008` was verified to
+apply cleanly on its own; the pre-existing `0001`–`0007` failure is
+recorded in TODO.md as a separate, not-yet-diagnosed issue.
+
 ## Vendored binary layout
 
 ```
