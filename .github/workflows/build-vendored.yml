@@ -9,6 +9,7 @@ on:
       - "dep/wepoll/**"
       - "dep/libressl/**"
       - "dep/luajit/**"
+      - "dep/tcc/**"
 
 jobs:
   # ── Version pinning + content-hash verification ─────────────────────────────
@@ -35,15 +36,11 @@ jobs:
       libressl_skip: ${{ steps.check.outputs.libressl_skip }}
       luajit_skip: ${{ steps.check.outputs.luajit_skip }}
       wepoll_skip: ${{ steps.check.outputs.wepoll_skip }}
+      tcc_skip: ${{ steps.check.outputs.tcc_skip }}
     steps:
       - uses: actions/checkout@v4
       - name: Verify vendored source content hashes
-        # tcc is intentionally NOT included here — see build-tcc.yml's
-        # header comment for why sharing this step with tcc's own verify
-        # was itself a bug (a tcc-only hash mismatch failed this whole job,
-        # blocking every unrelated dep build below via `needs:
-        # version-check`). tcc has its own version-check in build-tcc.yml.
-        run: tooling/scripts/vendor-verify.sh verify sqlite3 zlib libressl wepoll luajit
+        run: tooling/scripts/vendor-verify.sh verify sqlite3 zlib libressl wepoll luajit tcc
       - name: Compare pinned VERSION to vendored VERSION per dep
         id: check
         run: |
@@ -64,6 +61,7 @@ jobs:
           check_dep libressl
           check_dep luajit
           check_dep wepoll
+          check_dep tcc
 
   # ── LuaJIT ────────────────────────────────────────────────────────────────
 
@@ -453,16 +451,170 @@ jobs:
           path: out/
           retention-days: 1
 
-  # ── TinyCC (tcc) — moved to build-tcc.yml (2026-08-21) ─────────────────────
+  # ── TinyCC (tcc) — C-compiler fallback tier ────────────────────────────────
   #
-  # tcc's build+verify+commit pipeline now lives entirely in its own
-  # workflow file, build-tcc.yml — see that file's header comment for why
-  # (sharing this file's `version-check` job with tcc's verify step meant a
-  # tcc-only SOURCE_SHA256 mismatch failed this whole job and blocked every
-  # unrelated dep build below, confirmed happening in practice on
-  # 2026-08-21). tcc-bootstrap-*, tcc-build-deps-linux-x86_64, and
-  # tcc-commit all moved there unchanged. Nothing tcc-related remains in
-  # this file.
+  # tcc is infrastructure, not one of the 5 native-code tiers itself (see
+  # docs/native-tiers.md "TinyCC: enabling tier 4, not a tier"): it exists so
+  # tier 4 "C build" has a compiler to fall back on when a platform/CI runner
+  # lacks a system C compiler. Source is vendored as-is in dep/tcc/ (mob
+  # branch, pinned via dep/tcc/VERSION to a commit SHA — mob is untagged and
+  # rolling, so a SHA pin is used the same way as luajit's). These jobs build
+  # the tcc compiler itself from that source, same skip-if-unchanged and
+  # commit-in-lockstep treatment as every other dep above (2026-08-21: tcc
+  # used to be dispatch-only and separated into its own workflow file after
+  # a shared version-check step let a tcc hash mismatch block unrelated
+  # dep builds — the shared-step bug is fixed by giving each dep its own
+  # `check_dep` skip output rather than by keeping tcc split out).
+  #
+  # A separate diagnostic job used to exist here (tcc-build-deps-linux-x86_64:
+  # using the freshly built tcc to compile sqlite3/zlib/luajit/libressl as a
+  # self-hosting smoke test) — removed 2026-08-21: it never produced a
+  # committed artifact (tcc-compiled binaries are less optimized than the
+  # gcc/clang-built ones above and were never meant to ship), and its
+  # findings (sqlite3 needs an explicit -lm; zlib builds clean; luajit is
+  # blocked on lj_def.h having no __TINYC__ branch; libressl needs
+  # --disable-asm because this tcc has no xmm8-xmm15 support) are already on
+  # record in TODO.md. Re-run it by hand if tcc's viability as an actual
+  # build compiler (not just a fallback binary) needs re-checking later.
+
+  tcc-linux-x86_64:
+    needs: version-check
+    if: needs.version-check.outputs.tcc_skip != 'true'
+    runs-on: ubuntu-latest
+    container:
+      image: alpine:latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build tools
+        run: apk add --no-cache build-base
+      - name: Apply dep/tcc/patches (assembler/opcode-table fixes; see dep/tcc/patches/ and docs/native-tiers.md)
+        run: git apply dep/tcc/patches/0001-plt-suffix.patch dep/tcc/patches/0002-libressl-sse-aesni-opcodes.patch dep/tcc/patches/0003-asm-forward-label-diff-and-leb128.patch dep/tcc/patches/0004-asm-section-flags-alloc.patch dep/tcc/patches/0005-asm-leb128-relaxation.patch dep/tcc/patches/0006-dwarf-section-flag-and-debug-retention.patch dep/tcc/patches/0007-reserved-section-gate-and-eh-frame-retention.patch
+      - name: Build (built with the container's own gcc, per dep/tcc/README's documented ./configure && make)
+        # --config-musl is required here, not optional: this container is
+        # Alpine (musl libc). Without it, tcc's own configure defaults to
+        # the glibc-assuming branch, which leaves lib/bcheck.c's HAVE_CTYPE
+        # gated on `#if defined CONFIG_TCC_MUSL` never firing -- bcheck.c
+        # then calls the glibc-only __ctype_b_loc()/__ctype_tolower_loc(),
+        # which musl does not provide, and `make` fails building
+        # lib/libtcc1.a with "error: pointer expected" (implicit declaration
+        # of __ctype_b_loc). Found and confirmed locally: `./configure`
+        # (no flag) reproduces this failure verbatim in this exact
+        # alpine:latest container; `./configure --config-musl` builds
+        # clean end to end. See TODO.md for the full repro.
+        run: |
+          cd dep/tcc
+          ./configure --config-musl
+          make -j"$(nproc)"
+          strip --strip-debug tcc
+          mkdir -p "$GITHUB_WORKSPACE"/out
+          cp tcc "$GITHUB_WORKSPACE"/out/tcc-linux-x86_64
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tcc-linux-x86_64
+          path: out/
+          retention-days: 1
+
+  tcc-linux-aarch64:
+    needs: version-check
+    if: needs.version-check.outputs.tcc_skip != 'true'
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply dep/tcc/patches (assembler/opcode-table fixes; see dep/tcc/patches/ and docs/native-tiers.md)
+        run: git apply dep/tcc/patches/0001-plt-suffix.patch dep/tcc/patches/0002-libressl-sse-aesni-opcodes.patch dep/tcc/patches/0003-asm-forward-label-diff-and-leb128.patch dep/tcc/patches/0004-asm-section-flags-alloc.patch dep/tcc/patches/0005-asm-leb128-relaxation.patch dep/tcc/patches/0006-dwarf-section-flag-and-debug-retention.patch dep/tcc/patches/0007-reserved-section-gate-and-eh-frame-retention.patch
+      - name: Build (via Alpine Docker)
+        # --config-musl required: same Alpine/musl HAVE_CTYPE gap as the
+        # linux-x86_64 job above (see its comment for the full root cause).
+        run: |
+          docker run --rm -v "$PWD:/work" -w /work/dep/tcc alpine:latest sh -c "
+            apk add --no-cache build-base &&
+            ./configure --config-musl &&
+            make -j\$(nproc) &&
+            strip --strip-debug tcc &&
+            mkdir -p /work/out &&
+            cp tcc /work/out/tcc-linux-aarch64
+          "
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tcc-linux-aarch64
+          path: out/
+          retention-days: 1
+
+  tcc-macos-arm64:
+    needs: version-check
+    if: needs.version-check.outputs.tcc_skip != 'true'
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply dep/tcc/patches (assembler/opcode-table fixes; see dep/tcc/patches/ and docs/native-tiers.md)
+        run: git apply dep/tcc/patches/0001-plt-suffix.patch dep/tcc/patches/0002-libressl-sse-aesni-opcodes.patch dep/tcc/patches/0003-asm-forward-label-diff-and-leb128.patch dep/tcc/patches/0004-asm-section-flags-alloc.patch dep/tcc/patches/0005-asm-leb128-relaxation.patch dep/tcc/patches/0006-dwarf-section-flag-and-debug-retention.patch dep/tcc/patches/0007-reserved-section-gate-and-eh-frame-retention.patch
+      - name: Build
+        run: |
+          cd dep/tcc
+          ./configure
+          make -j"$(sysctl -n hw.ncpu)"
+          strip tcc
+          mkdir -p "$GITHUB_WORKSPACE"/out
+          cp tcc "$GITHUB_WORKSPACE"/out/tcc-macos-aarch64
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tcc-macos-arm64
+          path: out/
+          retention-days: 1
+
+  tcc-windows-x86_64:
+    needs: version-check
+    if: needs.version-check.outputs.tcc_skip != 'true'
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: microsoft/setup-msbuild@v2
+      - name: Apply dep/tcc/patches (assembler/opcode-table fixes; see dep/tcc/patches/ and docs/native-tiers.md)
+        run: git apply dep/tcc/patches/0001-plt-suffix.patch dep/tcc/patches/0002-libressl-sse-aesni-opcodes.patch dep/tcc/patches/0003-asm-forward-label-diff-and-leb128.patch dep/tcc/patches/0004-asm-section-flags-alloc.patch dep/tcc/patches/0005-asm-leb128-relaxation.patch dep/tcc/patches/0006-dwarf-section-flag-and-debug-retention.patch dep/tcc/patches/0007-reserved-section-gate-and-eh-frame-retention.patch
+      - name: Bootstrap tcc (win32/build-tcc.bat, per dep/tcc/win32/tcc-win32.txt build docs)
+        shell: cmd
+        run: |
+          for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do set VSPATH=%%i
+          call "%VSPATH%\VC\Auxiliary\Build\vcvars64.bat"
+          cd /d "%GITHUB_WORKSPACE%\dep\tcc\win32"
+          build-tcc.bat -c cl
+      - name: Copy artifact
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force out
+          Copy-Item "dep\tcc\win32\tcc.exe" "out\tcc-windows-x86_64.exe"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tcc-windows-x86_64
+          path: out/
+          retention-days: 1
+
+  tcc-windows-x86:
+    needs: version-check
+    if: needs.version-check.outputs.tcc_skip != 'true'
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: microsoft/setup-msbuild@v2
+      - name: Apply dep/tcc/patches (assembler/opcode-table fixes; see dep/tcc/patches/ and docs/native-tiers.md)
+        run: git apply dep/tcc/patches/0001-plt-suffix.patch dep/tcc/patches/0002-libressl-sse-aesni-opcodes.patch dep/tcc/patches/0003-asm-forward-label-diff-and-leb128.patch dep/tcc/patches/0004-asm-section-flags-alloc.patch dep/tcc/patches/0005-asm-leb128-relaxation.patch dep/tcc/patches/0006-dwarf-section-flag-and-debug-retention.patch dep/tcc/patches/0007-reserved-section-gate-and-eh-frame-retention.patch
+      - name: Bootstrap tcc (win32/build-tcc.bat, per dep/tcc/win32/tcc-win32.txt build docs)
+        shell: cmd
+        run: |
+          for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do set VSPATH=%%i
+          call "%VSPATH%\VC\Auxiliary\Build\vcvars32.bat"
+          cd /d "%GITHUB_WORKSPACE%\dep\tcc\win32"
+          build-tcc.bat -c cl
+      - name: Copy artifact
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force out
+          Copy-Item "dep\tcc\win32\tcc.exe" "out\tcc-windows-x86.exe"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tcc-windows-x86
+          path: out/
+          retention-days: 1
 
   # ── Commit all artifacts back to the repo ─────────────────────────────────
 
@@ -501,6 +653,11 @@ jobs:
       - libressl-linux-x86_64
       - wepoll-windows-x86_64
       - wepoll-windows-x86
+      - tcc-linux-x86_64
+      - tcc-linux-aarch64
+      - tcc-macos-arm64
+      - tcc-windows-x86_64
+      - tcc-windows-x86
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -549,6 +706,12 @@ jobs:
           copy_if_present wepoll-x64.dll                dep/wepoll/
           copy_if_present wepoll-x86.dll                dep/wepoll/
 
+          copy_if_present tcc-linux-x86_64              bin/tcc-linux-x86_64
+          copy_if_present tcc-linux-aarch64             bin/tcc-linux-aarch64
+          copy_if_present tcc-macos-aarch64             bin/tcc-macos-aarch64
+          copy_if_present tcc-windows-x86_64.exe        bin/tcc-windows-x86_64.exe
+          copy_if_present tcc-windows-x86.exe           bin/tcc-windows-x86.exe
+
           copy_if_present libcrypto.so.57              dep/libressl/linux-x86_64/
           copy_if_present libssl.so.60                 dep/libressl/linux-x86_64/
           copy_if_present libtls.so.33                 dep/libressl/linux-x86_64/
@@ -566,13 +729,15 @@ jobs:
           cp dep/libressl/VERSION dep/libressl/VENDORED_VERSION
           cp dep/luajit/VERSION   dep/luajit/VENDORED_VERSION
           cp dep/wepoll/VERSION   dep/wepoll/VENDORED_VERSION
+          cp dep/tcc/VERSION      dep/tcc/VENDORED_VERSION
 
           chmod_if_present() {
             [ -e "$1" ] && chmod +x "$1"
           }
           for f in bin/luajit-bin bin/luajit-aarch64-bin bin/luajit-macos-aarch64 \
                    bin/luajit.exe bin/luajit32.exe \
-                   bin/ld-musl-x86_64.so.1 bin/ld-musl-aarch64.so.1; do
+                   bin/ld-musl-x86_64.so.1 bin/ld-musl-aarch64.so.1 \
+                   bin/tcc-linux-x86_64 bin/tcc-linux-aarch64 bin/tcc-macos-aarch64; do
             chmod_if_present "$f"
           done
           if [ -e dep/libressl/linux-x86_64/libcrypto.so.57 ]; then
@@ -584,6 +749,6 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add bin/ dep/
           git diff --cached --quiet || \
-            git commit -m "chore(bin): update vendored LuaJIT, sqlite3, zlib, libressl, and wepoll binaries"
+            git commit -m "chore(bin): update vendored LuaJIT, sqlite3, zlib, libressl, wepoll, and tcc binaries"
           git push
 
