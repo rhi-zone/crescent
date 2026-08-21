@@ -486,7 +486,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install build tools
-        run: apk add --no-cache build-base
+        # git is required here (not just build-base): the "Apply
+        # dep/tcc/patches" step below runs `git apply` inside this same
+        # alpine:latest container, and alpine's base image has no git
+        # binary until installed explicitly. Confirmed broken in run
+        # 32453775057 (2026-08-21): "git: not found", exit 127, before any
+        # patch content was even read -- unrelated to patch correctness.
+        run: apk add --no-cache build-base git
       - name: Apply dep/tcc/patches (assembler/opcode-table fixes; see dep/tcc/patches/ and docs/native-tiers.md)
         run: git apply dep/tcc/patches/0001-plt-suffix.patch dep/tcc/patches/0002-libressl-sse-aesni-opcodes.patch dep/tcc/patches/0003-asm-forward-label-diff-and-leb128.patch dep/tcc/patches/0004-asm-section-flags-alloc.patch dep/tcc/patches/0005-asm-leb128-relaxation.patch dep/tcc/patches/0006-dwarf-section-flag-and-debug-retention.patch dep/tcc/patches/0007-reserved-section-gate-and-eh-frame-retention.patch dep/tcc/patches/0008-pt-gnu-stack.patch
       - name: Build (built with the container's own gcc, per dep/tcc/README's documented ./configure && make)

@@ -6,6 +6,27 @@
 
 See `docs/roadmap-v2.md` for the authoritative project roadmap and sequencing. The roadmap provides the current strategic direction informed by the value landscape analysis.
 
+## tcc native build: missing dep/tcc/conftest.c blocks ./configure-based jobs (2026-08-21)
+
+- [ ] **`dep/tcc/configure` compiles `"$source_path/conftest.c"` (configure:455) as
+  a static compiler-probe source that is expected to already exist in the vendored
+  tree, but no such file is tracked anywhere in `dep/tcc/`** (`git log --all -- conftest.c`
+  and `git ls-files | grep conftest` both empty). This blocks the `make` step with
+  `No rule to make target 'conftest.c', needed by 'c2str.exe'` (Makefile:258 depends
+  on it directly) on every platform that uses the `./configure && make` path —
+  confirmed locally (Alpine/musl, `docker run alpine:latest`, both `-j1` and default
+  parallelism) and independently confirmed in the actual `tcc-bootstrap-macos-arm64`
+  CI job of run 32453775057 (2026-08-21), which failed at `./configure` with
+  `clang: error: no such file or directory: '.../dep/tcc/conftest.c'`. The two
+  Windows tcc jobs are unaffected because they build via `win32/build-tcc.bat`
+  instead, which never reaches this code path. This is a vendoring gap (a file
+  missing from the committed tcc source, not a patch-content or CI-flag problem)
+  — fixing it means sourcing the correct upstream `conftest.c` content, which
+  wasn't decided as part of this investigation; flagging rather than guessing at
+  its content. See also the "Apply dep/tcc/patches" step fix in `build-vendored.yml`
+  (`tcc-linux-x86_64` job) committed the same session, a separate, already-fixed
+  issue (missing `git` binary in that job's Alpine container).
+
 ## Typechecker wishlist: unused-local-variable checking (2026-08-21)
 
 - [ ] **Want unused-local-variable checking as a real typechecker capability,
