@@ -165,6 +165,22 @@ See `docs/roadmap-v2.md` for the authoritative project roadmap and sequencing. T
   build was "still unverified", which is no longer true, and it now records
   that `LD` must be set alongside `CC` for anyone re-running it by hand.
 
+## `bin/install` shadows coreutils `install(1)` for anything run with `bin/` on PATH (2026-08-21)
+
+- [ ] **`bin/install` is a LuaJIT-download script, but it occupies the name of a
+  standard tool that autotools builds invoke by default.** The dev environment
+  puts the repo's `bin/` early on `PATH` (direnv), so a plain `install` resolves
+  to this script rather than coreutils'. Found while verifying the tcc libressl
+  build: `make install` there ran `bin/install`, which tried to `curl` a LuaJIT
+  tarball, 404'd, and failed the build with an error that says nothing about the
+  real cause. Verification had to drop the repo's `bin/` from `PATH` entirely to
+  proceed. Generalises beyond that one build — libressl's `configure` probes for
+  `${INSTALL}` and would record this script, and any other autotools dep built
+  from inside the dev shell is exposed the same way. Not fixed here: renaming or
+  relocating a documented entry point is an interface change and an owner call.
+  A fix would be choosing among renaming it to something unambiguous, moving it
+  out of the PATH-exposed `bin/`, or making it a subcommand of `bin/cr`.
+
 ## tcc native build: missing dep/tcc/conftest.c blocks ./configure-based jobs (2026-08-21)
 
 - [x] **`dep/tcc/configure` compiles `"$source_path/conftest.c"` (configure:455) as
@@ -584,6 +600,13 @@ See `docs/roadmap-v2.md` for the authoritative project roadmap and sequencing. T
   each byte-identical to `as`, including a case isolating the silent half; against an
   `0001`–`0012` baseline, 1 pass / 9 fail. The three `dep/libressl/crypto/sha/*_amd64_generic.S`
   files now assemble through tcc's integrated path with no `tcc -E` pre-expansion.
+  **Re-reported independently and reconciled (2026-08-21):** a second investigation filed
+  `#define step(c) adcq $0, c` / `step(%r9)` as a separate remaining gap, blaming
+  `dollars_in_identifiers` defaulting on with no reset for the x86_64 `.S` path. Same bug.
+  That input reproduces the reported `adc 0x0,%r9` + `R_X86_64_32S $0 + 0` exactly on an
+  `0001`–`0012` build and is byte-identical to `gcc -x assembler-with-cpp` on `0001`–`0013`.
+  The `tccasm.c` reset it points at is inside `tcc_assemble_inline()` (C `asm(...)`), not on
+  the `.S` path. Details in `docs/native-tiers.md` under `0013`.
 
 - [ ] **Two tcc/`as` encoding divergences found while writing `0013`'s cases, both
   pre-existing and unrelated to macros.** `shll $1, %ecx` — `as` picks the `D1 /r`
