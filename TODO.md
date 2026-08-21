@@ -8,7 +8,7 @@ See `docs/roadmap-v2.md` for the authoritative project roadmap and sequencing. T
 
 ## tcc native build: missing dep/tcc/conftest.c blocks ./configure-based jobs (2026-08-21)
 
-- [ ] **`dep/tcc/configure` compiles `"$source_path/conftest.c"` (configure:455) as
+- [x] **`dep/tcc/configure` compiles `"$source_path/conftest.c"` (configure:455) as
   a static compiler-probe source that is expected to already exist in the vendored
   tree, but no such file is tracked anywhere in `dep/tcc/`** (`git log --all -- conftest.c`
   and `git ls-files | grep conftest` both empty). This blocks the `make` step with
@@ -20,14 +20,62 @@ See `docs/roadmap-v2.md` for the authoritative project roadmap and sequencing. T
   `clang: error: no such file or directory: '.../dep/tcc/conftest.c'`. The two
   Windows tcc jobs are unaffected because they build via `win32/build-tcc.bat`
   instead, which never reaches this code path. This is a vendoring gap (a file
-  missing from the committed tcc source, not a patch-content or CI-flag problem)
-  — fixing it means sourcing the correct upstream `conftest.c` content, which
-  wasn't decided as part of this investigation; flagging rather than guessing at
-  its content. See also the "Apply dep/tcc/patches" step fix in `build-vendored.yml`
+  missing from the committed tcc source, not a patch-content or CI-flag problem).
+  See also the "Apply dep/tcc/patches" step fix in `build-vendored.yml`
   (`tcc-linux-x86_64` job) committed the same session, a separate, already-fixed
   issue (missing `git` binary in that job's Alpine container).
+  **Fixed (2026-08-21, follow-up session): root cause was a vendoring-process bug,
+  not a build-process bug.** The original vendoring commit (`9d389a37`) added
+  `dep/tcc/.gitignore` in the *same commit* as copying the whole upstream source
+  tree in. Any upstream source file whose name happened to match a gitignore
+  pattern got silently dropped from `git add` even though its bytes were written
+  to disk — `conftest.c` (blocked by `conftest*`) was one casualty, and a second,
+  previously-unnoticed one was found the same way: `win32/include/tcc/tcc_libm.h`
+  (blocked by the bare `tcc` pattern matching the `win32/include/tcc/` directory
+  component, not just the root `tcc` build output). Both confirmed byte-identical
+  to upstream `TinyCC/tinycc` at the pinned commit (`dep/tcc/VERSION`,
+  `2ba12e83b3599ca8f5d50c179fe5138fe956f0c9`) before being force-added. Every other
+  ignored-and-untracked path under `dep/tcc/` (`git status --ignored`) was checked
+  against `git ls-files` in a fresh clone of upstream at that same commit and
+  confirmed to be local build-artifact cruft (`.o`/`.a`/binaries/generated docs —
+  `config.h`, `config.mak`, `config.texi`, `tcc-doc.html`, `tcc-doc.info`, `tcc.1`,
+  `tccdefs_.h`, `c2str.exe` — none tracked upstream, all reproducible by running
+  `./configure && make`), correctly left ignored. `dep/tcc/.gitignore` narrowed to
+  stop recurrence: bare `tcc` → `/tcc` (anchor to repo root so it only matches the
+  build output binary, not any subdirectory named `tcc`), `conftest*` →
+  `conftest` + `conftest-*` (upstream's own `configure` only ever creates a
+  `conftest` binary or `conftest-$$*` temp files, never overwrites `conftest.c`
+  itself). `dep/tcc/SOURCE_SHA256` regenerated via
+  `tooling/scripts/vendor-verify.sh update tcc`. Verified: full `./configure && make`
+  bootstrap (including `lib/libtcc1.a`) succeeds end-to-end in a fresh
+  `docker run alpine:latest` container (matching CI's `tcc-linux-x86_64` job
+  environment) with these two files present; all 8 patches
+  (`dep/tcc/patches/0001`–`0008`) still apply cleanly against the updated tree
+  when applied one-per-invocation, same as before this fix (no regression — this
+  fix never touches any `.c`/`.h` file the patches target, only `.gitignore` +
+  the two newly-tracked files + `SOURCE_SHA256`).
 
-## Typechecker wishlist: unused-local-variable checking (2026-08-21)
+## build-vendored.yml: `git apply` with all 8 tcc patches as one multi-arg invocation fails (2026-08-21)
+
+- [ ] **Unrelated pre-existing finding surfaced while verifying the conftest.c/tcc_libm.h
+  vendoring fix above — not caused by that fix, not investigated further (out of scope for
+  that task).** `build-vendored.yml`'s "Apply dep/tcc/patches" steps (`tcc-linux-x86_64`,
+  `tcc-linux-aarch64`, `tcc-macos-arm64`, `tcc-windows-x86_64` jobs) all run
+  `git apply dep/tcc/patches/0001-....patch dep/tcc/patches/0002-....patch ... 0008-....patch`
+  as a single `git apply` invocation with all 8 patch files as separate pathspec arguments.
+  Reproduced locally (fresh clone of this repo at `b6547ec2`, both on the host and inside
+  `docker run alpine:latest`): that exact multi-arg invocation fails —
+  `error: patch failed: dep/tcc/tccasm.c:45` / `error: dep/tcc/tccasm.c: patch does not apply`
+  — even though every one of the 8 patch files applies cleanly when given to `git apply` one
+  at a time, in the same order (`for p in 0001... ; do git apply "$p"; done` succeeds
+  end-to-end, confirmed both on host and in the Alpine container). Confirmed present on
+  `b6547ec2` (current HEAD before this session's changes) with no files modified, so this is
+  not a regression from the conftest.c/tcc_libm.h fix — that fix touches no `.c`/`.h` file
+  the patches target. Whether this multi-arg failure mode also reproduces inside actual GitHub
+  Actions runners (vs. local Docker) wasn't checked — flagging rather than guessing; if it
+  does reproduce there, the fix is presumably splitting each workflow's single `git apply`
+  call into 8 sequential calls (one per patch file), but that's a call for whoever picks this
+  up, not decided here.
 
 - [ ] **Want unused-local-variable checking as a real typechecker capability,
   not a bolt-on lint script.** Surfaced this session while cleaning up 15
