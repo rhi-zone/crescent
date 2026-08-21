@@ -532,6 +532,60 @@ byte-identically, `aesni`/`ghash` fail on the same `%xmm8` gap), with no new
 diagnostic from either. `0008`'s `PT_GNU_STACK` header and `dlopen()` still
 behave as recorded.
 
+### `0010-extended-sse-registers.patch`
+
+`0010` (i386-tok.h + i386-asm.c) teaches the assembler `%xmm8`–`%xmm15`.
+
+**The gap, as it actually is.** The standing TODO entry described this as two
+missing register sets plus absent REX plumbing. Re-derived from the source, one
+third of that is true. `%r8`–`%r15` and their `d`/`w`/`b` width forms already
+assembled correctly, and byte-identically to GNU `as`, including as SIB base and
+index — they are absent from `i386-tok.h` because they are not tokens at all:
+`asm_parse_numeric_reg()` recognizes them from the identifier text. The REX
+machinery already existed too. `asm_rex()` turns any register number `>= 8` into
+REX.R (ModRM.reg), REX.B (ModRM.rm or SIB.base) or REX.X (SIB.index), subtracts
+8, and `asm_modrm()` then sees a 3-bit number — and its `rmi` branch already
+listed `OP_SSE` among the operand classes it extends. The one thing missing was
+a way to *say* `%xmm8`: `i386-tok.h` stopped at `xmm7`, so the parser rejected
+the name before any of that machinery could run.
+
+**Why the tokens sit apart from the other registers.** `parse_operand()` derives
+an operand's class from its position in one contiguous token block, as
+`1 << ((tok - TOK_ASM_al) >> 3)` — eight names per class, in the same order as
+the `OPT_*` enum. Appending `xmm8`–`xmm15` after `xmm7` would insert a ninth
+group and silently renumber `cr`/`tr`/`db`. They go at the end of the register
+list with an explicit parse branch instead, which is the pattern `%spl`/`%bpl`/
+`%sil`/`%dil` already established for the same reason. The branch sets
+`OP_SSE` and a register number of 8–15, and everything downstream is the code
+that was already there.
+
+**Verified.** `dep/tcc/patches/0010-tests/run.sh`: **8 pass** with `0010`
+applied — every case byte-identical to GNU `as`, comparing PROGBITS content and
+the normalized relocation table, across REX.R, REX.B, REX.X and their
+combinations, the `%rsp`/`%r12` forced-SIB and `%rbp`/`%r13` forced-displacement
+corners, the 0F38/0F3A three-byte maps (where REX must precede the `0x0f`
+escape), mixed GP/SSE operands, and RIP-relative. Against an `0001`–`0009`
+baseline the same harness gives **2 pass, 6 fail**, the six failing on
+`unknown register %xmm8`; the two that pass are the `xmm0`–`xmm7` control and
+the `%r8`–`%r15` regression guard, which is the direct evidence that the GP set
+never needed this patch. On the real vendored perlasm: `aesni-elf-x86_64.S` and
+`ghash-elf-x86_64.S` get past the register gap, and all **583** and **427**
+extended-register instructions in them encode byte-identically to `as` (the only
+`objdump` differences are symbol *names* in comments, tcc retaining local labels
+in `.symtab`). The other five perlasm objects are byte-identical to the baseline
+build, a freshly `buildvm`-generated `lj_vm.S` assembles to a byte-identical
+object and the LuaJIT linked from it runs with the JIT on, and tcc's own
+`make test` / `tests2` reach the same stage on patched and baseline builds with
+output differing only in paths and ASLR addresses.
+
+**Two unrelated gaps found behind this one, not fixed here.** Neither of the two
+perlasm files assembles yet, and neither remaining blocker has anything to do
+with registers. `x86_64-asm.h` types the second operand of `movups`/`movaps`/
+`movhps` as `OPT_EA | OPT_REG32` where the register-to-register form needs
+`OPT_SSE`, so `movaps %xmm0,%xmm1` is rejected on the unpatched tcc too; and
+`.value` (the GAS spelling of `.short`) is not among tcc's assembler
+directives. Both are recorded in TODO.md.
+
 ## Vendored binary layout
 
 ```

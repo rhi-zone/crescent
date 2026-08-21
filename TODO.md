@@ -314,7 +314,10 @@ See `docs/roadmap-v2.md` for the authoritative project roadmap and sequencing. T
   substantially larger gap than the opcode-table one (needs new register tokens plus
   REX.R/X/B extension-bit plumbing through the ModRM/SIB encoding, most of which doesn't
   exist yet for *any* register class) and is out of scope for this session's two targeted
-  fixes — recorded here, not attempted. Because of this, `--disable-asm` in
+  fixes — recorded here, not attempted. *Correction from the `0010` session: the
+  `r8`–`r15` half of that finding and the "REX plumbing doesn't exist" reading are both
+  wrong — see the `0010` entry below for what the source actually does.* Because of this,
+  `--disable-asm` in
   `tcc-build-deps-linux-x86_64` was deliberately left in place (not flipped): removing it
   would make that CI job fail on these two files. sqlite3 and zlib remain the two
   locally-verified-working deps from before; libressl's `--disable-asm` path itself (i.e.
@@ -328,17 +331,70 @@ See `docs/roadmap-v2.md` for the authoritative project roadmap and sequencing. T
   verification in this effort, e.g. the smoke test and opcode-table checks recorded above)
   followed by a local `./configure && make` of libressl with that tcc as `CC`.
 
-- [ ] **This vendored tcc (mob@2ba12e83b3599ca8f5d50c179fe5138fe956f0c9) defines no
-  `xmm8`–`xmm15` SSE registers and no `r8`–`r15` general-purpose registers at all under
-  `TCC_TARGET_X86_64`** (`dep/tcc/i386-tok.h` stops at `xmm7`/has no `r8`+ entries whatsoever)
-  — discovered while verifying the SSE/AES-NI opcode-table patch above, by actually
-  assembling `dep/libressl/crypto/aes/aesni-elf-x86_64.S` and
-  `dep/libressl/crypto/modes/ghash-elf-x86_64.S` with a patched tcc and hitting `unknown
-  register %xmm8`. This blocks those two files (and presumably any code using the extended
-  register set) regardless of the opcode-table fix above. Not attempted here: fixing it
-  needs new register-name tokens plus REX.R/X/B extension-bit plumbing through the ModRM/SIB
-  encoding in `i386-asm.c`/`i386-gen.c`/`x86_64-gen.c`, which is a materially bigger change
-  than adding opcode-table entries and wasn't part of this session's scope.
+- [x] **RESOLVED by `dep/tcc/patches/0010-extended-sse-registers.patch` (2026-08-21):
+  this vendored tcc could not name `%xmm8`–`%xmm15`.** The entry as originally written
+  claimed two missing register sets plus absent REX.R/X/B plumbing through the ModRM/SIB
+  encoding; re-deriving it from the source before implementing showed one third of that was
+  right, and the correction is the reason the fix is two hunks rather than the "materially
+  bigger change" this entry predicted. **`%r8`–`%r15` were never missing** — they and their
+  `d`/`w`/`b` width forms already assembled, byte-identically to GNU `as`, including as SIB
+  base and index. They are absent from `dep/tcc/i386-tok.h` because they are not tokens:
+  `asm_parse_numeric_reg()` in `i386-asm.c` parses them out of the identifier text (which is
+  also how it handles `cr8`–`cr15`). **The REX plumbing already existed** too: `asm_rex()`
+  maps any register number `>= 8` onto REX.R (ModRM.reg), REX.B (ModRM.rm / SIB.base) or
+  REX.X (SIB.index), subtracts 8, and `asm_modrm()` sees a 3-bit number — and its `rmi`
+  branch already listed `OP_SSE` among the classes it extends. The single real gap was that
+  `i386-tok.h` stopped at `xmm7`, so `%xmm8` was rejected at parse time before any of that
+  ran. Fixed by adding the eight names *at the end* of the register token list, not after
+  `xmm7`: `parse_operand()` derives an operand's class from position in one contiguous block
+  as `1 << ((tok - TOK_ASM_al) >> 3)`, so inserting a ninth group there would silently
+  renumber `cr`/`tr`/`db`. They get an explicit parse branch setting `OP_SSE` and a register
+  number of 8–15, the pattern `%spl`/`%bpl`/`%sil`/`%dil` already established. Verified with
+  `dep/tcc/patches/0010-tests/run.sh`: 8 cases pass, each byte-identical to GNU `as` on
+  PROGBITS content and the normalized relocation table, covering REX.R/B/X and their
+  combinations, the `%rsp`/`%r12` forced-SIB and `%rbp`/`%r13` forced-displacement corners,
+  the 0F38/0F3A three-byte maps (REX must precede the `0x0f` escape), mixed GP/SSE operands
+  and RIP-relative; against an `0001`–`0009` baseline the same harness gives 2 pass / 6 fail,
+  the two passing being the `xmm0`–`xmm7` control and the `%r8`–`%r15` guard. On the real
+  perlasm, all 583 (`aesni`) and 427 (`ghash`) extended-register instructions encode
+  byte-identically to `as`. No regression: the other five `*-elf-x86_64.S` objects are
+  byte-identical to the baseline build, a fresh `buildvm`-generated `lj_vm.S` assembles to a
+  byte-identical object and its LuaJIT runs with the JIT on, and tcc's own `make test` /
+  `tests2` reach the same stage on both builds (differing only in paths and ASLR addresses).
+  See `docs/native-tiers.md`. **AVX deliberately not touched:** this tcc has no `ymm`/`zmm`
+  registers and no VEX encoding path at all, so extending to them is a new encoding
+  mechanism rather than more register names — out of scope here, not blocking anything known.
+
+- [ ] **`dep/tcc/x86_64-asm.h` types the register-to-register form of `movups`, `movaps`
+  and `movhps` as `OPT_EA | OPT_REG32` where it must be `OPT_EA | OPT_SSE`** — so
+  `movaps %xmm0,%xmm1` is rejected with `bad operand with opcode 'movaps'`. Not
+  extended-register-specific: it fails identically on `xmm0`–`xmm7` and on the unpatched
+  vendored tcc, and it was simply hidden behind the `%xmm8` gap until `0010` closed that.
+  Found while verifying `0010`, by assembling `dep/libressl/crypto/aes/aesni-elf-x86_64.S`,
+  which now reaches line 828 (`movaps %xmm9,%xmm2`) before failing. Same family as
+  `0002-libressl-sse-aesni-opcodes.patch` (opcode-table entries that disagree with real
+  `as`). Probed locally: changing the three entries' `OPT_REG32` to `OPT_SSE` makes the form
+  assemble; the resulting choice between the two `ALT` encodings (`0f28` vs `0f29`) needs
+  checking against real `as` before this is called done, and that check was not run — the
+  probe was reverted rather than kept, to keep `0010` to one concern.
+
+- [ ] **tcc's assembler has no `.value` directive** (`dep/tcc/tccasm.c` has
+  `TOK_ASMDIR_word`/`TOK_ASMDIR_short` but nothing for `value`, GAS's synonym for
+  `.short`) — `dep/libressl/crypto/modes/ghash-elf-x86_64.S` fails at line 1004 on the
+  `.Lrem_8bit` table with `incorrect number of operands`, because `.value` is not recognized
+  as a directive and falls through to opcode parsing. Found while verifying `0010`; unrelated
+  to registers, and the second of the two blockers now standing between the current tcc and
+  assembling `ghash-elf-x86_64.S`. Probed locally (a `DEF_ASMDIR(value)` alongside `short`
+  plus a fallthrough case in the emitter is enough to make the file assemble); the probe was
+  reverted rather than kept, to keep `0010` to one concern. Whether GAS's `.value` is exactly
+  `.short` in every respect was not confirmed against the `as` documentation or binary.
+
+- [ ] **With those two fixed, both blocked perlasm files assemble** — confirmed locally by
+  applying `0010` plus both probes above and assembling
+  `dep/libressl/crypto/aes/aesni-elf-x86_64.S` and
+  `dep/libressl/crypto/modes/ghash-elf-x86_64.S` cleanly. That is the remaining distance to
+  dropping `--disable-asm` for libressl; the output was not compared against `as` for those
+  two files under the probes, only under `0010` alone (extended-register instructions only).
 
 - [x] **tcc's `.section NAME,"flags"` assembler directive hardcoded `SHF_ALLOC` into
   every parsed section's flags and never recognized `a` in the flags string at all — now

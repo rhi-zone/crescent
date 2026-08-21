@@ -1,0 +1,40 @@
+--- a/dep/tcc/i386-tok.h
++++ b/dep/tcc/i386-tok.h
+@@ -176,6 +176,21 @@
+  DEF_ASM(bpl)
+  DEF_ASM(sil)
+  DEF_ASM(dil)
++ /* The upper eight SSE registers, which exist only on x86-64 and are
++    reached by the REX.R/X/B extension bit of the ModRM/SIB field that
++    holds them.  They deliberately do NOT live in the contiguous
++    al..db7 register block above: parse_operand() derives the operand
++    class there from (tok - TOK_ASM_al) >> 3, so appending xmm8..xmm15
++    right after xmm7 would renumber every later class (cr/tr/db).
++    They are parsed by an explicit branch instead, like spl..dil. */
++ DEF_ASM(xmm8)
++ DEF_ASM(xmm9)
++ DEF_ASM(xmm10)
++ DEF_ASM(xmm11)
++ DEF_ASM(xmm12)
++ DEF_ASM(xmm13)
++ DEF_ASM(xmm14)
++ DEF_ASM(xmm15)
+ #endif
+  /* generic two operands */
+  DEF_BWLX(mov)
+--- a/dep/tcc/i386-asm.c
++++ b/dep/tcc/i386-asm.c
+@@ -414,6 +414,13 @@
+ 	} else if (tok >= TOK_ASM_spl && tok <= TOK_ASM_dil) {
+ 	    op->type = OP_REG8 | OP_REG8_LOW;
+ 	    op->reg = 4 + tok - TOK_ASM_spl;
++	} else if (tok >= TOK_ASM_xmm8 && tok <= TOK_ASM_xmm15) {
++	    /* Upper SSE registers: same operand class as xmm0..xmm7, but with
++	       a register number >= 8.  asm_rex() turns that into the REX.R or
++	       REX.B bit (depending on whether the operand lands in ModRM.reg
++	       or ModRM.rm) and subtracts 8, so asm_modrm() still sees 0..7. */
++	    op->type = OP_SSE;
++	    op->reg = 8 + tok - TOK_ASM_xmm8;
+         } else if ((op->reg = asm_parse_numeric_reg(tok, &op->type)) >= 0) {
+ 	    ;
+ #endif
