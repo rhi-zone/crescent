@@ -1,0 +1,28 @@
+--- a/dep/tcc/tccasm.c
++++ b/dep/tcc/tccasm.c
+@@ -1196,6 +1196,15 @@
+     case TOK_ASMDIR_p2align:
+     case TOK_ASMDIR_skip:
+     case TOK_ASMDIR_space:
++    /* `.zero' is GNU as's third spelling of this one directive, not a
++       narrower "always fills with zero" variant: as routes `.zero' into the
++       same s_space() as `.skip'/`.space', fill operand and all. Measured
++       rather than assumed, because the plausible reading is the wrong one --
++       `.zero 4,5' in `.text' assembles to 05 05 05 05 under as, exactly like
++       `.skip 4,5', and `.zero 0' produces s_space's zero-repeat warning.
++       Sharing the case is therefore the accurate implementation, not a
++       convenient approximation. */
++    case TOK_ASMDIR_zero:
+         tok1 = tok;
+         next();
+         n = asm_int_expr(s1);
+--- a/dep/tcc/tcctok.h
++++ b/dep/tcc/tcctok.h
+@@ -387,6 +387,7 @@
+  DEF_ASMDIR(set)
+  DEF_ASMDIR(skip)
+  DEF_ASMDIR(space)
++ DEF_ASMDIR(zero)
+  DEF_ASMDIR(string)
+  DEF_ASMDIR(asciz)
+  DEF_ASMDIR(ascii)

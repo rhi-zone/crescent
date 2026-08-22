@@ -381,12 +381,19 @@ See `docs/roadmap-v2.md` for the authoritative project roadmap and sequencing. T
   folding, so `foo: .long foo-foo` passes where `foo: .long foo` does not. All 62 checks in
   `dep/tcc/patches/0024-tests/run.sh` pass against a real gcc as well as against tcc.
 
-- [ ] **tcc does not implement `.zero N`.** `as`'s third spelling of `.skip`/`.space`,
-  and the one gcc emits most often for zero-initialised data. tcc says
-  `unknown opcode '.zero'` — in `.text` exactly as much as in `.bss`, so this is a missing
+- [x] **tcc did not implement `.zero N` — fixed by
+  `dep/tcc/patches/0025-asm-zero-directive.patch`.** `as`'s third spelling of
+  `.skip`/`.space`, and the one gcc emits most often for zero-initialised data. tcc said
+  `unknown opcode '.zero'` — in `.text` exactly as much as in `.bss`, so this was a missing
   directive and not a `SHT_NOBITS` matter; `0024` deliberately left it alone for that
-  reason. It is `.space` with the fill argument fixed at zero, so the handler is the
-  existing `TOK_ASMDIR_skip` case with one token added to `tcctok.h`.
+  reason. **One claim in the earlier wording of this item was wrong and the measurement is
+  the substance of the patch:** `.zero` is *not* "`.space` with the fill argument fixed at
+  zero". GNU `as` routes all three spellings into one `s_space()`, fill operand included —
+  `.zero 4,5` in `.text` assembles to `05 05 05 05`, byte-identical to `.skip 4,5`, and
+  `.zero 0` produces the zero-repeat-count warning. So sharing `TOK_ASMDIR_skip`'s case
+  entirely is the accurate implementation rather than a convenient approximation, which is
+  what `0025-tests/` asserts: t0/t1/t2 carry byte-identical content under the three
+  spellings, and the three objects must agree in `as` (the premise) and in tcc (the fix).
 
 - [ ] **tcc does not warn `.space repeat count is zero, ignored`.** `as` emits it for
   `.skip 0` / `.space 0` in every section type. The one visible consequence today is that
