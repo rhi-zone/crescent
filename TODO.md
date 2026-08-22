@@ -68,7 +68,8 @@ wrong; it was inferred from the `#error`, never checked against `libtcc1.a`.
     for any consumer of tcc objects, not just LuaJIT.
 
 - [x] **Verified state, on this NixOS box, tcc built from `dep/tcc` + all of
-  `dep/tcc/patches` (35 as of 2026-08-22), LuaJIT from `dep/luajit` + its patch,
+  `dep/tcc/patches` (37 patch files, `0001`–`0038` with no `0028`, as of 2026-08-22;
+  re-verified in full at `0038`), LuaJIT from `dep/luajit` + its patch,
   `XCFLAGS=-DLUAJIT_ENABLE_GC64`:**
   - tcc compiles the entire LuaJIT tree — `host/minilua`, `host/buildvm`, buildvm running
     to generate `lj_vm.S`/`lj_bcdef.h`/`lj_ffdef.h`/`lj_libdef.h`/`lj_recdef.h`/`vmdef.lua`,
@@ -81,12 +82,17 @@ wrong; it was inferred from the `#error`, never checked against `libtcc1.a`.
     `pcall` nested through a C boundary (an erroring `table.sort` comparator), a
     100-deep recursive error unwind, `ffi.C` calls, `ffi.new` arrays, and an
     `ffi.cast` callback from C back into Lua.
-  - **tcc as compiler + tcc as linker: builds, links, and runs — but `pcall` of an error
-    PANICs.** JIT, loops, coroutines and FFI are all fine. See the open item below; this
-    is the one remaining gap, and it is now understood rather than merely observed.
+  - **tcc as compiler + tcc as linker: a fully working LuaJIT, as of `0037` + `0038`
+    (2026-08-22).** No gcc and no GNU ld anywhere in the build. Same smoke bar as the
+    GNU-ld row above and then some — `pcall` of an error raised inside an `ffi.cast`
+    callback, nested rethrow, and a 200k-object GC stress pass — 19/19, no panic.
+    `.eh_frame_hdr` indexes 2402 of 2402 FDEs. Details in the closed item below.
 
-- [ ] **tcc's linker emits no `.eh_frame_hdr` section and no `PT_GNU_EH_FRAME` program
-  header. That is the whole of what blocks a fully tcc-compiled-and-linked LuaJIT.**
+- [x] **CLOSED by `0037` + `0038` (2026-08-22): tcc's linker emitted no `.eh_frame_hdr`
+  section and no `PT_GNU_EH_FRAME` program header, and that was the whole of what blocked
+  a fully tcc-compiled-and-linked LuaJIT.** Both defects below are fixed and the end-to-end
+  result is verified; the entry is kept in full because the diagnosis was corrected twice
+  on the way and the record of what was wrong about each is worth more than the summary.
   libgcc's `_Unwind_Find_FDE` locates FDEs by walking `dl_iterate_phdr` looking for
   `PT_GNU_EH_FRAME`; with no such header the search phase finds nothing, LuaJIT's
   `lj_err_unwind_dwarf` personality is never consulted, `_Unwind_RaiseException` fails,
@@ -192,17 +198,80 @@ wrong; it was inferred from the `#error`, never checked against `libtcc1.a`.
   returns `false` and the message instead of panicking. The same objects linked with no C
   source on the command line get no `.eh_frame_hdr` at all, from either tcc.
 
-  **So defect (1) is now the whole of what remains, and its fix is an open owner call.**
-  `s1->eh_frame_section` is assigned in exactly one place, during compilation. Something
-  has to give the generator a handle on the merged output `.eh_frame` when tcc is invoked
-  purely as a linker. Adopting it by name is what the probe does, and it works, but that
-  is a measurement instrument and not a considered answer: it changes what
-  `s1->eh_frame_section` *means* (generator-owned scratch vs. a handle on an output
-  section), and it leaves undecided whether a link-only invocation should emit a header
-  unconditionally, whether `-r` partial links should, and whether `-fno-asynchronous-
-  unwind-tables`/`s1->unwind_tables` has any say at link time when it was a compile-time
-  flag. Those differ in what a linked program does at runtime, so the call is the
-  owner's. Recorded here rather than filled in.
+  **Defect (1) is closed — `dep/tcc/patches/0038-eh-frame-hdr-link-time-adoption.patch`.**
+  The three questions this entry left open were settled by measuring real linkers rather
+  than by choosing, on x86-64 against GNU ld 2.44 and GNU gold, which agree on all three:
+
+  - **A final link emits the header whenever merged `.eh_frame` content exists** — from
+    wherever it came. gcc's link driver passes `--eh-frame-hdr` by default for both
+    `-o exe` and `-shared`, so this is what a normal build gets. Given no `.eh_frame`
+    content at all, `ld` emits neither section nor header even with `--eh-frame-hdr`
+    passed explicitly; an empty header is not the answer, no header is.
+  - **`s1->unwind_tables` has no say at link time.** Objects built with
+    `-fno-asynchronous-unwind-tables` still get a header when any other input carried
+    `.eh_frame`. Same T3 distinction `0007` drew for `.eh_frame` *retention*: the flag's
+    job is "should tcc's own C compiler generate CFI", never "should the linker index
+    CFI that already exists in its inputs".
+  - **`-r` never gets one**, from either linker, even with `--eh-frame-hdr` passed
+    explicitly — `-r` output has no program headers at all. tcc agrees for free:
+    `TCC_OUTPUT_OBJ` goes to `tcc_output_object()` and never reaches `elf_output_file()`,
+    so nothing had to change for this and the harness pins it as a property.
+
+  On the mechanism: adopt-by-name turned out right, but not as the probe did it. The
+  probe reached into the section list directly; `tcc_eh_frame_adopt_output()` binds
+  through `reserved_section()` — the gate `0007`/`0009` built for exactly this class of
+  collision — with `SECTION_ROLE_SHARED`, the same role `tcc_eh_frame_start()` uses. So
+  the role, the header fields it depends on, and the input-side claim gate all agree, and
+  the reserved-section aliasing hazards that work closed stay closed (verified: an input
+  object carrying its own `.eh_frame_hdr` still trips the `SECTION_ROLE_PRIVATE`
+  diagnostic, unchanged). It **adopts only, never creates**: `reserved_section()` alone
+  would manufacture an empty `.eh_frame` when no input supplied one, which is the one
+  output real `ld` never produces. And the field is not given a second meaning — it
+  denotes "the output `.eh_frame` this link is emitting" in both modes; compiling appends
+  into that same section. What widened is when it is set, not what it denotes.
+
+  Measured. `patches/0038-tests/run.sh`: 17 pass / 0 fail against the patched tcc (glibc,
+  1 skip — no libgcc unwinder links on NixOS), **19/0 with no skips under Alpine/musl**
+  where the end-to-end `_Unwind_Backtrace` group runs for real, 18/0 against `gcc` + GNU
+  `ld` as the reference, and **8 failures** against a tcc built from the same stack
+  without the patch. tcc's own `make test` reports ALL TESTS PASSED on glibc and on
+  Alpine/musl; all 31 per-patch harnesses pass on both; the libressl AT&T bignum mirror
+  reports `equal=80 differs=4 tcc-rejects=0`, 368,000 differential checks, 0 mismatches —
+  byte-identical to the pre-`0038` baseline run.
+
+  **And the actual goal, end to end: a fully tcc-compiled and tcc-linked LuaJIT works.**
+  No gcc and no GNU ld anywhere in the build — tcc for `minilua`, `buildvm`, the
+  generated sources, `lj_vm.S`, every `lj_*.c`/`lib_*.c`, and the final link. Built clean
+  from `make clean`. `PT_GNU_EH_FRAME` present, `.eh_frame_hdr` 0x4b1c bytes = **2402 of
+  2402 FDEs** indexed. Smoke bar: 19/19 — JIT on and tracing, 2M-iteration loop,
+  coroutines both directions, `pcall(error)` with error-object identity preserved, `pcall`
+  of a nil index, `xpcall` with a handler, `pcall` through a C boundary (erroring
+  `table.sort` comparator), `pcall` of an error raised **inside** an `ffi.cast` callback,
+  a 100-deep recursive unwind, nested rethrow, `ffi.C` calls, `ffi.new` arrays, an
+  `ffi.cast` qsort callback, 200k-object GC stress across full collections, and a
+  post-stress hot loop. No panic. Control, on the **same object files** with the **same
+  link command**, only the linker binary differing: the pre-`0038` tcc produces no
+  `PT_GNU_EH_FRAME` and dies at the first `pcall` with `PANIC: unprotected error in call
+  to Lua API`.
+
+- [ ] **Open owner call, newly measured: what should `tcc -static` do about
+  `.eh_frame_hdr`?** Found while implementing `0038`, and the one question the
+  measurement did *not* settle, because the two references disagree.
+  - GNU ld emits the header for a static link when asked: `ld -static --eh-frame-hdr`
+    produces both `.eh_frame_hdr` and `PT_GNU_EH_FRAME`, bfd and gold alike.
+  - gcc's driver does not ask. Its link spec reads
+    `%{!static|static-pie:--eh-frame-hdr}`, so plain `gcc -static` gets **no** header
+    while `gcc -static-pie` does. Confirmed by `gcc -dumpspecs` and by linking.
+
+  tcc is both driver and linker, so it has to pick one. It currently behaves like gcc's
+  driver — `tcc_eh_frame_hdr()`'s call site sits inside `if (!s1->static_link)` in
+  `elf_output_file()`, which is where upstream put it — and `0038` deliberately left that
+  alone rather than minting an answer. Hoisting the call out of that branch was tried and
+  works (a `-static -nostdlib` link then gets a correct, fully-indexed header), so this is
+  a one-line change once the call is made; it is not blocked on anything. Not on the
+  LuaJIT path either way: that link is dynamic. `patches/0038-tests/run.sh` asserts
+  nothing about `-static` for this reason; its `-nostdlib` group is an ordinary dynamic
+  link that merely has no libc inputs.
 
 - [ ] **Open owner call: whether `dep/luajit/patches/` should be applied in CI.** Today
   it is not — the five `luajit-*` jobs in `build-vendored.yml` build the pristine
@@ -224,7 +293,17 @@ wrong; it was inferred from the `#error`, never checked against `libtcc1.a`.
   - A fully tcc-built LuaJIT needs `libgcc_s.so.1` passed explicitly for `_Unwind_*`
     and `__register_frame`/`__deregister_frame`. gcc links it implicitly, so this is
     parity with a gcc build, not a new dependency — but tcc does not, and the failure
-    is seven unresolved-symbol errors at `LINK luajit`.
+    is seven unresolved-symbol errors at `LINK luajit`. Pass the `.so.1` by absolute
+    path, not `-lgcc_s`: the `.so` symlink nix installs is an ld *linker script* naming
+    `-lgcc`, which tcc cannot read, and a bare `-lgcc_s` is not on tcc's configured
+    library paths at all. The whole invocation, with `dep/luajit/patches/0001` applied:
+    ```
+    make -C src CC="<tcc> -B <tccdir>" HOST_CC="<tcc> -B <tccdir>" \
+         TARGET_LD="<tcc> -B <tccdir>" XCFLAGS=-DLUAJIT_ENABLE_GC64 \
+         TARGET_XLIBS="-lm -ldl $(gcc -print-file-name=libgcc_s.so.1)" BUILDMODE=static
+    ```
+    `TARGET_XLIBS` *replaces* LuaJIT's default rather than adding to it, so `-lm -ldl`
+    have to be repeated or the link fails on `fmod`/`fabs`/`sqrt`/`log2`.
 
 ## libressl built with tcc: libtool has no `-Wl,` capability probe (2026-08-21)
 
@@ -1827,8 +1906,12 @@ wrong; it was inferred from the `#error`, never checked against `libtcc1.a`.
   in the next entry, so: no-regression is well supported; a positive proof of the linker changes
   under a fully working tcc-linked LuaJIT was not obtainable in this environment.
 
-- [ ] **Pre-existing, NOT caused by `0006`: a tcc-LINKED luajit breaks `pcall` entirely with
-  `PANIC: unprotected error in call to Lua API`.** Found while verifying `0006`. Not
+- [x] **CLOSED by `0037` + `0038` (2026-08-22). Pre-existing, NOT caused by `0006`: a
+  tcc-LINKED luajit breaks `pcall` entirely with
+  `PANIC: unprotected error in call to Lua API`.** The narrowing recorded below —
+  "the fault is in tcc as LINKER, how it lays out or registers unwind info" — was right,
+  and the two defects it turned out to be are written up at the top of this file. Found
+  while verifying `0006`. Not
   JIT-related — reproduces with `-joff` and on a bare
   `pcall(function() error("e1") end)`. Not the missing `-Wl,-E` either: adding
   `-Wl,-E -rdynamic` does not help, and `PT_GNU_EH_FRAME`/`.eh_frame_hdr` are both present in

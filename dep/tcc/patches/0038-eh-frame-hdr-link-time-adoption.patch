@@ -1,0 +1,81 @@
+--- a/dep/tcc/tccelf.c
++++ b/dep/tcc/tccelf.c
+@@ -453,6 +453,38 @@
+     return reserved_section_conflict(s1, sec->name);
+ }
+ 
++#if TCC_EH_FRAME
++/* Bind s1->eh_frame_section to the output .eh_frame the link produced.
++
++   tcc_eh_frame_start() sets that field, but it only ever runs while tcc is
++   COMPILING: it is the handle the code generator appends its own CIE and FDEs
++   to.  A link-only run (`tcc -c a.c` then `tcc -o exe a.o`) never compiles
++   anything, so the field stays NULL even though the merge loop has built a
++   complete output .eh_frame out of the input objects' own -- and .eh_frame_hdr
++   generation, which reads the field, then produced nothing at all.
++
++   Adopting the merged section here makes the field mean the same thing in both
++   modes: the output .eh_frame this link is emitting.  That is a widening of
++   when it is set, not a second meaning -- compiling appends into that same
++   output section, which is why the role is SECTION_ROLE_SHARED.
++
++   Adopt only; never create.  reserved_section() would create the section when
++   no input supplied one, and an empty .eh_frame in the output is content this
++   link does not have -- real ld emits neither section nor header in that case.
++   So look first, and bind through the reserved-section gate only on a hit, so
++   the role and the header fields it depends on are set by the same path the
++   compile-time creator uses and the input-side claim gate agrees with. */
++ST_FUNC void tcc_eh_frame_adopt_output(TCCState *s1)
++{
++    if (eh_frame_section)
++        return;
++    if (!have_section(s1, ".eh_frame"))
++        return;
++    eh_frame_section = reserved_section(s1, ".eh_frame", SHT_PROGBITS,
++                                        SHF_ALLOC, SECTION_ROLE_SHARED);
++}
++#endif
++
+ /* return a reference to a section, and create it if it does not
+    exists */
+ ST_FUNC Section *find_section(TCCState *s1, const char *name)
+@@ -3221,7 +3253,27 @@
+                 export_global_syms(s1);
+             }
+ #if TCC_EH_FRAME
+-	    /* fill with initial data */
++	    /* Reserve .eh_frame_hdr and fill it with initial data.  The adopt
++	       call is what makes this reachable from a link-only invocation:
++	       see tcc_eh_frame_adopt_output().  Whether tcc GENERATED unwind
++	       tables for code it compiled (-f[no-]asynchronous-unwind-tables)
++	       does not enter into it -- what decides the header is whether the
++	       merged output has .eh_frame content to index, from wherever.
++	       Measured on x86-64, GNU ld 2.44 and gold alike: a final link
++	       emits .eh_frame_hdr and PT_GNU_EH_FRAME whenever merged
++	       .eh_frame content exists, emits neither when no input carried
++	       any, and never emits one under -r (which does not reach this
++	       function at all -- TCC_OUTPUT_OBJ goes to tcc_output_object).
++
++	       Kept inside the `!s1->static_link` branch deliberately: on a
++	       static link the two references disagree.  GNU ld emits the
++	       header when asked (`ld -static --eh-frame-hdr`), but gcc's link
++	       driver does not ask -- its spec reads
++	       `%{!static|static-pie:--eh-frame-hdr}`, so a plain `gcc -static`
++	       link gets no header while `gcc -static-pie` does.  tcc is both
++	       driver and linker, so it would have to pick one; that call is
++	       open and recorded in TODO.md rather than made here. */
++	    tcc_eh_frame_adopt_output(s1);
+ 	    tcc_eh_frame_hdr(s1, 0);
+ #endif
+ 	    dyninf.gnu_hash = create_gnu_hash(s1);
+--- a/dep/tcc/tcc.h
++++ b/dep/tcc/tcc.h
+@@ -1916,6 +1916,8 @@
+ ST_FUNC void tcc_eh_frame_start(TCCState *s1);
+ ST_FUNC void tcc_eh_frame_end(TCCState *s1);
+ ST_FUNC void tcc_eh_frame_hdr(TCCState *s1, int final);
++/* defined in tccelf.c, next to the reserved-section gate it binds through */
++ST_FUNC void tcc_eh_frame_adopt_output(TCCState *s1);
+ #define TCC_EH_FRAME 1
+ #endif
+ 
