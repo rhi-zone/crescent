@@ -1119,14 +1119,61 @@ See `docs/roadmap-v2.md` for the authoritative project roadmap and sequencing. T
   committed: on their own they do not make either shani file assemble, so whether they land
   as a patch of their own or as part of one complete SHA-NI patch is a packaging call.
 
-- [ ] **tcc's 2-byte data directives reject a bare symbol operand.** `.short sym` and
-  `.value sym` (and `.short sym+4`) fail with `constant expected`; `.short sym-.` and
-  `.long sym` both work, so it is specific to emitting a 16-bit *relocation* —
-  `R_X86_64_16`, which real `as` emits happily. Found while building `0012`'s test cases (a
-  `.short sym` line in the control case failed on the unpatched tcc, which is how it was
-  distinguished from anything `0012` introduced). `.value` inherits this by being an alias,
-  which is correct — the gap belongs to `.short`/`.word`. Nothing currently vendored needs
-  it: all seven libressl `*-elf-x86_64.S` files assemble without it. Not attempted.
+- [ ] **tcc's 2-byte data directives reject *any* symbol-bearing operand.** Found while
+  building `0012`'s test cases (a `.short sym` line in the control case failed on the
+  unpatched tcc, which is how it was distinguished from anything `0012` introduced).
+  `.value` inherits it by being an alias, which is correct — the gap belongs to
+  `.short`/`.word`. Nothing currently vendored needs it: all seven libressl
+  `*-elf-x86_64.S` files and `lj_vm.S` assemble without it.
+
+  **Re-derived 2026-08-22; the earlier wording of this item was wrong twice.** `.short
+  sym-.` does *not* work, and this is not specific to 16-bit relocations. Every
+  symbol-bearing 2-byte form errors `constant expected`: `sym`, `sym+4`, `sym-4`, a local
+  label, `lab - .`, `ext - d1`, and a forward same-section difference `d2-d1`. Only an
+  expression that folds to a pure constant passes. `asm_data`'s `size == 2` arm in
+  `tccasm.c` has no symbol path at all and goes straight to `expect("constant")`; the
+  `.short sym-.` case reaches it because `asm_expr_sum()`'s PC-relative branch leaves
+  `pe->sym` set with `pcrel=1`, not because a relocation was attempted.
+
+  Measured against binutils 2.44: `.short sym` → `R_X86_64_16`, addend 0, with `+4`/`-4`
+  riding in the addend; a local label reduces to the section symbol plus offset;
+  `sym - <same-section label>` and `sym - .` → `R_X86_64_PC16` with addend equal to the
+  relocation's own offset; stored bytes zero (RELA). On overflow `as` warns and truncates
+  for a literal (`.short 70000`) but for a symbol parks the oversized addend in the
+  relocation silently and lets `ld` fail with "relocation truncated to fit"; `ld` also
+  refuses `R_X86_64_16` outright under PIE.
+
+  **The x86_64 assembler half is prototyped and matches `as` byte-for-byte** on content and
+  relocation type/addend (`gen_addr16`/`gen_addrpc16` in `x86_64-gen.c`, `gen_expr16` in
+  `i386-asm.c`, `size == 2` routed to it). It is not landed, because closing it needs two
+  calls that are the owner's and not the implementer's:
+
+  1. **How many targets.** `asm_data` is shared by every target and tcc's own `make test`
+     cross-builds i386/arm/arm64/riscv64/c67, so an x86-only hook fails the cross-test with
+     `unresolved reference to 'gen_addr16'`. The per-target answers are not uniform: i386
+     has `R_386_16`/`R_386_PC16` (already in `i386-link.c`, but gated to
+     `--oformat=binary`), arm64 has `ABS16`/`PREL16`, arm has `ABS16`, and riscv64's psABI
+     has no absolute 16-bit relocation at all (only `ADD16`/`SUB16`), so there the right
+     behaviour is probably still to reject — divergent per-target semantics that would be
+     minted rather than measured, since there is no cross assembler on hand to observe.
+  2. **The linker side on x86_64.** `x86_64-link.c` has no `R_X86_64_16`/`PC16` support, so
+     with the assembler fix in, `tcc x.S -o prog` fails loudly (`Unknown relocation type
+     for got: 12`) instead of `constant expected`. No silent corruption either way, but the
+     feature half-works. i386's policy ("can only produce 16-bit binary files") is a
+     real-mode thing that does not transfer, and `ld`'s own policy is split (refuse under
+     PIE, truncation error otherwise) — more than one defensible answer and no reference to
+     copy.
+
+  Two things worth knowing whichever way it goes. Baseline tcc already emits a spurious
+  `R_X86_64_PC32` where `as` folds a forward same-section difference to a constant
+  (`.long d2-d1` in `.data`: `as` gives `04 00 00 00` and no relocation, tcc a relocation
+  and zeros) — same linked value, a representation divergence rather than a bug, but it
+  means a `.short d2-d1` harness case would MISMATCH for a pre-existing reason. Same story
+  for local-label-vs-section-symbol reduction, which `.long sym` already diverges on today.
+  A harness here therefore needs a `.long` control case to show both divergences are
+  pre-existing and shared, or the normalization looks like the patch's own opinion. And
+  `.byte sym` (`R_X86_64_8`) is the same hole one size down, open under any of these
+  directions.
 
 - [x] **`dep/tcc/i386-asm.h` carries the identical `OPT_REG32` bug `0011` fixed in
   `x86_64-asm.h`** — same six entries, same wrong operand class, so the 32-bit targets
