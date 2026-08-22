@@ -1033,6 +1033,27 @@ wrong; it was inferred from the `#error`, never checked against `libtcc1.a`.
   shape as `0003`'s. Different blast radius each, and the middle one has a
   correctness precondition nobody has measured yet.
 
+- [ ] **`pcall` of an error raised inside an `ffi.cast` callback, unwinding
+  back out through musl's `qsort`, panics — and it is not a tcc defect.**
+  Measured 2026-08-23 on alpine/musl while re-running the LuaJIT regression
+  bar. `PANIC: unprotected error in call to Lua API`. A gcc-built control on
+  the same container reproduces the identical panic, so the tcc patch stack
+  is not implicated; it reads as musl `qsort` frames not being unwindable.
+  Recorded as environmental and unmeasured rather than counted as a pass or a
+  failure — closing it means deciding whether crescent cares about raising
+  through a libc callback boundary at all, which is a separate question from
+  anything the tcc work covers.
+  Context for the surrounding numbers, all green on the same run: tcc's own
+  suite passes, all 31 per-patch harnesses pass (626/626 assertions), and
+  LuaJIT builds via tcc end to end with a genuinely regenerated `lj_vm.S`
+  (buildvm output, not a tree copy — it is absent from the tree after the
+  v2.1 bump), linking with `.eh_frame_hdr` fully indexed at 2400/2400 FDEs
+  and 19/19 smoke checks passing, `pcall`/`xpcall`, errors across a C
+  boundary, deep and nested unwinds, coroutine errors, FFI callbacks, GC
+  stress and JIT trace compilation among them. The recorded 2402/2402 FDE
+  count is from an older source state; the invariant that holds is "fully
+  indexed", not the raw number.
+
 - [ ] **Two build-recipe gotchas for tcc-built libressl, unrelated to the
   probe.** Both cost time before anything built at all, both worth writing
   down. `CC=tcc ./configure` fails at "C compiler cannot create executables"
