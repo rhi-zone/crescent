@@ -395,10 +395,28 @@ See `docs/roadmap-v2.md` for the authoritative project roadmap and sequencing. T
   what `0025-tests/` asserts: t0/t1/t2 carry byte-identical content under the three
   spellings, and the three objects must agree in `as` (the premise) and in tcc (the fix).
 
-- [ ] **tcc does not warn `.space repeat count is zero, ignored`.** `as` emits it for
-  `.skip 0` / `.space 0` in every section type. The one visible consequence today is that
-  `.skip 0,<non-zero>` in a NOBITS section gets `0024`'s `ignoring fill value` warning
-  where `as` gives this one instead, `as` having taken the zero-count exit first.
+- [x] **tcc did not warn `.space repeat count is zero, ignored` — fixed by
+  `dep/tcc/patches/0029-asm-space-zero-repeat-count.patch`.** `as` emits it for
+  `.skip 0` / `.space 0` / `.zero 0` in every section type. The visible consequence was
+  that `.skip 0,<non-zero>` in a NOBITS section got `0024`'s `ignoring fill value` warning
+  where `as` gives this one instead, `as` having taken the zero-count exit first — two
+  assemblers warning about two different things on the same input.
+  The discriminator, measured rather than assumed, is that the DIRECTIVE decides and not
+  the size: `.align 1,5` in a NOBITS section contributes zero bytes and still gets
+  `ignoring fill value`, because `.align`/`.balign`/`.p2align` are a different handler in
+  `as` with no repeat count to be zero. A fix keyed on "size works out to zero" would have
+  been wrong in exactly that case, so it is one of the 36 checks in `0029-tests/`.
+  (Numbered `0029` rather than `0026`: `0026`–`0028` were claimed by concurrent work while
+  this was in flight. It sorts after `0025`, which is the only ordering constraint — its
+  hunk context includes `0025`'s `case TOK_ASMDIR_zero:`.)
+
+- [ ] **tcc does not warn `.space repeat count is negative, ignored`.** `as` emits it for
+  `.skip -1` / `.space -1` / `.zero -1`; tcc clamps the count to zero and says nothing.
+  Measured against binutils 2.44 while writing `0029` and deliberately left out of it: it is
+  a different message for a different input, and `0024` set the precedent of leaving an
+  adjacent measured gap to its own patch rather than folding it in. `0029` flags the
+  zero case *before* the existing negative-clamp rather than after, so adding this needs no
+  rework — one `else if` at the same site.
 
 - [ ] **tcc's `.section` flags-string parser only understands `a`, `w`, `x`.** GNU `as` also
   takes `M`/`S` (mergeable/strings, with the entity-size and group operands that follow),

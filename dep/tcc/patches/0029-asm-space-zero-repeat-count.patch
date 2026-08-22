@@ -1,0 +1,58 @@
+--- a/dep/tcc/tccasm.c
++++ b/dep/tcc/tccasm.c
+@@ -1185,6 +1185,12 @@
+ static void asm_parse_directive(TCCState *s1, int global)
+ {
+     int n, offset, v, size, tok1, c;
++    /* Set only by `.skip'/`.space'/`.zero' with a repeat count of exactly
++       zero, which GNU as diagnoses and drops before it looks at anything
++       else about the directive. Kept as a flag rather than tested at the
++       point of use because `n' is clamped just below and a clamped negative
++       count is a different diagnostic in as, not this one. */
++    int zero_rept;
+     Section *sec;
+     uint8_t *ptr;
+ 
+@@ -1206,6 +1212,7 @@
+        convenient approximation. */
+     case TOK_ASMDIR_zero:
+         tok1 = tok;
++        zero_rept = 0;
+         next();
+         n = asm_int_expr(s1);
+         if (tok1 == TOK_ASMDIR_p2align)
+@@ -1225,6 +1232,7 @@
+                 sec->sh_addralign = n;
+             c = sec->sh_flags & SHF_EXECINSTR;
+         } else {
++	    zero_rept = (n == 0);
+ 	    if (n < 0)
+ 	        n = 0;
+             size = n, c = 0;
+@@ -1234,6 +1242,26 @@
+             next();
+             v = asm_int_expr(s1), c = 0;
+         }
++        /* The fill operand is still consumed above before this fires: as
++           parses the whole directive and only then drops it, so `.skip 0,7'
++           is a warning and not a syntax error.
++
++           Order matters and is measured, not assumed. as takes this exit
++           ahead of every other check it makes here, which is why `v' is
++           cleared: `.skip 0,7' in a NOBITS section warns about the zero
++           repeat count and NOT about the fill value 0024 would otherwise
++           report, because as never reaches that test. Clearing `v' rather
++           than guarding 0024's warning site keeps the two independent --
++           `zero_pad' is shared with `.org', which arrives with `v' already
++           zero and no repeat count of its own.
++
++           Confined to `.skip'/`.space'/`.zero' because as reaches it from
++           s_space() only: `.align'/`.balign'/`.p2align' are a different
++           handler there, and `.p2align 0' (alignment 1) is silent in as. */
++        if (zero_rept) {
++            tcc_warning(".space repeat count is zero, ignored");
++            v = 0;
++        }
+     zero_pad:
+ 	if ((uint64_t)ind + size >= 1<<30)
+ 	    tcc_error("too much data");
