@@ -588,10 +588,28 @@ See `docs/roadmap-v2.md` for the authoritative project roadmap and sequencing. T
   One deliberate strictness difference in the same area: `as` warns on a
   stray `.endm` and continues, this tcc errors.
 
-- [ ] **tcc's operand parser rejects a SIB address with no base
-  (`(,%reg,scale)`).** Not specific to any instruction; found while writing
-  `0015`'s cases, where the form had to be dropped from `t0_mulx.S`. GNU
-  `as` accepts it. Nothing in the vendored sources uses it.
+- [x] **tcc's operand parser rejected a SIB address with no base (`(,%reg,scale)`) —
+  fixed by `dep/tcc/patches/0027-asm-nobase-sib-operand.patch`.** Found while writing
+  `0015`'s cases, where the form had to be dropped from `t0_mulx.S`. The gap was narrower
+  than this item recorded: only the *bare* spelling, where the operand starts with `(`
+  immediately followed by `,`, was rejected — `8(,%rax,8)` and `sym(,%rax,8)` already
+  assembled byte-identically to GNU `as` before the patch. `parse_operand()` chose between
+  a parenthesised displacement expression and a displacement-less address by testing for
+  `%`, and sent everything else to `asm_expr()`, where a leading comma is a syntax error;
+  `asm_modrm()` already handled a missing base (SIB.base=101, mod=00, forced disp32), so
+  the encoder half was never wrong and no encoding change was needed. `0027-tests/` covers
+  all four scales, the omitted scale, every index register including the REX.X and 32-bit
+  `0x67` forms, and the memory-destination / immediate / group-opcode / `lea` /
+  indirect-branch / legacy-SSE / VEX paths.
+
+- [ ] **tcc does not reject `%rsp` (or `%esp`) written in the SIB *index* slot.** GNU `as`
+  errors `'(%rax,%rsp,4)' is not a valid base/index expression`; tcc assembles it to
+  `SIB.index=100`, the architectural "no index" code, which `objdump` reads back as `%riz`
+  — silently different code, no diagnostic. Predates `0027` (it reproduces on the base-ful
+  form against the `0001`–`0026` baseline); `0027` extends the same silence to the
+  base-less `(,%rsp,8)` spelling. A missing-diagnostic gap and not a
+  wrong-bytes-for-valid-input gap, so it is deliberately out of `0027-tests/`, where a case
+  would test neither assembler agreement nor `0027`'s change.
 
 - [ ] **Nothing in CI applies `dep/libressl/patches/` yet.** The
   `libressl-linux-x86_64` job in `build-vendored.yml` builds with the runner's
