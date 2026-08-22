@@ -1,0 +1,146 @@
+--- a/dep/tcc/tccasm.c
++++ b/dep/tcc/tccasm.c
+@@ -1236,6 +1236,23 @@
+             sec->data_offset = ind;
+             ptr = section_ptr_add(sec, size);
+             memset(ptr, v, size);
++        } else if (v != 0) {
++            /* Reserving space is exactly what a NOBITS section is for, so
++               the size stands; only the fill byte has nowhere to go. GNU as
++               drops it with a warning rather than failing -- this is the one
++               place in the NOBITS family that is a warning and not an error,
++               and `0024-tests/run.sh' pins that asymmetry against a real as.
++               tcc already ignored the fill (the branch above is the only
++               writer); it just did so without saying anything.
++
++               as reaches this check whatever `size' works out to, which is
++               why there is no `size > 0' guard: `.align 1,5' at an already
++               aligned `ind' still warns. The single case where as says
++               something else is `.skip 0,<non-zero>', where an earlier
++               ".space repeat count is zero, ignored" wins -- a warning tcc
++               lacks in every section type, NOBITS or not, so it is a
++               separate gap and not this patch's to close (see TODO.md). */
++            tcc_warning("ignoring fill value in section `%s'", sec->name);
+         }
+         ind += size;
+         break;
+@@ -1263,6 +1280,13 @@
+                 gen_le32(vl);
+                 gen_le32(vl >> 32);
+             } else {
++                /* Same rule as `asm_data' below; this branch is `.quad' on a
++                   32-bit target, where it takes a literal and never a
++                   symbol, so the value is the whole test. */
++                if (vl != 0)
++                    tcc_error_noabort(
++                        "attempt to store non-zero value in section `%s'",
++                        sec->name);
+                 ind += 8;
+             }
+             if (tok != ',')
+@@ -1314,6 +1338,30 @@
+                         gen_le16(e.v);
+                 }
+             } else {
++                /* A SHT_NOBITS section has a size in the file and no bytes,
++                   so a non-zero value has nowhere to live. GNU as refuses
++                   the store outright; tcc reserved the field and dropped the
++                   value without a word. `.bss' has always derived NOBITS, so
++                   this gap predates `0022' -- but 0022 made every name as
++                   derives NOBITS from (`.bss.foo', `.tbss*',
++                   `.gnu.linkonce.b*', any `@nobits') reach it too, which is
++                   what makes it worth closing now.
++
++                   as tests the value as written, before it is truncated to
++                   `size': `.byte 256' stores a zero byte and is still an
++                   error. Anything needing a relocation is an error whatever
++                   the addend, because the linker will write a non-zero
++                   result -- but a difference that folds away (`foo - foo',
++                   `1 - 1') leaves no symbol behind and is fine.
++
++                   `tcc_error_noabort', not `tcc_error': as reports every
++                   offending value in the directive and only then fails, and
++                   there is nothing here to recover from -- the field is
++                   reserved either way. */
++                if (e.sym || e.sym2 || e.v != 0)
++                    tcc_error_noabort(
++                        "attempt to store non-zero value in section `%s'",
++                        sec->name);
+                 ind += size;
+             }
+             if (tok != ',')
+@@ -1363,6 +1411,15 @@
+                     for (i = 0; i < len; i++)
+                         g(buf[i]);
+                 } else {
++                    /* Same rule as `asm_data'. The symbol-bearing case never
++                       gets here -- `0005' already rejects it above, since a
++                       NOBITS field cannot be relaxed -- so a plain value
++                       test is the whole of it: `.uleb128 0' encodes a single
++                       zero byte and is fine, `.sleb128 -1' is not. */
++                    if (e.v != 0)
++                        tcc_error_noabort(
++                            "attempt to store non-zero value in section `%s'",
++                            sec->name);
+                     ind += len;
+                 }
+             leb_next:
+@@ -1407,9 +1464,29 @@
+             repeat_buf[5] = 0;
+             repeat_buf[6] = 0;
+             repeat_buf[7] = 0;
+-            for(i = 0; i < repeat; i++) {
+-                for(j = 0; j < size; j++) {
+-                    g(repeat_buf[j]);
++            if (sec->sh_type == SHT_NOBITS) {
++                /* `.fill' gets its own wording from as -- "attempt to fill
++                   ... with non-zero value" -- and, unlike the data
++                   directives, says it once for the directive rather than
++                   once per byte. Like them it tests the value as written,
++                   so `.fill 4,1,256' is an error even though every byte it
++                   would store is zero. A fill that emits nothing (`repeat'
++                   or `size' zero) never reaches as's check, and `.fill N,M,0'
++                   is just reserved space, which is what NOBITS is for.
++
++                   Note this branch also stops the pointless writing: `g()'
++                   reallocs and fills a NOBITS section's `data' buffer that
++                   tcc_output_elf then never writes out. */
++                if (val != 0 && repeat > 0 && size > 0)
++                    tcc_error_noabort(
++                        "attempt to fill section `%s' with non-zero value",
++                        sec->name);
++                ind += repeat * size;
++            } else {
++                for(i = 0; i < repeat; i++) {
++                    for(j = 0; j < size; j++) {
++                        g(repeat_buf[j]);
++                    }
+                 }
+             }
+         }
+@@ -1526,8 +1603,23 @@
+                 size = tokc.str.size;
+                 if (t == TOK_ASMDIR_ascii && size > 0)
+                     size--;
+-                for(i = 0; i < size; i++)
+-                    g(p[i]);
++                if (sec->sh_type == SHT_NOBITS) {
++                    /* Third of as's three wordings, and the one that says
++                       what it really means: a NOBITS section can hold a
++                       string only if the string is empty. as checks byte by
++                       byte and reports each non-zero one, so `.ascii "hi"'
++                       is two errors -- while `.asciz ""' is a lone NUL and
++                       passes, as does an embedded `\0'. */
++                    for(i = 0; i < size; i++)
++                        if (p[i])
++                            tcc_error_noabort("attempt to store non-empty "
++                                              "string in section `%s'",
++                                              sec->name);
++                    ind += size;
++                } else {
++                    for(i = 0; i < size; i++)
++                        g(p[i]);
++                }
+                 next();
+                 if (tok == ',') {
+                     next();

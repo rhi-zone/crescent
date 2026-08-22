@@ -366,13 +366,32 @@ See `docs/roadmap-v2.md` for the authoritative project roadmap and sequencing. T
   `lj_vm.S` and all seven libressl `crypto/*/*-elf-x86_64.S` objects are byte-identical
   either side, and the relinked luajit runs unchanged.
 
-- [ ] **tcc drops a non-zero store into an `SHT_NOBITS` section instead of refusing it.**
+- [x] **tcc drops a non-zero store into an `SHT_NOBITS` section instead of refusing it.**
   `as` errors: `attempt to store non-zero value in section '.bss.foo'`. tcc emits the bytes
   into the section's data buffer and then never writes them out, so the value is silently
   lost. Not new and not caused by `0022` — tcc already did this for its own built-in `.bss`
   — but `0022` widens the set of names it applies to, since `.bss.foo` and friends are
   `SHT_NOBITS` now. Zero fill is byte-identical to `as` either way. Fixing it means a check
   at every data-emitting directive in `tccasm.c`, which is why it is its own item.
+  Fixed by `0024-asm-nobits-content.patch`. `as` turns out to have three errors and a
+  warning here, not one message: the data directives error once per offending value, the
+  string directives once per non-zero byte, `.fill` once per directive, and
+  `.skip`/`.space`/`.align` with a fill value only *warn* and keep the (legitimate) size.
+  It also tests the value before truncation — `.byte 256` is an error — and after constant
+  folding, so `foo: .long foo-foo` passes where `foo: .long foo` does not. All 62 checks in
+  `dep/tcc/patches/0024-tests/run.sh` pass against a real gcc as well as against tcc.
+
+- [ ] **tcc does not implement `.zero N`.** `as`'s third spelling of `.skip`/`.space`,
+  and the one gcc emits most often for zero-initialised data. tcc says
+  `unknown opcode '.zero'` — in `.text` exactly as much as in `.bss`, so this is a missing
+  directive and not a `SHT_NOBITS` matter; `0024` deliberately left it alone for that
+  reason. It is `.space` with the fill argument fixed at zero, so the handler is the
+  existing `TOK_ASMDIR_skip` case with one token added to `tcctok.h`.
+
+- [ ] **tcc does not warn `.space repeat count is zero, ignored`.** `as` emits it for
+  `.skip 0` / `.space 0` in every section type. The one visible consequence today is that
+  `.skip 0,<non-zero>` in a NOBITS section gets `0024`'s `ignoring fill value` warning
+  where `as` gives this one instead, `as` having taken the zero-count exit first.
 
 - [ ] **tcc's `.section` flags-string parser only understands `a`, `w`, `x`.** GNU `as` also
   takes `M`/`S` (mergeable/strings, with the entity-size and group operands that follow),

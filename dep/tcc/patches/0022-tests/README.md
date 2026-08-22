@@ -78,7 +78,12 @@ out `SHT_X86_64_UNWIND`.
 (`attempt to store non-zero value in section '.bss.foo'`); tcc drops the bytes
 silently. That divergence is not new — tcc already did it for its own built-in
 `.bss` — and `0022` only extends the set of names it applies to. Zero fill is
-byte-identical to `as`. There is a `TODO.md` item.
+byte-identical to `as`.
+
+**Closed since, by `0024-asm-nobits-content.patch`** — see
+`0024-tests/README.md`. It turned out to be three errors and a warning rather
+than the single message quoted above, the warning being the case
+(`.skip N,<non-zero>`) where `as` keeps the size and drops only the fill byte.
 
 ## Tests
 

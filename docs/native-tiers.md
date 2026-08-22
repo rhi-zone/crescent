@@ -1226,10 +1226,11 @@ An unrecognized type name behaves as if no argument had been given, which is
 number is accepted, as `as` accepts it, so `@0x70000001` really does come out
 `SHT_X86_64_UNWIND`.
 
-One divergence stays and is tracked in `TODO.md`: `as` refuses a non-zero
-store into an `SHT_NOBITS` section and tcc drops the bytes silently. That is
-not new — tcc already did it for its own built-in `.bss` — but `0022` widens
-the set of names it applies to. Zero fill is byte-identical to `as`.
+One divergence stayed at the time: `as` refuses a non-zero store into an
+`SHT_NOBITS` section and tcc dropped the bytes silently. That was not new —
+tcc already did it for its own built-in `.bss` — but `0022` widened the set of
+names it applies to. Zero fill was byte-identical to `as` either way. `0024`
+below closes it.
 
 **Verified.** `0022-tests/run.sh` scores 44/44 with `0022`, 44/44 against a
 real gcc, and 16/44 on the `0001`–`0021` baseline. `0021-tests` still scores
@@ -1286,6 +1287,50 @@ the program dereferences, so a fix that widened into "skip relocations under
 resolve to `file:line` unchanged in dwarf-4, dwarf-5 and stabs modes, and
 tcc's own `make test` — `btest` included — reaches `ALL TESTS PASSED` either
 side.
+
+### `0024-asm-nobits-content.patch`
+
+`0024` (tccasm.c) makes tcc refuse content it cannot represent in a
+`SHT_NOBITS` section, which is what `0022`'s own "what is not fixed" note was
+pointing at.
+
+A NOBITS section has a size in the file and no bytes. tcc reserved the space,
+dropped the value and said nothing, so `.long 0xdeadbeef` in `.bss.foo`
+assembled quietly into four zero bytes. The silent drop predates `0022` —
+tcc's built-in `.bss` always did it — but once `0022` derived the type from
+the name and from `@type`, every name `as` calls NOBITS reached it.
+
+`as` does not have one diagnostic here, it has three errors and a warning, and
+which applies is a property of the directive rather than the value: the data
+directives (`.byte` … `.quad`, `.uleb128`, `.sleb128`) error once per offending
+**value**, the string directives once per non-zero **byte**, `.fill` once per
+**directive** with its own wording, and `.skip`/`.space`/`.align` given a fill
+value only **warn** — `ignoring fill value` — because the size they ask for is
+exactly what a NOBITS section is for and only the fill byte is homeless. That
+last row is the one a naive "error on any write" fix gets wrong. Two further
+details read backwards from the obvious guess: the value is tested *before*
+truncation to the field, so `.byte 256` is an error, and *after* constant
+folding, so `foo: .long foo-foo` passes while `foo: .long foo` does not, a
+relocation counting as non-zero whatever its addend. Instructions are not
+policed at all — `nop` in `.bss` assembles and grows the section — so that path
+is untouched. Errors go through `tcc_error_noabort`, so every offending value
+in a directive is reported before the assembly fails, as `as` does.
+
+**Verified.** `0024-tests/run.sh` scores 62/62 against the patched tcc and
+62/62 against a real gcc — binutils 2.44 locally, and each container's own `as`
+in CI — against 28/62 on the `0001`–`0023` baseline. Each case pins the
+classification, the message text, and the message *count*, which is what
+catches a once-per-directive rule implemented once-per-byte. `0005`–`0023`'s
+harnesses all still pass, and tcc's own `make test` reaches `ALL TESTS PASSED`
+on glibc and on alpine/musl either side of the patch. A freshly generated
+luajit `lj_vm.S` and all seven libressl `crypto/*/*-elf-x86_64.S` objects are
+byte-identical either side and draw no new diagnostics; a luajit relinked
+against the tcc-assembled `lj_vm.o` runs with the JIT on.
+
+Two gaps it deliberately does not close, both in `TODO.md`: tcc has no `.zero`
+directive at all (a missing directive, not a NOBITS matter — it fails in
+`.text` too), and no `.space repeat count is zero` warning (which `as` emits in
+every section type).
 
 ### `dep/libressl/patches/`: build-system gaps, not compiler gaps
 
