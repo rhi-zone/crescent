@@ -1446,12 +1446,12 @@ loop's forward `jmp` in the near form and pads with multi-byte `nopl`, tcc
 picks the short form and pads with `0x90` — which is the same latitude
 `tooling/scripts/verify-bignum-att-tcc.sh` allows for whole routines.
 
-**Not yet end-to-end.** A second, unrelated blocker sits behind this one: both
-files put their byte-shuffle mask in a single `.octa` directive with a 128-bit
-hex literal, which tcc has no directive for and, more to the point, no
-integer type for — its expression evaluator is 64-bit, so this is a lexer and
-expression-layer gap rather than a directive alias. Substituting two `.quad`s
-by hand is what the verification above assembled. Recorded in `TODO.md`.
+**End-to-end as of `0036`.** A second, unrelated blocker sat behind this one:
+both files put their byte-shuffle mask in a single `.octa` directive with a
+128-bit hex literal, which tcc had no directive for and, more to the point, no
+integer type for. The verification above assembled a hand-substituted pair of
+`.quad`s; `0036` implements the directive, and both files now assemble as
+written, with the mask bytes identical to `gcc -c`.
 
 ### `0034-asm-bswap-reg64.patch`
 
@@ -1566,6 +1566,90 @@ generator's CIE walk silently skips FDEs whose CIE is not tcc's own exact
 shape, which includes every CIE carrying a personality routine — LuaJIT's VM
 `.eh_frame` among them. Details, measurements and the open semantics question
 in the second one are in `TODO.md`.
+
+### `0036-asm-octa-directive.patch`
+
+`.octa` is gas's 16-byte data directive — a 128-bit literal, little-endian.
+libressl's two SHA-NI files each keep their byte-shuffle mask in one, and
+until this patch tcc answered `unknown opcode '.octa'`, which was the last
+blocker on them after `0033`.
+
+It is not a missing line in a directive table. There is nowhere in tcc to put
+a 128-bit value: `ExprValue` is a single `uint64_t`, `asm_expr_unary` reads
+literals through `strtoull`, and every arithmetic path in `tccasm.c` is
+64-bit. Nothing wider exists anywhere to borrow — floating-point constants
+never enter the assembler's expression path at all. So the patch carries its
+own arithmetic: four 32-bit limbs, one multiply-accumulate per digit, local
+to the literal parser.
+
+**The operand grammar is narrower than gas's, deliberately.** gas documents
+`.octa` as taking "zero or more bignums", and that is what this implements,
+plus one leading unary `+`, `-` or `~`. gas *also* accepts arithmetic and
+absolute symbols — but the upper 8 bytes it emits for such an operand are not
+a sign extension of the value. They come from gas's own `X_extrabit` flag
+propagated through the operators, and measured against binutils 2.44 that
+flag is wrong on its own terms: `.octa 2-1` emits 1 with every bit of the
+upper half set, `.octa 1==1` emits all ones, and `.octa 0xffffffffffffffff`
+zero-extends while `.octa 0-1` sign-extends the same 64-bit value. Matching
+that byte for byte means reimplementing a gas bug as a specification. The
+alternative — widening the expression evaluator — means a hand-built 128-bit
+arithmetic subsystem, long division included, since tcc has no `__int128`,
+and it would still disagree with gas wherever that flag fires. So an operand
+form that cannot be assembled into bytes that agree with gas is refused with
+a diagnostic instead of assembled into bytes that quietly differ. Symbols are
+refused by gas too, which has no 128-bit absolute relocation to emit
+("cannot do unsigned 16 byte relocation").
+
+A few accepted forms still diverge from gas, and gas is not a fixed reference
+on them. `.octa -0` is the extrabit flag again: gas 2.44 emits an all-ones
+upper half where a 128-bit negate of zero is zero. And gas is not even
+self-consistent between bases — 2.44 emits zero for 2^64 written in octal
+while emitting the right value for the same number in hex or in decimal, and
+the right value again for an octal literal one digit longer, a narrow band of
+its number lexer found by fuzzing random literals against it. Those forms are
+pinned to tcc's own bytes in the harness, with gas's answer reported and never
+asserted, so the harness tracks tcc rather than the installed binutils —
+which is also what keeps it green on more than one binutils release.
+
+Everything else follows the directives already there: 16 bytes per operand
+via `gen_le32`, `0024`'s NOBITS rule at this width with the same message gas
+uses, and gas's own truncate-and-warn behaviour ("bignum truncated to 16
+bytes") for a literal wider than 128 bits.
+
+**Verified.** `dep/tcc/patches/0036-tests/run.sh`: **20 pass, 0 fail**, every
+byte-compared case checked against real GNU `as`. Against the `0001`–`0035`
+baseline the same harness reports **10 pass, 10 fail** — every positive and
+pinned case fails with `unknown opcode`, and the rejection cases pass there
+for the wrong reason. Green on binutils 2.40, 2.44 and 2.45.1.
+
+Beyond the fixed cases, the limb arithmetic was fuzzed against `as`: 200
+random hex literals of 1–33 digits and 450 random decimal, octal and binary
+literals, many wider than 128 bits. Everything agreed except the octal band
+described above, which is how that `as` artifact was found.
+
+The acceptance test is the two libressl files themselves, assembled as
+written with no hand substitution: `.rodata` — which is where both masks live
+— is byte-identical to `gcc -c` on the same source, and the instruction
+streams match one for one, with `.text` differing only in the jmp form and
+nop padding latitude `0033` already documents.
+
+`tooling/scripts/verify-bignum-att-tcc.sh` reports **equal=80 differs=4**
+with 368,000 runtime differential checks and 0 mismatches — identical to the
+`0001`–`0035` baseline on the same host, as are all 28 pre-existing patch
+harnesses.
+
+The six harnesses that fail on a NixOS host — `0007`, `0009`, `0023`, `0030`,
+`0034`, `0035` — fail identically with and without the patch; they want
+`crt1.o` and `stdio.h`, which a NixOS host does not have, and they are a
+property of the host rather than of this patch.
+
+**Not measured here.** tcc's own `make test` on glibc and musl, and the
+LuaJIT leg (a freshly `buildvm`-generated `lj_vm.S` assembled by the patched
+and the baseline tcc, then relinked and run) are both worth having for this
+patch — the LuaJIT one specifically because adding a token to `tcctok.h`
+renumbers every later `TOK_ASMDIR_*` — and neither is recorded here because
+neither has been measured. Nothing in `lj_vm.S` uses `.octa`, which is a
+reason to expect no change, not evidence of one.
 
 ### `dep/luajit/patches/`: a compiler-identity gate, not a compiler gap
 

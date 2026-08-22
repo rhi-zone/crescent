@@ -1440,8 +1440,34 @@ wrong; it was inferred from the `#error`, never checked against `libtcc1.a`.
   committed: on their own they do not make either shani file assemble, so whether they land
   as a patch of their own or as part of one complete SHA-NI patch is a packaging call.
 
-- [ ] **`.octa` is the second blocker on the shani files, and it is a 128-bit-literal gap,
-  not a missing directive alias.** With `0033` applied, both
+- [x] **`.octa` is the second blocker on the shani files, and it is a 128-bit-literal gap,
+  not a missing directive alias — closed by
+  `dep/tcc/patches/0036-asm-octa-directive.patch`.** The directive is implemented, both
+  shani files assemble as written with no hand substitution, and their `.rodata` — where
+  both masks live — is byte-identical to `gcc -c`. The 128-bit value never enters
+  `ExprValue`: the literal parser carries its own arithmetic in four 32-bit limbs, one
+  multiply-accumulate per digit, so nothing shared with the 64-bit expression evaluator
+  changed. Verified in `dep/tcc/patches/0036-tests/` (20 pass against binutils 2.44 here and
+  green on two further binutils in containers; 10 pass 10 fail against the `0001`–`0035`
+  baseline), plus a fuzz sweep of 650 random literals in all four bases against `as`, and
+  the libressl bignum harness unchanged from baseline. `make test` on glibc and musl and the
+  LuaJIT `lj_vm.S` leg are NOT measured for this patch — worth doing, the LuaJIT one
+  especially, since adding a `tcctok.h` token renumbers every later `TOK_ASMDIR_*`.
+  Design detail in `docs/native-tiers.md`. Two things worth carrying forward. First, the
+  accepted operand grammar is narrower than gas's on purpose — bignum literals plus one
+  unary operator, with arithmetic, absolute symbols, character constants and chained unary
+  operators refused — because the upper half gas emits for an expression operand comes from
+  its `X_extrabit` flag rather than from the value (`.octa 2-1` there is 1 with the whole
+  upper half set), so agreeing with gas byte-for-byte on those forms would mean copying a
+  gas bug, and the only other route, a hand-built 128-bit arithmetic subsystem, would still
+  disagree wherever that flag fires. Second, gas is not a fixed reference here at all, which
+  is why the harness pins tcc's own bytes for the affected forms and only *reports* whether
+  the local `as` agrees: within one release (2.44) it is not self-consistent between
+  bases — it emits zero for 2^64 written in octal while getting the same number right in
+  hex, in decimal, and in octal one digit longer. That last one is a gas defect nobody in
+  this tree depends on, found by fuzzing; it is recorded here rather than reported upstream,
+  which is a separate call. Original entry follows.
+  With `0033` applied, both
   `dep/libressl/crypto/sha/sha1_amd64_shani.S` and `sha256_amd64_shani.S` get past every
   opcode and then fail on `.octa 0x000102030405060708090a0b0c0d0e0f` (sha1, line 165) and
   `.octa 0x0c0d0e0f08090a0b0405060700010203` (sha256, line 180) — the byte-shuffle masks —

@@ -1,0 +1,184 @@
+--- a/dep/tcc/tcctok.h
++++ b/dep/tcc/tcctok.h
+@@ -416,6 +416,7 @@
+  DEF_ASMDIR(endif)
+  DEF_ASMDIR(org)
+  DEF_ASMDIR(quad)
++ DEF_ASMDIR(octa)
+ #if PTR_SIZE == 4
+  DEF_ASMDIR(code16)
+  DEF_ASMDIR(code32)
+--- a/dep/tcc/tccasm.c
++++ b/dep/tcc/tccasm.c
+@@ -1182,6 +1182,96 @@
+     return -1;
+ }
+ 
++/* Parse one PPNUM spelling as a 128-bit unsigned integer, low half into
++   *plo and high half into *phi.  Returns 0, or 1 if the literal did not fit
++   and was truncated to 128 bits, or -1 if it is not an integer literal at
++   all -- which is what a local label reference (`1f', `2b') and a stray
++   suffix both come through as, since the lexer hands those over as one
++   PPNUM exactly like a number.
++
++   This exists because there is nowhere in tcc to put a 128-bit value:
++   `ExprValue' is a single uint64_t and every arithmetic path in this file
++   is 64-bit.  The four 32-bit limbs are the whole of the arithmetic needed
++   for `.octa' -- a multiply-accumulate per digit -- which is why they are
++   local to this function rather than a wider integer type threaded through
++   the expression evaluator.  See the comment on TOK_ASMDIR_octa for why
++   that evaluator is deliberately not widened. */
++static int asm_parse_u128(const char *p, uint64_t *plo, uint64_t *phi)
++{
++    uint32_t w[4] = { 0, 0, 0, 0 };
++    unsigned int base = 10, digits = 0;
++    int truncated = 0;
++
++    if (p[0] == '0') {
++        if (p[1] == 'x' || p[1] == 'X')
++            base = 16, p += 2;
++        else if (p[1] == 'b' || p[1] == 'B')
++            base = 2, p += 2;
++        else
++            /* Plain `0' is octal with the leading zero as its first digit,
++               so that a bare "0" is a well-formed literal and not an empty
++               digit string. */
++            base = 8, p += 1, digits = 1;
++    }
++    for (; *p != '\0'; p++) {
++        unsigned int d, k;
++        uint64_t carry;
++
++        if (*p >= '0' && *p <= '9')
++            d = *p - '0';
++        else if (*p >= 'a' && *p <= 'f')
++            d = *p - 'a' + 10;
++        else if (*p >= 'A' && *p <= 'F')
++            d = *p - 'A' + 10;
++        else
++            return -1;
++        if (d >= base)
++            return -1;
++        carry = d;
++        for (k = 0; k < 4; k++) {
++            uint64_t t = (uint64_t)w[k] * base + carry;
++            w[k] = (uint32_t)t;
++            carry = t >> 32;
++        }
++        /* as truncates rather than refusing, with a warning; the caller
++           issues it. */
++        if (carry != 0)
++            truncated = 1;
++        digits++;
++    }
++    if (digits == 0)
++        return -1;
++    *plo = (uint64_t)w[0] | ((uint64_t)w[1] << 32);
++    *phi = (uint64_t)w[2] | ((uint64_t)w[3] << 32);
++    return truncated;
++}
++
++/* Parse one `.octa' operand: an integer literal, optionally preceded by a
++   single unary `+', `-' or `~', evaluated in 128 bits. */
++static void asm_octa_operand(uint64_t *plo, uint64_t *phi)
++{
++    int op = 0, truncated;
++
++    if (tok == '+' || tok == '-' || tok == '~') {
++        op = tok;
++        next();
++    }
++    if (tok != TOK_PPNUM)
++        tcc_error(".octa takes an integer literal");
++    truncated = asm_parse_u128(tokc.str.data, plo, phi);
++    if (truncated < 0)
++        tcc_error("invalid number syntax");
++    if (truncated)
++        /* Same wording as as, which truncates and carries on. */
++        tcc_warning("bignum truncated to 16 bytes");
++    next();
++    if (op == '-' || op == '~') {
++        *plo = ~*plo, *phi = ~*phi;
++        if (op == '-' && ++(*plo) == 0)
++            ++(*phi);
++    }
++}
++
+ static void asm_parse_directive(TCCState *s1, int global)
+ {
+     int n, offset, v, size, tok1, c;
+@@ -1347,6 +1437,74 @@
+         }
+         break;
+ #endif
++    case TOK_ASMDIR_octa:
++        /* 16 bytes per operand, little-endian, and NOT `size = 16; goto
++           asm_data'.  The operand cannot go through `asm_expr': ExprValue
++           holds one uint64_t, so a 128-bit literal has nowhere to land.
++
++           Widening ExprValue would not buy agreement with GNU as either.
++           as does not sign-extend a 64-bit expression result into the upper
++           half; it propagates its own X_extrabit flag, which is why (all
++           measured against binutils 2.44) `.octa 2-1' emits 1 with every
++           bit of the upper half set, `.octa 1==1' emits all ones, and
++           `.octa 0xffffffffffffffff' zero-extends while `.octa 0-1'
++           sign-extends the same 64-bit value.  Matching that byte for byte
++           means reimplementing an as bug as a specification, and the only
++           alternative -- a hand-built 128-bit arithmetic subsystem, long
++           division included, since tcc has no __int128 -- would still
++           disagree with as wherever that flag fires.
++
++           So the grammar accepted here is what as documents for .octa,
++           "zero or more bignums", plus the one unary operator that is
++           unambiguous on a literal.  Every other operand form as accepts --
++           arithmetic, symbols (which as itself refuses to relocate at this
++           width: "cannot do unsigned 16 byte relocation"), character
++           constants, chained unary operators -- is rejected with a
++           diagnostic rather than assembled into bytes that would disagree
++           with as.  Both real users in the tree, libressl's
++           sha1_amd64_shani.S and sha256_amd64_shani.S, are bare hex
++           literals.
++
++           as is also not a fixed reference here.  Within one release (2.44)
++           it is not even self-consistent between bases: it emits zero for
++           2^64 written in octal and the right value for the same number
++           written in hex.  0036-tests pins tcc's bytes for the forms where
++           as answers from that flag or from that lexer band, and only
++           reports what the local as did. */
++        next();
++        for(n = 0;; n++) {
++            uint64_t lo, hi;
++
++            /* as documents zero or more operands, and `.octa' alone emits
++               nothing rather than being an error.  Only the first operand
++               may be absent: after a comma there has to be one, which is
++               the `.octa 1,' case (as warns there and assumes a zero). */
++            if (n == 0
++                && (tok == TOK_LINEFEED || tok == ';' || tok == CH_EOF))
++                break;
++            asm_octa_operand(&lo, &hi);
++            if (sec->sh_type != SHT_NOBITS) {
++                /* XXX: endianness */
++                gen_le32(lo);
++                gen_le32(lo >> 32);
++                gen_le32(hi);
++                gen_le32(hi >> 32);
++            } else {
++                /* 0024's rule, and the same message as as: a NOBITS section
++                   has a size and no bytes, so a non-zero value has nowhere
++                   to live.  No symbol case to test for -- the operand is
++                   always a literal here. */
++                if (lo != 0 || hi != 0)
++                    tcc_error_noabort(
++                        "attempt to store non-zero value in section `%s'",
++                        sec->name);
++                ind += 16;
++            }
++            if (tok != ',')
++                break;
++            next();
++        }
++        break;
+     case TOK_ASMDIR_byte:
+         size = 1;
+         goto asm_data;
