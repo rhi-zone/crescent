@@ -1,0 +1,1 @@
+{"session_id":"verify-smoke","hook_event_name":"PostToolUse","agent_id":"verify-smoke","agent_type":"general-purpose","tool_name":"Bash","tool_input":{"command":"echo hi"},"tool_response":{"stdout":"hi","stderr":"","interrupted":false,"isImage":false,"noOutputExpected":false}}

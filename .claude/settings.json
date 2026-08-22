@@ -66,13 +66,26 @@
             "command": "${CLAUDE_PROJECT_DIR}/tooling/claude-hooks/require-explicit-agent-type.sh"
           }
         ]
-      },
+      }
+    ],
+    "SubagentStart": [
       {
-        "matcher": "Agent|SendMessage",
+        "matcher": "",
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PROJECT_DIR}/tooling/claude-hooks/inject-subagent-context-agent.sh"
+            "command": "${CLAUDE_PROJECT_DIR}/tooling/claude-hooks/subagent-context-start.sh"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PROJECT_DIR}/tooling/claude-hooks/subagent-context-refresh.sh"
           }
         ]
       }
