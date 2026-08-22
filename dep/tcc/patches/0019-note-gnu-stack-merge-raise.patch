@@ -1,0 +1,65 @@
+--- a/dep/tcc/tccelf.c
++++ b/dep/tcc/tccelf.c
+@@ -3325,9 +3325,12 @@
+    Input that supplied the section itself -- an object being merged under
+    `-r`, or an asm `.section .note.GNU-stack` directive -- has already stated
+    its own requirement, and "x" there means "I really do need an executable
+-   stack".  Adopting and re-flagging that section would silently discard a
+-   requirement whose violation is a runtime crash, so it is kept exactly as
+-   it arrived.
++   stack".  Replacing that section, or clearing its "x", would silently
++   discard a requirement whose violation is a runtime crash, so it is never
++   replaced and its flags are never cleared.  (It can still be *raised* to
++   executable when a co-merged input declared nothing -- see the `-r`
++   paragraphs below.  That direction adds a requirement rather than dropping
++   one.)
+ 
+    Assembled input that said nothing gets nothing, matching what GNU as,
+    gcc -c and clang -c all do on a .S file: none of them inject this marker.
+@@ -3352,18 +3355,39 @@
+    which is the failure this paragraph exists to prevent.
+ 
+    Note what this does NOT do: when the marker already exists because some
+-   input supplied it, that section is left alone even if a *different*,
+-   undeclared assembled input is also present. ld -r would raise
+-   SHF_EXECINSTR there too. Closing that would mean rewriting an
+-   input-supplied section, which is the one thing this function refuses to
+-   do, so it is recorded in TODO.md instead of decided here. */
++   input supplied it, that section is not replaced -- but it is not left
++   untouched either. ld -r raises SHF_EXECINSTR on the merged marker when any
++   other input declared nothing, and tcc does the same: raising the flag only
++   ever *strengthens* the statement the section already makes ("this object
++   may need an executable stack"), and never weakens one. Overwriting an
++   input's explicit "x" with an unflagged marker would be the weakening move,
++   and that is the one this function still refuses to make -- which is what
++   `0014-tests` t3 protects. Raising is a different operation from replacing,
++   and its direction is the safe one: the failure mode of a marker that is
++   executable when it need not be is a more permissive stack, while the
++   failure mode of the reverse is a program that segfaults.
++
++   Measured against binutils 2.44, `ld -r` over decl.o + undecl.o, over
++   foo.o + decl.o + undecl.o, and over exec.o + decl.o all yield a marker
++   carrying SHF_EXECINSTR; `ld -r` over an unmarked object alone yields no
++   marker at all. The raise below covers the first three shapes; the
++   creation gate below it leaves the fourth alone. */
+ static void create_gnu_stack_section(TCCState *s1)
+ {
+     Section *sec;
+ 
+-    if (!s1->compiler_generated_code)
++    sec = have_section(s1, ".note.GNU-stack");
++    if (sec) {
++        /* Some input supplied the marker. If a *different* input declared
++           nothing, its implicit executable-stack requirement has to survive
++           the merge, exactly as ld -r makes it survive. Reached with no
++           compilation at all (`tcc -r a.o b.o`, asm-only `-r`), so this sits
++           above the compiler_generated_code gate rather than below it. */
++        if (s1->undeclared_stack_input)
++            sec->sh_flags |= SHF_EXECINSTR;
+         return;
+-    if (have_section(s1, ".note.GNU-stack"))
++    }
++    if (!s1->compiler_generated_code)
+         return;
+     sec = reserved_section(s1, ".note.GNU-stack", SHT_PROGBITS,
+                            s1->undeclared_stack_input ? SHF_EXECINSTR : 0,

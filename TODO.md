@@ -231,27 +231,37 @@ See `docs/roadmap-v2.md` for the authoritative project roadmap and sequencing. T
   `dep/tcc/patches` apply steps in `build-vendored.yml` (applied between `0013` and
   `0015`; `0015`–`0017` re-verified to apply after it), reasoning recorded in
   `docs/native-tiers.md`.
-  **First follow-up since closed:** the `__ELF__` gap above, which is what actually kept the
-  libressl AT&T objects unmarked, is now `0018-elf-target-predefine.patch`.
-  **Still open, separately:** the `-r`-over-input-supplied-marker case below.
+  **Both follow-ups since closed:** the `__ELF__` gap above (now
+  `0018-elf-target-predefine.patch`), which is what actually kept the libressl AT&T objects
+  unmarked, and the input-supplied-marker `-r` case below (now
+  `0019-note-gnu-stack-merge-raise.patch`). The "Note what this does NOT do" paragraph in
+  `create_gnu_stack_section()` was rewritten by `0019` accordingly.
 
-- [ ] **`tcc -r` diverges from `ld -r` whenever the merged object's marker came from
-  input rather than being created.** The general shape: some input supplies a
-  `.note.GNU-stack` section, a *different* input declares nothing, and `ld -r` raises
-  `SHF_EXECINSTR` on the merged marker so the undeclared input's implicit executable-stack
-  requirement survives (measured, binutils 2.44). tcc leaves the input-supplied section
-  exactly as it arrived — or, when nothing supplies one and no compilation happened,
-  creates nothing — and the merged object comes out unflagged, dropping that requirement.
-  Reaches every mix: asm sources only with one declaring and one not; `tcc -r a.o b.o`
-  with no compilation at all; and `tcc -r foo.c marked.o unmarked.o`, where compilation
-  does happen but a marker already exists so none is created. Not closed by
-  `0014-note-gnu-stack-object-marker.patch`: that patch only ever *creates* a marker and
-  never rewrites one an input supplied, which is the property `0014-tests` `t3` exists to
-  protect. Closing this means deciding whether raising a flag on an input-supplied section
-  counts as rewriting it — an input's own statement would only ever be strengthened, never
-  weakened, so the answer is not obvious from `t3`'s rule alone. Needs deciding on its own
-  terms; not attempted. The seven two-input `-r` shapes where compilation happens and no
-  input supplied a marker of its own already match `ld -r` exactly.
+- [x] **Fixed (`dep/tcc/patches/0019-note-gnu-stack-merge-raise.patch`): `tcc -r` diverged
+  from `ld -r` whenever the merged object's marker came from input rather than being
+  created.** The shape: some input supplies a `.note.GNU-stack` section, a *different* input
+  declares nothing, and `ld -r` raises `SHF_EXECINSTR` on the merged marker so the undeclared
+  input's implicit executable-stack requirement survives (measured, binutils 2.44). tcc left
+  the input-supplied section exactly as it arrived, and the merged object came out unflagged.
+  **Resolved on the owner's standing parity principle: match the incumbent toolchain.** The
+  question the item left open — whether raising a flag on an input-supplied section counts as
+  rewriting it — is answered by direction. Raising only ever *strengthens* the statement the
+  section already makes; it never weakens one. `0014-tests` `t3` protects against weakening
+  (an explicit `"x"` is never cleared, an input-supplied section is never replaced) and passes
+  unchanged. The asymmetry has teeth: a marker executable when it need not be costs a more
+  permissive stack, while the reverse costs a segfault. Implemented as a single raise in
+  `create_gnu_stack_section()`, placed *above* the `compiler_generated_code` gate — the two
+  no-compilation shapes never reach that gate, which is why the original patch could not see
+  them.
+  **Verified:** `0019-tests/run.sh` scores 6/9 on the `0001`–`0018` baseline, 9/9 with
+  `0019`, and 9/9 against a real gcc (whose `-r -nostdlib` hands the merge to the same `ld`).
+  The three failing cases are exactly the three shapes this item enumerated: asm-only with
+  one declaring and one not; `tcc -r a.o b.o` with no compilation; and
+  `tcc -r foo.c marked.o unmarked.o`. Six further guards cover the seven shapes that already
+  matched — including the two ways an over-broad rule would go wrong (a false raise where
+  every input declared, and inventing a marker where `ld -r` produces none). Measured
+  side by side against `ld -r` on nine shapes before any code was written; all nine now
+  agree. `0014-tests` still 11/11.
 
 - [ ] **`dep/tcc/VERSION` holds a commit hash, which corrupts `__TINYC__` into a malformed
   number and breaks every `#if __TINYC__` guard.** `configure` does

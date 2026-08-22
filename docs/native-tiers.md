@@ -831,6 +831,11 @@ this — it deliberately does not speak for assembled input — so those `.S`
 objects stayed unmarked under `0014` alone. Closed by
 `0018-elf-target-predefine.patch`, below.
 
+**Second gap, addressed by `0019`.** `0014` only ever *creates* the marker.
+When an input supplied one, `0014` adopted it verbatim, which diverges from
+`ld -r` whenever a different input declared nothing. Closed by
+`0019-note-gnu-stack-merge-raise.patch`, below.
+
 ### `0015-adx-bmi2-opcodes.patch`
 
 `0015` (i386-asm.c + i386-tok.h + x86_64-asm.h) teaches the assembler `adcx`,
@@ -1024,6 +1029,43 @@ unaffected and measured: `lj_vm.o` byte-identical, links and runs,
 `GNU_STACK RW`. libressl builds and passes `make check` 136/136 with
 `libcrypto.so` byte-identical across the two builds. tcc's `tests2`: 129
 tests, output identical.
+
+### `0019-note-gnu-stack-merge-raise.patch`
+
+`0019` (tccelf.c) makes `tcc -r` raise `SHF_EXECINSTR` on an
+*input-supplied* `.note.GNU-stack` marker when another input declared
+nothing, matching `ld -r`.
+
+**The gap.** `0014` only ever *creates* the marker. When an input already
+supplied the section, tcc adopted it verbatim — but `ld -r` does not: it
+raises the executable flag so the undeclared input's implicit *I may need an
+executable stack* survives the merge (measured, binutils 2.44). Three shapes
+reached this: asm sources only with one declaring and one not; `tcc -r a.o
+b.o` with no compilation at all; and `tcc -r foo.c marked.o unmarked.o`,
+where compilation happens but a marker already exists so none is created. In
+all three the merged object came out unflagged, dropping the requirement in
+the unsafe direction.
+
+**The question `0014` left open, and its answer.** Does raising a flag on an
+input-supplied section count as rewriting it — the thing `0014-tests` `t3`
+exists to forbid? Direction settles it. Raising only ever *strengthens* the
+statement the section already makes; it never weakens one. An explicit `"x"`
+is never cleared and an input-supplied section is never replaced, so `t3`
+passes unchanged. The asymmetry has teeth: a marker executable when it need
+not be costs a more permissive stack, while the reverse costs a segfault.
+This is the same parity-with-the-incumbent stance `0014` took for the create
+path, applied to the path `0014` could not see — the raise sits *above* the
+`compiler_generated_code` gate, which the two no-compilation shapes never
+reach.
+
+**Verified.** `0019-tests/run.sh` scores 6/9 on the `0001`–`0018` baseline,
+9/9 with `0019`, 9/9 against a real gcc (whose `-r -nostdlib` hands the merge
+to the same `ld`). The three failures are exactly the three shapes above. Six
+guards cover the seven shapes that already matched, including both ways an
+over-broad rule would go wrong: a false raise where every input declared, and
+inventing a marker where `ld -r` produces none. Nine `-r` shapes were measured
+side by side against `ld -r` before any code was written; all nine now agree.
+`0014-tests` still 11/11.
 
 ### `dep/libressl/patches/`: build-system gaps, not compiler gaps
 
