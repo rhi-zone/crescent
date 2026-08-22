@@ -46,7 +46,9 @@ wrong; it was inferred from the `#error`, never checked against `libtcc1.a`.
   `|| defined(__TINYC__)`, so the patch is inert under gcc — verified by building
   `dep/luajit` with gcc with the patch applied and passing the same smoke test.
 
-- [x] **Two real tcc bugs surfaced by that build, both fixed with their own patches.**
+- [x] **Three real tcc bugs surfaced by that build, each fixed with its own patch.**
+  (The third, `0037`, is the `.eh_frame_hdr` CIE-augmentation walk; it is written up in
+  full under the `.eh_frame_hdr` item below rather than repeated here.)
   - `dep/tcc/patches/0034-asm-bswap-reg64.patch` — the x86_64 opcode table had `bswap`
     only for `OPT_REG32` (plus explicit `bswapl`/`bswapq`), so `bswap %rax` — the
     suffix-less 64-bit form GNU as accepts — was rejected with "bad operand with opcode
@@ -139,12 +141,68 @@ wrong; it was inferred from the `#error`, never checked against `libtcc1.a`.
   (1); on this workload it is the whole of the remaining failure, and any fix that closes
   (1) without (2) will produce a binary that looks correct by `readelf` and still panics.
 
-  Defect (2) carries a semantics question that is **not mine to settle**: when tcc meets
-  an FDE it cannot represent in the table, the options are to omit the header entirely
-  (safe but disables unwinding wholesale), to emit a partial table (today's silent
-  behaviour), to emit a partial table *with a diagnostic*, or to grow real parsing for
-  the other augmentations and pointer encodings. Those differ in what a linked program
-  does at runtime, so the call is the owner's. Recorded here rather than filled in.
+  **Defect (2) is closed — `dep/tcc/patches/0037-eh-frame-hdr-cie-augmentation.patch`.**
+  The owner's call among the four options recorded here (omit the header, partial table
+  silently, partial table with a diagnostic, real parsing) was: grow real parsing.
+  `dwarf_cie_fde_encoding()` now parses the augmentation string as the LSB CFI
+  convention defines it — a leading `z` introduces a length-prefixed data block, and
+  each further character describes one entry in it: `L` an LSDA encoding byte, `P` a
+  personality encoding byte plus a pointer stored in that encoding (sized by
+  `dwarf_skip_eh_pointer()`), `R` the FDE pointer encoding byte, `S` nothing at all.
+  The walk is then checked against the block's declared length, so a CIE that does not
+  add up is refused rather than read at a guessed offset. This is a general parse of the
+  format, not a second literal alongside `"zR"`: `"zPR"`, `"zPLR"` and `"zRS"` all index
+  correctly and so would any other ordering of the same four characters.
+
+  What is still *refused*, in every case by leaving the FDE out rather than guessing at
+  it: an augmentation string with no leading `z` (no `R` entry, so no stated encoding),
+  an `R` encoding other than `FDE_ENCODING` (the table's own entries are 4-byte
+  data-relative and the arithmetic assumes it), `DW_EH_PE_aligned` anywhere (its padding
+  depends on a load address not known at that point), and any augmentation character
+  outside those four. Also corrected while the parse was being rewritten: the return
+  address column is a `ubyte` in CIE version 1 and a ULEB128 from version 3 on, where
+  the old walk read one byte for both — no real target has a return-address register
+  number above 127, so this never differed in practice.
+
+  Measured. `patches/0037-tests/run.sh`: 12 pass / 0 fail against the patched tcc, 12/0
+  against `gcc` + GNU `ld` as the reference, 6 pass / 6 fail against a tcc built from the
+  same stack without the patch — so the harness discriminates rather than restating the
+  patch. tcc's own `make test` still reports ALL TESTS PASSED, verified from a pristine
+  `dep/tcc` with the full 37-patch stack applied and rebuilt. And end to end: with defect
+  (1) bridged by the same throwaway probe as before (still uncommitted, still not a
+  proposed fix), a fully tcc-compiled **and** tcc-linked LuaJIT now indexes **2402 of
+  2402** FDEs — the interpreter's `zPR` frame among them — and passes the whole smoke
+  bar: JIT on, 2M-iteration loop, `ffi.C` calls, `ffi.new` arrays, an `ffi.cast` callback
+  from C back into Lua, coroutines both directions, 20k `setmetatable`/`__gc` with GC
+  stepping, then `pcall(error)`, `pcall` of a nil index, `xpcall` with a handler, `pcall`
+  through a C boundary (an erroring `table.sort` comparator), `pcall` across an FFI
+  callback boundary, a 100-deep recursive unwind and a 50-deep nested-`pcall` rethrow
+  chain. No panic. The control run — the same `.o` files relinked by a tcc carrying
+  `0037` but **not** the probe — has no `.eh_frame_hdr`, no `PT_GNU_EH_FRAME`, and dies
+  with the same `PANIC: unprotected error in call to Lua API` as before.
+
+  No regression elsewhere, measured: all 30 per-patch harnesses pass; the libressl AT&T
+  bignum mirror still reports `equal=80 differs=4 tcc-rejects=0` with 368,000 differential
+  checks and 0 mismatches; `lj_vm.S` (regenerated via `buildvm`, since the v2.1 HEAD bump
+  removed it from the tree) assembles byte-identically under the patched and unpatched
+  tcc and against GNU `as`. A second, independent confirmation of the defect (1) boundary
+  fell out of that run: linking a LuaJIT with tcc **in one invocation with a `.c` on the
+  command line** now produces a table of 1316 entries where the unpatched build produced
+  1315 — the extra one being the `zPR` FDE — and `pcall(function() error("x") end)`
+  returns `false` and the message instead of panicking. The same objects linked with no C
+  source on the command line get no `.eh_frame_hdr` at all, from either tcc.
+
+  **So defect (1) is now the whole of what remains, and its fix is an open owner call.**
+  `s1->eh_frame_section` is assigned in exactly one place, during compilation. Something
+  has to give the generator a handle on the merged output `.eh_frame` when tcc is invoked
+  purely as a linker. Adopting it by name is what the probe does, and it works, but that
+  is a measurement instrument and not a considered answer: it changes what
+  `s1->eh_frame_section` *means* (generator-owned scratch vs. a handle on an output
+  section), and it leaves undecided whether a link-only invocation should emit a header
+  unconditionally, whether `-r` partial links should, and whether `-fno-asynchronous-
+  unwind-tables`/`s1->unwind_tables` has any say at link time when it was a compile-time
+  flag. Those differ in what a linked program does at runtime, so the call is the
+  owner's. Recorded here rather than filled in.
 
 - [ ] **Open owner call: whether `dep/luajit/patches/` should be applied in CI.** Today
   it is not — the five `luajit-*` jobs in `build-vendored.yml` build the pristine

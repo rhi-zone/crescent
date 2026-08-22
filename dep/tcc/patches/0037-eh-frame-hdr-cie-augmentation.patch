@@ -1,0 +1,157 @@
+--- a/dep/tcc/tccdbg.c
++++ b/dep/tcc/tccdbg.c
+@@ -1058,6 +1058,119 @@
+     return pc1 < pc2 ? -1 : pc1 > pc2 ? 1 : 0;
+ }
+ 
++/* Step *P past one pointer stored with DWARF exception-header encoding ENC,
++   which must not run past END.  Returns 0 on success and -1 when ENC is one
++   this walk cannot size: DW_EH_PE_aligned pads to a boundary determined by
++   the record's own load address, which is not known here.  DW_EH_PE_omit
++   stores nothing at all. */
++static int dwarf_skip_eh_pointer(unsigned char **p, unsigned char *end,
++				 unsigned char enc)
++{
++    int n;
++
++    if (enc == DW_EH_PE_omit)
++	return 0;
++    if ((enc & 0x70) == DW_EH_PE_aligned)
++	return -1;
++    switch (enc & 0x0f) {
++    case DW_EH_PE_uleb128:
++	dwarf_read_uleb128(p, end);
++	return 0;
++    case DW_EH_PE_sleb128:
++	dwarf_read_sleb128(p, end);
++	return 0;
++    case DW_EH_PE_absptr: n = PTR_SIZE; break;
++    case DW_EH_PE_udata2:
++    case DW_EH_PE_sdata2: n = 2; break;
++    case DW_EH_PE_udata4:
++    case DW_EH_PE_sdata4: n = 4; break;
++    case DW_EH_PE_udata8:
++    case DW_EH_PE_sdata8: n = 8; break;
++    default: return -1;
++    }
++    if (n > end - *p)
++	return -1;
++    *p += n;
++    return 0;
++}
++
++/* Read the CIE whose version byte is at CIE far enough to learn the encoding
++   it prescribes for the initial_location field of the FDEs that point back to
++   it.  Returns that encoding, or -1 for a CIE whose FDEs cannot be indexed.
++
++   The record is DWARF's CIE followed by the LSB's CFI augmentation
++   convention.  A leading 'z' in the augmentation string introduces a
++   length-prefixed augmentation data block, and each further character of the
++   string describes one entry in that block, in order: 'L' an LSDA encoding
++   byte, 'P' a personality-routine encoding byte followed by a pointer stored
++   in that encoding, 'R' the FDE pointer encoding byte, 'S' nothing at all (it
++   only marks the frame as a signal frame).  Only 'R' is wanted here, but the
++   entries ahead of it have to be parsed to find where it sits.
++
++   gcc emits "zR" for ordinary code and "zPR" as soon as a translation unit
++   names a personality routine; the latter is what a hand-written CIE with a
++   .cfi_personality produces, and it is the shape of LuaJIT's VM CIE, which
++   names lj_err_unwind_dwarf.  Recognising only "zR" -- as this walk did
++   before -- silently dropped every such frame from the table.
++
++   An augmentation string is self-describing but its data block is not, so the
++   walk is checked against the declared length: if the two disagree, something
++   was misread and every offset derived from this CIE's FDEs would be wrong. */
++static int dwarf_cie_fde_encoding(unsigned char *cie, unsigned char *end)
++{
++    unsigned char *aug, *aug_end, *p;
++    uint64_t aug_len;
++    unsigned int version;
++    int fde_enc = -1;
++
++    version = dwarf_read_1(cie, end);
++    if (version != 1 && version != 3)
++	return -1;
++    aug = cie;
++    while (dwarf_read_1(cie, end) != 0)
++	;
++    /* without 'z' there is no augmentation data block, so no 'R' entry and no
++       stated FDE encoding -- a shape this table does not read.  The bound is
++       not redundant: a CIE Pointer landing on the last byte of the section
++       leaves the string starting at END. */
++    if (aug >= end || *aug != 'z')
++	return -1;
++    dwarf_read_uleb128(&cie, end);	// code_alignment_factor
++    dwarf_read_sleb128(&cie, end);	// data_alignment_factor
++    if (version == 1)
++	dwarf_read_1(cie, end);		// return address column, a ubyte in v1
++    else
++	dwarf_read_uleb128(&cie, end);	// and a ULEB128 from v3 on
++    aug_len = dwarf_read_uleb128(&cie, end);
++    if (aug_len > (uint64_t)(end - cie))
++	return -1;
++    aug_end = cie + aug_len;
++    for (p = aug + 1; p < end && *p; p++) {
++	switch (*p) {
++	case 'R':
++	    fde_enc = dwarf_read_1(cie, aug_end);
++	    break;
++	case 'L':
++	    dwarf_read_1(cie, aug_end);	// LSDA encoding
++	    break;
++	case 'P': {
++	    unsigned char penc = dwarf_read_1(cie, aug_end);
++
++	    if (dwarf_skip_eh_pointer(&cie, aug_end, penc))
++		return -1;
++	    break;
++	}
++	case 'S':			// signal frame; contributes no data
++	    break;
++	default:			// an entry of unknown width: the rest
++	    return -1;			// of the block can no longer be placed
++	}
++    }
++    if (cie != aug_end)
++	return -1;
++    return fde_enc;
++}
++
+ ST_FUNC void tcc_eh_frame_hdr(TCCState *s1, int final)
+ {
+     int count = 0, offset;
+@@ -1092,7 +1205,7 @@
+     end = eh_frame_section->data + eh_frame_section->data_offset;
+     while (ln < end) {
+ 	unsigned char *fde = ln, *rd = ln;
+-	unsigned int cie_offset, version, length = dwarf_read_4(rd, end);
++	unsigned int cie_offset, length = dwarf_read_4(rd, end);
+ 	unsigned int pc_offset, fde_offset;
+ 
+ 	if (length == 0)
+@@ -1105,23 +1218,9 @@
+ 
+ 	    if (cie < eh_frame_section->data)
+ 		goto next;
+-	    version = dwarf_read_1(cie, end);
+-	    if ((version == 1 || version == 3) &&
+-	        dwarf_read_1(cie, end) == 'z' && // Augmentation String
+-		dwarf_read_1(cie, end) == 'R' &&
+-		dwarf_read_1(cie, end) == 0) {
+-	        dwarf_read_uleb128(&cie, end); // code_alignment_factor
+-	        dwarf_read_sleb128(&cie, end); // data_alignment_factor
+-		dwarf_read_1(cie, end); // return address column
+-		if (dwarf_read_uleb128(&cie, end) == 1 &&
+-		    dwarf_read_1(cie, end) == FDE_ENCODING) {
+-		    last_cie_offset = cie_offset;
+-		}
+-		else
+-		    goto next;
+-	    }
+-	    else
++	    if (dwarf_cie_fde_encoding(cie, end) != FDE_ENCODING)
+ 		goto next;
++	    last_cie_offset = cie_offset;
+ 	}
+ 	count++;
+ 	fde_offset = eh_frame_section->sh_addr +

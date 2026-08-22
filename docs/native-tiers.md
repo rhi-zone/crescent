@@ -141,9 +141,13 @@ with `0034` and `0035` on the tcc side. tcc now compiles the whole LuaJIT tree
 including `buildvm` and the generated VM assembly, and a LuaJIT compiled by tcc
 and linked by GNU ld runs with the JIT on and passes `pcall`, `xpcall`,
 coroutines, FFI and FFI callbacks. Linking with tcc *itself* still breaks
-`pcall`, for a separate and now-understood reason: tcc's linker emits no
-`.eh_frame_hdr`/`PT_GNU_EH_FRAME`, so the unwinder never finds LuaJIT's
-personality routine. Full result matrix and the remaining gap are in `TODO.md`.
+`pcall`, for a separate and now-understood reason, and one of its two causes is
+closed: `0037` teaches the `.eh_frame_hdr` generator to index CIEs carrying a
+personality routine, which LuaJIT's interpreter CIE is. What remains is that a
+link-only invocation never reaches that generator at all. Bridged past that,
+measured, a fully tcc-compiled and tcc-linked LuaJIT indexes every FDE and
+passes the whole smoke bar including `pcall`. Full result matrix and the
+remaining gap are in `TODO.md`.
 LuaJIT source is vendored locally (`dep/luajit/`, pinned via
 `dep/luajit/VERSION`; used by the gcc/clang/cl `luajit-*` jobs in
 `build-vendored.yml`), and those jobs still build the pristine source — the
@@ -1559,13 +1563,14 @@ correct in tcc-linked output.
 
 That is a symptom, not a missing feature: `tccdbg.c` already implements
 `.eh_frame_hdr` generation, and `tccelf.c` already reserves and fills a
-`PT_GNU_EH_FRAME` slot. Two defects keep it from firing — a link-only
-invocation never sets the state variable the generator keys on (so `tcc -o x
-a.c b.c` emits the header and `tcc -c` + `tcc -o x a.o b.o` does not), and the
-generator's CIE walk silently skips FDEs whose CIE is not tcc's own exact
-shape, which includes every CIE carrying a personality routine — LuaJIT's VM
-`.eh_frame` among them. Details, measurements and the open semantics question
-in the second one are in `TODO.md`.
+`PT_GNU_EH_FRAME` slot. Two defects kept it from firing. The second — the
+generator's CIE walk silently skipping FDEs whose CIE is not tcc's own exact
+shape, which includes every CIE carrying a personality routine, LuaJIT's VM
+`.eh_frame` among them — is closed by `0037` below. The first is still open: a
+link-only invocation never sets the state variable the generator keys on, so
+`tcc -o x a.c b.c` emits the header and `tcc -c` + `tcc -o x a.o b.o` does not,
+which is the shape every real build has. Details, measurements and the open
+question in that one are in `TODO.md`.
 
 ### `0036-asm-octa-directive.patch`
 
@@ -1650,6 +1655,97 @@ patch — the LuaJIT one specifically because adding a token to `tcctok.h`
 renumbers every later `TOK_ASMDIR_*` — and neither is recorded here because
 neither has been measured. Nothing in `lj_vm.S` uses `.octa`, which is a
 reason to expect no change, not evidence of one.
+
+### `0037-eh-frame-hdr-cie-augmentation.patch`
+
+`.eh_frame_hdr` carries a sorted binary-search table over the FDEs in
+`.eh_frame`, and it is how libgcc's `_Unwind_Find_FDE` locates a frame at all:
+it finds `PT_GNU_EH_FRAME` via `dl_iterate_phdr`, then searches that table. An
+FDE missing from the table is an FDE the unwinder cannot find, however correct
+`.eh_frame` itself is — and nothing in the output says one is missing.
+
+`tccdbg.c`'s `tcc_eh_frame_hdr()` built that table by walking `.eh_frame` and
+matching each FDE's CIE against exactly one literal shape: version 1 or 3,
+augmentation string exactly `"zR"`, augmentation data exactly one byte equal to
+`FDE_ENCODING`. Anything else was `goto next`'d past without being recorded.
+
+The DWARF/LSB CFI convention that governs a CIE's augmentation is not one
+shape. A leading `z` says the CIE carries a length-prefixed augmentation data
+block; each further character of the string describes one entry in that block,
+in order — `L` an LSDA encoding byte, `P` a personality encoding byte followed
+by a pointer stored in that encoding, `R` the encoding of the FDE's
+`initial_location`, `S` nothing at all beyond marking the frame as a signal
+frame. gcc writes `"zR"` for ordinary code and `"zPR"` as soon as a translation
+unit names a personality routine; `.cfi_personality` in hand-written assembly
+produces the same, `.cfi_lsda` makes it `"zPLR"`, `.cfi_signal_frame` makes it
+`"zRS"`. Every one of those was dropped.
+
+`dwarf_cie_fde_encoding()` parses that string, using `dwarf_skip_eh_pointer()`
+to size the `P` entry's pointer, and checks the walk against the block's
+declared length so a CIE that does not add up is refused rather than read at a
+guessed offset. What is *accepted* once the `R` byte is found is unchanged — it
+still has to be `FDE_ENCODING` (`DW_EH_PE_pcrel|DW_EH_PE_sdata4`), because the
+table's own entries are 4-byte data-relative and the offset arithmetic assumes
+it. What changed is finding that byte.
+
+Refusals all take the same form — leave the FDE out of the table, never guess
+at it, since an entry computed from a misread encoding is worse than an absent
+one and the unwinder would follow it. Refused: no leading `z`, an `R` encoding
+other than `FDE_ENCODING`, `DW_EH_PE_aligned` anywhere (its padding depends on
+a load address not known at that point), and any augmentation character outside
+those four.
+
+This is what LuaJIT needed. Its interpreter CIE is hand-written in
+`vm_x86.dasc`, names `lj_err_unwind_dwarf` as its personality, and covers the
+whole interpreter — so exactly one FDE went missing from a table of 2402, and
+it was the only frame LuaJIT's error handling consults.
+
+**Verified.** `dep/tcc/patches/0037-tests/run.sh`: **12 pass, 0 fail** against
+the patched tcc and **12 pass, 0 fail** against `gcc` + GNU `ld`, which is what
+makes its assertions reference properties rather than a restatement of the
+patch. Against a tcc built from the same stack without `0037` it reports **6
+pass, 6 fail**, including the end-to-end row, where `_Unwind_Backtrace` stops
+two frames in instead of reaching `main` — the same failure shape as LuaJIT's
+`pcall` panic. tcc's own `make test` reports ALL TESTS PASSED, measured on a
+pristine `dep/tcc` with all 37 patches applied and rebuilt from scratch.
+
+End to end, with defect (1) bridged by an uncommitted probe (see `TODO.md`): a
+fully tcc-compiled **and** tcc-linked LuaJIT indexes **2402 of 2402** FDEs,
+table decoded entry by entry and confirmed sorted, and passes the full smoke
+bar — JIT, FFI calls and callbacks, coroutines, GC/metatable stress, `pcall`,
+`xpcall`, `pcall` through a C boundary, `pcall` across an FFI callback
+boundary, a 100-deep recursive unwind and a 50-deep nested-`pcall` rethrow
+chain. The control, the same objects relinked without the probe, still panics.
+
+**No regression elsewhere.** All 30 per-patch harnesses in
+`dep/tcc/patches/*-tests/` pass against the patched tcc, run the way CI runs
+them. `tooling/scripts/verify-bignum-att-tcc.sh` reports `equal=80 differs=4
+tcc-rejects=0`, 368,000 runtime differential checks and 0 mismatches —
+identical to what is already on record, with the four differs still the
+`bignum_sqr` family differing only in immediate print form. `lj_vm.S` (which
+this tree no longer carries directly since the v2.1 HEAD bump, so it was
+regenerated via `buildvm`) assembles byte-identically under the patched and
+unpatched tcc, and byte-identically against GNU `as` for `.text`, `.eh_frame`
+and `.debug_frame`.
+
+That last file is not untouched on the *link* side, and should not be: its own
+CIE augmentation is `"zPR"`, the class this patch newly indexes. Linking a
+LuaJIT with tcc in one invocation, the table goes from 1315 FDE entries to
+1316 — the extra one being that single `zPR` FDE — and where the unpatched
+build panics on `pcall(function() error("x") end)`, the patched one returns
+`false` and the message, matching a gcc-linked LuaJIT. That is a link
+invocation with a `.c` on the same command line; the pure `.o`/`.a` case is
+defect (1) and still emits no header at all.
+
+**Not measured here.** tcc's own `make test` under musl — the glibc run above
+is a NixOS host, and the musl leg is the Alpine container CI provides. Also
+unmeasured: a full `CC=tcc LD=tcc ./configure --disable-asm && make check`
+libressl rebuild, which remains on record from an earlier session rather than
+re-run for this patch. One divergence worth noting rather than quietly
+overwriting: the `0036` notes above record six harnesses (`0007`, `0009`,
+`0023`, `0030`, `0034`, `0035`) as failing on a NixOS host for want of
+`crt1.o` and `stdio.h`; on this run all six passed. Why the host behaves
+differently now was not investigated.
 
 ### `dep/luajit/patches/`: a compiler-identity gate, not a compiler gap
 
