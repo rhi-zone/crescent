@@ -1,0 +1,40 @@
+--- a/dep/tcc/tccelf.c
++++ b/dep/tcc/tccelf.c
+@@ -1243,6 +1243,28 @@
+     unsigned char *ptr;
+     addr_t tgt, addr;
+     int is_dwarf = s->is_dwarf;
++    /* Under -run, tccrun.c hands out runtime addresses to SHF_ALLOC sections
++       only (see the shf[] table in tcc_run_prepare); everything else keeps
++       sh_addr == 0 and is never copied into the run memory at all. A
++       relocation inside such a section therefore has nothing to be relative
++       to: a PC-relative one computes `symbol - 0', which against -run's real
++       heap addresses overflows int32 and aborts the run with "relocation '2'
++       out of range", and an absolute one writes a live pointer into bytes
++       nobody will ever map. Neither is a value; both are noise from
++       pretending the section has an address. Linking to a file is different
++       and stays as it was -- a real linker computes these against sh_addr ==
++       0 too, and the answers are just as unread but no longer wild.
++
++       The one relocation that does mean something without an address is the
++       dwarf-to-dwarf R_DATA_32DW below: it subtracts out the target
++       section's own sh_addr, so it yields the same section-relative offset
++       whether or not either section was placed. That one keeps running, so
++       -run -g still relocates debug sections it happens to find
++       non-allocated (tcc marks the ones its own backtrace reads SHF_ALLOC
++       precisely so they get addresses -- tccdbg.c's do_backtrace shf -- but
++       a merged foreign .debug_loc and friends are not). */
++    int unplaced = s1->output_type == TCC_OUTPUT_MEMORY
++                   && !(s->sh_flags & SHF_ALLOC);
+ 
+     qrel = (ElfW_Rel *)sr->data;
+     for_each_elem(sr, 0, rel, ElfW_Rel) {
+@@ -1262,6 +1284,8 @@
+             add32le(ptr, tgt - s1->sections[sym->st_shndx]->sh_addr);
+             continue;
+         }
++        if (unplaced)
++            continue;
+         addr = s->sh_addr + rel->r_offset;
+         relocate(s1, rel, type, ptr, addr, tgt);
+     }

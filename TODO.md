@@ -384,18 +384,36 @@ See `docs/roadmap-v2.md` for the authoritative project roadmap and sequencing. T
   `SHF_X86_64_LARGE` — tcc has no large code model and no name for that flag in its `elf.h`.
   (`.gnu.linkonce.b*`, also missing from `0021`, was added by `0022`.)
 
-- [ ] **`tcc -run` cannot relocate a genuinely non-allocated section.** The defect `0004`
-  exposed and `0021` moved out of the way rather than removed. `tccrun.c` assigns addresses
-  only to `SHF_ALLOC` sections; `relocate_sections()` relocates all of them regardless, so
-  a PC-relative relocation inside a section `as` also considers non-allocated still computes
-  `symbol - 0` and overflows. Live repro: `asm(".data\n.byte 41\nblob:\n771:\n.byte 42\n
-  772:\n.pushsection notspecial\n.long 771b - .\n.popsection\n.byte 772b - 771b\n")` —
-  `-run` errors, `-c` plus link runs correctly and prints the right values. A real link
-  computes these against `sh_addr == 0` too and simply does not care, because nothing reads
-  the section; only `-run`'s real heap addresses make the difference overflow. The fix is a
-  genuine design question — probably "do not relocate non-`SHF_ALLOC` sections under
-  `TCC_OUTPUT_MEMORY`", but that touches DWARF sections too and needs its own verification —
-  so it is deliberately not bundled into `0021`.
+- [x] **`tcc -run` could not relocate a genuinely non-allocated section — fixed by
+  `dep/tcc/patches/0023-run-unplaced-section-relocs.patch`.** The defect `0004` exposed and
+  `0021` moved out of the way rather than removed. `tccrun.c` assigns runtime addresses only
+  to `SHF_ALLOC` sections and never copies anything else into the run memory;
+  `relocate_sections()` relocated them all regardless, so a relocation in a section `as`
+  also considers non-allocated computed against an address the section does not have. Three
+  shapes, all reproduced: PC-relative → `relocation '2' out of range`; absolute 32-bit →
+  `relocation 'R_X86_64_32[S]' out of range`; absolute 64-bit → fits, and quietly writes a
+  live heap pointer into bytes nobody maps. `-c` plus link ran correctly throughout, because
+  a real link computes the same subtractions against `sh_addr == 0` and nothing reads the
+  result.
+
+  The recorded lead was "do not relocate non-`SHF_ALLOC` sections under
+  `TCC_OUTPUT_MEMORY`", flagged as needing verification against DWARF. Checked: the debug
+  sections tcc's own runtime backtrace reads are *already* `SHF_ALLOC` under `-run` on
+  purpose — `tccdbg.c`'s `tcc_debug_new()` sets `do_backtrace` whenever
+  `do_debug && output_type == TCC_OUTPUT_MEMORY` and creates `.debug_info`/`.debug_line`/
+  `.debug_str`/`.stab` with `shf = SHF_ALLOC` — and the `rt_context` pointing at them lives
+  in `.data`. So the blanket skip would not have broken backtraces. It would still have
+  discarded the one relocation that is meaningful without an address: the dwarf-to-dwarf
+  `R_DATA_32DW` case subtracts the target section's own `sh_addr` back out and yields the
+  same section-relative offset either way. `0023` keeps that one and skips the rest, which
+  costs one condition and loses nothing. Gated on `TCC_OUTPUT_MEMORY`; linking to a file is
+  untouched.
+
+  Verified: `0023-tests/run.sh` 12/12 with `0023` on both glibc and alpine/musl, 10/12 on
+  the `0001`–`0022` baseline failing exactly the two 32-bit cases; every numeric expectation
+  cross-checked against the same source built and run through gcc; `-run -g` backtraces
+  resolve to `file:line` unchanged in dwarf-4, dwarf-5 and stabs modes; tcc's own
+  `make test` — `btest` included — reaches `ALL TESTS PASSED` either side.
 
 - [ ] **tcc segfaults on a truncated object file, or one whose `sh_name` points past the
   end of `.shstrtab`.** Pre-existing and unrelated to

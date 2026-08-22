@@ -1160,11 +1160,12 @@ patch also deletes upstream's hand-written `.init`/`.fini` →
 table, and a plain default-if-absent rule would have broken
 `.section .init,"a"`, which musl's crt asm relies on.
 
-Two things were deliberately out of scope here. `sh_type`, derived from
-neither the name nor the directive's `@type` argument, is `0022` below.
-`-run`'s inability to relocate a genuinely non-allocated section — the
-underlying `relocate_sections()` defect, which `0004` exposed rather than
-introduced — is still open and tracked in `TODO.md`.
+Two things were deliberately out of scope here and each got its own patch
+immediately after: `sh_type`, derived from neither the name nor the
+directive's `@type` argument (`0022` below), and `-run`'s inability to
+relocate a genuinely non-allocated section — the underlying
+`relocate_sections()` defect, which `0004` exposed rather than introduced
+(`0023` below).
 
 **Verified.** `0021-tests/run.sh` scores 35/61 on the `0001`–`0020` baseline,
 61/61 with `0021`, and 61/61 against a real gcc — the gcc run is what makes
@@ -1238,6 +1239,53 @@ reaches `ALL TESTS PASSED` either side. A freshly `buildvm`-generated
 byte-identical either side — `lj_vm.S`'s `.note.GNU-stack,"",@progbits` now
 agrees with its own name's row instead of falling to the old blanket default,
 which is the same answer — and the relinked luajit runs unchanged.
+
+### `0023-run-unplaced-section-relocs.patch`
+
+`0023` (tccelf.c) stops `-run` relocating sections that have no runtime
+address. This is the defect `0004` exposed and `0021` moved out of the way
+rather than removed.
+
+`tccrun.c` hands out runtime addresses to `SHF_ALLOC` sections only — the
+`shf[]` table in `tcc_run_prepare()` matches three `ALLOC|WRITE|EXECINSTR`
+combinations and nothing else — and never copies anything else into the run
+memory at all. `relocate_sections()` relocated those sections anyway, against
+an address they do not have, while the symbols they referred to had real heap
+addresses. A PC-relative relocation computed `symbol - 0` and failed with
+`relocation '2' out of range`; an absolute 32-bit one wrote the symbol's real
+address and failed with `relocation 'R_X86_64_32[S]' out of range`; an
+absolute 64-bit one fitted, and quietly wrote a live pointer into bytes nobody
+will ever map. Linking to a file never had the problem, because a real linker
+computes the same subtractions against `sh_addr == 0` and the answers, equally
+unread, are no longer wild.
+
+The recorded lead was "do not relocate non-`SHF_ALLOC` sections under
+`TCC_OUTPUT_MEMORY`", flagged as needing verification because it touches DWARF.
+Checking it out: the debug sections tcc's own backtrace reads are *already*
+`SHF_ALLOC` under `-run`, on purpose — `tccdbg.c`'s `tcc_debug_new()` turns on
+`do_backtrace` whenever `do_debug && output_type == TCC_OUTPUT_MEMORY` and
+then creates `.debug_info`, `.debug_line`, `.debug_str` and `.stab` with
+`shf = SHF_ALLOC`, commented "have debug data available at runtime" — and the
+`rt_context` that points at them is built in `.data`. So the blanket skip
+would not have broken backtraces. It would still have discarded the one
+relocation that means something without an address: the dwarf-to-dwarf
+`R_DATA_32DW` case subtracts the target section's own `sh_addr` back out and
+yields the same section-relative offset whether or not either section was
+placed. `0023` keeps that one running and skips the rest, which costs one
+condition and loses nothing.
+
+**Verified.** `0023-tests/run.sh` scores 12/12 with `0023` on both glibc and
+alpine/musl, and 10/12 on the `0001`–`0022` baseline, failing exactly the two
+32-bit cases with the two messages above. It cannot be pointed at gcc — `-run`
+has no gcc equivalent — so instead every numeric expectation is checked twice,
+once through `-run` and once by building the same source into an executable
+with `$CC` and running that, which is what keeps the numbers a measurement.
+The harness also carries an allocated-section control whose relocated pointer
+the program dereferences, so a fix that widened into "skip relocations under
+`-run`" would segfault rather than print a wrong number. `-run -g` backtraces
+resolve to `file:line` unchanged in dwarf-4, dwarf-5 and stabs modes, and
+tcc's own `make test` — `btest` included — reaches `ALL TESTS PASSED` either
+side.
 
 ### `dep/libressl/patches/`: build-system gaps, not compiler gaps
 
