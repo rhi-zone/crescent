@@ -753,16 +753,18 @@ See `docs/roadmap-v2.md` for the authoritative project roadmap and sequencing. T
   `0x67` forms, and the memory-destination / immediate / group-opcode / `lea` /
   indirect-branch / legacy-SSE / VEX paths.
 
-- [ ] **tcc does not reject `%rsp` (or `%esp`) written in the SIB *index* slot.** GNU `as`
-  errors `'(%rax,%rsp,4)' is not a valid base/index expression`; tcc assembles it to
+- [x] **tcc did not reject `%rsp` (or `%esp`) written in the SIB *index* slot — fixed by
+  `dep/tcc/patches/0032-asm-index-register-rsp.patch`.** GNU `as`
+  errors `'(%rax,%rsp,4)' is not a valid base/index expression`; tcc assembled it to
   `SIB.index=100`, the architectural "no index" code, which `objdump` reads back as `%riz`
   — silently different code, no diagnostic. Predates `0027` (it reproduces on the base-ful
   form against the `0001`–`0026` baseline); `0027` extends the same silence to the
   base-less `(,%rsp,8)` spelling. A missing-diagnostic gap and not a
   wrong-bytes-for-valid-input gap, so it is deliberately out of `0027-tests/`, where a case
   would test neither assembler agreement nor `0027`'s change.
-  **Status 2026-08-22: does not close as one patch — blocked on an owner call about the
-  message, not about the detection.** The detection half is trivial and unambiguous:
+  **How it got here (kept because the measurements are the reason the fix is one `if`):**
+  it did not close on the first pass — it was blocked on an owner call about the
+  message, never about the detection. The detection half is trivial and unambiguous:
   `parse_operand()` leaves the index register in `op->reg2` as a plain 0–15 register
   number, `%rsp`/`%esp` is exactly `4`, and `%r12` is `12` (REX.X carries the extension),
   so `op->reg2 == 4` is the whole condition and it cannot catch a legitimate form —
@@ -782,11 +784,34 @@ See `docs/roadmap-v2.md` for the authoritative project roadmap and sequencing. T
   literally means new substrate: a source-span capture around `parse_operand`, which has a
   hole of its own — under `.macro`/`.rept` replay tcc is reading a token stream with no
   backing text, where `as` still has a synthesized line to quote.
-  So the fork is: (a) build the source-span capture, (b) emit `as`'s sentence with a
+  The fork was: (a) build the source-span capture, (b) emit `as`'s sentence with a
   reconstructed operand that matches only canonical spellings, or (c) diagnose in tcc's own
   idiom without echoing the operand. All three reject the same inputs and differ only in
   what the user reads; the effort's harnesses have so far held message text to parity with
-  real `as`, which is why this is an owner call rather than an implementer's.
+  real `as`, which is why this was an owner call rather than an implementer's.
+  **Resolved 2026-08-22, owner chose (c):** tcc says `%rsp cannot be used as an index
+  register` (`%esp` for the `0x67` forms), phrased after the existing `can't encode register
+  %%%ch when REX prefix is required` in the same file. `0032` is therefore the detection and
+  nothing else — one `if` beside the existing `asm_parse_reg` call. `0032-tests/` scores
+  20/50 on the `0001`–`0031` baseline, 50/50 with the patch and 50/50 against a real gcc:
+  it pins the *set of inputs refused* (with `as` as the reference) and the byte-for-byte
+  encoding of everything still accepted, and deliberately not the message text — the `bad`
+  cases assert only the intersection of the two assemblers' sentences, the register named
+  and the word *index*, which is what keeps the gcc cross-check meaningful. The parity half
+  covers `%r12` as an index specifically (its low three bits *are* `100b`, so a detection
+  written against the encoded field rather than the parsed one would break there) and
+  `%rsp`/`%esp` as a *base*, which is a different field and stays valid.
+  Regression bar met: all 25 patch harnesses and tcc's own `make test` pass on glibc
+  (NixOS) and musl (alpine); a fresh `buildvm`-generated `lj_vm.S` assembles to a
+  byte-identical object either side of the patch and the relinked luajit runs traces, ffi
+  and coroutines unchanged; libressl's 7 perlasm objects are byte-identical and the AT&T
+  bignum harness (21 files x 4 configs) produces an identical log either side, including
+  its 4 pre-existing `bignum_sqr` `shr $1`/`shr $0x1` encoding differences.
+  Left where it was: `%riz` as an *accepted* index spelling. `as` takes `(%rax,%riz,4)` as
+  an explicit request for the no-index encoding; tcc has no such token and answers
+  `register expected`. Neither assembler miscompiles it, so teaching tcc `%riz` is a
+  separate feature rather than part of this gap, and `0032-tests/` asserts only that tcc
+  refuses it.
 
 - [ ] **Nothing in CI applies `dep/libressl/patches/` yet.** The
   `libressl-linux-x86_64` job in `build-vendored.yml` builds with the runner's

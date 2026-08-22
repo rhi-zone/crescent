@@ -31,13 +31,13 @@
 # parsing moved.
 #
 # Deliberately absent: %rsp (and %esp) in the index slot. `as' rejects
-# `(,%rsp,8)' as "not a valid base/index expression"; tcc accepts it -- both
-# base-less and, already before 0027, base-ful (`(%rax,%rsp,4)' assembles to
+# `(,%rsp,8)' as "not a valid base/index expression"; tcc accepted it -- both
+# base-less and, already before 0027, base-ful (`(%rax,%rsp,4)' assembled to
 # an encoding objdump reads back as `%riz') because SIB.index=100 is the
-# architectural "no index" code and tcc never validates against it. That is a
+# architectural "no index" code and tcc never validated against it. That was a
 # pre-existing missing-diagnostic gap in tcc, unrelated to which spellings
-# parse, and it is recorded separately in TODO.md. A case here would test
-# neither assembler's agreement nor 0027's change.
+# parse; 0032 closed it, and 0032-tests/ owns those cases. A case here would
+# test neither assembler's agreement nor 0027's change.
 #
 # Also absent: 32-bit (`-m32') targets. The parser change is in the shared
 # i386-asm.c and applies to both, but the vendored build is x86_64-only, so

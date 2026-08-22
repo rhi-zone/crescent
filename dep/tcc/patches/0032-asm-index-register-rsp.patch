@@ -1,0 +1,19 @@
+--- a/dep/tcc/i386-asm.c
++++ b/dep/tcc/i386-asm.c
+@@ -498,6 +498,16 @@
+                 next();
+                 if (tok != ',') {
+                     op->reg2 = asm_parse_reg(&type);
++                    /* SIB.index == 100b is the architectural "no index"
++                       encoding, so register 4 cannot be an index: REX.X
++                       extends the field upwards to %r12 and never aliases
++                       back onto 4, which makes reg2 == 4 exactly %esp/%rsp
++                       and nothing else. Without this the operand assembled
++                       to an index-less address (%riz) -- different code
++                       than was written, and silently so. */
++                    if (op->reg2 == 4)
++                        tcc_error("%%%s cannot be used as an index register",
++                                  (type & OP_REG32) ? "esp" : "rsp");
+                 }
+                 if (tok == ',') {
+                     next();

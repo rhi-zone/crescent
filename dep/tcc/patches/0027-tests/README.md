@@ -73,13 +73,13 @@ reproduce).
 ## Deliberately absent
 
 **`%rsp` in the index slot.** `as` rejects `(,%rsp,8)` —
-`not a valid base/index expression`. tcc accepts it, and accepted the base-ful
+`not a valid base/index expression`. tcc accepted it, and accepted the base-ful
 `(%rax,%rsp,4)` before 0027 too, assembling it to an encoding `objdump` reads
 back as `%riz`: `SIB.index=100` is the architectural "no index" code, and tcc
-never validates a written index register against it. That is a pre-existing
-missing-diagnostic gap, unrelated to which spellings parse, recorded
-separately in TODO.md. A case here would test neither assembler agreement nor
-0027's change.
+never validated a written index register against it. That was a pre-existing
+missing-diagnostic gap, unrelated to which spellings parse; `0032` closed it
+and `0032-tests/` owns those cases. A case here would test neither assembler
+agreement nor 0027's change.
 
 **32-bit (`-m32`) targets.** The changed code is in the shared `i386-asm.c`
 and applies to both, but the vendored build is x86_64-only, so there is
