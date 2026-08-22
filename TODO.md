@@ -334,16 +334,42 @@ See `docs/roadmap-v2.md` for the authoritative project roadmap and sequencing. T
   attempted here. (`bcheck.o` does not compile against musl at all — `__ctype_b_loc` is
   glibc-only — so such a job needs `--config-bcheck=no`; that is pre-existing and unrelated.)
 
-- [ ] **tcc derives `sh_type` from neither the section name nor `.section`'s `@type`
-  argument.** GNU `as` gives `.bss*` `SHT_NOBITS`, `.note*` `SHT_NOTE`, `.init_array*`
-  `SHT_INIT_ARRAY`, `.fini_array*` `SHT_FINI_ARRAY`, `.preinit_array` `SHT_PREINIT_ARRAY`
-  and `.dynamic` `SHT_DYNAMIC`; tcc leaves everything `SHT_PROGBITS`. Its `.section` handler
-  parses the `,@type` / `,%type` argument and throws it away (`tccasm.c`, the two bare
-  `next()` calls after the flags string). Older than the whole patch stack — `0004` did not
-  touch it and `0021` deliberately did not fold it in, since `0021`'s table is about
-  `sh_flags` and quietly half-doing types inside it would be the wrong shape. Nothing in
-  crescent has needed it yet; the visible cost is that a tcc-assembled `.bss.foo` occupies
-  file space where an `as`-assembled one does not.
+- [x] **tcc derived `sh_type` from neither the section name nor `.section`'s `@type`
+  argument — fixed by `dep/tcc/patches/0022-asm-section-type.patch`.** GNU `as` gives
+  `.bss*`/`.tbss*` `SHT_NOBITS`, `.note*` `SHT_NOTE`, the three `*_array` names their array
+  types and `.dynamic` `SHT_DYNAMIC`; tcc left everything `SHT_PROGBITS`, and its `.section`
+  handler parsed the `,@type` / `,%type` argument and threw it away (two bare `next()` calls
+  after the flags string). `0022` adds the type column to `0021`'s table and honours the
+  argument.
+
+  The precedence rule is **not** the same shape as `0021`'s flags rule, which is why folding
+  it in would have been wrong: `as` honours a `@type` that disagrees with the name
+  (`setting incorrect section type`) *except* for `SHT_INIT_ARRAY`/`SHT_FINI_ARRAY`/
+  `SHT_PREINIT_ARRAY`, where the name wins (`ignoring incorrect section type`) because older
+  gcc emitted `.section .init_array,"aw",@progbits`. So `.section .bss.foo,"aw",@progbits`
+  really is `PROGBITS` while `.section .init_array.1,"aw",@progbits` really is still
+  `INIT_ARRAY` — measured against binutils 2.44, and traced to `gas/config/obj-elf.c`.
+
+  Three table details, each measured: `.note` matches *any* suffix (binutils
+  `suffix_length == -1`), so `.notefoo` is a note section; `.note.GNU-stack` needs its own
+  exact `SHT_PROGBITS` row ahead of it, since `as` gives the bare name `PROGBITS` and only a
+  longer name falls through to `NOTE` — tcc marks stack requirements on that section, so a
+  wrong type there would have been immediate; and `.gnu.linkonce.b*` is `SHT_NOBITS` with
+  `WA`, a row `0021` had omitted, so `0022` closes that flags gap in passing.
+
+  Verified: `0022-tests/run.sh` 44/44 with `0022`, 44/44 against a real gcc, 16/44 on the
+  `0001`–`0021` baseline; `0021-tests` still 61/61, so no flags moved; tcc's own `make test`
+  reaches `ALL TESTS PASSED` either side (alpine/musl); a freshly `buildvm`-generated
+  `lj_vm.S` and all seven libressl `crypto/*/*-elf-x86_64.S` objects are byte-identical
+  either side, and the relinked luajit runs unchanged.
+
+- [ ] **tcc drops a non-zero store into an `SHT_NOBITS` section instead of refusing it.**
+  `as` errors: `attempt to store non-zero value in section '.bss.foo'`. tcc emits the bytes
+  into the section's data buffer and then never writes them out, so the value is silently
+  lost. Not new and not caused by `0022` — tcc already did this for its own built-in `.bss`
+  — but `0022` widens the set of names it applies to, since `.bss.foo` and friends are
+  `SHT_NOBITS` now. Zero fill is byte-identical to `as` either way. Fixing it means a check
+  at every data-emitting directive in `tccasm.c`, which is why it is its own item.
 
 - [ ] **tcc's `.section` flags-string parser only understands `a`, `w`, `x`.** GNU `as` also
   takes `M`/`S` (mergeable/strings, with the entity-size and group operands that follow),
@@ -354,8 +380,9 @@ See `docs/roadmap-v2.md` for the authoritative project roadmap and sequencing. T
   non-special name with an explicit `T` still loses it. Also `as` warns on both directions
   of a special-section flags mismatch (`ignoring changed section attributes` / `setting
   incorrect section attributes`) and tcc says nothing; that is a diagnostic gap, not a
-  layout one. Related: `0021`'s table omits `.lrodata`/`.ldata`/`.lbss`, which `as` marks
+  layout one. Related: the table omits `.lrodata`/`.ldata`/`.lbss`, which `as` marks
   `SHF_X86_64_LARGE` — tcc has no large code model and no name for that flag in its `elf.h`.
+  (`.gnu.linkonce.b*`, also missing from `0021`, was added by `0022`.)
 
 - [ ] **`tcc -run` cannot relocate a genuinely non-allocated section.** The defect `0004`
   exposed and `0021` moved out of the way rather than removed. `tccrun.c` assigns addresses

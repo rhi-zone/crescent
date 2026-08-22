@@ -1160,11 +1160,11 @@ patch also deletes upstream's hand-written `.init`/`.fini` →
 table, and a plain default-if-absent rule would have broken
 `.section .init,"a"`, which musl's crt asm relies on.
 
-Two things are deliberately out of scope and tracked separately in `TODO.md`:
-`sh_type` is still derived from neither the name nor the directive's `@type`
-argument (tcc never has), and `-run` still cannot relocate a genuinely
-non-allocated section — the underlying `relocate_sections()` defect, which
-`0004` exposed rather than introduced.
+Two things were deliberately out of scope here. `sh_type`, derived from
+neither the name nor the directive's `@type` argument, is `0022` below.
+`-run`'s inability to relocate a genuinely non-allocated section — the
+underlying `relocate_sections()` defect, which `0004` exposed rather than
+introduced — is still open and tracked in `TODO.md`.
 
 **Verified.** `0021-tests/run.sh` scores 35/61 on the `0001`–`0020` baseline,
 61/61 with `0021`, and 61/61 against a real gcc — the gcc run is what makes
@@ -1180,6 +1180,64 @@ relinked luajit runs traces, the interpreter, coroutines, varargs and an ffi
 call unchanged — `lj_vm.S`'s only `.section` directives are
 `.note.GNU-stack`, `.debug_frame` and `.eh_frame`, all with explicit flags
 strings and none in the table, so that axis never reaches the changed path.
+
+### `0022-asm-section-type.patch`
+
+`0022` (tccasm.c) is the other half of `0021`: a section's **type**, from its
+name and from `.section`'s `@type` argument.
+
+tcc left every section its `.section` directive created `SHT_PROGBITS`. It
+parsed the `,@type` / `,%type` argument and threw it away — two bare `next()`
+calls after the flags string — and it consulted no name table for the type at
+all. So a tcc-assembled `.bss.foo` occupied file space where an
+`as`-assembled one does not, and `@nobits`, the way to ask for that on a name
+`as` has no opinion about, did nothing whatsoever.
+
+The reason this was not folded into `0021` is that the precedence rule is a
+different shape. For flags, name-implied wins unless the flags string is a
+strict superset. For types, `as` honours a disagreeing `@type` argument —
+warning `setting incorrect section type` — *except* for `SHT_INIT_ARRAY`,
+`SHT_FINI_ARRAY` and `SHT_PREINIT_ARRAY`, where it keeps the name's type and
+warns `ignoring incorrect section type` instead, because older gcc emitted
+`.section .init_array,"aw",@progbits` for
+`__attribute__((section(".init_array")))` and `as` refuses to believe it. So
+`.section .bss.foo,"aw",@progbits` really is `PROGBITS` while
+`.section .init_array.1,"aw",@progbits` really is still `INIT_ARRAY`. A rule
+of "argument always wins" and a rule of "name always wins" each get one of
+those wrong. Both directions are in the harness. Like `0021`, all of this
+applies only to a section the directive is *creating*, which the handler was
+already gated on; and like `0021`, `as` warns on every mismatch and tcc says
+nothing, a diagnostic gap rather than a layout one.
+
+Three rows in the table are worth naming, each measured rather than recalled.
+`.note` matches **any** suffix — binutils `suffix_length == -1` — so
+`.notefoo` is a note section, unlike `.text`/`.data`/`.bss`, which take a
+dotted suffix only. `.note.GNU-stack` therefore needs its own exact
+`SHT_PROGBITS` row ahead of `.note`, exactly as binutils lists it: `as` gives
+the bare name `PROGBITS` and only `.note.GNU-stack.something` falls through to
+`NOTE`. tcc records stack requirements against that section (`0014`, `0019`),
+so a wrong type there would not have stayed quiet. And `.gnu.linkonce.b*` is
+`SHT_NOBITS` with `WA` — a row `0021` had omitted, so `0022` closes that flags
+gap in passing.
+
+An unrecognized type name behaves as if no argument had been given, which is
+`as`'s own fallback after its `unrecognized section type` warning; a bare
+number is accepted, as `as` accepts it, so `@0x70000001` really does come out
+`SHT_X86_64_UNWIND`.
+
+One divergence stays and is tracked in `TODO.md`: `as` refuses a non-zero
+store into an `SHT_NOBITS` section and tcc drops the bytes silently. That is
+not new — tcc already did it for its own built-in `.bss` — but `0022` widens
+the set of names it applies to. Zero fill is byte-identical to `as`.
+
+**Verified.** `0022-tests/run.sh` scores 44/44 with `0022`, 44/44 against a
+real gcc, and 16/44 on the `0001`–`0021` baseline. `0021-tests` still scores
+61/61, so restructuring the table moved no flags. tcc's own `make test`
+reaches `ALL TESTS PASSED` either side. A freshly `buildvm`-generated
+`lj_vm.S` and all seven libressl `crypto/*/*-elf-x86_64.S` objects are
+byte-identical either side — `lj_vm.S`'s `.note.GNU-stack,"",@progbits` now
+agrees with its own name's row instead of falling to the old blanket default,
+which is the same answer — and the relinked luajit runs unchanged.
 
 ### `dep/libressl/patches/`: build-system gaps, not compiler gaps
 

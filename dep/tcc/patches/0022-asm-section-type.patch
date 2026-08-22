@@ -1,0 +1,207 @@
+--- a/dep/tcc/tccasm.c
++++ b/dep/tcc/tccasm.c
+@@ -1082,52 +1082,64 @@
+     tok = term;
+ }
+ 
+-/* GNU as gives a section the flags implied by its NAME, independently of --
+-   and in preference to -- the flags string on the .section directive.
+-   The table below is binutils' bfd_elf_special_sections (bfd/elf.c), for
+-   the entries that carry flags; every name not listed here has no
+-   name-implied flags and takes the directive's flags string verbatim.
+-   `dot_suffix' is binutils' suffix_length == -2: the name matches
+-   exactly, or the entry followed by a '.' and any suffix -- which is why
+-   `.text.hot' is code but `.textfoo' is nothing in particular.
+-
+-   Only sh_flags is derived. GNU as also derives sh_type from the name
+-   (.bss* -> SHT_NOBITS, .note* -> SHT_NOTE, .init_array* ->
+-   SHT_INIT_ARRAY, ...) and from the directive's `@type' argument; tcc
+-   derives it from neither, and never has. That is a separate, older gap
+-   -- see TODO.md -- not something this table quietly half-fixes. */
++/* GNU as gives a section the flags AND the type implied by its NAME,
++   independently of -- and in preference to -- the flags string and the
++   `@type' argument on the .section directive. The table below is binutils'
++   bfd_elf_special_sections (bfd/elf.c), for the entries that carry a flag
++   or a type other than SHT_PROGBITS; every name not listed here has no
++   name-implied attributes and takes the directive's arguments verbatim.
++
++   `suffix' is binutils' own suffix_length, spelled with binutils' own
++   values so the table reads against bfd/elf.c:
++      0   the name must match exactly -- `.init' is code, `.init.foo' is
++          nothing in particular;
++     -2   exact, or the entry followed by `.' and any suffix -- `.text.hot'
++          is code, `.textfoo' is not;
++     -1   any suffix at all -- `.notefoo' is a note section.
++   `.note.GNU-stack' is its own exact entry ahead of `.note' for the same
++   reason binutils lists it: as gives the bare name SHT_PROGBITS, and only
++   `.note.GNU-stack.something' falls through to `.note' and SHT_NOTE. tcc
++   marks stack requirements on that section (see create_gnu_stack_section),
++   so getting it wrong would be visible.
++
++   Every row was measured against binutils 2.44 `as` before being written
++   down; 0022-tests/run.sh replays the measurement. */
+ typedef struct AsmSectionAttr {
+     const char *name;
+     unsigned char len;
+-    unsigned char dot_suffix;
++    signed char suffix;
++    int type;
+     int flags;
+ } AsmSectionAttr;
+ 
+ static const AsmSectionAttr asm_section_attrs[] = {
+-#define ASM_SEC_ATTR(n, dot, f) { n, sizeof(n) - 1, dot, f }
+-    ASM_SEC_ATTR(".text",          1, SHF_ALLOC | SHF_EXECINSTR),
+-    ASM_SEC_ATTR(".data",          1, SHF_ALLOC | SHF_WRITE),
+-    ASM_SEC_ATTR(".rodata",        1, SHF_ALLOC),
+-    ASM_SEC_ATTR(".bss",           1, SHF_ALLOC | SHF_WRITE),
+-    ASM_SEC_ATTR(".tdata",         1, SHF_ALLOC | SHF_WRITE | SHF_TLS),
+-    ASM_SEC_ATTR(".tbss",          1, SHF_ALLOC | SHF_WRITE | SHF_TLS),
+-    ASM_SEC_ATTR(".init_array",    1, SHF_ALLOC | SHF_WRITE),
+-    ASM_SEC_ATTR(".fini_array",    1, SHF_ALLOC | SHF_WRITE),
+-    ASM_SEC_ATTR(".preinit_array", 1, SHF_ALLOC | SHF_WRITE),
+-    ASM_SEC_ATTR(".data1",         0, SHF_ALLOC | SHF_WRITE),
+-    ASM_SEC_ATTR(".rodata1",       0, SHF_ALLOC),
+-    ASM_SEC_ATTR(".init",          0, SHF_ALLOC | SHF_EXECINSTR),
+-    ASM_SEC_ATTR(".fini",          0, SHF_ALLOC | SHF_EXECINSTR),
+-    ASM_SEC_ATTR(".plt",           0, SHF_ALLOC | SHF_EXECINSTR),
+-    ASM_SEC_ATTR(".got",           0, SHF_ALLOC | SHF_WRITE),
+-    ASM_SEC_ATTR(".dynamic",       0, SHF_ALLOC),
++#define ASM_SEC_ATTR(n, sfx, t, f) { n, sizeof(n) - 1, sfx, t, f }
++    ASM_SEC_ATTR(".text",           -2, SHT_PROGBITS,      SHF_ALLOC | SHF_EXECINSTR),
++    ASM_SEC_ATTR(".data",           -2, SHT_PROGBITS,      SHF_ALLOC | SHF_WRITE),
++    ASM_SEC_ATTR(".rodata",         -2, SHT_PROGBITS,      SHF_ALLOC),
++    ASM_SEC_ATTR(".bss",            -2, SHT_NOBITS,        SHF_ALLOC | SHF_WRITE),
++    ASM_SEC_ATTR(".tdata",          -2, SHT_PROGBITS,      SHF_ALLOC | SHF_WRITE | SHF_TLS),
++    ASM_SEC_ATTR(".tbss",           -2, SHT_NOBITS,        SHF_ALLOC | SHF_WRITE | SHF_TLS),
++    ASM_SEC_ATTR(".init_array",     -2, SHT_INIT_ARRAY,    SHF_ALLOC | SHF_WRITE),
++    ASM_SEC_ATTR(".fini_array",     -2, SHT_FINI_ARRAY,    SHF_ALLOC | SHF_WRITE),
++    ASM_SEC_ATTR(".preinit_array",  -2, SHT_PREINIT_ARRAY, SHF_ALLOC | SHF_WRITE),
++    ASM_SEC_ATTR(".gnu.linkonce.b", -2, SHT_NOBITS,        SHF_ALLOC | SHF_WRITE),
++    ASM_SEC_ATTR(".data1",           0, SHT_PROGBITS,      SHF_ALLOC | SHF_WRITE),
++    ASM_SEC_ATTR(".rodata1",         0, SHT_PROGBITS,      SHF_ALLOC),
++    ASM_SEC_ATTR(".init",            0, SHT_PROGBITS,      SHF_ALLOC | SHF_EXECINSTR),
++    ASM_SEC_ATTR(".fini",            0, SHT_PROGBITS,      SHF_ALLOC | SHF_EXECINSTR),
++    ASM_SEC_ATTR(".plt",             0, SHT_PROGBITS,      SHF_ALLOC | SHF_EXECINSTR),
++    ASM_SEC_ATTR(".got",             0, SHT_PROGBITS,      SHF_ALLOC | SHF_WRITE),
++    ASM_SEC_ATTR(".dynamic",         0, SHT_DYNAMIC,       SHF_ALLOC),
++    ASM_SEC_ATTR(".note.GNU-stack",  0, SHT_PROGBITS,      0),
++    ASM_SEC_ATTR(".note",           -1, SHT_NOTE,          0),
+ #undef ASM_SEC_ATTR
+ };
+ 
+-/* Flags GNU as implies from a section name, or -1 for a name it has no
+-   opinion about. Zero is a real answer (no name would give it here, but
+-   the caller must not confuse "no flags" with "no entry"). */
+-static int asm_section_name_flags(const char *name)
++/* The attributes GNU as implies from a section name, or NULL for a name it
++   has no opinion about. Zero flags is a real answer (`.note'), which is why
++   this returns the entry rather than the flags. */
++static const AsmSectionAttr *asm_section_name_attr(const char *name)
+ {
+     int i;
+ 
+@@ -1136,9 +1148,37 @@
+         const AsmSectionAttr *a = &asm_section_attrs[i];
+         if (strncmp(name, a->name, a->len))
+             continue;
+-        if (name[a->len] == '\0' || (a->dot_suffix && name[a->len] == '.'))
+-            return a->flags;
++        if (a->suffix == -1 || name[a->len] == '\0'
++            || (a->suffix == -2 && name[a->len] == '.'))
++            return a;
+     }
++    return NULL;
++}
++
++/* The section types GNU as spells by name after `@' or `%'. as also takes a
++   bare number there, and warns "unrecognized section type" for anything
++   else and then behaves as if no type had been given -- which is what
++   returning -1 makes the caller do. */
++static const struct {
++    const char *name;
++    int type;
++} asm_section_types[] = {
++    { "progbits",      SHT_PROGBITS },
++    { "nobits",        SHT_NOBITS },
++    { "note",          SHT_NOTE },
++    { "init_array",    SHT_INIT_ARRAY },
++    { "fini_array",    SHT_FINI_ARRAY },
++    { "preinit_array", SHT_PREINIT_ARRAY },
++};
++
++static int asm_section_type_by_name(const char *name)
++{
++    int i;
++
++    for (i = 0; i < (int)(sizeof(asm_section_types)
++                          / sizeof(asm_section_types[0])); i++)
++        if (!strcmp(name, asm_section_types[i].name))
++            return asm_section_types[i].type;
+     return -1;
+ }
+ 
+@@ -1623,7 +1663,8 @@
+         {
+             char sname[256];
+ 	    int old_nb_section = s1->nb_sections;
+-            int flags = 0, name_flags;
++            int flags = 0, type, given_type = -1;
++            const AsmSectionAttr *attr;
+ 
+ 	    tok1 = tok;
+             /* XXX: support more options */
+@@ -1652,10 +1693,19 @@
+                 }
+                 next();
+                 if (tok == ',') {
++                    /* `,@progbits' / `,%nobits' / `,@0x70000001': the
++                       section type. tcc used to consume these two tokens
++                       and throw the type away. */
+                     next();
+                     if (tok == '@' || tok == '%')
+                         next();
+-                    next();
++                    if (tok == TOK_PPNUM)
++                        given_type = asm_int_expr(s1);
++                    else {
++                        given_type =
++                            asm_section_type_by_name(get_tok_str(tok, NULL));
++                        next();
++                    }
+                 }
+             }
+             last_text_section = cur_text_section;
+@@ -1683,10 +1733,29 @@
+                    `.section .rodata,"aw"' is the one shape that gets to add
+                    write. GNU as warns on both mismatch directions; tcc says
+                    nothing, which is a diagnostic gap, not a layout one. */
+-                name_flags = asm_section_name_flags(sname);
+-                if (name_flags >= 0 && (flags & name_flags) != name_flags)
+-                    flags = name_flags;
++                attr = asm_section_name_attr(sname);
++                if (attr && (flags & attr->flags) != attr->flags)
++                    flags = attr->flags;
+ 	        cur_text_section->sh_flags = flags;
++                /* The type follows the same shape, with one exception that
++                   binutils spells out (gas/config/obj-elf.c): a `@type' that
++                   disagrees with the name is honoured -- "setting incorrect
++                   section type" -- EXCEPT for the array sections, where as
++                   keeps the name's type -- "ignoring incorrect section type"
++                   -- because older gcc emitted `.section .init_array,
++                   "aw",@progbits' and as refuses to believe it. Both
++                   branches warn; tcc says nothing, the same diagnostic gap
++                   0021 left. as only reaches any of this for a section the
++                   directive is CREATING, which is what this whole block is
++                   already gated on. */
++                type = attr ? attr->type : SHT_PROGBITS;
++                if (given_type >= 0
++                    && !(attr && attr->type != given_type
++                         && (attr->type == SHT_INIT_ARRAY
++                             || attr->type == SHT_FINI_ARRAY
++                             || attr->type == SHT_PREINIT_ARRAY)))
++                    type = given_type;
++                cur_text_section->sh_type = type;
+             }
+         }
+         break;
