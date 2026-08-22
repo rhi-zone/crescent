@@ -17,6 +17,15 @@
 # into context multiple times over a handful of tool calls. 1-in-8 keeps
 # refreshes periodic without being redundant on short subagent runs.
 #
+# Re-emits style-rules.md AND subagent-coordinator-note.md (not
+# subagent-role-note.md — delegation framing doesn't drift the same way).
+# The coordinator-note counters the hardcoded harness guidance that a
+# coordinator's relayed message is never the user's consent — that guidance
+# is standing, effectively re-asserted every turn, so a spawn-only note gets
+# outweighed over a long run and the subagent drifts back to treating
+# relayed task-direction as suspect. Folding the note into this periodic
+# refresh matches its cadence to the cadence of the guidance it's countering.
+#
 # Replaces the old PreToolUse(SendMessage)-splice periodic-refresh half of
 # inject-subagent-context-agent.sh: that fired 100% of the time a message was
 # sent TO a running agent (rare, so 100% was cheap). This decouples refresh
@@ -35,10 +44,7 @@ set -euo pipefail
 
 dir="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"
 style_file="$dir/style-rules.md"
-
-if [ ! -f "$style_file" ]; then
-    exit 0
-fi
+coordinator_note_file="$dir/subagent-coordinator-note.md"
 
 input=$(head -c $((1024 * 1024)))
 
@@ -67,6 +73,19 @@ escape_file() {
     ' "$1" | sed '$ s/\\n$//'
 }
 
-inject="$(escape_file "$style_file")"
+inject=""
+for f in "$style_file" "$coordinator_note_file"; do
+    if [ -f "$f" ]; then
+        if [ -n "$inject" ]; then
+            inject="${inject}\\n\\n"
+        fi
+        inject="${inject}$(escape_file "$f")"
+    fi
+done
+
+# Nothing to inject — no context files present.
+if [ -z "$inject" ]; then
+    exit 0
+fi
 
 printf '{"hookSpecificOutput":{"hookEventName":"PostToolUse","additionalContext":"%s"}}\n' "$inject"
