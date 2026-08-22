@@ -410,13 +410,44 @@ See `docs/roadmap-v2.md` for the authoritative project roadmap and sequencing. T
   this was in flight. It sorts after `0025`, which is the only ordering constraint — its
   hunk context includes `0025`'s `case TOK_ASMDIR_zero:`.)
 
-- [ ] **tcc does not warn `.space repeat count is negative, ignored`.** `as` emits it for
-  `.skip -1` / `.space -1` / `.zero -1`; tcc clamps the count to zero and says nothing.
-  Measured against binutils 2.44 while writing `0029` and deliberately left out of it: it is
-  a different message for a different input, and `0024` set the precedent of leaving an
-  adjacent measured gap to its own patch rather than folding it in. `0029` flags the
-  zero case *before* the existing negative-clamp rather than after, so adding this needs no
-  rework — one `else if` at the same site.
+- [x] **tcc did not warn `.space repeat count is negative, ignored` — fixed by
+  `dep/tcc/patches/0031-asm-space-negative-repeat-count.patch`.** `as` emits it for
+  `.skip -1` / `.space -1` / `.zero -1`; tcc clamped the count to zero and said nothing.
+  Measured against binutils 2.44 while writing `0029` and deliberately left out of it: a
+  different message for a different input, per the precedent `0024` set. `0029`'s
+  prediction held exactly — it flagged the zero case *before* the existing negative-clamp,
+  so this is one more flag set beside the existing one and one `else if` beside the
+  existing warning, with no rework to `0029`.
+  Measured, not assumed: the negative count outranks `0024`'s `ignoring fill value in
+  section` the same way the zero count does, so `.skip -1,7` in a NOBITS section reports
+  only this. `0031-tests/` is 38/38 against the patched tcc and against a real gcc, 19/38
+  on the stack-through-`0030` baseline, and carries the zero-count and fill-value rows as
+  guards: a fix that *widened* `0029`'s message instead of adding one would still warn and
+  would still fail there.
+  Two adjacent gaps it does not close, both measured while writing it. A negative
+  *alignment* (`.align -1`) is refused by both assemblers — `as` says `alignment not a
+  power of 2`, tcc says `alignment must be a positive power of two` — so that is a wording
+  difference with no silently-mis-assembled input behind it, not a correctness gap.
+  `.org` with a negative operand is a different directive with a different message
+  (`attempt to move .org backwards`) from a different handler, sharing only the `zero_pad`
+  label in tcc; left to its own patch.
+  Full regression, `0001`–`0030` vs `0001`–`0031`, in containers on both libcs
+  (debian/glibc and alpine/musl, the latter `--config-musl`): tcc's own `make test` reaches
+  `ALL TESTS PASSED` in all four runs; every harness is green either side and none of the
+  older ones moved; a freshly `buildvm`-generated `lj_vm.S` assembles to a byte-identical
+  object and the relinked luajit binaries are byte-identical; `verify-bignum-att-tcc.sh` is
+  `equal=80 differs=4` identically either side on both libcs (those four `bignum_sqr` rows
+  are the pre-existing branch-form difference against gas, not a change here); the seven
+  perlasm `*-elf-x86_64.S` objects are byte-identical either side. `0031-tests` is the only
+  thing in the sweep that moves at all.
+  Recorded because it qualifies what "green" means: neither container ships binutils 2.44
+  (bookworm is 2.40, alpine 2.45.1), so the harnesses that *do* diff against the container's
+  `as` were green against those two. `0031-tests` never diffs against `as` — it reads tcc's
+  own diagnostics — and its gcc cross-check was run here on 2.44, so its own result carries
+  no binutils dependency either way.
+  (Numbered `0031`: `0028` was claimed by concurrent work and `0029`/`0030` had landed by
+  the time this went in. It sorts after `0029`, which is the only ordering constraint — its
+  hunk context is `0029`'s own flag and warning.)
 
 - [ ] **tcc's `.section` flags-string parser only understands `a`, `w`, `x`.** GNU `as` also
   takes `M`/`S` (mergeable/strings, with the entity-size and group operands that follow),
@@ -730,6 +761,32 @@ See `docs/roadmap-v2.md` for the authoritative project roadmap and sequencing. T
   base-less `(,%rsp,8)` spelling. A missing-diagnostic gap and not a
   wrong-bytes-for-valid-input gap, so it is deliberately out of `0027-tests/`, where a case
   would test neither assembler agreement nor `0027`'s change.
+  **Status 2026-08-22: does not close as one patch — blocked on an owner call about the
+  message, not about the detection.** The detection half is trivial and unambiguous:
+  `parse_operand()` leaves the index register in `op->reg2` as a plain 0–15 register
+  number, `%rsp`/`%esp` is exactly `4`, and `%r12` is `12` (REX.X carries the extension),
+  so `op->reg2 == 4` is the whole condition and it cannot catch a legitimate form —
+  verified against `as`, which accepts `%r12`, `%rbp`, `%r13` and `%riz`-free bases in
+  every index position and rejects only reg 4. Confirmed tcc emits
+  `mov (%rax,%riz,4),%rbx` today where `as` errors.
+  What does not close is the *text*. `as`'s message embeds the operand **as written in the
+  source, unevaluated** — measured against binutils 2.44: `2*4(%rax,%rsp,4)` and
+  `foo+8(%rax,%rsp,4)` are echoed with the arithmetic and the symbol intact, `(%rax,%rsp)`
+  keeps its absent scale, `(%rax,%RSP,4)` keeps its case, `%fs:` prefixes are included, and
+  odd whitespace comes out in `as`'s own scrubbed form (`-16(  %rax , %rsp , 4 )` prints as
+  `-16( %rax,%rsp,4)`). tcc has already folded `2*4` to `8` and dropped every one of those
+  distinctions by the time it knows the operand is invalid, so a message rebuilt from
+  `op->e`/`op->reg`/`op->reg2`/`op->shift` provably cannot match `as` in general — it would
+  match only the canonical spelling. Nothing in tcc echoes operand source text today
+  (`i386-asm.c`'s errors name a token via `get_tok_str` and nothing more), so matching `as`
+  literally means new substrate: a source-span capture around `parse_operand`, which has a
+  hole of its own — under `.macro`/`.rept` replay tcc is reading a token stream with no
+  backing text, where `as` still has a synthesized line to quote.
+  So the fork is: (a) build the source-span capture, (b) emit `as`'s sentence with a
+  reconstructed operand that matches only canonical spellings, or (c) diagnose in tcc's own
+  idiom without echoing the operand. All three reject the same inputs and differ only in
+  what the user reads; the effort's harnesses have so far held message text to parity with
+  real `as`, which is why this is an owner call rather than an implementer's.
 
 - [ ] **Nothing in CI applies `dep/libressl/patches/` yet.** The
   `libressl-linux-x86_64` job in `build-vendored.yml` builds with the runner's

@@ -1,0 +1,45 @@
+--- a/dep/tcc/tccasm.c
++++ b/dep/tcc/tccasm.c
+@@ -1191,6 +1191,10 @@
+        point of use because `n' is clamped just below and a clamped negative
+        count is a different diagnostic in as, not this one. */
+     int zero_rept;
++    /* The negative counterpart, and the reason the flag above had to exist:
++       both are read after `n' has been clamped to zero, so neither can be
++       recovered from `n' at the point the message is issued. */
++    int neg_rept;
+     Section *sec;
+     uint8_t *ptr;
+ 
+@@ -1213,6 +1217,7 @@
+     case TOK_ASMDIR_zero:
+         tok1 = tok;
+         zero_rept = 0;
++        neg_rept = 0;
+         next();
+         n = asm_int_expr(s1);
+         if (tok1 == TOK_ASMDIR_p2align)
+@@ -1233,6 +1238,7 @@
+             c = sec->sh_flags & SHF_EXECINSTR;
+         } else {
+ 	    zero_rept = (n == 0);
++	    neg_rept = (n < 0);
+ 	    if (n < 0)
+ 	        n = 0;
+             size = n, c = 0;
+@@ -1261,6 +1267,15 @@
+         if (zero_rept) {
+             tcc_warning(".space repeat count is zero, ignored");
+             v = 0;
++        } else if (neg_rept) {
++            /* A negative count is a distinct message in as, not a spelling
++               of the zero one, and it takes the same precedence: measured,
++               `.skip -1,7' in a NOBITS section reports only this and never
++               0024's `ignoring fill value in section', the same way the
++               zero case does. `v' is cleared for that reason, not for
++               symmetry with the branch above. */
++            tcc_warning(".space repeat count is negative, ignored");
++            v = 0;
+         }
+     zero_pad:
+ 	if ((uint64_t)ind + size >= 1<<30)
