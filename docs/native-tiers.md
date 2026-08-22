@@ -1922,7 +1922,33 @@ noprefix`. The AT&T files are a parallel, tcc-only artifact — vendored
 output, not vendored source, checked in (rather than generated at build
 time) so the build has no dependency on `sed` or on re-deriving a
 translation whose correctness has to be independently checked anyway.
-**They are not wired into any build configuration yet** (see TODO.md).
+They are selected by
+`dep/libressl/patches/0003-configure-intel-syntax-probe.patch`, which adds a
+`configure` capability probe (assemble `.intel_syntax noprefix`; the result
+becomes `AM_CONDITIONAL([ASM_INTEL_SYNTAX])`) and has
+`crypto/Makefile.am.elf-x86_64` choose between the Intel list and the `att/`
+list on it. The test is the capability, never the compiler's name, so gcc
+and clang — which answer yes — stay on the originals and their output is
+unchanged; the mirror is reached only by an assembler that genuinely cannot
+parse Intel syntax. The vendored tree itself stays pristine (the patch is
+applied at build time, like `0001`/`0002`), so the shipped
+`libressl-linux-x86_64` job, which applies no patches, is untouched.
+
+Regenerating the derived files after editing `configure.ac` or a
+`Makefile.am.*` is `aclocal -I m4 && autoconf && automake` under autoconf
+2.72 + automake 1.18.1 (in the `flake.nix` dev shell). Running `libtoolize`
+— including via `autoreconf -i`/`-f` — would replace the vendored libtool
+2.4.2 macros that `0001`/`0002` patch, and must not happen.
+
+**This closes the syntax gap, not the whole tcc build.** With `0003` applied
+and no `--disable-asm`, tcc's probe answers `no`, the `att/` list is selected,
+and all 21 objects build and link into `libcrypto.so` — but `make` still fails
+at `apps/ocspcheck` with `unresolved reference to 'bn_div_words'`. That is an
+unrelated `__GNUC__` gate in `crypto/bn/arch/amd64/bn_arch.h`, not a syntax
+problem, and it would block the Intel path identically; see TODO.md for the
+measurement and the three places it could be closed. Until it is, a tcc
+libressl build with real assembly does not complete, and no `make check` or
+crypto-vector result exists for one.
 
 #### Verification methodology
 

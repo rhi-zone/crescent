@@ -55,6 +55,28 @@
             coqPackages.QuickChick
             # Browser binaries for playwright-driven UI screenshots/tests.
             playwright-driver.browsers
+            # Autotools for regenerating dep/libressl's configure/Makefile.in
+            # after a source-level patch to configure.ac or Makefile.am.* (see
+            # dep/libressl/patches/0003). CONTRIBUTOR/CI TOOLING ONLY: nothing
+            # shipped needs them, and `bin/cr test` never invokes them.
+            #
+            # These versions are not free-floating -- they are pinned by what
+            # generated the checked-in files (`configure` says autoconf 2.72,
+            # `aclocal.m4` says aclocal 1.18.1). nixpkgs at the current lock
+            # supplies exactly those, so regeneration is a no-op apart from the
+            # intended change; a mismatch here would show up as generated-file
+            # drift in the diff.
+            autoconf   # 2.72
+            automake   # 1.18.1
+            # NO libtool here, deliberately. dep/libressl vendors libtool 2.4.2
+            # macros (m4/libtool.m4, ltversion.m4) and a matching ltmain.sh, and
+            # patches 0001/0002 edit those 2.4.2 macros in place. Regeneration
+            # runs aclocal/autoconf/automake ONLY -- never libtoolize, never
+            # `autoreconf -i`/`-f` -- so the 2.4.2 files are left untouched.
+            # nixpkgs' libtool is 2.5.4; letting libtoolize run would overwrite
+            # them with 2.5.4, invalidating both patches (and ltmain.sh checks
+            # package_revision against macro_revision, so a half-swap fails
+            # loudly rather than silently).
           ] ++ extraInputs;
           LD_LIBRARY_PATH = "${pkgs.lib.makeLibraryPath buildInputs}:$LD_LIBRARY_PATH";
           shellHook = ''

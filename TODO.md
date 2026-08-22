@@ -941,6 +941,133 @@ wrong; it was inferred from the `#error`, never checked against `libtcc1.a`.
     That wiring is its own decision (which files, which arch guard, how the
     mirror is kept in lockstep with the Intel originals) and is not implied
     by the files now assembling.
+  - **The wiring decision is settled (owner call, made in conversation
+    2026-08-23; it was never written up here, which is why the paragraph
+    above still read as open).** Of the three viable shapes — teach tcc real
+    `.intel_syntax` support, hand-edit the generated `configure`/`Makefile.in`,
+    or patch the autotools *sources* — the call was the third: a real
+    configure-time capability probe in `configure.ac` that assembles a
+    `.intel_syntax noprefix` snippet, exposed as an `AM_CONDITIONAL`, with
+    `crypto/Makefile.am.elf-x86_64` selecting the `att/` list when the probe
+    says no. Teaching tcc Intel syntax was ruled out as not worth the size of
+    the job; hand-editing generated files was ruled out as fragile. Selecting
+    on a capability rather than on a compiler name is the load-bearing part —
+    it keeps gcc/clang on the Intel originals untouched and makes the mirror
+    a fallback rather than a new default, which is the role its README states.
+    Implemented as `dep/libressl/patches/0003-configure-intel-syntax-probe.patch`;
+    the vendored tree stays pristine and the patch is applied at build time,
+    exactly like `0001`/`0002`, so the shipped gcc build is byte-untouched
+    (the `libressl-linux-x86_64` job applies no patches at all).
+    Regeneration is `aclocal -I m4 && autoconf && automake` under autoconf
+    2.72 + automake 1.18.1 — measured as a no-op against the checked-in files
+    apart from one inert trailing newline. **`libtoolize` must never run**:
+    the tree vendors libtool 2.4.2 macros that `0001`/`0002` patch in place,
+    and `ltmain.sh` cross-checks `package_revision` against `macro_revision`,
+    so a partial swap fails loudly. Those two tools are now in the `flake.nix`
+    dev shell; libtool deliberately is not.
+    **What `0003` does and does not buy, measured 2026-08-23.** It does close
+    the `.intel_syntax` gap: under `CC=tcc LD=tcc ./configure` with no
+    `--disable-asm`, the probe reports `no`, the generated `crypto/Makefile`
+    activates the `att` file list and comments out the Intel one, and the build
+    produces 21 `.lo` objects under `bn/arch/amd64/att/` with no bignum objects
+    from the Intel directory (the single `.lo` there is `bn_arch.c`, which is C).
+    gcc on the same patched tree answers `yes` and still passes `make check`
+    136/136. It does **not** yet get a complete tcc build: `make` fails on
+    `bn_div_words`, a `__GNUC__`-gated inline-asm gap tracked as its own item
+    below, so `make check` and the crypto vector suite have not been run
+    through a tcc-built library and no such claim should be read here.
+    **Patch-then-regenerate is the correct order, and it was verified rather
+    than assumed.** `0001`/`0002` edit both `m4/libtool.m4` and the generated
+    `configure`, so regenerating after applying them looks like it would
+    discard half of each. It does not: `aclocal -I m4` rebuilds `aclocal.m4`
+    from the *patched* `libtool.m4`, and `configure` is then re-derived from
+    that. Applying `0001`+`0002`+`0003` to a pristine tree and regenerating
+    leaves all three `tcc*)` entries and the `-soname $wl$soname` spelling in
+    `configure`, alongside the new probe. The `configure` half of `0001`/`0002`
+    is what makes them work *without* a regeneration step; it is redundant, not
+    contradictory, once one happens.
+    **The gcc path is unchanged, measured at object level.** A gcc build of a
+    `0003`-patched tree vs a gcc build of an unpatched one: identical `.text`
+    bytes, identical section headers, identical symbol table (address, type and
+    name for every entry), identical file size. Getting there required one
+    correction — placing the `if ASM_INTEL_SYNTAX` block at the position the 21
+    entries originally occupied rather than appending it at the end of the file.
+    The appended form compiles exactly the same files but hands the linker a
+    different object order, which shifted every symbol after it; caught by
+    diffing the two libraries rather than by reading the Makefile.
+    Built at the same path both times, the two libraries are byte-identical,
+    build-id included — so the shipped gcc build is undisturbed with no
+    asterisk. Built at *different* paths they differ, first differing byte in
+    `.note.gnu.build-id`, and that is not a patch effect: two **byte-identical
+    pristine** trees built at two different paths reproduce the same pair of
+    build-ids. libressl's build is not path-reproducible independently of
+    anything here. Worth knowing before anyone reaches for a `.so` hash as a
+    change detector — it will report differences that are purely the build
+    directory.
+
+- [ ] **`bn_div_words` is a second, independent blocker on tcc + real asm, and
+  it is a `__GNUC__` gate rather than a syntax gate.** Found 2026-08-23 while
+  verifying `0003` end to end, and it is the reason "libressl builds with real
+  asm under tcc" is **not** yet true even though the `.intel_syntax` half is
+  closed and proven.
+  With asm enabled, `crypto/bn/arch/amd64/bn_arch.h` defines
+  `HAVE_BN_DIV_WORDS`, which makes `crypto/bn/bn_div.c` skip its portable C
+  `bn_div_words`. The intended replacement, `bn_div_rem_words_inline` (the
+  `divq` inline-asm block), sits behind `#if defined(__GNUC__)`. tcc defines
+  `__TINYC__` and not `__GNUC__`, so *neither* definition is compiled and
+  `bn_div_rem_words` falls through to a branch that calls the now-absent
+  `bn_div_words`. `make` then dies with a single error, `unresolved reference
+  to 'bn_div_words'`, at `apps/ocspcheck` link time.
+  Measured shape of the failure: `libcrypto.so.57.0.2`, `libssl` and `libtls`
+  all link successfully, and `bn_div_words` is the **only** non-libc undefined
+  symbol in `libcrypto`. Every AT&T bignum symbol resolves. Only the `apps/`
+  executables fail. `--disable-asm` never hit this because `OPENSSL_NO_ASM`
+  keeps the C version, and the gate is on `__GNUC__` rather than on syntax, so
+  it would bite the Intel path identically — the `att/` mirror is not
+  implicated in any way.
+  Three shapes for closing it, in three different places, none picked:
+  define `__GNUC__` (or whatever the gate actually wants) tcc-side; widen the
+  `#if` to accept `__TINYC__` libressl-side, which is only correct if tcc's
+  inline-asm constraint handling really does cope with that `divq` block;
+  or add a second configure-time capability probe for the inline asm, the same
+  shape as `0003`'s. Different blast radius each, and the middle one has a
+  correctness precondition nobody has measured yet.
+
+- [ ] **Two build-recipe gotchas for tcc-built libressl, unrelated to the
+  probe.** Both cost time before anything built at all, both worth writing
+  down. `CC=tcc ./configure` fails at "C compiler cannot create executables"
+  unless tcc is installed or handed `-B` — from a build directory it cannot
+  locate its own `libtcc1.a`. And `git apply`ing the libressl patches sets the
+  mtime of `m4/libtool.m4` and `configure` to now, which makes them newer than
+  `aclocal.m4`; automake's rebuild rules then try to run `aclocal-1.18` mid
+  `make` and the build dies. The generated files have to be re-touched in
+  dependency order after patching.
+
+- [ ] **Open: does CI gain a tcc-built libressl job, and if so which autoconf
+  does it regenerate with?** These are one decision with a dependency, both
+  surfaced while landing `0003` (above), neither guessed at.
+  - **There is no CI step that builds libressl under tcc.** The
+    `tcc-consumers` jobs build tcc, run tcc's own suite, run the per-patch
+    harnesses in `dep/tcc/patches/*-tests/`, and package — that is all. Every
+    `--disable-asm` string in `build-vendored.yml` sits inside an explanatory
+    comment (around lines 470–513) describing builds that were done by hand
+    and recorded there; none is a live invocation. So "drop `--disable-asm`
+    for the tcc path" has no invocation to edit. Either the comments get
+    corrected and the tcc libressl build stays a manual, documented exercise,
+    or a real job is added — which is a new CI gate and a new time cost, not
+    a comment fix. Not the same commitment, so not picked here.
+  - **If a job is added, alpine's autoconf is the wrong version and it
+    matters.** `alpine:latest` (3.24.1) ships autoconf **2.73**; the
+    checked-in `configure` was generated by **2.72**, which is what the
+    `flake.nix` dev shell now pins. Measured, not assumed: regenerating the
+    same patched tree under 2.73 yields a `configure` differing from the 2.72
+    output by **2301 lines**, plus a differing `aclocal.m4`.
+    `crypto/Makefile.in` is unaffected (automake is 1.18.1 in both). So a CI
+    job that regenerates in-container would not reproduce the local result,
+    and the "regeneration doesn't drift" property would be false there. Pinning
+    2.72 inside the container, accepting 2.73 for a build that never ships, or
+    shipping the generated files inside `0003` are all coherent answers with
+    different costs; none is implied by the decision already made.
 
 - [x] **tcc assembler: ADX/BMI2 opcodes, `.macro`/`.endm`,
   `.if`/`.elseif`/`.else`/`.endif`, and a `.rept` replay bug** — 2026-08-22.

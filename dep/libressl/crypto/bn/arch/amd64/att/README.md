@@ -11,9 +11,20 @@ The Intel-syntax originals in `../` remain the canonical, primary vendored
 source. gcc and clang builds always use `../` directly (via
 `.intel_syntax noprefix`, which they both support). This `att/` directory
 exists only because tcc's assembler is AT&T-only and does not implement
-`.intel_syntax` — see `TODO.md` ("New tcc assembler gap"). **These files are
-not yet wired into any build** — that is a separate step, gated on closing
-the remaining tcc opcode/macro gaps described below.
+`.intel_syntax` — see `TODO.md` ("New tcc assembler gap").
+
+**Selected by a configure-time capability probe, not by compiler name.**
+`dep/libressl/patches/0003-configure-intel-syntax-probe.patch` adds an
+`AC_COMPILE_IFELSE` to `configure.ac` that assembles a `.intel_syntax
+noprefix` snippet and defines `AM_CONDITIONAL([ASM_INTEL_SYNTAX])` from the
+result; `crypto/Makefile.am.elf-x86_64` uses that conditional to compile
+either the originals in `../` or the files here. An assembler that answers
+yes — gcc and clang both do — never touches this directory, so the
+originals stay the canonical path and the shipped build is unaffected.
+
+Note that the vendored tree itself stays pristine: `0003` is applied at
+build time, like `0001`/`0002`, so this selection only exists in builds
+that opt into the patch stack.
 
 ## Provenance
 
