@@ -329,10 +329,13 @@ See `docs/roadmap-v2.md` for the authoritative project roadmap and sequencing. T
   in the table, so it never reaches the changed path) and the relinked luajit runs traces,
   interpreter, coroutines, varargs and an ffi call unchanged.
 
-  **Follow-on now unblocked:** `test1`/`test3` are runnable in CI's Alpine container and
-  worth wiring into `build-vendored.yml`, which was the original entry's "first step". Not
-  attempted here. (`bcheck.o` does not compile against musl at all — `__ctype_b_loc` is
-  glibc-only — so such a job needs `--config-bcheck=no`; that is pre-existing and unrelated.)
+  **Follow-on, done 2026-08-22:** `make test` now runs in the `tcc-linux-x86_64` job of
+  `build-vendored.yml`, between the build and the artifact copy, so it gates the committed
+  binary. ~5s in that container. One correction to the parenthesis above, measured rather
+  than assumed: `--config-bcheck=no` is *not* needed. `--config-musl` — which the build step
+  already passes — is exactly what makes `lib/bcheck.c` compile against musl, via its
+  `CONFIG_TCC_MUSL` `HAVE_CTYPE` gate; with it, `memtest` and `btest` run like everything
+  else and the suite reaches `ALL TESTS PASSED`.
 
 - [x] **tcc derived `sh_type` from neither the section name nor `.section`'s `@type`
   argument — fixed by `dep/tcc/patches/0022-asm-section-type.patch`.** GNU `as` gives
@@ -414,6 +417,15 @@ See `docs/roadmap-v2.md` for the authoritative project roadmap and sequencing. T
   cross-checked against the same source built and run through gcc; `-run -g` backtraces
   resolve to `file:line` unchanged in dwarf-4, dwarf-5 and stabs modes; tcc's own
   `make test` — `btest` included — reaches `ALL TESTS PASSED` either side.
+
+- [ ] **The per-patch harnesses in `dep/tcc/patches/*-tests/` are still not run by CI.**
+  `make test` is wired now (see the `0021` item above), but the ~18 `run.sh` scripts that
+  encode what each patch actually fixed are only ever run by hand, which is how a harness
+  rots. Measured in the CI container (alpine:latest + `build-base`): 15 of them pass under
+  busybox `sh`, and `0014`/`0018`/`0019` die with `syntax error: unexpected redirection`
+  because they use bash process substitution and alpine has no bash. So wiring them means
+  either adding `bash` to that job or rewriting three scripts — a call worth making
+  deliberately rather than slipping a package into an unrelated commit.
 
 - [ ] **tcc segfaults on a truncated object file, or one whose `sh_name` points past the
   end of `.shstrtab`.** Pre-existing and unrelated to

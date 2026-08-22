@@ -521,6 +521,29 @@ jobs:
           cd dep/tcc
           ./configure --config-musl
           make -j"$(nproc)"
+      - name: Test (tcc's own suite, which the patch stack made passable)
+        # tcc's own `make test` -- test1/test3 included -- could not complete
+        # on this stack until `0020` and `0021` landed together: `0020` was
+        # the __TINYC__ blocker, `0021` the `relocation '2' out of range` one.
+        # It has been green since, so it is a gate now rather than a known
+        # failure, and it gates the artifact by running before the copy below.
+        # ~5s in this container, so it costs nothing to keep.
+        #
+        # No --config-bcheck=no needed, contrary to what TODO.md said before
+        # this was measured: --config-musl is what makes lib/bcheck.c compile
+        # against musl (the CONFIG_TCC_MUSL HAVE_CTYPE gate), and the build
+        # step above already passes it, so memtest/btest run like the rest.
+        #
+        # The per-patch harnesses in dep/tcc/patches/*-tests/ are NOT run here
+        # -- see TODO.md; three of them need bash, which alpine:latest has not
+        # got, and that is a call to make deliberately rather than by adding a
+        # package in passing.
+        run: |
+          cd dep/tcc
+          make test
+      - name: Package
+        run: |
+          cd dep/tcc
           strip --strip-debug tcc
           mkdir -p "$GITHUB_WORKSPACE"/out
           cp tcc "$GITHUB_WORKSPACE"/out/tcc-linux-x86_64
