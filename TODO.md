@@ -289,30 +289,86 @@ See `docs/roadmap-v2.md` for the authoritative project roadmap and sequencing. T
   Note for re-vendoring: moving the pin to a commit with a different upstream `VERSION`
   means updating `TCC_UPSTREAM_VERSION` and the expected `928` in `0020-tests` together.
 
-  **One correction to the paragraph above, measured 2026-08-22.** `test1`/`test3` do *not*
-  pass on this NixOS box even with `__TINYC__` fixed; they now fail later, at
-  `tcc: error: relocation '2' out of range`, in the `-run` in-memory execution path. That is
-  independent of this patch — the `0001`–`0019` baseline fails identically when
-  `__TINYC__` is forced valid from the command line (`-U__TINYC__ -D__TINYC__=928`), so it
-  is reachable-but-pre-existing rather than caused. What *was* verified here is the thing
-  `test1`/`test3` actually assert: `tcctest.c` compiled by the patched tcc to an executable
-  and run under the nix loader produces output byte-identical to the gcc-built `test.ref`
-  (1062 lines, zero diff). The earlier "Auto Test OK" report was presumably from an
-  environment where `-run` works; whether the relocation failure is NixOS-specific or shows
-  up in CI too is untested. Separate item, not folded into this one.
+  **One correction to the paragraph above, measured 2026-08-22.** `__TINYC__` was one of
+  *two* blockers on `test1`/`test3`; with `0020` alone the run gets past `tcctest.c:338` and
+  then dies at `tcc: error: relocation '2' out of range`. That second blocker is `0004`, not
+  this patch, and is fixed by `0021` — see the closed item below. With `0020` and `0021`
+  together, tcc's own `make test` completes end to end.
 
-- [ ] **`tcc -run` fails with `relocation '2' out of range` on `tests/tcctest.c`, which is
-  what now blocks tcc's own `test1`/`test3` here.** Surfaced only once `__TINYC__` was fixed
-  (`0020`) — before that the run died in the preprocessor and never reached codegen.
-  Pre-existing, not caused by any patch: the `0001`–`0019` baseline fails identically when
-  `__TINYC__` is forced valid from the command line. `2` is `R_X86_64_PC32`, so this is the
-  familiar `-run` problem of mmap'd code landing further than ±2GB from the libc it calls;
-  `-run` on smaller inputs (including `-run ../tcc.c` itself, three levels deep) works fine
-  on the same box, so it is size- or layout-dependent rather than broken outright. The same
-  `tcctest.c` compiled to an executable and run under the nix loader matches the gcc
-  reference output exactly, so codegen is not implicated. Measured on NixOS only —
-  **first step is to check whether CI's Alpine container hits it at all**, since if it does
-  not, `test1`/`test3` are runnable in CI and worth wiring up. Not attempted.
+- [x] **`relocation '2' out of range` under `-run` was `0004` marking allocatable sections
+  non-allocatable — fixed by `dep/tcc/patches/0021-asm-section-name-attrs.patch`.** The
+  hypothesis in the original entry (mmap'd `-run` code landing >±2GB from libc, hence
+  NixOS-specific) was wrong, and so was "pre-existing, not caused by any patch". Actual
+  cause, instrumented: the failing relocation's *target* address was fine; its *own*
+  address was zero. `tests/tcctest.c` pushes a `.long 661b - .` into `.data.ignore`, which
+  after `0004-asm-section-flags-alloc.patch` carries no `SHF_ALLOC`; `tccrun.c` assigns
+  run-time addresses only to `SHF_ALLOC` sections, while `tccelf.c`'s `relocate_sections()`
+  relocates every section that has relocations, so the `R_X86_64_PC32` (`'2'` is the
+  relocation *type*) computed `symbol - 0` — which does not fit in int32 once `-run`'s
+  addresses are real heap pointers. Under `-c`/link the same subtraction is computed against
+  `ELF_START_ADDR`-scale values, fits, and lands in a section nobody reads, which is exactly
+  why compiled output stayed byte-identical to gcc's and only `-run` complained.
+
+  `0004` was a real fix to a real upstream bug, but overshot: GNU `as` derives a section's
+  flags from its **name** first (binutils `bfd_elf_special_sections`, `bfd/elf.c`) and lets
+  the flags string only add to them, so `0004`'s flat `flags = 0` default was right for
+  unrecognized names and wrong for recognized ones. The wider damage was not the test
+  failure: bare `.section .rodata` — which four of the seven vendored libressl
+  `crypto/*/*-elf-x86_64.S` files use — was non-allocated in every object tcc produced
+  between `0004` and `0021`, i.e. dropped from any image linked from them.
+
+  Confirmed **not** NixOS-specific: in an Alpine 3.20 / musl container, `0001`–`0020` fails
+  identically on both `test1` and `test3`, `0001`–`0020` minus `0004` passes both, and
+  `0001`–`0021` passes both. It would have failed in CI's own container.
+
+  Verified: `0021-tests/run.sh` 35/61 on the `0001`–`0020` baseline, 61/61 with `0021`,
+  61/61 against a real gcc; full `make test` green; the four libressl objects gain `A` on
+  `.rodata` with `.text`/`.rodata` bytes unchanged; a freshly `buildvm`-generated `lj_vm.S`
+  assembles byte-identically either side (its only `.section` directives are
+  `.note.GNU-stack`, `.debug_frame`, `.eh_frame`, all with explicit flags strings and none
+  in the table, so it never reaches the changed path) and the relinked luajit runs traces,
+  interpreter, coroutines, varargs and an ffi call unchanged.
+
+  **Follow-on now unblocked:** `test1`/`test3` are runnable in CI's Alpine container and
+  worth wiring into `build-vendored.yml`, which was the original entry's "first step". Not
+  attempted here. (`bcheck.o` does not compile against musl at all — `__ctype_b_loc` is
+  glibc-only — so such a job needs `--config-bcheck=no`; that is pre-existing and unrelated.)
+
+- [ ] **tcc derives `sh_type` from neither the section name nor `.section`'s `@type`
+  argument.** GNU `as` gives `.bss*` `SHT_NOBITS`, `.note*` `SHT_NOTE`, `.init_array*`
+  `SHT_INIT_ARRAY`, `.fini_array*` `SHT_FINI_ARRAY`, `.preinit_array` `SHT_PREINIT_ARRAY`
+  and `.dynamic` `SHT_DYNAMIC`; tcc leaves everything `SHT_PROGBITS`. Its `.section` handler
+  parses the `,@type` / `,%type` argument and throws it away (`tccasm.c`, the two bare
+  `next()` calls after the flags string). Older than the whole patch stack — `0004` did not
+  touch it and `0021` deliberately did not fold it in, since `0021`'s table is about
+  `sh_flags` and quietly half-doing types inside it would be the wrong shape. Nothing in
+  crescent has needed it yet; the visible cost is that a tcc-assembled `.bss.foo` occupies
+  file space where an `as`-assembled one does not.
+
+- [ ] **tcc's `.section` flags-string parser only understands `a`, `w`, `x`.** GNU `as` also
+  takes `M`/`S` (mergeable/strings, with the entity-size and group operands that follow),
+  `G` (group), `T` (`SHF_TLS`), `e` (`SHF_EXCLUDE`), `o` (`SHF_LINK_ORDER`), `R`
+  (`SHF_GNU_RETAIN`) and `d`/`l` (`SHF_GNU_MBIND` / `SHF_X86_64_LARGE`). tcc silently drops
+  them: `.section .foo,"awT"` comes out `WA` where `as` gives `WAT`. `0021` masks the two
+  cases that matter most today — `.tdata`/`.tbss` get `SHF_TLS` from their names — but a
+  non-special name with an explicit `T` still loses it. Also `as` warns on both directions
+  of a special-section flags mismatch (`ignoring changed section attributes` / `setting
+  incorrect section attributes`) and tcc says nothing; that is a diagnostic gap, not a
+  layout one. Related: `0021`'s table omits `.lrodata`/`.ldata`/`.lbss`, which `as` marks
+  `SHF_X86_64_LARGE` — tcc has no large code model and no name for that flag in its `elf.h`.
+
+- [ ] **`tcc -run` cannot relocate a genuinely non-allocated section.** The defect `0004`
+  exposed and `0021` moved out of the way rather than removed. `tccrun.c` assigns addresses
+  only to `SHF_ALLOC` sections; `relocate_sections()` relocates all of them regardless, so
+  a PC-relative relocation inside a section `as` also considers non-allocated still computes
+  `symbol - 0` and overflows. Live repro: `asm(".data\n.byte 41\nblob:\n771:\n.byte 42\n
+  772:\n.pushsection notspecial\n.long 771b - .\n.popsection\n.byte 772b - 771b\n")` —
+  `-run` errors, `-c` plus link runs correctly and prints the right values. A real link
+  computes these against `sh_addr == 0` too and simply does not care, because nothing reads
+  the section; only `-run`'s real heap addresses make the difference overflow. The fix is a
+  genuine design question — probably "do not relocate non-`SHF_ALLOC` sections under
+  `TCC_OUTPUT_MEMORY`", but that touches DWARF sections too and needs its own verification —
+  so it is deliberately not bundled into `0021`.
 
 - [ ] **tcc segfaults on a truncated object file, or one whose `sh_name` points past the
   end of `.shstrtab`.** Pre-existing and unrelated to
@@ -996,6 +1052,18 @@ See `docs/roadmap-v2.md` for the authoritative project roadmap and sequencing. T
   -elf-x86_64.S` still assemble cleanly; `aesni-elf-x86_64.S` and `modes/ghash-elf-x86_64.S`
   still fail on the pre-existing, separately-recorded `xmm8`–`xmm15` register gap above, not
   on anything section-flags-related — no regression introduced.
+
+  **Correction, 2026-08-22: `0004` overshot, and `0021-asm-section-name-attrs.patch` walks
+  it back to GNU `as`'s actual rule.** Every case verified above used a section name `as`
+  has no opinion about, where "flags string decides" is the whole rule. For a name `as`
+  *recognizes* the name decides first and the flags string only adds, so `0004`'s flat
+  `flags = 0` default made bare `.section .rodata` non-allocated — including in four of the
+  seven vendored libressl `*-elf-x86_64.S` files, whose constant tables were therefore
+  dropped from any linked image, and in `tcctest.c`'s `.data.ignore`, which is what
+  `relocation '2' out of range` under `-run` actually was. The blast-radius check above was
+  sound for what it measured and simply did not measure that axis. See the `0021` item near
+  the top of this file. `0004` itself stays — its own bug is real and `0021` builds on it.
+
   **Separate, deeper, NOT-fixed bug found while re-confirming this area of `tccasm.c`,
   intentionally left alone (`x86_64-gen.c` not touched):** `gen_addr32()` in
   `dep/tcc/x86_64-gen.c` (~line 265) hardcodes `R_X86_64_32S` for every 32-bit

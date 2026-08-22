@@ -173,8 +173,11 @@ separately as `0005`, below), `0004-asm-section-flags-alloc.patch`
 into every parsed section's flags and the flag-parsing loop never
 recognized `a` at all, so an explicit `"w"`-only section came out
 allocatable and an empty flags string still got `SHF_ALLOC` — both wrong
-against real GNU `as`, which only sets `SHF_ALLOC` when `a` is actually
-present), and `0005-asm-leb128-relaxation.patch` (tcc.h + tccpp.c +
+against real GNU `as`, which for a section name it does not recognize only
+sets `SHF_ALLOC` when `a` is actually present. For a name it *does*
+recognize the name decides, which `0004` got wrong in the other direction
+and `0021-asm-section-name-attrs.patch` corrects), and
+`0005-asm-leb128-relaxation.patch` (tcc.h + tccpp.c +
 tccasm.c + tccdbg.c, variable-width LEB128 relaxation — the gap `0003`
 documented). A `.uleb128`/`.sleb128` whose operand is an unresolved label
 difference has an unknown *width*, not just an unknown value, so nothing
@@ -1105,13 +1108,78 @@ the asm-mode case. Unlike `0019-tests` this is not meaningful against gcc —
 upstream's `VERSION` file at the pinned SHA. All fourteen earlier harnesses
 score identically either side of `0020`. `tcctest.c` compiled by the patched
 tcc and run produces output byte-identical to the gcc-built `test.ref` (1062
-lines); `test1`/`test3` themselves still fail on NixOS, one stage later, in
-`-run` — pre-existing and reachable-but-not-caused, tracked separately in
-`TODO.md`. A freshly `buildvm`-generated `lj_vm.S` assembles byte-identically
+lines); `test1`/`test3` themselves still failed at the time `0020` landed, one
+stage later, in `-run`. That second failure was read then as a NixOS `-run`
+quirk; it was not. It was `0004`, and `0021` below fixes it. A freshly
+`buildvm`-generated `lj_vm.S` assembles byte-identically
 either side, the resulting luajit links and runs identically (traces, ffi,
 callbacks, coroutines), and `verify-bignum-att-tcc.sh` output is unchanged
 line for line — none of which is surprising, since none of those sources
 mention `__TINYC__`; they are the regression floor, not the demonstration.
+
+### `0021-asm-section-name-attrs.patch`
+
+`0021` (tccasm.c) makes a section's **name** decide its flags, the way GNU
+`as` decides them, and is a correction to `0004`.
+
+`0004` fixed a real upstream bug — tcc forced `SHF_ALLOC` into every section
+`.section` created and never parsed `a` out of the flags string at all — by
+making the default flags `0`. That is right for a name `as` has no opinion
+about, and wrong for one it does. `as` derives flags from the name first
+(binutils `bfd_elf_special_sections`, `bfd/elf.c`); the flags string only
+gets to add to them. `0004` was checked against `as` on made-up names, where
+the two rules agree. On recognized names they do not, and after `0004` the
+ordinary hand-written spelling `.section .rodata` produced a section with no
+`SHF_ALLOC` — dropped from every linked image. Four of the seven vendored
+libressl `crypto/*/*-elf-x86_64.S` files (`aes`, `aesni`, `ghash`, `mont5`)
+spell it exactly that way, and their constant tables were non-allocated in
+every object tcc produced from them between `0004` and `0021`.
+
+The same defect is what the `relocation '2' out of range` failure of
+`make test1`/`test3` was. `tests/tcctest.c` pushes a `.long 661b - .` into
+`.data.ignore`; that is a `.data.` name, so allocatable to `as`, but flagless
+after `0004`. `tccrun.c` assigns run-time addresses only to `SHF_ALLOC`
+sections while `tccelf.c`'s `relocate_sections()` relocates every section
+that has relocations, so the `R_X86_64_PC32` (`'2'` is the relocation type
+number) computed `symbol - 0` — which does not fit in int32 when `-run`'s
+addresses are real heap pointers. Under `-c`/link the same subtraction is
+computed against `ELF_START_ADDR`-scale values, fits, and lands in a section
+nobody reads, which is why compiled output stayed byte-identical to gcc's and
+only `-run` ever complained. Nothing about it was NixOS-specific or
+memory-layout-specific; it reproduces identically wherever the patch stack is
+applied.
+
+The patch adds binutils' table for the entries that carry flags, reproducing
+its `suffix_length` matching (`.text`/`.text.hot` but not `.textfoo`;
+`.init` but not `.init.foo`), plus `as`'s precedence rule: name-implied flags
+win outright unless the directive's flags string is a strict superset of
+them. `.section .text,"w"` is still `AX`, `.section .rodata,""` is still `A`,
+`.section .rodata,"aw"` is `WA`. The subset half of that rule is why the
+patch also deletes upstream's hand-written `.init`/`.fini` →
+`SHF_EXECINSTR` `strcmp`: that two-name special case was a fragment of this
+table, and a plain default-if-absent rule would have broken
+`.section .init,"a"`, which musl's crt asm relies on.
+
+Two things are deliberately out of scope and tracked separately in `TODO.md`:
+`sh_type` is still derived from neither the name nor the directive's `@type`
+argument (tcc never has), and `-run` still cannot relocate a genuinely
+non-allocated section — the underlying `relocate_sections()` defect, which
+`0004` exposed rather than introduced.
+
+**Verified.** `0021-tests/run.sh` scores 35/61 on the `0001`–`0020` baseline,
+61/61 with `0021`, and 61/61 against a real gcc — the gcc run is what makes
+the expected flags a measurement of binutils 2.44 rather than this patch's
+own opinion. tcc's own `make test` completes end to end for the first time in
+this stack (`test1` and `test3` included), and produces results identical to
+a build with `0004` dropped entirely, which is the other way to make those
+tests pass and is not acceptable because it puts `0004`'s original bug back.
+The four affected libressl objects gain `A` on `.rodata` and are otherwise
+byte-identical, `.text` and `.rodata` contents unchanged. A freshly
+`buildvm`-generated `lj_vm.S` assembles byte-identically either side and the
+relinked luajit runs traces, the interpreter, coroutines, varargs and an ffi
+call unchanged — `lj_vm.S`'s only `.section` directives are
+`.note.GNU-stack`, `.debug_frame` and `.eh_frame`, all with explicit flags
+strings and none in the table, so that axis never reaches the changed path.
 
 ### `dep/libressl/patches/`: build-system gaps, not compiler gaps
 

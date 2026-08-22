@@ -1,0 +1,100 @@
+--- a/dep/tcc/tccasm.c
++++ b/dep/tcc/tccasm.c
+@@ -1082,6 +1082,66 @@
+     tok = term;
+ }
+ 
++/* GNU as gives a section the flags implied by its NAME, independently of --
++   and in preference to -- the flags string on the .section directive.
++   The table below is binutils' bfd_elf_special_sections (bfd/elf.c), for
++   the entries that carry flags; every name not listed here has no
++   name-implied flags and takes the directive's flags string verbatim.
++   `dot_suffix' is binutils' suffix_length == -2: the name matches
++   exactly, or the entry followed by a '.' and any suffix -- which is why
++   `.text.hot' is code but `.textfoo' is nothing in particular.
++
++   Only sh_flags is derived. GNU as also derives sh_type from the name
++   (.bss* -> SHT_NOBITS, .note* -> SHT_NOTE, .init_array* ->
++   SHT_INIT_ARRAY, ...) and from the directive's `@type' argument; tcc
++   derives it from neither, and never has. That is a separate, older gap
++   -- see TODO.md -- not something this table quietly half-fixes. */
++typedef struct AsmSectionAttr {
++    const char *name;
++    unsigned char len;
++    unsigned char dot_suffix;
++    int flags;
++} AsmSectionAttr;
++
++static const AsmSectionAttr asm_section_attrs[] = {
++#define ASM_SEC_ATTR(n, dot, f) { n, sizeof(n) - 1, dot, f }
++    ASM_SEC_ATTR(".text",          1, SHF_ALLOC | SHF_EXECINSTR),
++    ASM_SEC_ATTR(".data",          1, SHF_ALLOC | SHF_WRITE),
++    ASM_SEC_ATTR(".rodata",        1, SHF_ALLOC),
++    ASM_SEC_ATTR(".bss",           1, SHF_ALLOC | SHF_WRITE),
++    ASM_SEC_ATTR(".tdata",         1, SHF_ALLOC | SHF_WRITE | SHF_TLS),
++    ASM_SEC_ATTR(".tbss",          1, SHF_ALLOC | SHF_WRITE | SHF_TLS),
++    ASM_SEC_ATTR(".init_array",    1, SHF_ALLOC | SHF_WRITE),
++    ASM_SEC_ATTR(".fini_array",    1, SHF_ALLOC | SHF_WRITE),
++    ASM_SEC_ATTR(".preinit_array", 1, SHF_ALLOC | SHF_WRITE),
++    ASM_SEC_ATTR(".data1",         0, SHF_ALLOC | SHF_WRITE),
++    ASM_SEC_ATTR(".rodata1",       0, SHF_ALLOC),
++    ASM_SEC_ATTR(".init",          0, SHF_ALLOC | SHF_EXECINSTR),
++    ASM_SEC_ATTR(".fini",          0, SHF_ALLOC | SHF_EXECINSTR),
++    ASM_SEC_ATTR(".plt",           0, SHF_ALLOC | SHF_EXECINSTR),
++    ASM_SEC_ATTR(".got",           0, SHF_ALLOC | SHF_WRITE),
++    ASM_SEC_ATTR(".dynamic",       0, SHF_ALLOC),
++#undef ASM_SEC_ATTR
++};
++
++/* Flags GNU as implies from a section name, or -1 for a name it has no
++   opinion about. Zero is a real answer (no name would give it here, but
++   the caller must not confuse "no flags" with "no entry"). */
++static int asm_section_name_flags(const char *name)
++{
++    int i;
++
++    for (i = 0; i < (int)(sizeof(asm_section_attrs)
++                          / sizeof(asm_section_attrs[0])); i++) {
++        const AsmSectionAttr *a = &asm_section_attrs[i];
++        if (strncmp(name, a->name, a->len))
++            continue;
++        if (name[a->len] == '\0' || (a->dot_suffix && name[a->len] == '.'))
++            return a->flags;
++    }
++    return -1;
++}
++
+ static void asm_parse_directive(TCCState *s1, int global)
+ {
+     int n, offset, v, size, tok1, c;
+@@ -1563,7 +1623,7 @@
+         {
+             char sname[256];
+ 	    int old_nb_section = s1->nb_sections;
+-            int flags = 0;
++            int flags = 0, name_flags;
+ 
+ 	    tok1 = tok;
+             /* XXX: support more options */
+@@ -1615,10 +1675,17 @@
+ 	       sets alignment to PTR_SIZE.  The assembler behaves different. */
+ 	    if (old_nb_section != s1->nb_sections) {
+ 	        cur_text_section->sh_addralign = 1;
+-                /* Make .init and .fini sections executable by default.
+-                   GAS does so, too, and musl relies on it. */
+-                if (!strcmp(sname, ".init") || !strcmp(sname, ".fini"))
+-                    flags |= SHF_EXECINSTR;
++                /* A name GNU as recognizes carries its own flags, and they
++                   win unless the directive's flags string is a strict
++                   superset of them: `.section .text,"w"' is still code,
++                   `.section .rodata' -- the ordinary hand-written spelling,
++                   with no flags string at all -- is still SHF_ALLOC, and
++                   `.section .rodata,"aw"' is the one shape that gets to add
++                   write. GNU as warns on both mismatch directions; tcc says
++                   nothing, which is a diagnostic gap, not a layout one. */
++                name_flags = asm_section_name_flags(sname);
++                if (name_flags >= 0 && (flags & name_flags) != name_flags)
++                    flags = name_flags;
+ 	        cur_text_section->sh_flags = flags;
+             }
+         }
