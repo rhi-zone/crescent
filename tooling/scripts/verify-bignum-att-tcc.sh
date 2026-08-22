@@ -187,12 +187,23 @@ else
   echo "  runtime differential could not be built"; differ=$((differ+1))
 fi
 
-# tcc emits no `.note.GNU-stack` section in its object output, which makes
-# GNU ld mark the linked program's stack executable. Reported, not silently
-# tolerated -- see TODO.md.
+# These files end with a self-guarded marker:
+#
+#     #if defined(__linux__) && defined(__ELF__)
+#     .section .note.GNU-stack,"",%progbits
+#     #endif
+#
+# tcc used not to define `__ELF__` at all, so the guard evaluated false, the
+# directive was preprocessed away, and the object came out unmarked -- which
+# GNU ld reads as "requires an executable stack", the exact opposite of what
+# the source asked for. `dep/tcc/patches/0018-elf-target-predefine.patch`
+# fixed that, and this reading is what measured it: tcc went 0 -> 21 marked
+# here, with the same flags gas produces. Still reported every run rather than
+# asserted silently, since it is the one axis of these objects that is a
+# property of the toolchain rather than of the translation.
 echo "== .note.GNU-stack in object output"
 g=$(readelf -SW "$WORK/rt_word_clz.g.o" 2>/dev/null | grep -c 'GNU-stack')
 t=$(readelf -SW "$WORK/rt_word_clz.t.o" 2>/dev/null | grep -c 'GNU-stack')
-echo "  gas=$g tcc=$t (tcc=0 means GNU ld marks the stack executable; tcc-wide, not specific to these files)"
+echo "  gas=$g tcc=$t (both should be 1; tcc=0 means __ELF__ went missing again and GNU ld will mark the stack executable)"
 
 [ "$differ" -eq 0 ]

@@ -1,0 +1,41 @@
+--- a/dep/tcc/tccpp.c
++++ b/dep/tcc/tccpp.c
+@@ -3624,6 +3624,24 @@
+ # endif
+     "__unix__\0"
+     "__unix\0"
++# if !defined TCC_TARGET_MACHO && !defined TCC_TARGET_COFF
++    /* Scoped on the object format tcc actually writes, the way gcc and clang
++       scope it, rather than per-OS.  tcc_output_file() dispatches on exactly
++       three formats: PE (already excluded by the enclosing #ifdef), Mach-O,
++       and ELF for everything else -- with TCC_TARGET_COFF, which tcc.h sets
++       for TCC_TARGET_C67, going to tcc_output_coff() instead.  Excluding
++       those three leaves precisely the ELF-writing targets: Linux/Android,
++       FreeBSD, FreeBSD_kernel, NetBSD and OpenBSD.
++
++       This belongs here rather than in tccdefs.h for a second reason:
++       tcc_predefs() only pulls tccdefs.h in when !is_asm, so a macro defined
++       there is invisible while preprocessing a .S file.  __ELF__'s commonest
++       real-world use is `#if defined(__linux__) && defined(__ELF__)` guarding
++       a `.section .note.GNU-stack` directive in hand-written asm -- exactly
++       the mode tccdefs.h does not reach.  gcc defines it in both modes
++       (`gcc -E -dM -x assembler-with-cpp` reports it). */
++    "__ELF__\0"
++# endif
+ #endif
+     ;
+ 
+--- a/dep/tcc/include/tccdefs.h
++++ b/dep/tcc/include/tccdefs.h
+@@ -104,7 +104,10 @@
+     #define __GNUC_MINOR__ 1
+     #define __GNUC_PATCHLEVEL__ 0
+     #define _Pragma(x)
+-    #define __ELF__ 1
++    /* __ELF__ used to be defined here, NetBSD-only.  It is now predefined in
++       tccpp.c's target_os_defs for every ELF-writing target -- NetBSD among
++       them -- and, unlike a macro defined here, is also visible while
++       preprocessing assembler.  See the comment there. */
+ #if defined __aarch64__
+     #define _LOCORE /* avoids usage of __asm */
+ #endif

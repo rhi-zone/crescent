@@ -145,25 +145,47 @@ See `docs/roadmap-v2.md` for the authoritative project roadmap and sequencing. T
   Intel-syntax operand parser, which is a much larger job than the existing
   opcode-table patches.
 
-- [ ] **tcc does not define `__ELF__` on Linux targets, so guarded
-  `.note.GNU-stack` directives in real-world asm are preprocessed away.**
-  The common idiom is `#if defined(__linux__) && defined(__ELF__)` around
-  `.section .note.GNU-stack,"",%progbits`; gcc defines both, tcc defines only
-  `__linux__`. Confirmed against the live source and both binaries:
-  `include/tccdefs.h` has a single `#define __ELF__ 1`, inside the
-  `#elif defined __NetBSD__` branch, and `tcc -E -dM` on the vendored
-  `dep/tcc/tcc` and on a local build reports no `__ELF__`; the guard
-  evaluates false under tcc and true under gcc on the same input. Effect:
-  all 14 of `dep/libressl/crypto/bn/arch/amd64/att/bignum_*.S` that assemble
-  under tcc lose their own marker, which is where the `GNU_STACK ... RWE`
-  observation in the AT&T-mirror work actually came from —
-  `0014-note-gnu-stack-object-marker.patch` does not cover it, because that
-  patch deliberately does not speak for assembled input. LuaJIT is
-  unaffected: `buildvm_asm.c` writes the directive into the generated
-  `lj_vm.S` unguarded. Fix is a tccdefs conformance change (define `__ELF__`
-  wherever tcc targets ELF, as gcc and clang do), not a codegen change. Not
-  attempted; scope beyond `__linux__` (which other target branches should
-  also define it) is unexamined.
+- [x] **Fixed (`dep/tcc/patches/0018-elf-target-predefine.patch`): tcc did not define
+  `__ELF__` on any target anyone builds for, so guarded `.note.GNU-stack` directives in
+  real-world asm were preprocessed away.** The common idiom is
+  `#if defined(__linux__) && defined(__ELF__)` around
+  `.section .note.GNU-stack,"",%progbits`; gcc defines both, tcc defined only `__linux__`.
+  `include/tccdefs.h` had a single `#define __ELF__ 1` inside the `#elif defined __NetBSD__`
+  arm — unreachable on Linux, FreeBSD, OpenBSD and Android alike.
+  **The fix is in `tccpp.c`'s `target_os_defs`, not `tccdefs.h`, and that distinction is the
+  substance of the patch rather than a stylistic choice.** `tcc_predefs()` pulls `tccdefs.h`
+  in only when `!is_asm`, so a macro defined there is invisible while preprocessing a `.S`
+  file — precisely the mode the idiom lives in. Measured, not recalled: `tcc -E -dM
+  -x assembler` reports 13 macros against 44 for C. A tccdefs-only fix would have left the
+  motivating case broken while looking correct in `-E -dM -x c`. `0018-tests` `t1` is the
+  case that discriminates the two.
+  **Scope re-derived from tcc's output-format logic rather than per-OS.** `tcc_output_file()`
+  dispatches on exactly three formats, and `target_os_defs` is already structured on that
+  axis, so `__ELF__` is defined for everything that is not `TCC_TARGET_PE`, not
+  `TCC_TARGET_MACHO` and not `TCC_TARGET_COFF` (which `tcc.h` sets for `TCC_TARGET_C67`).
+  That leaves precisely the ELF writers: Linux/Android, FreeBSD, FreeBSD_kernel, NetBSD,
+  OpenBSD. Verified by building the cross compilers — `x86_64-win32-tcc`, `x86_64-osx-tcc`
+  and `c67-tcc` report no `__ELF__` in either mode; `x86_64-tcc`, `i386-tcc` and `arm64-tcc`
+  report it in both — and the BSD arms by preprocessing the table under each `TARGETOS_*`
+  combination. The NetBSD `tccdefs.h` line is removed as redundant; NetBSD still gets the
+  macro, and now gets it in asm mode too.
+  **Verified:** `0018-tests/run.sh` scores 0/5 on the `0001`–`0017` baseline, 5/5 with
+  `0018`, and 5/5 against a real gcc. On the baseline `t3` measures the actual harm directly
+  — `GNU_STACK is RWE` plus binutils 2.44's `missing .note.GNU-stack section implies
+  executable stack`. All 21 `dep/libressl/crypto/bn/arch/amd64/att/bignum_*.S` now assemble
+  with a marker (0 → 21), flags matching gcc's; `.text` byte-identical to the unpatched
+  build for every one of them, and `verify-bignum-att-tcc.sh` is otherwise unchanged
+  (equal=80, differs=4, 368000 runtime checks, 0 mismatches — its own GNU-stack line is the
+  single differing byte of output). libressl builds and passes `make check` 136/136 under
+  both builds with `libcrypto.so` byte-identical. LuaJIT unaffected as predicted, and
+  measured rather than assumed: `buildvm_asm.c` writes the directive unguarded, and
+  `lj_vm.o` is byte-identical base vs patched, links and runs with `GNU_STACK RW`. tcc's
+  own `tests2` suite: 129 tests, output identical base vs patched.
+  **Wider than first thought:** `crypto/bn/arch/amd64/*.S` (the Intel-syntax originals) and
+  `crypto/sha/*.S` carry the same guard, so they benefit too once they assemble. libressl's
+  `configure`/`libtool.m4`/`config.guess` also probe `__ELF__`, but every probe site sits in
+  a `netbsd*`/`openbsd*`/`freebsd*` `$host_os` arm, unreachable on a linux-gnu host — the
+  flip is therefore untested for a BSD *host*, which is the one loose thread here.
 
 - [x] **Fixed (`dep/tcc/patches/0014-note-gnu-stack-object-marker.patch`): tcc emitted
   no `.note.GNU-stack` section in any object, so GNU `ld` marked anything linked from a
@@ -209,8 +231,9 @@ See `docs/roadmap-v2.md` for the authoritative project roadmap and sequencing. T
   `dep/tcc/patches` apply steps in `build-vendored.yml` (applied between `0013` and
   `0015`; `0015`–`0017` re-verified to apply after it), reasoning recorded in
   `docs/native-tiers.md`.
-  **Left open, separately:** the `__ELF__` gap above, which is what actually keeps the
-  libressl AT&T objects unmarked, and the `-r`-over-asm-only case below.
+  **First follow-up since closed:** the `__ELF__` gap above, which is what actually kept the
+  libressl AT&T objects unmarked, is now `0018-elf-target-predefine.patch`.
+  **Still open, separately:** the `-r`-over-input-supplied-marker case below.
 
 - [ ] **`tcc -r` diverges from `ld -r` whenever the merged object's marker came from
   input rather than being created.** The general shape: some input supplies a
@@ -229,6 +252,26 @@ See `docs/roadmap-v2.md` for the authoritative project roadmap and sequencing. T
   weakened, so the answer is not obvious from `t3`'s rule alone. Needs deciding on its own
   terms; not attempted. The seven two-input `-r` shapes where compilation happens and no
   input supplied a marker of its own already match `ld -r` exactly.
+
+- [ ] **`dep/tcc/VERSION` holds a commit hash, which corrupts `__TINYC__` into a malformed
+  number and breaks every `#if __TINYC__` guard.** `configure` does
+  `version=$(head VERSION)` and bakes the result into `TCC_VERSION`; `tccpp.c` then builds
+  the predefine as `"#define __TINYC__ 9%.2s", &TCC_VERSION[4]`, hardcoding "two characters
+  at offset 4" on the assumption of a `0.9.` prefix. With the hash
+  `2ba12e83b3599ca8f5d50c179fe5138fe956f0c9`, offset 4 is `2e`, so `__TINYC__` expands to
+  `92e` — a malformed float literal. Any source testing `__TINYC__` gets
+  `error: exponent digits expected`, which is how this surfaced: tcc's own
+  `make -C tests test` dies at `test1`/`test3` on `tcctest.c:338`.
+  **Reproduced on a pristine unpatched tree**, so it is not one of the `dep/tcc/patches`;
+  the hash arrived with the original vendoring commit `9d389a37`. Setting VERSION to
+  `0.9.28rc` makes `__TINYC__` expand to `928` and both tests pass ("Auto Test OK",
+  "Auto Test3 OK"). Noticed while regression-testing `0018`/`0019`, and identical on both
+  sides of those, so not a regression from them.
+  **The fix is a decision, not a patch:** `VERSION` is load-bearing as the upstream pin —
+  `build-vendored.yml` and `dep/tcc/README` both treat it as the mob-branch commit SHA,
+  since mob is untagged. Decoupling the pin from the version string (a separate `COMMIT`
+  file, or making `configure`/`tccpp.c` tolerate a non-`0.9.` version) is an owner call
+  about how the vendoring tracks upstream. Not attempted.
 
 - [ ] **tcc segfaults on a truncated object file, or one whose `sh_name` points past the
   end of `.shstrtab`.** Pre-existing and unrelated to

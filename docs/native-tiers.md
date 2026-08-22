@@ -821,15 +821,15 @@ no target gate is needed.
 `0015`–`0017` baseline, 11/11 with `0014`, and 11/11 against a real gcc — the
 reference being an actual toolchain rather than the patch's own opinion.
 
-**Adjacent gap, not addressed here.** The common real-world idiom guards the
-directive as `#if defined(__linux__) && defined(__ELF__)`, and tcc does not
-define `__ELF__` on Linux targets — `include/tccdefs.h` defines it only under
-the NetBSD branch, confirmed by `tcc -E -dM` on both the vendored binary and
-a local build. The directive is therefore preprocessed away and the object
-comes out unmarked; `dep/libressl`'s AT&T bignum mirror is affected, which is
-where the original `RWE` observation came from. `0014` does not change this,
-and under `0014` those `.S` objects stay unmarked. Tracked separately in
-`TODO.md`.
+**Adjacent gap, addressed by `0018`.** The common real-world idiom guards the
+directive as `#if defined(__linux__) && defined(__ELF__)`, and tcc did not
+define `__ELF__` on Linux targets — `include/tccdefs.h` defined it only under
+the NetBSD branch. The directive was therefore preprocessed away and the
+object came out unmarked; `dep/libressl`'s AT&T bignum mirror was affected,
+which is where the original `RWE` observation came from. `0014` did not change
+this — it deliberately does not speak for assembled input — so those `.S`
+objects stayed unmarked under `0014` alone. Closed by
+`0018-elf-target-predefine.patch`, below.
 
 ### `0015-adx-bmi2-opcodes.patch`
 
@@ -975,6 +975,55 @@ under relaxation, and macros and `.rept` nested both ways round), five inputs
 `as` rejects and tcc rejects too, and three inputs `as` *accepts* which tcc
 must refuse with a diagnostic rather than misread. Against an `0001`–`0016`
 baseline: **8 pass, 6 fail**.
+
+### `0018-elf-target-predefine.patch`
+
+`0018` (tccpp.c + include/tccdefs.h) predefines `__ELF__` on every target
+whose object format is ELF.
+
+**The gap.** gcc and clang define `__ELF__` wherever they emit ELF. tcc had
+one `#define __ELF__ 1`, in `include/tccdefs.h`, inside the
+`#elif defined __NetBSD__` arm — so on Linux, FreeBSD, OpenBSD and Android it
+was absent entirely. Hand-written assembler overwhelmingly guards its
+`.note.GNU-stack` declaration as
+`#if defined(__linux__) && defined(__ELF__)`, so under tcc that guard
+evaluated false, the directive vanished, and the object came out unmarked —
+which GNU `ld` reads as *requires an executable stack*. A file that had
+correctly declared it needs nothing got the opposite outcome, and one such
+object makes the whole link `RWE`.
+
+**Why the fix is in `tccpp.c` rather than `tccdefs.h`, which is the substance
+of the patch.** `tcc_predefs()` pulls `tccdefs.h` in only when `!is_asm`.
+Measured, not recalled: `tcc -E -dM -x assembler` reports 13 macros against 44
+for C. A macro defined in `tccdefs.h` is therefore invisible in exactly the
+mode the motivating idiom lives in — a tccdefs-only fix would have looked
+correct under `-E -dM -x c` while leaving the real case broken.
+`0018-tests` `t1` is the case that separates the two candidate fixes.
+
+**Scope, re-derived from tcc's output-format logic rather than per-OS.**
+`tcc_output_file()` dispatches on exactly three formats, and `target_os_defs`
+is already structured on that axis, so the define is placed for everything
+that is not `TCC_TARGET_PE`, not `TCC_TARGET_MACHO`, and not
+`TCC_TARGET_COFF` (which `tcc.h` sets for `TCC_TARGET_C67`, routing to
+`tcc_output_coff()`). That leaves precisely the ELF writers: Linux/Android,
+FreeBSD, FreeBSD_kernel, NetBSD, OpenBSD. The NetBSD `tccdefs.h` line is
+removed as redundant — NetBSD is covered by the new scope, and now gets the
+macro in assembler mode too.
+
+**Verified.** `0018-tests/run.sh` scores 0/5 on the `0001`–`0017` baseline,
+5/5 with `0018`, 5/5 against a real gcc. The baseline `t3` measures the harm
+itself rather than the macro's absence: `GNU_STACK is RWE`, plus binutils
+2.44's `missing .note.GNU-stack section implies executable stack`. Scope
+verified by building the cross compilers — `x86_64-win32-tcc`,
+`x86_64-osx-tcc` and `c67-tcc` report no `__ELF__` in either mode;
+`x86_64-tcc`, `i386-tcc` and `arm64-tcc` report it in both — and the BSD arms
+by preprocessing the table under each `TARGETOS_*` combination. All 21
+libressl AT&T `bignum_*.S` go from 0 marked to 21 marked with gcc's flags,
+`.text` byte-identical to the unpatched build in every case. LuaJIT
+unaffected and measured: `lj_vm.o` byte-identical, links and runs,
+`GNU_STACK RW`. libressl builds and passes `make check` 136/136 with
+`libcrypto.so` byte-identical across the two builds. tcc's `tests2`: 129
+tests, output identical.
 
 ### `dep/libressl/patches/`: build-system gaps, not compiler gaps
 
@@ -1198,13 +1247,16 @@ PIE, so the position-independent case is covered at runtime too.
 170. The 6 `_alt` files that contain no forward branches come out
 *byte-identical* to gas.
 
-**One real defect found, unrelated to these files.** tcc emits no
-`.note.GNU-stack` section in *any* object it produces (`-c` on `.c` sources
-too, not just `.S`), so GNU `ld` marks the linked program's stack
-executable — the verification harness links with `GNU_STACK ... RWE`.
+**One real defect found, unrelated to these files.** tcc emitted no
+`.note.GNU-stack` section in *any* object it produced (`-c` on `.c` sources
+too, not just `.S`), so GNU `ld` marked the linked program's stack
+executable — the verification harness linked with `GNU_STACK ... RWE`.
 `0008-pt-gnu-stack.patch` fixed this for tcc acting as the *linker* (it
-emits the `PT_GNU_STACK` program header in its own output); the
-object-emission side is still open. Tracked in TODO.md.
+emits the `PT_GNU_STACK` program header in its own output). The
+object-emission side is closed by `0014` for compiled objects and by `0018`
+for these `.S` files, whose own guarded directive tcc could not see until
+`__ELF__` existed. The harness now reads `gas=1 tcc=1` where it read
+`gas=1 tcc=0`.
 
 #### 21/21 after `0015`–`0017`
 
