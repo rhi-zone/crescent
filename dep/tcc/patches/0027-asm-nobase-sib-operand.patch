@@ -1,0 +1,13 @@
+--- a/dep/tcc/i386-asm.c
++++ b/dep/tcc/i386-asm.c
+@@ -471,7 +471,9 @@
+             op->e = e;
+         } else {
+             next();
+-            if (tok == '%') {
++            if (tok == '%' || tok == ',') {
++                /* '(%reg...)' or a base-less SIB '(,%reg,scale)': neither
++                   has a displacement expression before the parenthesis. */
+                 unget_tok('(');
+                 op->e.v = 0;
+                 op->e.sym = NULL;
