@@ -1552,11 +1552,20 @@ address-bounding sentinel layout-dependent. It was measured stable across 20
 consecutive runs before being kept.
 
 It does not, on its own, give a fully tcc-*linked* LuaJIT a working `pcall`.
-That is blocked separately on tcc's linker emitting no `.eh_frame_hdr` section
-and no `PT_GNU_EH_FRAME` program header, without which libgcc's
-`_Unwind_Find_FDE` — which locates FDEs by walking `dl_iterate_phdr` — finds
-nothing to search. The FDEs themselves are correct in tcc-linked output. That
-gap is recorded in `TODO.md`.
+A tcc-linked binary carries no `.eh_frame_hdr` section and no `PT_GNU_EH_FRAME`
+program header, without which libgcc's `_Unwind_Find_FDE` — which locates FDEs
+by walking `dl_iterate_phdr` — has nothing to search. The FDEs themselves are
+correct in tcc-linked output.
+
+That is a symptom, not a missing feature: `tccdbg.c` already implements
+`.eh_frame_hdr` generation, and `tccelf.c` already reserves and fills a
+`PT_GNU_EH_FRAME` slot. Two defects keep it from firing — a link-only
+invocation never sets the state variable the generator keys on (so `tcc -o x
+a.c b.c` emits the header and `tcc -c` + `tcc -o x a.o b.o` does not), and the
+generator's CIE walk silently skips FDEs whose CIE is not tcc's own exact
+shape, which includes every CIE carrying a personality routine — LuaJIT's VM
+`.eh_frame` among them. Details, measurements and the open semantics question
+in the second one are in `TODO.md`.
 
 ### `dep/luajit/patches/`: a compiler-identity gate, not a compiler gap
 

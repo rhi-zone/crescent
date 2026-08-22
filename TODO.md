@@ -95,12 +95,45 @@ wrong; it was inferred from the `#error`, never checked against `libtcc1.a`.
   This is the precise, narrowed form of the long-standing "tcc-as-linker breaks pcall"
   finding recorded earlier in this file: it is the linker, it is one missing output
   structure, and it is not corruption of the frame data.
-  Closing it means teaching `tccelf.c` to build the `.eh_frame_hdr` binary-search table
-  (sorted `initial_location`/FDE-pointer pairs, `DW_EH_PE_datarel|sdata4` table
-  encoding) from the output `.eh_frame` and to emit the matching program header. Real
-  design surface: which input FDE encodings to handle (objects from gas arrive with
-  their own), where in tcc's layout the sort can happen, and what `-run` mode should do.
-  Scoped as a follow-up, deliberately not improvised at the tail of this work.
+  **Diagnosis corrected the same day, before any of it was acted on.** The paragraph
+  above is right about the symptom and was wrong about the cause; this replaces it.
+  tcc is *not* missing the feature. `tccdbg.c` already implements `.eh_frame_hdr`
+  generation in full — `tcc_eh_frame_hdr()` builds the sorted binary-search table, and
+  `tccelf.c`'s `layout_sections()` already reserves a `PT_GNU_EH_FRAME` slot
+  (`d->ehfr`) and fills it. `TCC_EH_FRAME` is unconditionally 1. The earlier wording
+  ("closing it means teaching `tccelf.c` to build the table") would have had someone
+  rewrite a feature that is already there. It was inferred from `readelf` output alone,
+  without reading `tccdbg.c`.
+
+  What is actually wrong is two separate defects, both measured:
+
+  1. **A link-only invocation never creates the section.** `s1->eh_frame_section` is
+     assigned in exactly one place — `tcc_eh_frame_start()`, which runs during
+     *compilation*, at the first FDE of a translation unit. When tcc is invoked purely
+     as a linker over `.o` files it compiles nothing, so that stays NULL, and
+     `tcc_eh_frame_hdr()` returns at its first line — even though the output does have a
+     real `.eh_frame`, merged from the input objects. Minimal repro: `tcc -o x a.c b.c`
+     produces `.eh_frame_hdr` + `PT_GNU_EH_FRAME`; `tcc -c` each then `tcc -o x a.o b.o`
+     produces neither. LuaJIT is built the second way, as is essentially every real
+     build. This is why a fully tcc-linked LuaJIT panics and a one-step tcc build would
+     not have.
+  2. **Even when it is created, the table is silently incomplete.** The CIE walk in
+     `tcc_eh_frame_hdr()` accepts only CIEs of tcc's own exact shape — version 1 or 3,
+     augmentation exactly `zR`, and exactly `FDE_ENCODING` — and `goto next`s past
+     anything else without recording it. Measured: linking one tcc-compiled C file with
+     a gas object whose CIE carries a personality routine (`.cfi_personality`,
+     augmentation `zPR`) yields 5 FDEs in `.eh_frame` and a header count field of **4**.
+     A plain `zR` gas object is fine (all 5 recorded), so this is specifically about the
+     augmentations tcc does not parse. LuaJIT's VM `.eh_frame` is exactly the affected
+     shape — it names `lj_err_unwind_dwarf` as its personality — so fixing only (1)
+     would produce a header that omits the frames this whole exercise is about.
+
+  Defect (2) carries a semantics question that is **not mine to settle**: when tcc meets
+  an FDE it cannot represent in the table, the options are to omit the header entirely
+  (safe but disables unwinding wholesale), to emit a partial table (today's silent
+  behaviour), to emit a partial table *with a diagnostic*, or to grow real parsing for
+  the other augmentations and pointer encodings. Those differ in what a linked program
+  does at runtime, so the call is the owner's. Recorded here rather than filled in.
 
 - [ ] **Open owner call: whether `dep/luajit/patches/` should be applied in CI.** Today
   it is not — the five `luajit-*` jobs in `build-vendored.yml` build the pristine
