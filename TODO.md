@@ -1085,14 +1085,47 @@ See `docs/roadmap-v2.md` for the authoritative project roadmap and sequencing. T
   which is correct — the gap belongs to `.short`/`.word`. Nothing currently vendored needs
   it: all seven libressl `*-elf-x86_64.S` files assemble without it. Not attempted.
 
-- [ ] **`dep/tcc/i386-asm.h` carries the identical `OPT_REG32` bug `0011` fixed in
+- [x] **`dep/tcc/i386-asm.h` carries the identical `OPT_REG32` bug `0011` fixed in
   `x86_64-asm.h`** — same six entries, same wrong operand class, so the 32-bit targets
   (`tcc-windows-x86`) still reject `movaps %xmm0,%xmm1` and still silently assemble
   `movups %eax,%xmm0` as `movups %xmm0,%xmm0`. Confirmed by reading the table, not inferred.
   Deliberately left out of `0011`: this whole effort's verification surface is x86_64 (the
   libressl perlasm, `lj_vm.S`), and holding `0011` to the target it was verified against was
-  preferred over changing a shipped target's behavior on an untested path. Closing it needs
-  an i386 tcc build plus `as --32` to verify to the same bar.
+  preferred over changing a shipped target's behavior on an untested path.
+  **Now fixed by `dep/tcc/patches/0026-i386-sse-mov-operand-types.patch`**, verified to
+  `0011`'s bar against real `as --32` (binutils 2.44) using an i386-target tcc built from
+  the `0001`–`0024` stack plus this patch — `./configure && make i386-tcc`, which needs no 32-bit libc
+  because the cases only assemble `-c` objects. Every one of `0011`'s findings transferred
+  unchanged, including the `movhps` one: `as --32` rejects `movhps %xmm0,%xmm1` for the same
+  reason (`mod=11` is `movlhps`/`movhlps`), so `movhps` keeps a bare `OPT_EA`. Details and
+  the before/after encodings are in `docs/native-tiers.md`. Wired into all five `git apply`
+  lists in `build-vendored.yml`, so it reaches the shipped `bin/tcc-windows-x86.exe` on the
+  next tcc rebuild — patch-only commits do not trigger one, since the build jobs skip on
+  `VERSION == VENDORED_VERSION` and a patch changes neither.
+
+- [ ] **No CI coverage for anything that is i386-target-only in tcc.** `0026` above is
+  verified by hand and only by hand. `build-vendored.yml`'s per-patch harness loop hands
+  every `dep/tcc/patches/*-tests/run.sh` the single native `tcc` the job just built, and no
+  job builds an i386-target tcc at all (`tcc-windows-x86` bootstraps one but runs no tests),
+  so an `0026-tests/` directory would be handed an x86-64 binary and fail — there is nowhere
+  to hang the harness without changing that one-binary contract. The substrate needed is a
+  way for a harness to be given a target-specific tcc: e.g. a `make cross-i386` step in
+  `tcc-linux-x86_64` plus a loop that passes both binaries, or per-harness declaration of
+  which target it wants. Unverified either way: whether alpine's binutils `as` accepts
+  `--32` in that container, which any variant needs. Deliberately not decided here — the
+  choice changes a gating workflow's contract for all 20 existing harnesses.
+
+- [ ] **tcc encodes register-to-register `movq %xmm0,%xmm1` as `66 0f d6 c1` where `as`
+  emits `f3 0f 7e c8`.** Both are valid encodings of the same instruction, so this is an
+  encoding divergence, not a mis-assembly, and nothing currently vendored hits it — no
+  `movq %xmmN,%xmmM` appears in any `dep/libressl` source. Both table entries match a
+  reg-reg operand pair
+  and tcc takes the first, which is the `0f d6` store-direction one; `as` picks the
+  load-direction `f3 0f 7e`. Same on both targets (checked against `as` and `as --32` with
+  the `0001`–`0024` stack plus this patch), so it is an ALT-ordering question in the shared table shape, not
+  an i386 matter, and predates `0011`/`0026` — neither patch touches the `movq` entries.
+  Found while smoke-testing `0026`. Not attempted: reordering ALT entries changes output for
+  the x86-64 target that the whole `0010`–`0012` effort verified byte-for-byte.
 
 - [x] **With `0010`+`0011`+`0012`, all seven libressl `*-elf-x86_64.S` files assemble** —
   the five that already worked stay byte-identical to the pre-`0011` build, and

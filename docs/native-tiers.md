@@ -1332,6 +1332,50 @@ directive at all (a missing directive, not a NOBITS matter — it fails in
 `.text` too), and no `.space repeat count is zero` warning (which `as` emits in
 every section type).
 
+### `0026-i386-sse-mov-operand-types.patch`
+
+`0026` (i386-asm.h) is `0011` applied to the 32-bit target's opcode table.
+`i386-asm.h` and `x86_64-asm.h` are separate files with separate copies of the
+`movups`/`movaps`/`movhps` entries, and `0011` only touched the x86-64 one,
+deliberately: its verification surface was x86-64 (libressl perlasm, `lj_vm.S`)
+and a shipped target was not changed on an untested path. The six entries are
+character-identical to `0011`'s "before", so the fix is too — `OPT_EA |
+OPT_REG32` becomes `OPT_EA | OPT_SSE` on `movups`/`movaps` and bare `OPT_EA` on
+`movhps`, whose `mod=11` encodings are the different instructions
+`movlhps`/`movhlps`.
+
+The target this actually ships to is `tcc-windows-x86` — `win32/build-tcc.bat`
+under `vcvars32` builds `TCC_TARGET_I386`, and that binary is committed to
+`bin/`. So the silent mis-assembly was reachable from a vendored artifact, not
+only from a hypothetical build.
+
+**Verified** against real `as --32` on binutils 2.44, using an i386-target tcc
+built from the `0001`–`0024` stack plus this patch (`./configure && make i386-tcc`, the
+Makefile's own `TCC_X` cross target — no 32-bit libc needed to assemble `-c`
+objects). Before: `movaps %xmm0,%xmm1` and `movups %xmm0,%xmm1` rejected with
+`bad operand with opcode`, while `movups %eax,%xmm0` and `movaps %eax,%xmm0`
+assembled as `... %xmm0,%xmm0` and `movhps %eax,%xmm0` as `movlhps %xmm0,%xmm0`
+— every one of them rejected by `as --32`. After: the register-to-register
+forms encode `0f 28 c8` / `0f 10 c8`, byte-identical to `as --32`, all four GP
+cases are rejected, `movhps %xmm0,%xmm1` stays rejected as `as --32` rejects it
+(the `movhps` finding transfers to 32-bit unchanged), and the memory forms in
+both directions are unchanged. A wider 32-bit smoke of neighbouring
+`movd`/`movq`/`addps`/`mulps`/`pxor`/`paddd`/`unpcklps` and the `movaps`/
+`movups`/`movhps` displacement forms is byte-identical to `as --32` too.
+
+x86-64 is untouched by construction: the Makefile's `x86_64_FILES` takes
+`x86_64-asm.h`, never `i386-asm.h`. Confirmed empirically — `0005`–`0024`'s
+harnesses all still pass against a native tcc built from the stack with `0026`
+applied (three fail locally on NixOS for the unrelated `stub-ld` reason:
+`0007`, `0009`, `0023` link or run generic-linux dynamic executables).
+
+**No CI coverage yet.** The per-patch harness loop in `build-vendored.yml`
+hands every `patches/*-tests/run.sh` the one native `tcc` it built, and CI
+builds no i386-target tcc anywhere, so there is no binary for an `0026`
+harness to test and no place to hang one without changing that contract. The
+gap is recorded in `TODO.md`; the fix above is verified by hand to `0011`'s
+bar, but by hand only.
+
 ### `dep/libressl/patches/`: build-system gaps, not compiler gaps
 
 The same numbered-unified-diff mechanism now also exists for

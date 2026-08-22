@@ -1,0 +1,29 @@
+--- a/dep/tcc/i386-asm.h
++++ b/dep/tcc/i386-asm.h
+@@ -457,12 +457,20 @@
+     /* sse */
+     DEF_ASM_OP1(ldmxcsr, 0x0fae, 2, OPC_MODRM, OPT_EA)
+     DEF_ASM_OP1(stmxcsr, 0x0fae, 3, OPC_MODRM, OPT_EA)
+-    DEF_ASM_OP2(movups, 0x0f10, 0, OPC_MODRM, OPT_EA | OPT_REG32, OPT_SSE )
+-ALT(DEF_ASM_OP2(movups, 0x0f11, 0, OPC_MODRM, OPT_SSE, OPT_EA | OPT_REG32 ))
+-    DEF_ASM_OP2(movaps, 0x0f28, 0, OPC_MODRM, OPT_EA | OPT_REG32, OPT_SSE )
+-ALT(DEF_ASM_OP2(movaps, 0x0f29, 0, OPC_MODRM, OPT_SSE, OPT_EA | OPT_REG32 ))
+-    DEF_ASM_OP2(movhps, 0x0f16, 0, OPC_MODRM, OPT_EA | OPT_REG32, OPT_SSE )
+-ALT(DEF_ASM_OP2(movhps, 0x0f17, 0, OPC_MODRM, OPT_SSE, OPT_EA | OPT_REG32 ))
++    /* The non-EA operand of these three is an SSE register, never a GP one.
++       With OPT_REG32 here the register-to-register forms real "as" accepts
++       (movaps %xmm0,%xmm1) were rejected outright, while the ones it rejects
++       (movaps %eax,%xmm0) silently assembled as if the GP register named the
++       xmm of the same number.  movhps has no register-to-register form at all
++       -- 0f16/0f17 with mod=11 are movlhps/movhlps -- so its EA operand takes
++       no register class.  This is the 32-bit target's copy of the table; the
++       x86-64 one carries the same correction.  */
++    DEF_ASM_OP2(movups, 0x0f10, 0, OPC_MODRM, OPT_EA | OPT_SSE, OPT_SSE )
++ALT(DEF_ASM_OP2(movups, 0x0f11, 0, OPC_MODRM, OPT_SSE, OPT_EA | OPT_SSE ))
++    DEF_ASM_OP2(movaps, 0x0f28, 0, OPC_MODRM, OPT_EA | OPT_SSE, OPT_SSE )
++ALT(DEF_ASM_OP2(movaps, 0x0f29, 0, OPC_MODRM, OPT_SSE, OPT_EA | OPT_SSE ))
++    DEF_ASM_OP2(movhps, 0x0f16, 0, OPC_MODRM, OPT_EA, OPT_SSE )
++ALT(DEF_ASM_OP2(movhps, 0x0f17, 0, OPC_MODRM, OPT_SSE, OPT_EA ))
+     DEF_ASM_OP2(addps, 0x0f58, 0, OPC_MODRM, OPT_EA | OPT_SSE, OPT_SSE )
+     DEF_ASM_OP2(cvtpi2ps, 0x0f2a, 0, OPC_MODRM, OPT_EA | OPT_MMX, OPT_SSE )
+     DEF_ASM_OP2(cvtps2pi, 0x0f2d, 0, OPC_MODRM, OPT_EA | OPT_SSE, OPT_MMX )
