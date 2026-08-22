@@ -519,14 +519,76 @@ See `docs/roadmap-v2.md` for the authoritative project roadmap and sequencing. T
   (`--config-musl`), `make test` passes, and all 18 harnesses pass, `0014`/`0018`/`0019`
   included, with `bash` installed.
 
-- [ ] **tcc segfaults on a truncated object file, or one whose `sh_name` points past the
-  end of `.shstrtab`.** Pre-existing and unrelated to
-  `0014-note-gnu-stack-object-marker.patch` — reproduced identically on builds with and
-  without it, same return code and same empty stderr — but noticed while regression-testing
-  that patch, whose new section-header scan in `tcc_load_object_file()` reads the same
-  unvalidated field a few lines earlier than the existing code that already dereferences it
-  without bounds-checking. A malformed or hostile `.o` should be a diagnostic, not a crash.
-  Not attempted.
+- [x] **Fixed (`dep/tcc/patches/0030-malformed-object-bounds-checks.patch`): tcc segfaulted
+  on a truncated object file, or one whose `sh_name` points past the end of `.shstrtab`.**
+  Pre-existing and unrelated to `0014-note-gnu-stack-object-marker.patch` — reproduced
+  identically on builds with and without it — but noticed while regression-testing that
+  patch, whose new section-header scan in `tcc_load_object_file()` reads the same
+  unvalidated field a few lines earlier than the existing code that already dereferenced it
+  without bounds-checking.
+  **The scope was much larger than the two recorded cases, and is written down in full in
+  `dep/tcc/patches/0030-tests/README.md` rather than summarised here.** Nothing in
+  `tcc_load_object_file()` compared a file offset against the size of the file, an index
+  against `e_shnum`, or a string-table offset against that table's size; `load_data()`
+  short-reads a truncated file and hands back a buffer whose tail is uninitialised, so a
+  truncated object did not fail, it produced section headers made of heap garbage that the
+  loader then followed. Eleven distinct unchecked reads, measured: of 21 hand-built
+  malformations, 11 killed tcc with SIGSEGV; random mutation of a real object crashed or
+  hung roughly one input in five. After the patch: 40 000 mutated objects across 10 seeds,
+  zero signals and zero hangs, every input either linking or producing a diagnostic.
+  Six new diagnostics, deliberately shaped like the ones `tccelf.c` already emits
+  (`unexpected end of file` is not even new wording — its linker-script parser already uses
+  it). Verified on the full patch stack on both libcs: `make test` → `ALL TESTS PASSED` on
+  `debian:bookworm` and on `alpine:latest` (`--config-musl`), and all `patches/*-tests/`
+  harnesses pass on both. The harness is `0030-tests/run.sh`: 29 pass / 0 fail against the
+  patched tcc, 6 pass / 23 fail (14 of them SIGSEGV) against the same tcc without it, with
+  its three controls passing on both.
+  **Zero behaviour change on legitimate input was measured, not inferred.** Patched and
+  unpatched tccs each compiled the same 479 sources — sqlite3, all 15 zlib `.c`, all 21
+  amd64 AT&T bignum `.S`, 442 libressl `.c` — and produced **479 byte-identical objects, 0
+  differing** (the 7 that fail to compile fail with byte-identical diagnostics from both).
+  Byte-identical too: the linked zlib/sqlite3/bignum/libressl-SHA programs, each tcc's own
+  `libtcc1.a`, a 4.7 MB `libcrypto.a`, `lj_vm.o` assembled fresh from buildvm output, and
+  the linked luajit interpreter — which runs, JIT active, with matching output. Objects from
+  the two trees are interchangeable, not merely internally consistent: patched-tcc linking
+  unpatched-tcc objects gives the same binary either way. Also linked and ran gcc-produced
+  objects across `-O2`, `-O0 -g`, `-gz`, `-ffunction-sections`, and an `ar` archive of them,
+  since a foreign producer is where new strictness would bite first.
+  **One of the eleven is not in the object reader at all.** `relocate_section()` derives
+  `ptr = s->data + rel->r_offset` with `r_offset` unbounded, so relocation *application*
+  crashed on inputs the parser had already accepted — found by fuzzing after the parser was
+  clean, when every remaining crash was in `relocate()`. Fixed in the same patch because
+  the goal is "a malformed `.o` is a diagnostic", not "the parser is tidy".
+  (Numbered `0030` rather than `0025`: `0025`–`0029` were claimed by concurrent work while
+  this was in flight. It has no ordering constraint against any of them — none of them
+  touch `tccelf.c`.)
+
+- [ ] **Two residuals of `0030` left open deliberately, both needing something that does not
+  exist yet rather than a check that was skipped.**
+  (a) A relocation that *starts* inside its section can still write up to 8 bytes past the
+  end of it. `0030` rejects `r_offset >= s->data_offset`, which is the part that is
+  definitional; bounding the write itself needs the per-relocation-type write width, and
+  that lives scattered through each target's `relocate()` switch in `x86_64-link.c`,
+  `arm64-link.c` and friends with no table to consult. Closing it means building that
+  table, per target.
+  (b) `sh_addralign` is checked for the property ELF actually states — 0 or a power of two —
+  which is what killed the fuzz case that hung tcc indefinitely (an input with
+  `sh_addralign = 0xffff00000008` on `.data.ro`; `section_add()` rounds up to it and
+  `section_realloc()` then reallocs and zeroes to match).
+  A legal power of two can still be absurd: 2^40 is a valid alignment and an
+  unreasonable allocation. Any cap on it is a policy number ELF does not supply, so none was
+  invented; deciding one is the work.
+
+- [ ] **`tcc_load_dll()` has the same class of unchecked reads as the object reader did, and
+  crashes on the same kind of input.** Measured while fixing `0030`, on the same build: a
+  `.so` whose section headers' `sh_link` points past `e_shnum` kills tcc with SIGSEGV, and a
+  truncated one exits 255 having printed nothing at all. The shape is
+  identical — unchecked `load_data()`, `shdr[sh->sh_link]`, `dynstr + sym->st_name`,
+  `dynstr + dt->d_un.d_val` for `DT_SONAME` — and the same three helpers `0030` adds
+  (`range_in_file()`, `load_data_bounded()`, and a validation pass over the section header
+  table) are what it needs. Kept out of `0030` on purpose: it is a separate function on a
+  separate path, and its regression evidence is a different set of inputs (real `.so` files
+  tcc links against, `libc.so.6` included) that `0030`'s object-file corpus does not cover.
 
 - [ ] **AT&T mirror of the s2n-bignum files exists, all 21 now assemble under
   tcc and are verified correct, but none are wired into the build.**
@@ -1502,6 +1564,11 @@ See `docs/roadmap-v2.md` for the authoritative project roadmap and sequencing. T
   LuaJIT, independently of the `__TINYC__` compile blocker. Also note tcc does not pull the
   unwinder in by itself: the link needs an explicit `-lgcc_s` or it fails on `_Unwind_GetIP`,
   `__register_frame` and friends. Root cause not investigated; needs its own scoped pass.
+  Narrowed while regression-testing `0030` (2026-08-22), by a 2x2 over which tool did which
+  half: gcc-linking **tcc's** `lj_vm.o` runs `pcall` fine, tcc-linking **gcc's** `lj_vm.o`
+  panics. So the fault is in tcc as LINKER — how it lays out or registers unwind info — and
+  not in its assembler's `lj_vm.o`, which is exonerated. Still reproduces identically with
+  and without `0030`, on lj_vm objects that are byte-identical between the two trees.
 
 - [ ] **Known gap, deliberately not fixed in `0006`: tcc cannot decompress `SHF_COMPRESSED`
   debug sections, and skips debug retention for an entire object if ANY section in it is

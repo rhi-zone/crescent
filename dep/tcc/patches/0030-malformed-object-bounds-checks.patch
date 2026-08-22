@@ -1,0 +1,305 @@
+--- a/dep/tcc/tccelf.c
++++ b/dep/tcc/tccelf.c
+@@ -1270,6 +1270,19 @@
+     for_each_elem(sr, 0, rel, ElfW_Rel) {
+ 	if (s->data == NULL) /* bss */
+ 	    continue;
++        /* r_offset arrived in an input object and says where in `s' to
++           patch; relocate() below writes through the pointer derived from
++           it.  A relocation that does not even start inside the section it
++           applies to is meaningless, and following it was the one crash left
++           in this file once the object reader stopped trusting its input.
++           The residual case -- a relocation starting in the last few bytes
++           and writing past the end -- needs the per-type write width, which
++           only the per-target relocate() knows; see TODO.md. */
++        if (rel->r_offset >= (addr_t)s->data_offset) {
++            tcc_error_noabort("relocation offset out of range in section '%s'",
++                              s->name);
++            continue;
++        }
+         ptr = s->data + rel->r_offset;
+         sym_index = ELFW(R_SYM)(rel->r_info);
+         sym = &((ElfW(Sym) *)symtab_section->data)[sym_index];
+@@ -3482,6 +3495,55 @@
+     return data;
+ }
+ 
++/* Does the byte range [file_offset + off, file_offset + off + size) lie
++   inside a file of `fsize' bytes?  The sum is never formed, so that a
++   crafted sh_offset cannot wrap around and land back inside the file on a
++   host where unsigned long is 32 bits. */
++static int range_in_file(unsigned long file_offset, unsigned long off,
++                         unsigned long size, unsigned long fsize)
++{
++    if (file_offset > fsize)
++        return 0;
++    fsize -= file_offset;
++    if (off > fsize)
++        return 0;
++    return size <= fsize - off;
++}
++
++/* load_data() for input that is not trusted to be well formed.
++
++   load_data() malloc()s `size' bytes and does a short read into them when the
++   file is smaller than the header claims, leaving the tail uninitialised and
++   every field the caller reads out of it undefined -- which is how a
++   truncated object file used to walk out of the parser as a wild pointer
++   rather than as a diagnostic.  Here the range is checked against `fsize'
++   (the size of the whole file) first, and a range that does not fit returns
++   NULL for the caller to report.
++
++   The bound is the end of the FILE, not the end of an archive member, so an
++   object read out of a .a is checked slightly loosely: a malformed member can
++   still read bytes belonging to the member after it.  That is bounded memory
++   that was read from disk either way -- not an out-of-bounds access -- and
++   tightening it would mean threading the member size in through
++   tcc_load_object_file()'s signature, which the archive loader does not
++   currently have a reason to know precisely. */
++static void *load_data_bounded(int fd, unsigned long file_offset,
++                               unsigned long off, unsigned long size,
++                               unsigned long fsize)
++{
++    if (!range_in_file(file_offset, off, size, fsize))
++        return NULL;
++    return load_data(fd, file_offset + off, size);
++}
++
++/* Size of the file behind `fd', restoring nothing: every caller here seeks
++   explicitly before it reads. */
++static unsigned long file_size(int fd)
++{
++    off_t end = lseek(fd, 0, SEEK_END);
++    return end < 0 ? 0 : (unsigned long)end;
++}
++
+ typedef struct SectionMergeInfo {
+     Section *s;            /* corresponding existing section */
+     unsigned long offset;  /* offset of the new section in the existing section */
+@@ -3508,6 +3570,54 @@
+     return 0;
+ }
+ 
++/* Check, once and up front, every section-header field that the object
++   loader will later index or dereference.  Doing it here rather than at each
++   use is what keeps the loader below readable: after this returns 0, sh_name
++   indexes a NUL-terminated string inside .shstrtab, sh_link and (for
++   relocation sections) sh_info are section numbers that exist, and every
++   section that has bytes in the file has all of them in the file.
++
++   Reports the first violation and returns -1; returns 0 when the table is
++   sound.  `strsec_size' is the size of the already-loaded .shstrtab, whose
++   final byte the caller has checked is a NUL. */
++static int validate_shdr_table(TCCState *s1, ElfW(Ehdr) *ehdr,
++                               ElfW(Shdr) *shdr, unsigned long strsec_size,
++                               unsigned long file_offset, unsigned long fsize)
++{
++    ElfW(Shdr) *sh;
++    int i;
++
++    for (i = 0; i < ehdr->e_shnum; i++) {
++        sh = &shdr[i];
++        if (sh->sh_name >= strsec_size)
++            return tcc_error_noabort("invalid section name offset");
++        if (sh->sh_link >= (unsigned)ehdr->e_shnum)
++            return tcc_error_noabort("invalid section header index");
++        if (sh->sh_type == SHT_RELX
++            && sh->sh_info >= (unsigned)ehdr->e_shnum)
++            return tcc_error_noabort("invalid section header index");
++        /* ELF requires sh_addralign to be 0 or a power of two.  A value that
++           is neither reaches section_add(), which rounds the section's
++           offset up to it, and section_realloc(), which then reallocs and
++           zeroes to match -- so garbage here turns into an allocation of
++           terabytes rather than into an error.  A fuzzed object with
++           sh_addralign = 0xffff00000008 on .data.ro hung the link with no
++           output and no end.  (A power of two can still be absurdly large;
++           that residual is in TODO.md, since the bound on it is a policy
++           call and not something ELF states.) */
++        if (sh->sh_addralign & (sh->sh_addralign - 1))
++            return tcc_error_noabort("invalid section alignment");
++        /* SHT_NOBITS occupies no file space, so its sh_offset says nothing
++           and sh_size is free to exceed the file; SHT_NULL has neither. */
++        if (sh->sh_type != SHT_NOBITS && sh->sh_type != SHT_NULL) {
++            if (!range_in_file(file_offset, sh->sh_offset, sh->sh_size,
++                               fsize))
++                return tcc_error_noabort("unexpected end of file");
++        }
++    }
++    return 0;
++}
++
+ /* load an object file and merge it with current files */
+ /* XXX: handle correctly stab (debug) info */
+ ST_FUNC int tcc_load_object_file(TCCState *s1,
+@@ -3525,7 +3635,23 @@
+     ElfW(Sym) *sym, *symtab;
+     ElfW_Rel *rel;
+     Section *s;
++    unsigned long fsize, strsec_size, strtab_size;
+ 
++    /* Nothing below this point may be reached with these uninitialised: the
++       validation added here reports through `goto the_end', which frees all
++       of them.  (They used to be set further down, past reads that are now
++       checked.) */
++    shdr = NULL;
++    sm_table = NULL;
++    strsec = NULL;
++    strsec_size = 0;
++    strtab_size = 0;
++    symtab = NULL;
++    strtab = NULL;
++    old_to_new_syms = NULL;
++    ret = -1;
++
++    fsize = file_size(fd);
+     lseek(fd, file_offset, SEEK_SET);
+     if (tcc_object_type(fd, &ehdr) != AFF_BINTYPE_REL)
+         goto invalid;
+@@ -3535,14 +3661,53 @@
+ invalid:
+         return tcc_error_noabort("invalid object file");
+     }
++
++    /* Everything from here to the end of validate_shdr_table() below exists
++       because the fields being read are attacker-controlled: a malformed or
++       hostile .o must come back as a diagnostic, never as a segfault.  The
++       parser that follows indexes shdr[] by e_shstrndx, sh_link, sh_info and
++       st_shndx, and indexes the two string tables by sh_name and st_name,
++       none of which were checked against anything before this. */
++
+     /* read sections */
+-    shdr = load_data(fd, file_offset + ehdr.e_shoff,
+-                     sizeof(ElfW(Shdr)) * ehdr.e_shnum);
++    if (ehdr.e_shentsize != sizeof(ElfW(Shdr)))
++        return tcc_error_noabort("invalid object file");
++    shdr = load_data_bounded(fd, file_offset, ehdr.e_shoff,
++                             sizeof(ElfW(Shdr)) * ehdr.e_shnum, fsize);
++    if (!shdr)
++        return tcc_error_noabort("unexpected end of file");
+     sm_table = tcc_mallocz(sizeof(SectionMergeInfo) * ehdr.e_shnum);
+ 
+-    /* load section names */
++    /* load section names.  Index 0 is the null section header, so it is as
++       out of range here as a value past e_shnum: an object whose section
++       names cannot be read at all is not one this loader can go on with. */
++    if (ehdr.e_shstrndx == 0 || ehdr.e_shstrndx >= ehdr.e_shnum) {
++        tcc_error_noabort("invalid section header index");
++        goto the_end;
++    }
+     sh = &shdr[ehdr.e_shstrndx];
+-    strsec = load_data(fd, file_offset + sh->sh_offset, sh->sh_size);
++    strsec_size = sh->sh_size;
++    /* Emptiness is a property of the table and is reported as such; asking
++       load_data_bounded() first would report it as a short read, which it is
++       not.  (A name that starts inside the table is likewise only safe to
++       strcmp() if the table ends in a NUL, so that too is checked once here
++       rather than scanned for per name.) */
++    if (strsec_size == 0) {
++        tcc_error_noabort("invalid section name table");
++        goto the_end;
++    }
++    strsec = load_data_bounded(fd, file_offset, sh->sh_offset,
++                               strsec_size, fsize);
++    if (!strsec) {
++        tcc_error_noabort("unexpected end of file");
++        goto the_end;
++    }
++    if (strsec[strsec_size - 1] != '\0') {
++        tcc_error_noabort("invalid section name table");
++        goto the_end;
++    }
++    if (validate_shdr_table(s1, &ehdr, shdr, strsec_size, file_offset, fsize) < 0)
++        goto the_end;
+ 
+     /* An input object carrying no .note.GNU-stack section has made exactly
+        the statement an assembled source without the directive makes: it may
+@@ -3564,13 +3729,9 @@
+     }
+ 
+     /* load symtab and strtab */
+-    old_to_new_syms = NULL;
+-    symtab = NULL;
+-    strtab = NULL;
+     nb_syms = 0;
+     seencompressed = 0;
+     stab_index = stabstr_index = 0;
+-    ret = -1;
+ 
+     for(i = 1; i < ehdr.e_shnum; i++) {
+         sh = &shdr[i];
+@@ -3580,12 +3741,38 @@
+                 goto the_end;
+             }
+             nb_syms = sh->sh_size / sizeof(ElfW(Sym));
+-            symtab = load_data(fd, file_offset + sh->sh_offset, sh->sh_size);
++            symtab = load_data_bounded(fd, file_offset, sh->sh_offset,
++                                       sh->sh_size, fsize);
++            if (!symtab) {
++                tcc_error_noabort("unexpected end of file");
++                goto the_end;
++            }
+             sm_table[i].s = symtab_section;
+ 
+-            /* now load strtab */
++            /* now load strtab.  sh_link is in range (validate_shdr_table),
++               but index 0 is the null section header, whose zero-size
++               "string table" no symbol name could be read out of. */
++            if (sh->sh_link == 0) {
++                tcc_error_noabort("invalid section header index");
++                goto the_end;
++            }
+             sh = &shdr[sh->sh_link];
+-            strtab = load_data(fd, file_offset + sh->sh_offset, sh->sh_size);
++            strtab_size = sh->sh_size;
++            /* Same shape as .shstrtab above, and for the same reasons. */
++            if (strtab_size == 0) {
++                tcc_error_noabort("invalid symbol name table");
++                goto the_end;
++            }
++            strtab = load_data_bounded(fd, file_offset, sh->sh_offset,
++                                       strtab_size, fsize);
++            if (!strtab) {
++                tcc_error_noabort("unexpected end of file");
++                goto the_end;
++            }
++            if (strtab[strtab_size - 1] != '\0') {
++                tcc_error_noabort("invalid symbol name table");
++                goto the_end;
++            }
+         }
+ 	if (sh->sh_flags & SHF_COMPRESSED)
+ 	    seencompressed = 1;
+@@ -3748,6 +3935,13 @@
+         if (sh->sh_link > 0)
+             s->link = sm_table[sh->sh_link].s;
+         if (sh->sh_type == SHT_RELX) {
++            /* sh_info is in range, but the section it names need not have
++               been merged in -- a relocation section pointing at, say, the
++               section name table has no target to be relocated against. */
++            if (!sm_table[sh->sh_info].s) {
++                tcc_error_noabort("invalid section header index");
++                goto the_end;
++            }
+             s->sh_info = sm_table[sh->sh_info].s->sh_num;
+             /* update backward link */
+             s1->sections[s->sh_info]->reloc = s;
+@@ -3762,8 +3956,19 @@
+ 
+     sym = symtab + 1;
+     for(i = 1; i < nb_syms; i++, sym++) {
++        /* st_name indexes the string table, st_shndx indexes sm_table; both
++           come straight out of the file and neither is implied by anything
++           checked so far. */
++        if (sym->st_name >= strtab_size) {
++            tcc_error_noabort("invalid symbol name offset");
++            goto the_end;
++        }
+         if (sym->st_shndx != SHN_UNDEF &&
+             sym->st_shndx < SHN_LORESERVE) {
++            if (sym->st_shndx >= ehdr.e_shnum) {
++                tcc_error_noabort("invalid section header index");
++                goto the_end;
++            }
+             sm = &sm_table[sym->st_shndx];
+             if (sm->link_once) {
+                 /* if a symbol is in a link once section, we use the
