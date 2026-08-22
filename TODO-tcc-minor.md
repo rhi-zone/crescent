@@ -115,3 +115,21 @@ needs one of these.
   `l` (`SHF_X86_64_LARGE`) stays out under any of these: tcc has no large code model, so
   there is nothing to derive the flag *for* — same reason the `.lrodata`/`.ldata`/`.lbss`
   name-table entries stay out, noted above.
+
+- [ ] **`str %rax` and `swapgs`: two pre-existing divergences from `as` in the same
+  opcode-table neighbourhood as `bswap`.** Found 2026-08-22 while building `0034`'s test
+  harness, and measured against the `0001`–`0033` baseline as well as the patched tree —
+  both predate `0034` and neither is caused by it.
+  - `str %rax`: gas encodes it `0f 00 c8` (and disassembles that back as `str %eax`,
+    since the instruction stores into a 16-bit selector regardless). tcc emits
+    `48 0f 00 c8` from an `OPC_48` `ALT()` entry already in the table — a spurious REX.W.
+    `str %ax` and `str %eax` agree between the two.
+  - `swapgs`: gas assembles it; tcc rejects it with `bad MODR/M opcode without operands`.
+    Its table entry is `DEF_ASM_OP0L(swapgs, 0x0f01, 7, OPC_MODRM)`, i.e. a no-operand
+    form that still asks for a MODR/M byte.
+  Both are system/privileged instructions that nothing vendored uses — no libressl
+  `*-elf-x86_64.S` file and no LuaJIT `lj_vm.S` contains either — which is why they sit
+  here rather than in `TODO.md`. `0034-tests/run.sh` deliberately does not pin either one:
+  a "refused" row for `swapgs` would assert the opposite of what `as` does, and the
+  `str` row there is narrowed to the two widths that agree. The byte evidence for both is
+  written up under "Deliberately absent" in `0034-tests/README.md`.

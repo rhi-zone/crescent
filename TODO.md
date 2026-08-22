@@ -6,6 +6,124 @@
 
 See `docs/roadmap-v2.md` for the authoritative project roadmap and sequencing. The roadmap provides the current strategic direction informed by the value landscape analysis.
 
+## LuaJIT under tcc: compiles, links and runs (2026-08-22)
+
+**This section supersedes the "LuaJIT itself: genuine substrate gap, confirmed, NOT
+fixed" bullet and its 2026-08-16 scope correction further down this file.** Those
+recorded the state accurately at the time — every LuaJIT C source hit `lj_def.h:322:
+#error "missing defines for your compiler"`, so "tcc cannot compile LuaJIT at all" was
+the true statement. It is no longer the state. Both of the fix options that bullet
+listed turned out to be unnecessary: tcc does not need to fake `__GNUC__`, and the
+`__builtin_ctz`/`__builtin_clz`/`__builtin_ctzll`/`__builtin_clzll` it was said to lack
+are in fact present in this tcc as real linkable functions in `libtcc1.a`
+(`dep/tcc/lib/builtin.c` defines them, with `__asm__(".set ...")` aliases so the
+`__builtin_` spellings resolve). The bullet's claim that tcc "provides none of" them was
+wrong; it was inferred from the `#error`, never checked against `libtcc1.a`.
+
+- [x] **LuaJIT's compiler gate is four sites, not one, and folding `__TINYC__` into each
+  is enough — `dep/luajit/patches/0001-tinycc-compiler-support.patch`.** Following the
+  `wqweto/LuaJIT@tcc-build` precedent (fold `__TINYC__` into the existing
+  `__GNUC__`-attribute branch's entry condition rather than faking `__GNUC__`), because
+  tcc is attribute-syntax-compatible for everything those branches need. The four:
+  - `lj_def.h:123` — the attributes/builtins branch (`LJ_NORET`, `LJ_AINLINE`,
+    `LJ_ALIGN`, `__builtin_expect`, `lj_ffs`/`lj_fls`, packed unions). This is the one
+    the old bullet found. Fixing only this one gets to a link error, not a build.
+  - `lj_arch.h:717` — `LJ_UNWIND_EXT`. Worth being precise about why this matters: the
+    LuaJIT Makefile's own probe for external unwinding (compile a C file, grep the
+    object for `eh_frame`) **passes** for tcc — tcc emits real `.eh_frame` for C — so
+    `-DLUAJIT_UNWIND_EXTERNAL` was already on the command line. Only the compiler-name
+    half of the gate was suppressing it.
+  - `lj_err.c:392` — the branch defining `lj_err_unwind_dwarf`, which the interpreter's
+    `.eh_frame` references by name. Without it the build reaches `LINK luajit` and fails
+    on that one unresolved symbol.
+  - `lj_api.c:1216` — the `lua_yield`-from-a-C-function path. Not a link error; taking
+    the other branch silently diverges from what a gcc build does, which is why it is in
+    the patch rather than left alone.
+  Everything else in the tree gated on `__GNUC__` is MIPS/ARM-only or has a correct
+  portable fallback on x86_64 (`lj_mcode.c:55` `__clear_cache` is compiled out on x86;
+  `lj_strscan.c:83`, `lj_emit_x86.h:48`, `lj_strfmt.h:126` all have working fallbacks;
+  `lj_ircall.h:336` is `LJ_NEED_FP64`, which is 0 on x64). All four edits only *add*
+  `|| defined(__TINYC__)`, so the patch is inert under gcc — verified by building
+  `dep/luajit` with gcc with the patch applied and passing the same smoke test.
+
+- [x] **Two real tcc bugs surfaced by that build, both fixed with their own patches.**
+  - `dep/tcc/patches/0034-asm-bswap-reg64.patch` — the x86_64 opcode table had `bswap`
+    only for `OPT_REG32` (plus explicit `bswapl`/`bswapq`), so `bswap %rax` — the
+    suffix-less 64-bit form GNU as accepts — was rejected with "bad operand with opcode
+    'bswap'". That is exactly the spelling in LuaJIT's `lj_bswap64` inline asm. One
+    `ALT()` entry mirroring the existing `bswapq`; encodings now byte-identical to gas.
+  - `dep/tcc/patches/0035-eh-frame-fde-pc-addend.patch` — `tccdbg.c`'s
+    `tcc_debug_frame_end()` wrote each FDE's PC-Begin as an in-place word while emitting
+    the relocation with `r_addend = 0`. tcc's own linker adds the in-place word back, so
+    tcc-linked output was self-consistently correct and nothing looked wrong from inside
+    tcc. GNU ld on a RELA target ignores the in-place word, so every FDE in a
+    tcc-produced object resolved to `.text+0`; they all overlap, and GNU ld refuses the
+    object outright with `.eh_frame_hdr refers to overlapping FDEs`. The offset now goes
+    in `r_addend`, guarded `#if SHT_RELX == SHT_RELA` — i386/arm are REL targets with no
+    addend field, and tcc's own `make test` catches an unguarded version loudly
+    ("non-zero addend on REL architecture", from the 32-bit cross tests). **This is what
+    made tcc-compiled objects consumable by GNU ld at all**, and it is a correctness fix
+    for any consumer of tcc objects, not just LuaJIT.
+
+- [x] **Verified state, on this NixOS box, tcc built from `dep/tcc` + all of
+  `dep/tcc/patches` (35 as of 2026-08-22), LuaJIT from `dep/luajit` + its patch,
+  `XCFLAGS=-DLUAJIT_ENABLE_GC64`:**
+  - tcc compiles the entire LuaJIT tree — `host/minilua`, `host/buildvm`, buildvm running
+    to generate `lj_vm.S`/`lj_bcdef.h`/`lj_ffdef.h`/`lj_libdef.h`/`lj_recdef.h`/`vmdef.lua`,
+    the VM assembly assembling, and every `lj_*.c`/`lib_*.c`. `libluajit.a`,
+    `libluajit.so` and a linked `luajit` all get produced.
+  - **tcc as compiler + GNU ld as linker: a fully working LuaJIT.** Smoke test passes end
+    to end — JIT on and tracing (`jit.status()` reports the full optimizer set), a 2M-iteration
+    numeric loop, string/table work, coroutines with values passed both ways, `pcall`
+    of an explicit `error()` and of a runtime nil-index, `xpcall` with a handler,
+    `pcall` nested through a C boundary (an erroring `table.sort` comparator), a
+    100-deep recursive error unwind, `ffi.C` calls, `ffi.new` arrays, and an
+    `ffi.cast` callback from C back into Lua.
+  - **tcc as compiler + tcc as linker: builds, links, and runs — but `pcall` of an error
+    PANICs.** JIT, loops, coroutines and FFI are all fine. See the open item below; this
+    is the one remaining gap, and it is now understood rather than merely observed.
+
+- [ ] **tcc's linker emits no `.eh_frame_hdr` section and no `PT_GNU_EH_FRAME` program
+  header. That is the whole of what blocks a fully tcc-compiled-and-linked LuaJIT.**
+  libgcc's `_Unwind_Find_FDE` locates FDEs by walking `dl_iterate_phdr` looking for
+  `PT_GNU_EH_FRAME`; with no such header the search phase finds nothing, LuaJIT's
+  `lj_err_unwind_dwarf` personality is never consulted, `_Unwind_RaiseException` fails,
+  and LuaJIT panics with "unprotected error in call to Lua API". Confirmed by
+  `readelf -lW` on the tcc-linked `luajit` (three LOAD segments and `GNU_STACK`, no
+  `GNU_EH_FRAME`) and `readelf -SW` (no `.eh_frame_hdr`, though `.eh_frame` itself is
+  present and, after `0035`, correct — 2402 FDEs with distinct sequential pc ranges).
+  This is the precise, narrowed form of the long-standing "tcc-as-linker breaks pcall"
+  finding recorded earlier in this file: it is the linker, it is one missing output
+  structure, and it is not corruption of the frame data.
+  Closing it means teaching `tccelf.c` to build the `.eh_frame_hdr` binary-search table
+  (sorted `initial_location`/FDE-pointer pairs, `DW_EH_PE_datarel|sdata4` table
+  encoding) from the output `.eh_frame` and to emit the matching program header. Real
+  design surface: which input FDE encodings to handle (objects from gas arrive with
+  their own), where in tcc's layout the sort can happen, and what `-run` mode should do.
+  Scoped as a follow-up, deliberately not improvised at the tail of this work.
+
+- [ ] **Open owner call: whether `dep/luajit/patches/` should be applied in CI.** Today
+  it is not — the five `luajit-*` jobs in `build-vendored.yml` build the pristine
+  vendored source with gcc/clang/MSVC and are entirely unaffected. This mirrors how
+  `dep/libressl/patches/` is treated (present, verified by hand, not applied by any CI
+  job). The patch is inert under gcc, so applying it unconditionally would be harmless,
+  but "harmless" is not a reason to change what CI builds. `dep/tcc/patches/` are
+  different and *are* applied, in all five `git apply` invocations in
+  `build-vendored.yml`, because they patch the tool being built rather than a target.
+
+- **Environment notes for reproducing any of the above on NixOS** (not needed on the
+  Alpine containers CI uses, where `/usr/include` and `/usr/lib` are real):
+  - tcc must be configured with explicit paths or it finds neither headers nor
+    `crt1.o` and stamps an unloadable ELF interpreter:
+    `./configure --tccdir=<dir> --sysincludepaths="{B}/include:<glibc-dev>/include"
+    --libpaths="{B}:<glibc>/lib" --crtprefix="<glibc>/lib"
+    --elfinterp="<glibc>/lib/ld-linux-x86-64.so.2"`. `{B}` must stay first in
+    `--libpaths`: that is where tcc looks for its own `libtcc1.a` and `runmain.o`.
+  - A fully tcc-built LuaJIT needs `libgcc_s.so.1` passed explicitly for `_Unwind_*`
+    and `__register_frame`/`__deregister_frame`. gcc links it implicitly, so this is
+    parity with a gcc build, not a new dependency — but tcc does not, and the failure
+    is seven unresolved-symbol errors at `LINK luajit`.
+
 ## libressl built with tcc: libtool has no `-Wl,` capability probe (2026-08-21)
 
 - [x] **`CC=<tcc> ./configure` on `dep/libressl` produced `wl=""` while
@@ -1036,6 +1154,12 @@ See `docs/roadmap-v2.md` for the authoritative project roadmap and sequencing. T
     (previously only claimed "verified" from a non-Alpine sandbox that never hit either
     bug). Both fixes are now in `build-vendored.yml` with comments explaining why.
   - **LuaJIT itself: genuine substrate gap, confirmed, NOT fixed, NOT worked around.**
+    *(SUPERSEDED 2026-08-22 — see "LuaJIT under tcc: compiles, links and runs" at the top
+    of this file. LuaJIT now builds and runs under tcc. Two specifics below are wrong as
+    written: tcc does have the `__builtin_ctz`/`__builtin_clz` family, as linkable
+    functions in `libtcc1.a`; and the gate is four sites across `lj_def.h`, `lj_arch.h`,
+    `lj_err.c` and `lj_api.c`, not `lj_def.h` alone. Kept for the record of what was
+    measured at the time.)*
     `dep/tcc` (mob@2ba12e83b3599ca8f5d50c179fe5138fe956f0c9) defines only `__TINYC__` in its
     predefined macros — never `__GNUC__` or `__clang__` — and provides none of the
     `__builtin_ctz`/`__builtin_clz`/`__builtin_ctzll`/`__builtin_clzll` builtins. LuaJIT's
@@ -1062,7 +1186,8 @@ See `docs/roadmap-v2.md` for the authoritative project roadmap and sequencing. T
     `luajit-*` CI jobs (linux-x86_64/aarch64, macos-arm64, windows-x86_64/x86), which remain
     the only working way LuaJIT gets built and are unaffected by any of this.
   - **Scope correction (2026-08-16, found while verifying patch `0006`): this blocker is not
-    confined to `host/buildvm.c`.** The wording above ("fires at `host/buildvm.o`", "`buildvm`
+    confined to `host/buildvm.c`.** *(Also SUPERSEDED 2026-08-22 — accurate when written;
+    the blocker is closed. See the top of this file.)* The wording above ("fires at `host/buildvm.o`", "`buildvm`
     does not compile at all") reads as though `buildvm` is the one obstacle and LuaJIT would
     build once past it. It is not — EVERY LuaJIT C source hits the identical
     `lj_def.h:322: error: #error "missing defines for your compiler"`. Verified directly against

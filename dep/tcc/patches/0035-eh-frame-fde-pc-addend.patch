@@ -1,0 +1,66 @@
+--- a/dep/tcc/tccdbg.c
++++ b/dep/tcc/tccdbg.c
+@@ -567,10 +567,15 @@
+                        s->sh_num, NULL);
+ }
+ 
+-static void dwarf_reloc(Section *s, int sym, int rel)
++static void dwarf_reloca(Section *s, int sym, int rel, addr_t addend)
+ {
+     TCCState *s1 = s->s1;
+-    put_elf_reloca(symtab_section, s, s->data_offset, rel, sym, 0);
++    put_elf_reloca(symtab_section, s, s->data_offset, rel, sym, addend);
++}
++
++static void dwarf_reloc(Section *s, int sym, int rel)
++{
++    dwarf_reloca(s, sym, rel, 0);
+ }
+ 
+ static void free_str(struct dwarf_str_hash **str)
+@@ -900,6 +905,8 @@
+ {
+     int eh_section_sym;
+     unsigned long fde_start;
++    addr_t fde_pc_addend = 0;
++    unsigned fde_pc_inplace = func_ind;
+ 
+     /* first FDE of the session brings the shared CIE into being */
+     if (!eh_frame_section)
+@@ -911,18 +918,30 @@
+     dwarf_data4(eh_frame_section, 0); // length
+     dwarf_data4(eh_frame_section,
+ 		fde_start - s1->eh_start + 4); // CIE Pointer
++    /* PC Begin is section-relative: this FDE covers text_section+func_ind.
++       On a RELA target that offset belongs in r_addend.  Writing it in place
++       instead resolves fine under tcc's own linker, which adds the in-place
++       word too, but GNU ld ignores the in-place word on RELA and so reads
++       every FDE in the object as starting at .text+0 -- it rejects such an
++       object outright (".eh_frame_hdr refers to overlapping FDEs"), and any
++       unwinder fed the resulting table gets garbage.  On a REL target there
++       is no addend field, so the offset has to stay in place there. */
++#if SHT_RELX == SHT_RELA
++    fde_pc_addend = func_ind;
++    fde_pc_inplace = 0;
++#endif
+ #if defined TCC_TARGET_I386
+-    dwarf_reloc(eh_frame_section, eh_section_sym, R_386_PC32);
++    dwarf_reloca(eh_frame_section, eh_section_sym, R_386_PC32, fde_pc_addend);
+ #elif defined TCC_TARGET_X86_64
+-    dwarf_reloc(eh_frame_section, eh_section_sym, R_X86_64_PC32);
++    dwarf_reloca(eh_frame_section, eh_section_sym, R_X86_64_PC32, fde_pc_addend);
+ #elif defined TCC_TARGET_ARM
+-    dwarf_reloc(eh_frame_section, eh_section_sym, R_ARM_REL32);
++    dwarf_reloca(eh_frame_section, eh_section_sym, R_ARM_REL32, fde_pc_addend);
+ #elif defined TCC_TARGET_ARM64
+-    dwarf_reloc(eh_frame_section, eh_section_sym, R_AARCH64_PREL32);
++    dwarf_reloca(eh_frame_section, eh_section_sym, R_AARCH64_PREL32, fde_pc_addend);
+ #elif defined TCC_TARGET_RISCV64
+-    dwarf_reloc(eh_frame_section, eh_section_sym, R_RISCV_32_PCREL);
++    dwarf_reloca(eh_frame_section, eh_section_sym, R_RISCV_32_PCREL, fde_pc_addend);
+ #endif
+-    dwarf_data4(eh_frame_section, func_ind); // PC Begin
++    dwarf_data4(eh_frame_section, fde_pc_inplace); // PC Begin
+     dwarf_data4(eh_frame_section, size); // PC Range
+     dwarf_data1(eh_frame_section, 0); // Augmentation Length
+ #if defined TCC_TARGET_I386

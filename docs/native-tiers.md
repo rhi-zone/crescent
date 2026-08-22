@@ -129,17 +129,25 @@ produced today.
 **Known gap, found by actually building with it:** tcc (mob branch,
 `dep/tcc/VERSION` pin) cleanly builds `sqlite3.c` and zlib's sources (the
 former needs an explicit `-lm`; tcc's driver doesn't auto-link libm the way
-gcc/clang's does). It still does not build LuaJIT end-to-end: `buildvm`'s
-generated `lj_vm.S` used GNU-as-only `sym@PLT` relocation-suffix syntax that
-tcc's assembler rejected outright ("end of line expected") — that specific
-parser gap is now patched (see below) and verified in isolation, but a full
-LuaJIT build with the patched tcc has not been attempted. LuaJIT source is
-now vendored locally (`dep/luajit/`, pinned via `dep/luajit/VERSION`; used
-by the gcc/clang/cl `luajit-*` jobs in `build-vendored.yml`) — the tcc gap
-here is specifically about wiring that vendored source into the
-`tcc-build-deps-*` job's tcc-as-`CC` path, which hasn't been attempted, not
-about the source's availability. LuaJIT stays unwired in `tcc-build-deps-*`
-until that's verified for real (see TODO.md). libressl's `--disable-asm`
+gcc/clang's does).
+
+**LuaJIT (updated 2026-08-22): it builds now.** This paragraph previously read
+"it still does not build LuaJIT end-to-end", listing `buildvm`'s generated
+`lj_vm.S` and its GNU-as-only `sym@PLT` suffix syntax as the obstacle. That
+parser gap was patched long ago (`0001`), and the deeper obstacle behind it —
+every LuaJIT C source hitting `#error "missing defines for your compiler"` —
+is closed by `dep/luajit/patches/0001-tinycc-compiler-support.patch` together
+with `0034` and `0035` on the tcc side. tcc now compiles the whole LuaJIT tree
+including `buildvm` and the generated VM assembly, and a LuaJIT compiled by tcc
+and linked by GNU ld runs with the JIT on and passes `pcall`, `xpcall`,
+coroutines, FFI and FFI callbacks. Linking with tcc *itself* still breaks
+`pcall`, for a separate and now-understood reason: tcc's linker emits no
+`.eh_frame_hdr`/`PT_GNU_EH_FRAME`, so the unwinder never finds LuaJIT's
+personality routine. Full result matrix and the remaining gap are in `TODO.md`.
+LuaJIT source is vendored locally (`dep/luajit/`, pinned via
+`dep/luajit/VERSION`; used by the gcc/clang/cl `luajit-*` jobs in
+`build-vendored.yml`), and those jobs still build the pristine source — the
+patch is not applied by CI. libressl's `--disable-asm`
 tcc path is still wired (kept, not flipped):
 the perlasm-generated `*-elf-x86_64.S` files' SSE2/AES-NI opcode gap is now
 patched, but assembling them surfaced a *separate* gap — this vendored tcc
@@ -1444,6 +1452,137 @@ hex literal, which tcc has no directive for and, more to the point, no
 integer type for — its expression evaluator is 64-bit, so this is a lexer and
 expression-layer gap rather than a directive alias. Substituting two `.quad`s
 by hand is what the verification above assembled. Recorded in `TODO.md`.
+
+### `0034-asm-bswap-reg64.patch`
+
+The x86_64 opcode table carried `bswap` for `OPT_REG32` only, alongside the
+explicitly suffixed `bswapl` (REG32) and `bswapq` (REG64 + `OPC_48`). GNU `as`
+also accepts the suffix-less `bswap` with a 64-bit register and infers REX.W
+from the operand; tcc rejected it outright with `bad operand with opcode
+'bswap'`. The patch is one `ALT()` entry giving `bswap` the REG64 form,
+mirroring `bswapq` exactly — the same shape the table already uses for `str`
+and the other operand-size alternates.
+
+This is not a hypothetical spelling. LuaJIT's `lj_def.h` defines `lj_bswap64`
+as `__asm__("bswap %0" : "=r" (r) : "0" (x))` on x86_64, so the suffix-less
+64-bit form is what an inline-asm-bearing C compile actually hands the
+assembler, and it was one of the two tcc-side blockers for building LuaJIT.
+
+Nothing else in the table changes: `bswap %eax`, `bswapl`, `bswapq` and the
+16-bit rejection (the table's existing "bswap can't be applied to 16bit regs"
+comment) all behave as before.
+
+**Verified.** `dep/tcc/patches/0034-tests/run.sh`: **65 pass, 0 fail** with the
+patch, and **65 pass, 0 fail** against real gcc 15.2 / binutils 2.44, so the
+harness is a reference rather than this patch's own opinion. Against a
+`0001`–`0033` build with only the `ALT()` line removed it reports **43 pass, 22
+fail** — the sixteen suffix-less 64-bit registers, the `.macro`/`.rept` replay
+rows, the row asserting `bswap %rax` and `bswapq %rax` encode identically, and
+three of the five compile-and-run C programs. `make test` in `dep/tcc` passes
+with the patch applied.
+
+The 16-bit case is pinned as agreement-on-refusal only, with no wording match:
+`as` and tcc both refuse `bswap %ax` and `bswapw %ax`, but not for the same
+reason — `as` knows `bswapw` and rejects the suffix, while tcc has no such
+token at all (`unknown opcode`). Two nearby divergences from `as` that the
+harness deliberately does not pin, both pre-existing and unrelated to this
+patch (`str %rax` gets a spurious REX.W from tcc; `swapgs` is rejected
+outright), are recorded in `TODO-tcc-minor.md`.
+
+### `0035-eh-frame-fde-pc-addend.patch`
+
+`tccdbg.c`'s `tcc_debug_frame_end()` writes one FDE per function. Its PC-Begin
+field was emitted as an in-place word (`dwarf_data4(eh_frame_section,
+func_ind)`) with the accompanying relocation carrying `r_addend = 0`.
+
+That is self-consistent under tcc and only under tcc. tcc's own linker adds the
+in-place word back in when it applies the relocation, so tcc-linked output came
+out with correct FDE addresses and nothing looked wrong from inside the
+toolchain. GNU ld, on a RELA target, ignores the in-place word entirely and
+uses `r_addend` — so every FDE in a tcc-produced object resolved to `.text+0`,
+all of them overlapping, and GNU ld refused the object with
+
+    .eh_frame_hdr refers to overlapping FDEs
+
+which is a hard link failure, not a warning. The practical effect was that tcc
+object files could not be linked by the system linker at all whenever they
+carried unwind data — which, since tcc emits `.eh_frame` for ordinary C, is
+every non-trivial object.
+
+The fix moves the offset into `r_addend`: `dwarf_reloca()` takes an addend and
+`dwarf_reloc()` becomes the zero-addend wrapper, so no other caller changes.
+It is guarded `#if SHT_RELX == SHT_RELA`, because i386 and ARM are REL targets
+with no addend field and must keep the offset in place. That guard is not
+defensive styling — tcc's own `make test` fails loudly without it, with
+`non-zero addend on REL architecture` from `tccelf.c`'s own check during the
+32-bit cross tests.
+
+This patch is what makes tcc-compiled LuaJIT linkable by GNU ld, and with it
+the resulting interpreter passes a full smoke test: JIT tracing, `pcall`,
+`xpcall`, `pcall` nested through a C boundary, coroutines, FFI calls and FFI
+callbacks. It is a correctness fix for every consumer of tcc object files, not
+only for LuaJIT.
+
+**Verified.** `dep/tcc/patches/0035-tests/run.sh`: **23 pass, 0 fail** with the
+patch, and **23 pass, 0 fail** against real gcc 15.2 / binutils 2.44. Against
+the same stack with `0035` reverse-applied it reports **4 pass, 19 fail**, and
+the four that still pass are exactly the must-not-disturb set — the
+single-function object (one FDE cannot overlap anything) plus the three rows
+checking tcc's own linker output, which was always self-consistently correct.
+
+Unlike its assembler-side neighbours this harness cannot be a byte-parity
+comparison against gas: gcc and tcc generate structurally different
+`.eh_frame`, so the reference is GNU ld's *acceptance* plus the semantic
+content of the tables. Two properties turned out to need care:
+
+- "distinct nonzero addends" is the wrong assertion. The first function in a
+  section legitimately sits at offset 0, and gcc puts `main` in
+  `.text.startup`, so a gcc object can hold two FDEs with addend 0 against
+  *different* section symbols. The harness therefore checks distinctness of the
+  `(symbol, addend)` pair and that the addend multiset equals the `FUNC` symbol
+  offsets — which is also what keeps the gcc run green.
+- tcc's linker writes no `.symtab` into an executable at all (`nm` on a
+  tcc-linked binary is empty), so the linked-image rows build `-rdynamic` and
+  read symbols with `nm -D`.
+
+The end-to-end row unwinds through several tcc-compiled frames with
+`_Unwind_Backtrace` and resolves each frame with `dladdr` rather than by
+bounding addresses — tcc emits functions in definition order, which makes any
+address-bounding sentinel layout-dependent. It was measured stable across 20
+consecutive runs before being kept.
+
+It does not, on its own, give a fully tcc-*linked* LuaJIT a working `pcall`.
+That is blocked separately on tcc's linker emitting no `.eh_frame_hdr` section
+and no `PT_GNU_EH_FRAME` program header, without which libgcc's
+`_Unwind_Find_FDE` — which locates FDEs by walking `dl_iterate_phdr` — finds
+nothing to search. The FDEs themselves are correct in tcc-linked output. That
+gap is recorded in `TODO.md`.
+
+### `dep/luajit/patches/`: a compiler-identity gate, not a compiler gap
+
+`dep/luajit/` now carries the same numbered-unified-diff mechanism as
+`dep/tcc/` and `dep/libressl/`, for a third distinct reason. LuaJIT gates its
+GNU-flavoured code on `defined(__GNUC__) || defined(__clang__)`. tcc defines
+neither, only `__TINYC__`, so every LuaJIT C source fell through to `#error
+"missing defines for your compiler"` in `lj_def.h`. Nothing was actually
+missing from tcc: it is attribute-syntax-compatible for everything those
+branches use, `__builtin_expect` is a token it knows, and the
+`__builtin_ctz`/`__builtin_clz` family are real linkable functions in
+`libtcc1.a` (`dep/tcc/lib/builtin.c`, with `.set` aliases so the `__builtin_`
+spellings resolve).
+
+`0001-tinycc-compiler-support.patch` follows the `wqweto/LuaJIT@tcc-build`
+precedent — fold `__TINYC__` into the existing branch's entry condition rather
+than fake `__GNUC__` — at the four sites that matter on x86_64: `lj_def.h`
+(attributes and bit-scan builtins), `lj_arch.h` (`LJ_UNWIND_EXT`), `lj_err.c`
+(the branch defining the `lj_err_unwind_dwarf` personality the VM's `.eh_frame`
+references) and `lj_api.c` (the `lua_yield`-from-C path). Every edit only *adds*
+`|| defined(__TINYC__)`, so the patch is inert under gcc.
+
+Unlike `dep/tcc/patches/`, these are not applied by any CI job —
+`build-vendored.yml`'s five `luajit-*` jobs build the pristine vendored source
+with gcc/clang/MSVC. That matches how `dep/libressl/patches/` is treated, and
+whether it should change is an open owner call in `TODO.md`.
 
 ### `dep/libressl/patches/`: build-system gaps, not compiler gaps
 

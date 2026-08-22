@@ -1,0 +1,46 @@
+--- a/dep/luajit/src/lj_def.h
++++ b/dep/luajit/src/lj_def.h
+@@ -120,7 +120,8 @@
+ #define bloomset(b, x)	((b) |= bloombit((x)))
+ #define bloomtest(b, x)	((b) & bloombit((x)))
+ 
+-#if defined(__GNUC__) || defined(__clang__) || defined(__psp2__)
++#if defined(__GNUC__) || defined(__clang__) || defined(__psp2__) || \
++    defined(__TINYC__)
+ 
+ #define LJ_NORET	__attribute__((noreturn))
+ #define LJ_ALIGN(n)	__attribute__((aligned(n)))
+--- a/dep/luajit/src/lj_arch.h
++++ b/dep/luajit/src/lj_arch.h
+@@ -714,7 +714,7 @@
+ #define LJ_NO_UNWIND		1
+ #endif
+ 
+-#if !LJ_NO_UNWIND && !defined(LUAJIT_UNWIND_INTERNAL) && (LJ_ABI_WIN || (defined(LUAJIT_UNWIND_EXTERNAL) && (defined(__GNUC__) || defined(__clang__))))
++#if !LJ_NO_UNWIND && !defined(LUAJIT_UNWIND_INTERNAL) && (LJ_ABI_WIN || (defined(LUAJIT_UNWIND_EXTERNAL) && (defined(__GNUC__) || defined(__clang__) || defined(__TINYC__))))
+ #define LJ_UNWIND_EXT		1
+ #else
+ #define LJ_UNWIND_EXT		0
+--- a/dep/luajit/src/lj_err.c
++++ b/dep/luajit/src/lj_err.c
+@@ -389,7 +389,8 @@
+   RaiseException(LJ_EXCODE_MAKE(errcode), 1 /* EH_NONCONTINUABLE */, 0, NULL);
+ }
+ 
+-#elif !LJ_NO_UNWIND && (defined(__GNUC__) || defined(__clang__))
++#elif !LJ_NO_UNWIND && (defined(__GNUC__) || defined(__clang__) || \
++		       defined(__TINYC__))
+ 
+ /*
+ ** We have to use our own definitions instead of the mandatory (!) unwind.h,
+--- a/dep/luajit/src/lj_api.c
++++ b/dep/luajit/src/lj_api.c
+@@ -1213,7 +1213,7 @@
+       if (LJ_FR2) top++;
+       setframe_ftsz(top, ((char *)(top+1)-(char *)L->base)+FRAME_CONT);
+       L->top = L->base = top+1;
+-#if ((defined(__GNUC__) || defined(__clang__)) && (LJ_TARGET_X64 || defined(LUAJIT_UNWIND_EXTERNAL)) && !LJ_NO_UNWIND) || LJ_TARGET_WINDOWS
++#if ((defined(__GNUC__) || defined(__clang__) || defined(__TINYC__)) && (LJ_TARGET_X64 || defined(LUAJIT_UNWIND_EXTERNAL)) && !LJ_NO_UNWIND) || LJ_TARGET_WINDOWS
+       lj_err_throw(L, LUA_YIELD);
+ #else
+       L->cframe = NULL;

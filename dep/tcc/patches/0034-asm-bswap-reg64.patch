@@ -1,0 +1,10 @@
+--- a/dep/tcc/x86_64-asm.h
++++ b/dep/tcc/x86_64-asm.h
+@@ -420,6 +420,7 @@
+     /* 486 */
+     /* bswap can't be applied to 16bit regs */
+     DEF_ASM_OP1(bswap, 0x0fc8, 0, OPC_REG, OPT_REG32 )
++ALT(DEF_ASM_OP1(bswap, 0x0fc8, 0, OPC_REG | OPC_48, OPT_REG64 ))
+     DEF_ASM_OP1(bswapl, 0x0fc8, 0, OPC_REG, OPT_REG32 )
+     DEF_ASM_OP1(bswapq, 0x0fc8, 0, OPC_REG | OPC_48, OPT_REG64 )
+ 
