@@ -128,6 +128,17 @@ wrong; it was inferred from the `#error`, never checked against `libtcc1.a`.
      shape — it names `lj_err_unwind_dwarf` as its personality — so fixing only (1)
      would produce a header that omits the frames this whole exercise is about.
 
+  **Measured, not predicted: closing (1) alone does not fix LuaJIT.** A throwaway probe
+  (a local hack making `tcc_eh_frame_hdr()` adopt the merged `.eh_frame` by name when
+  `s1->eh_frame_section` is NULL — never committed, and not a proposed fix) was built and
+  used to build LuaJIT end to end. The result: `.eh_frame_hdr` and `PT_GNU_EH_FRAME` both
+  appear, `.eh_frame` holds 2402 FDEs, and the header's count field reads **2401** —
+  and `pcall` still panics, identically. Exactly one FDE is missing from the table, and
+  it is the one that carries the personality routine: the interpreter's, the only frame
+  LuaJIT's error handling actually needs. So (2) is not a secondary polish item behind
+  (1); on this workload it is the whole of the remaining failure, and any fix that closes
+  (1) without (2) will produce a binary that looks correct by `readelf` and still panics.
+
   Defect (2) carries a semantics question that is **not mine to settle**: when tcc meets
   an FDE it cannot represent in the table, the options are to omit the header entirely
   (safe but disables unwinding wholesale), to emit a partial table (today's silent
