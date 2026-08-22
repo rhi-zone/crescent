@@ -1,0 +1,100 @@
+--- a/dep/tcc/i386-asm.c
++++ b/dep/tcc/i386-asm.c
+@@ -102,6 +102,33 @@
+ #ifdef TCC_TARGET_X86_64
+     OPT_IM64,
+ #endif
++    /* %xmm0 and nothing else.  sha256rnds2 reads a third source operand
++       from %xmm0 that has no field anywhere in its encoding; gas spells
++       that operand out anyway, and libressl's sha256_amd64_shani.S uses
++       that spelling, so the assembler has to accept it and then leave it
++       out of the ModRM byte it builds.
++
++       Both halves fall out of giving it its own operand type rather than
++       marking an OPT_SSE operand as special.  The searches in asm_opcode()
++       that pick the mod/rm and mod/reg operands test op_type[] -- the
++       TEMPLATE's type, not the operand's -- against OP_REG|OP_MMX|OP_SSE|
++       OP_INDIR, so a type outside that set is passed over without any
++       exclusion logic; and the ordinary type match is already the check
++       that the register really is %xmm0, since parse_operand() sets
++       OP_SSE0 only for register number 0.  OPT_EAX, OPT_CL, OPT_DX and
++       OPT_ST0 are the same idea for the general-purpose and x87 files.
++
++       This is not OPT_VVVV (patch 0015).  That marks WHERE an operand is
++       encoded, and its operand still has a type of its own; this says WHAT
++       the operand has to be, for an operand that is not encoded at all.
++
++       Adding it fills the operand-type index space: OPT_DISP8 is now 31
++       and the matcher reads the index back with `& 0x1f'.  A further
++       OPT_xxx has to widen that mask, and ASMInstr's op_type[] with it,
++       before it can exist.  (Nothing reaches the `1 << op2' default with
++       index 30 or 31 -- OPT_DISP and OPT_DISP8 both have their own case in
++       that switch -- so no shift overflows a signed int.)  */
++    OPT_SSE0,
+     OPT_EAX,    /* %al, %ax, %eax or %rax register */
+     OPT_ST0,    /* %st(0) register */
+     OPT_CL,     /* %cl register */
+@@ -142,6 +169,7 @@
+ #define OP_IM32   (1 << OPT_IM32)
+ #define OP_EAX    (1 << OPT_EAX)
+ #define OP_ST0    (1 << OPT_ST0)
++#define OP_SSE0   (1 << OPT_SSE0)
+ #define OP_CL     (1 << OPT_CL)
+ #define OP_DX     (1 << OPT_DX)
+ #define OP_ADDR   (1 << OPT_ADDR)
+@@ -397,6 +425,11 @@
+                 op->type |= OP_CL;
+             else if (op->type == OP_REG16 && op->reg == TREG_XDX)
+                 op->type |= OP_DX;
++            /* %xmm0 carries OP_SSE0 alongside OP_SSE, so it matches both an
++               ordinary xmm template operand and the implicit-operand one --
++               the same way %al/%ax/%eax/%rax carry OP_EAX above.  */
++            else if (op->type == OP_SSE && op->reg == 0)
++                op->type |= OP_SSE0;
+         } else if (tok >= TOK_ASM_dr0 && tok <= TOK_ASM_dr7) {
+             op->type = OP_DB;
+             op->reg = tok - TOK_ASM_dr0;
+--- a/dep/tcc/x86_64-asm.h
++++ b/dep/tcc/x86_64-asm.h
+@@ -588,6 +588,41 @@
+     DEF_ASM_OP2(aesimc, 0x66db, 0, OPC_MODRM | OPC_0F | OPC_0F38, OPT_EA | OPT_SSE, OPT_SSE)
+     DEF_ASM_OP3(aeskeygenassist, 0x66df, 0, OPC_MODRM | OPC_0F | OPC_0F3A, OPT_IM8, OPT_EA | OPT_SSE, OPT_SSE)
+ 
++    /* ssse3 / sse4.1: same 0F38 and 0F3A escape maps as the aes-ni block
++       above, and like it they carry 0x66 as a mandatory prefix in the
++       opcode field.  OPT_SSE rather than OPT_MMXSSE is what keeps that 0x66
++       the template's own: an OPT_MMXSSE operand makes asm_opcode() emit its
++       own operand-size 0x66 to select the xmm form, which would double the
++       prefix here.  (The 64-bit MMX forms of pshufb and palignr are
++       therefore not reachable through these entries; nothing needs them.) */
++    DEF_ASM_OP2(pshufb, 0x6600, 0, OPC_MODRM | OPC_0F | OPC_0F38, OPT_EA | OPT_SSE, OPT_SSE)
++    DEF_ASM_OP3(palignr, 0x660f, 0, OPC_MODRM | OPC_0F | OPC_0F3A, OPT_IM8, OPT_EA | OPT_SSE, OPT_SSE)
++    DEF_ASM_OP3(pblendw, 0x660e, 0, OPC_MODRM | OPC_0F | OPC_0F3A, OPT_IM8, OPT_EA | OPT_SSE, OPT_SSE)
++    /* pinsrd takes r/m32 as its source and pextrd as its destination, so
++       the xmm operand is the one in modrm.reg in both -- which is what
++       asm_opcode()'s "ea operand first, then a register" search already
++       arrives at, from opposite operand positions. */
++    DEF_ASM_OP3(pinsrd, 0x6622, 0, OPC_MODRM | OPC_0F | OPC_0F3A, OPT_IM8, OPT_EA | OPT_REG32, OPT_SSE)
++    DEF_ASM_OP3(pextrd, 0x6616, 0, OPC_MODRM | OPC_0F | OPC_0F3A, OPT_IM8, OPT_SSE, OPT_EA | OPT_REG32)
++
++    /* sha-ni: 0F38/0F3A again, but with NO mandatory prefix -- the opcode
++       field's high byte is 0, which asm_opcode()'s prefix switch already
++       reads as "no prefix".  Every operand is OPT_SSE, so no operand-size
++       0x66 is synthesised either; these instructions have no encoding that
++       accepts one. */
++    DEF_ASM_OP2(sha1nexte, 0x00c8, 0, OPC_MODRM | OPC_0F | OPC_0F38, OPT_EA | OPT_SSE, OPT_SSE)
++    DEF_ASM_OP2(sha1msg1, 0x00c9, 0, OPC_MODRM | OPC_0F | OPC_0F38, OPT_EA | OPT_SSE, OPT_SSE)
++    DEF_ASM_OP2(sha1msg2, 0x00ca, 0, OPC_MODRM | OPC_0F | OPC_0F38, OPT_EA | OPT_SSE, OPT_SSE)
++    DEF_ASM_OP2(sha256msg1, 0x00cc, 0, OPC_MODRM | OPC_0F | OPC_0F38, OPT_EA | OPT_SSE, OPT_SSE)
++    DEF_ASM_OP2(sha256msg2, 0x00cd, 0, OPC_MODRM | OPC_0F | OPC_0F38, OPT_EA | OPT_SSE, OPT_SSE)
++    /* sha256rnds2's leading operand is the implicit %xmm0 source, which has
++       no field in the encoding -- OPT_SSE0 both pins it to that one register
++       and keeps it out of the ModRM byte (see i386-asm.c).  Only the
++       three-operand spelling is here; gas also accepts a two-operand one
++       that leaves %xmm0 unwritten, which nothing in libressl uses. */
++    DEF_ASM_OP3(sha256rnds2, 0x00cb, 0, OPC_MODRM | OPC_0F | OPC_0F38, OPT_SSE0, OPT_EA | OPT_SSE, OPT_SSE)
++    DEF_ASM_OP3(sha1rnds4, 0x00cc, 0, OPC_MODRM | OPC_0F | OPC_0F3A, OPT_IM8, OPT_EA | OPT_SSE, OPT_SSE)
++
+     /* movnti should only accept REG32 and REG64, we accept more */
+     DEF_ASM_OP2(movnti, 0x0fc3, 0, OPC_MODRM, OPT_REG, OPT_EA)
+     DEF_ASM_OP2(movntil, 0x0fc3, 0, OPC_MODRM, OPT_REG32, OPT_EA)

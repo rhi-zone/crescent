@@ -1238,8 +1238,24 @@ See `docs/roadmap-v2.md` for the authoritative project roadmap and sequencing. T
   size, not correctness, and neither is a blocker for anything vendored. Kept out of
   `0013-tests` so its cases compare cleanly. Not attempted.
 
-- [ ] **libressl's SHA-NI asm needs eleven missing opcodes, not the two first reported, and
-  one of them needs new operand-matcher substrate.** `dep/libressl/crypto/sha/sha1_amd64_shani.S`
+- [x] **libressl's SHA-NI asm needs eleven missing opcodes, not the two first reported, and
+  one of them needs new operand-matcher substrate — closed by
+  `dep/tcc/patches/0033-ssse3-sse41-shani-opcodes.patch`.** All twelve mnemonics are now in
+  `x86_64-asm.h`, and the `%xmm0` operand class this entry called for exists as `OPT_SSE0`
+  in `i386-asm.c`, set by `parse_operand()` alongside `OP_EAX`/`OP_CL`/`OP_DX`/`OP_ST0`.
+  Because it is a type of its own rather than a marked-up `OPT_SSE`, it drops out of
+  `asm_opcode()`'s mod/rm and mod/reg searches with no exclusion logic — those test the
+  template's type against `OP_REG|OP_MMX|OP_SSE|OP_INDIR` — and the ordinary type match is
+  already the check that the register really is `%xmm0`. Verified in
+  `dep/tcc/patches/0033-tests/` (9 pass; 4 pass 5 fail against the `0001`–`0032` baseline)
+  and by assembling both shani files: instruction streams and `.rodata` match `gcc -c`,
+  `.text` differs only in branch-form and nop-padding choices. Design detail in
+  `docs/native-tiers.md`. Two consequences worth carrying forward: the operand-type index
+  space is now full (`OPT_DISP8` is 31, matcher masks with `& 0x1f`), and the table
+  deliberately omits three spellings `as` accepts — the MMX forms of `pshufb`/`palignr` and
+  the two-operand `sha256rnds2` — which tcc rejects rather than mis-assembles. Original
+  entry follows.
+  `dep/libressl/crypto/sha/sha1_amd64_shani.S`
   and `sha256_amd64_shani.S` use `palignr`, `pinsrd`, `pextrd`, `pshufb`, `pblendw`,
   `sha1msg1`, `sha1msg2`, `sha1nexte`, `sha1rnds4`, `sha256msg1`, `sha256msg2` and
   `sha256rnds2`; tcc's tables have none of them (confirmed by reading `x86_64-asm.h`, and by
@@ -1254,6 +1270,27 @@ See `docs/roadmap-v2.md` for the authoritative project roadmap and sequencing. T
   byte-identical to `as` (reg/reg, reg/mem, and REX.R/REX.B extended-register forms) but not
   committed: on their own they do not make either shani file assemble, so whether they land
   as a patch of their own or as part of one complete SHA-NI patch is a packaging call.
+
+- [ ] **`.octa` is the second blocker on the shani files, and it is a 128-bit-literal gap,
+  not a missing directive alias.** With `0033` applied, both
+  `dep/libressl/crypto/sha/sha1_amd64_shani.S` and `sha256_amd64_shani.S` get past every
+  opcode and then fail on `.octa 0x000102030405060708090a0b0c0d0e0f` (sha1, line 165) and
+  `.octa 0x0c0d0e0f08090a0b0405060700010203` (sha256, line 180) — the byte-shuffle masks —
+  with `unknown opcode '.octa'`. tcc has `.quad` but no `.octa`, and the reason it cannot
+  simply be aliased is the operand: tcc's assembler expression evaluator and its number
+  lexer are both 64-bit, so a 128-bit hex literal has nowhere to land. Closing this means
+  substrate in the lexer/expression layer, not a `TOK_ASMDIR_` entry. Rewriting each
+  `.octa` as two little-endian `.quad`s by hand is what `0033`'s verification assembled, and
+  with that substitution both files assemble and match `gcc -c`; that substitution is a
+  local test scaffold only, not something to patch into `dep/libressl`.
+
+- [ ] **`movbe` and `pclmulqdq` are still missing from tcc's tables, and whether they are in
+  scope is an open call.** Both were noticed while probing for `0033` and neither is needed
+  by anything currently vendored: libressl's ghash uses `.byte` encodings for `pclmulqdq`
+  rather than the mnemonic, and nothing reaches for `movbe`. `0033` deliberately did not
+  add them — it added exactly what the two shani files need — so this is a scope question
+  (does the vendored tcc aim to assemble what `as` assembles, or what the tree needs?)
+  rather than a known gap with a known fix.
 
 - [ ] **tcc's 2-byte data directives reject *any* symbol-bearing operand (`.short sym`,
   `.value sym`).** Deferred, full detail moved to `TODO-tcc-minor.md` (the prototyped

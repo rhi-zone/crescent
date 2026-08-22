@@ -1376,6 +1376,75 @@ harness to test and no place to hang one without changing that contract. The
 gap is recorded in `TODO.md`; the fix above is verified by hand to `0011`'s
 bar, but by hand only.
 
+### `0033-ssse3-sse41-shani-opcodes.patch`
+
+`0033` (i386-asm.c + x86_64-asm.h) teaches the assembler the twelve opcodes
+that libressl's two SHA-extension files need: `pshufb`, `palignr`, `pblendw`,
+`pinsrd` and `pextrd` from SSSE3/SSE4.1, and `sha1msg1`, `sha1msg2`,
+`sha1nexte`, `sha1rnds4`, `sha256msg1`, `sha256msg2` and `sha256rnds2` from
+SHA-NI. With the `0001`–`0032` stack applied and asm *enabled*, those two files
+— `crypto/sha/sha1_amd64_shani.S` and `crypto/sha/sha256_amd64_shani.S` — were
+the only ones in the whole libressl tree that tcc could not assemble; every
+other perlasm `.S`, every `att/` bignum file and all of the C already built.
+
+Eleven of the twelve are table entries in the shape `0002` established for
+AES-NI: the `OPC_0F38`/`OPC_0F3A` escape maps with the mandatory-prefix byte
+(or, for SHA-NI, no prefix byte — its opcode field's high byte is zero, which
+the prefix switch already reads as "none") in the opcode literal. Using
+`OPT_SSE` rather than `OPT_MMXSSE` for every operand is load-bearing: an
+`OPT_MMXSSE` operand makes `asm_opcode()` synthesise its own operand-size
+`0x66` to select the xmm form, which would double the mandatory prefix on the
+SSE4 entries and invent one outright on the SHA-NI ones. The 64-bit MMX forms
+of `pshufb` and `palignr` are unreachable through these entries as a result,
+and nothing needs them.
+
+`sha256rnds2` is the one that needed new substrate. It reads a third source
+operand from `%xmm0` that has no field anywhere in its encoding; gas spells
+that operand out anyway, and libressl uses the three-operand spelling. So the
+patch adds `OPT_SSE0` — an operand type meaning "`%xmm0` and nothing else",
+set by `parse_operand()` on register number 0 next to the existing `OP_EAX`,
+`OP_CL`, `OP_DX` and `OP_ST0`. Giving it its own type is what makes it work
+with no exclusion logic at all: `asm_opcode()` picks the mod/rm and mod/reg
+operands by testing the *template's* type against `OP_REG|OP_MMX|OP_SSE|
+OP_INDIR`, so a type outside that set is passed over, and the ordinary type
+match is already the check that the register really is `%xmm0`. This is a
+different mechanism from `0015`'s `OPT_VVVV`, which marks *where* an operand
+is encoded and leaves it a type of its own; `OPT_SSE0` says *what* an operand
+must be, for one that is not encoded.
+
+It also fills the operand-type index space. `OPT_DISP8` is now 31 and the
+matcher reads the index back with `& 0x1f`, so a further `OPT_xxx` has to
+widen that mask — and `ASMInstr`'s `op_type[]` with it — before it can exist.
+Nothing reaches the `1 << op2` default with index 30 or 31 (`OPT_DISP` and
+`OPT_DISP8` both have their own case), so no shift overflows a signed int.
+
+Only what libressl uses is in the table. gas additionally accepts a
+two-operand `sha256rnds2` that leaves `%xmm0` unwritten; that spelling is not
+here.
+
+**Verified.** `dep/tcc/patches/0033-tests/run.sh`: **9 pass** — five accepted
+files compared byte-for-byte against real GNU `as` (binutils 2.44) and four
+rejection cases where `as` refuses an encoding that does not exist. Against
+the `0001`–`0032` baseline the same harness reports **4 pass, 5 fail**: every
+positive case fails with `unknown opcode`, and the four negative cases pass
+for the wrong reason (the mnemonics do not exist there at all). `make test` in
+`dep/tcc` passes with the patch applied.
+
+The acceptance test is the two libressl files themselves. Both now assemble
+with tcc, and against `gcc -c` on the same sources the `.rodata` is
+byte-identical and the instruction streams match one-for-one. The `.text`
+bytes differ only where the two assemblers have a free choice — gcc emits the
+loop's forward `jmp` in the near form and pads with multi-byte `nopl`, tcc
+picks the short form and pads with `0x90` — which is the same latitude
+`tooling/scripts/verify-bignum-att-tcc.sh` allows for whole routines.
+
+**Not yet end-to-end.** A second, unrelated blocker sits behind this one: both
+files put their byte-shuffle mask in a single `.octa` directive with a 128-bit
+hex literal, which tcc has no directive for and, more to the point, no
+integer type for — its expression evaluator is 64-bit, so this is a lexer and
+expression-layer gap rather than a directive alias. Substituting two `.quad`s
+by hand is what the verification above assembled. Recorded in `TODO.md`.
+
 ### `dep/libressl/patches/`: build-system gaps, not compiler gaps
 
 The same numbered-unified-diff mechanism now also exists for
