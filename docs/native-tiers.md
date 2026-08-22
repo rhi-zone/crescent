@@ -1067,6 +1067,52 @@ inventing a marker where `ld -r` produces none. Nine `-r` shapes were measured
 side by side against `ld -r` before any code was written; all nine now agree.
 `0014-tests` still 11/11.
 
+### `0020-tinyc-version-predefine.patch`
+
+`0020` (tcc.h + tccpp.c) restores `__TINYC__` to a usable preprocessor
+number. Unlike `0001`–`0019`, it fixes damage crescent's own vendoring did
+to upstream rather than a gap in upstream.
+
+**The gap.** `tcc_predefs()` builds the predefine by slicing tcc's own
+version string — `"#define __TINYC__ 9%.2s"` over `&TCC_VERSION[4]`, i.e.
+`"0.9.XX"` → `9XX` — and `TCC_VERSION` is whatever `./configure` (or
+`win32/build-tcc.bat`) read out of the `VERSION` file. crescent overwrites
+`dep/tcc/VERSION` with the vendored commit SHA, following the
+`dep/<name>/VERSION` convention every vendored dep uses; mob is untagged and
+rolling, so a SHA is the only pin that names this exact source. The slice then
+ran over a SHA: offset 4 of `2ba12e83…` is `2e`, so tcc predefined
+`__TINYC__ 92e`, which is not a number. Every `#if __TINYC__` it compiled died
+with `exponent digits expected`, tcc's own `tests/tcctest.c:338` included.
+Present on a pristine unpatched tree since the original vendoring commit
+`9d389a37`, and reachable in asm mode too — `tcc_predefs()` runs for `.S`
+input as well, which is the file kind this whole series exists to assemble.
+
+**The fix splits the two meanings apart rather than choosing between them.**
+`TCC_VERSION` keeps meaning *which commit is vendored*: it stays the SHA, and
+the pin, `tcc -v`, the DWARF producer string and `tcc.1` are all untouched. A
+new `TCC_UPSTREAM_VERSION` in `tcc.h` means *what this source calls itself*,
+and is what the slice reads. Its value is upstream's own, not an invention —
+tinycc's `VERSION` at the pinned commit is `0.9.28rc`, so upstream's rule
+gives `928`, exactly what a tcc built from unmodified upstream there reports.
+The alternative one-file fix — putting a real version back into `VERSION` —
+was rejected because it silently discards the pin; `0020-tests` `t4` fails if
+anyone tries it.
+
+**Verified.** `0020-tests/run.sh` scores 2/5 on the `0001`–`0019` baseline and
+5/5 with `0020`; the three that move are the `#if` shape, the exact value, and
+the asm-mode case. Unlike `0019-tests` this is not meaningful against gcc —
+`__TINYC__` is tcc's own identity macro — so the external reference is
+upstream's `VERSION` file at the pinned SHA. All fourteen earlier harnesses
+score identically either side of `0020`. `tcctest.c` compiled by the patched
+tcc and run produces output byte-identical to the gcc-built `test.ref` (1062
+lines); `test1`/`test3` themselves still fail on NixOS, one stage later, in
+`-run` — pre-existing and reachable-but-not-caused, tracked separately in
+`TODO.md`. A freshly `buildvm`-generated `lj_vm.S` assembles byte-identically
+either side, the resulting luajit links and runs identically (traces, ffi,
+callbacks, coroutines), and `verify-bignum-att-tcc.sh` output is unchanged
+line for line — none of which is surprising, since none of those sources
+mention `__TINYC__`; they are the regression floor, not the demonstration.
+
 ### `dep/libressl/patches/`: build-system gaps, not compiler gaps
 
 The same numbered-unified-diff mechanism now also exists for

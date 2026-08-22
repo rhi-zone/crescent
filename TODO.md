@@ -263,7 +263,7 @@ See `docs/roadmap-v2.md` for the authoritative project roadmap and sequencing. T
   side by side against `ld -r` on nine shapes before any code was written; all nine now
   agree. `0014-tests` still 11/11.
 
-- [ ] **`dep/tcc/VERSION` holds a commit hash, which corrupts `__TINYC__` into a malformed
+- [x] **`dep/tcc/VERSION` holds a commit hash, which corrupts `__TINYC__` into a malformed
   number and breaks every `#if __TINYC__` guard.** `configure` does
   `version=$(head VERSION)` and bakes the result into `TCC_VERSION`; `tccpp.c` then builds
   the predefine as `"#define __TINYC__ 9%.2s", &TCC_VERSION[4]`, hardcoding "two characters
@@ -277,11 +277,42 @@ See `docs/roadmap-v2.md` for the authoritative project roadmap and sequencing. T
   `0.9.28rc` makes `__TINYC__` expand to `928` and both tests pass ("Auto Test OK",
   "Auto Test3 OK"). Noticed while regression-testing `0018`/`0019`, and identical on both
   sides of those, so not a regression from them.
-  **The fix is a decision, not a patch:** `VERSION` is load-bearing as the upstream pin —
-  `build-vendored.yml` and `dep/tcc/README` both treat it as the mob-branch commit SHA,
-  since mob is untagged. Decoupling the pin from the version string (a separate `COMMIT`
-  file, or making `configure`/`tccpp.c` tolerate a non-`0.9.` version) is an owner call
-  about how the vendoring tracks upstream. Not attempted.
+  **Resolved by `0020-tinyc-version-predefine.patch` (owner call taken 2026-08-22):** keep
+  `VERSION` meaning *which commit is vendored* — it stays the SHA, and `build-vendored.yml`,
+  `dep/tcc/README`, `tcc -v` and the DWARF producer string are all untouched — and add a
+  separate `TCC_UPSTREAM_VERSION` in `tcc.h` meaning *what this source calls itself*, which
+  is what `tccpp.c`'s slice now reads. The value is upstream's own, not invented: tinycc's
+  `VERSION` at `2ba12e83` is `0.9.28rc` (fetched at that exact SHA; corroborated in-tree by
+  `Changelog`'s top entry and `win32/tcc-win32.txt`), so upstream's `0.9.XX` → `9XX` rule
+  gives `928` — what a tcc built from unmodified upstream at this commit would report.
+  Harness in `dep/tcc/patches/0020-tests/` (5 checks; 2/5 on `0001`–`0019`, 5/5 with `0020`).
+  Note for re-vendoring: moving the pin to a commit with a different upstream `VERSION`
+  means updating `TCC_UPSTREAM_VERSION` and the expected `928` in `0020-tests` together.
+
+  **One correction to the paragraph above, measured 2026-08-22.** `test1`/`test3` do *not*
+  pass on this NixOS box even with `__TINYC__` fixed; they now fail later, at
+  `tcc: error: relocation '2' out of range`, in the `-run` in-memory execution path. That is
+  independent of this patch — the `0001`–`0019` baseline fails identically when
+  `__TINYC__` is forced valid from the command line (`-U__TINYC__ -D__TINYC__=928`), so it
+  is reachable-but-pre-existing rather than caused. What *was* verified here is the thing
+  `test1`/`test3` actually assert: `tcctest.c` compiled by the patched tcc to an executable
+  and run under the nix loader produces output byte-identical to the gcc-built `test.ref`
+  (1062 lines, zero diff). The earlier "Auto Test OK" report was presumably from an
+  environment where `-run` works; whether the relocation failure is NixOS-specific or shows
+  up in CI too is untested. Separate item, not folded into this one.
+
+- [ ] **`tcc -run` fails with `relocation '2' out of range` on `tests/tcctest.c`, which is
+  what now blocks tcc's own `test1`/`test3` here.** Surfaced only once `__TINYC__` was fixed
+  (`0020`) — before that the run died in the preprocessor and never reached codegen.
+  Pre-existing, not caused by any patch: the `0001`–`0019` baseline fails identically when
+  `__TINYC__` is forced valid from the command line. `2` is `R_X86_64_PC32`, so this is the
+  familiar `-run` problem of mmap'd code landing further than ±2GB from the libc it calls;
+  `-run` on smaller inputs (including `-run ../tcc.c` itself, three levels deep) works fine
+  on the same box, so it is size- or layout-dependent rather than broken outright. The same
+  `tcctest.c` compiled to an executable and run under the nix loader matches the gcc
+  reference output exactly, so codegen is not implicated. Measured on NixOS only —
+  **first step is to check whether CI's Alpine container hits it at all**, since if it does
+  not, `test1`/`test3` are runnable in CI and worth wiring up. Not attempted.
 
 - [ ] **tcc segfaults on a truncated object file, or one whose `sh_name` points past the
   end of `.shstrtab`.** Pre-existing and unrelated to

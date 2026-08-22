@@ -1,0 +1,36 @@
+--- a/dep/tcc/tcc.h
++++ b/dep/tcc/tcc.h
+@@ -25,6 +25,18 @@
+ #define _DARWIN_C_SOURCE
+ #include "config.h"
+ 
++/* Upstream's own self-reported version for this source: the contents of
++   tinycc's VERSION file at the vendored commit. Deliberately distinct from
++   TCC_VERSION. crescent repurposes dep/tcc/VERSION -- which ./configure and
++   win32/build-tcc.bat turn into TCC_VERSION -- as the vendoring pin, holding
++   the mob-branch commit SHA, because mob is untagged and rolling. TCC_VERSION
++   is therefore a provenance string, not a version number; anything needing a
++   real version number must read TCC_UPSTREAM_VERSION instead. Bump this
++   whenever the pin is moved to a commit with a different upstream VERSION. */
++#ifndef TCC_UPSTREAM_VERSION
++# define TCC_UPSTREAM_VERSION "0.9.28rc"
++#endif
++
+ #include <stdarg.h>
+ #include <stdlib.h>
+ #include <stdio.h>
+--- a/dep/tcc/tccpp.c
++++ b/dep/tcc/tccpp.c
+@@ -3658,7 +3658,11 @@
+ 
+ static void tcc_predefs(TCCState *s1, CString *cs, int is_asm)
+ {
+-    cstr_printf(cs, "#define __TINYC__ 9%.2s\n", &TCC_VERSION[4]);
++    /* "0.9.XX" -> 9XX. Sliced out of TCC_UPSTREAM_VERSION, not TCC_VERSION:
++       the latter is crescent's commit-SHA vendoring pin, and slicing a SHA
++       here produced a non-numeric __TINYC__ (e.g. 92e), which turned every
++       `#if __TINYC__` guard into a preprocessor error. */
++    cstr_printf(cs, "#define __TINYC__ 9%.2s\n", &TCC_UPSTREAM_VERSION[4]);
+     putdefs(cs, target_machine_defs);
+     putdefs(cs, target_os_defs);
+ 
