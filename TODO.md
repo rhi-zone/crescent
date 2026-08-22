@@ -431,6 +431,46 @@ See `docs/roadmap-v2.md` for the authoritative project roadmap and sequencing. T
   `SHF_X86_64_LARGE` — tcc has no large code model and no name for that flag in its `elf.h`.
   (`.gnu.linkonce.b*`, also missing from `0021`, was added by `0022`.)
 
+  **Measured 2026-08-22 against binutils 2.44, and it does not close as one patch.** Two
+  claims above needed correcting and the rest splits three ways with different costs, so
+  the scope is an open call rather than an implementation detail.
+
+  Corrections. `as` does not *warn* on an unrecognized flag character — it is a **Fatal
+  error**, exit 1, no object written: `bad .section directive: want a,l,w,x,M,S,G,T in
+  string`. And that message does not describe the accepted set: characters silently
+  accepted are `a e l o w x R S T`, the digits `0`–`9`, and `? + -`; `d` is accepted and
+  sets `D`; `M` and `G` are accepted but demand an operand (`entity size for SHF_MERGE not
+  specified` / `group name for SHF_GROUP not specified`); everything else is fatal. The
+  meaning of the digits and of `? + -` was not determined.
+
+  What tcc does today with each, measured side by side: `awT`/`awe`/`awR`/`awd` all come
+  out `WA` where `as` gives `WAT`/`WAE`/`WAR`/`WAD` — silently dropped, as recorded. But
+  `aMS,…,1`, `axG,…,mygrp,comdat` and `ao,…,.bar` are **not** silently dropped: tcc errors
+  `end of line expected`, because the extra operand after the type is grammar it has never
+  seen. Loud rejection, not wrong output.
+
+  The three slices:
+
+  1. **Plain bits, no grammar change** — `T` (`SHF_TLS`), `e` (`SHF_EXCLUDE`), `R`
+     (`SHF_GNU_RETAIN`), `d` (`SHF_GNU_MBIND`). Parsing only; `0021`'s name-attribute
+     override does not interfere, since a non-special name has no `attr` to win over the
+     string. `T` is the one with downstream machinery already present (the linker handles
+     TLS sections via the `.tdata`/`.tbss` name entries). `e`/`R`/`d` would be bits tcc
+     records for a real `ld` and does not itself act on — defensible for object output,
+     but it is a decision about what "supported" means here, not a measurement.
+  2. **Extra-operand flags** — `M`/`S` (entity size → `sh_entsize`), `G` (group name plus
+     linkage → a COMDAT `.group` section, an ELF feature tcc's linker does not have), `o`
+     (linked section → `sh_link`). Each needs the operand grammar *and* the machinery
+     behind it. Real feature work, and `G` is the largest by a wide margin.
+  3. **The unrecognized-character diagnostic** — matching `as` means turning silence into
+     a fatal error, i.e. tcc starts rejecting inputs it accepts today. Whether that is
+     wanted, and whether the oddities in `as`'s accepted set (digits, `? + -`) get
+     reproduced or just not-rejected, are both calls to make before writing anything.
+
+  `l` (`SHF_X86_64_LARGE`) stays out under any of these: tcc has no large code model, so
+  there is nothing to derive the flag *for* — same reason the `.lrodata`/`.ldata`/`.lbss`
+  name-table entries stay out, noted above.
+
 - [x] **`tcc -run` could not relocate a genuinely non-allocated section — fixed by
   `dep/tcc/patches/0023-run-unplaced-section-relocs.patch`.** The defect `0004` exposed and
   `0021` moved out of the way rather than removed. `tccrun.c` assigns runtime addresses only
