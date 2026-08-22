@@ -502,7 +502,14 @@ jobs:
         # binary until installed explicitly. Confirmed broken in run
         # 32453775057 (2026-08-21): "git: not found", exit 127, before any
         # patch content was even read -- unrelated to patch correctness.
-        run: apk add --no-cache build-base git
+        # bash is required here (not just build-base/git): three of the
+        # dep/tcc/patches/*-tests/run.sh harnesses (0014, 0018, 0019) use
+        # bash-only redirection (herestrings, `<<<`) that busybox sh's
+        # `sh -n` rejects with "syntax error: unexpected redirection". The
+        # other 15 harnesses parse and run fine under busybox sh, but all
+        # 18 are invoked via their `#!/usr/bin/env bash` shebang below, so
+        # bash has to be on PATH for any of them, not just the three.
+        run: apk add --no-cache build-base git bash
       - name: Apply dep/tcc/patches (assembler/opcode-table fixes; see dep/tcc/patches/ and docs/native-tiers.md)
         run: git apply dep/tcc/patches/0001-plt-suffix.patch dep/tcc/patches/0002-libressl-sse-aesni-opcodes.patch dep/tcc/patches/0003-asm-forward-label-diff-and-leb128.patch dep/tcc/patches/0004-asm-section-flags-alloc.patch dep/tcc/patches/0005-asm-leb128-relaxation.patch dep/tcc/patches/0006-dwarf-section-flag-and-debug-retention.patch dep/tcc/patches/0007-reserved-section-gate-and-eh-frame-retention.patch dep/tcc/patches/0008-pt-gnu-stack.patch dep/tcc/patches/0009-reserved-section-input-side-gate.patch dep/tcc/patches/0010-extended-sse-registers.patch dep/tcc/patches/0011-sse-mov-operand-types.patch dep/tcc/patches/0012-asm-value-directive.patch dep/tcc/patches/0013-asm-macro-body-dollar-lexing.patch dep/tcc/patches/0014-note-gnu-stack-object-marker.patch dep/tcc/patches/0015-adx-bmi2-opcodes.patch dep/tcc/patches/0016-asm-rept-replay-double-capture.patch dep/tcc/patches/0017-asm-macro-and-conditional-directives.patch dep/tcc/patches/0018-elf-target-predefine.patch dep/tcc/patches/0019-note-gnu-stack-merge-raise.patch dep/tcc/patches/0020-tinyc-version-predefine.patch dep/tcc/patches/0021-asm-section-name-attrs.patch dep/tcc/patches/0022-asm-section-type.patch dep/tcc/patches/0023-run-unplaced-section-relocs.patch
       - name: Build (built with the container's own gcc, per dep/tcc/README's documented ./configure && make)
@@ -533,14 +540,29 @@ jobs:
         # this was measured: --config-musl is what makes lib/bcheck.c compile
         # against musl (the CONFIG_TCC_MUSL HAVE_CTYPE gate), and the build
         # step above already passes it, so memtest/btest run like the rest.
-        #
-        # The per-patch harnesses in dep/tcc/patches/*-tests/ are NOT run here
-        # -- see TODO.md; three of them need bash, which alpine:latest has not
-        # got, and that is a call to make deliberately rather than by adding a
-        # package in passing.
         run: |
           cd dep/tcc
           make test
+      - name: Test (per-patch harnesses in dep/tcc/patches/*-tests/)
+        # Each harness verifies its own patch's specific fix against real
+        # GNU as/readelf/objdump output (see dep/tcc/patches/*-tests/README.md).
+        # Every run.sh takes the built tcc binary as $1 and exits non-zero
+        # if any of its checks fail ("[ \"$fail\" -eq 0 ]" as the last line),
+        # so this loop gates the job the same way `make test` above does.
+        run: |
+          cd dep/tcc
+          status=0
+          for d in patches/*-tests; do
+            echo "::group::${d}"
+            if bash "$d/run.sh" "$PWD/tcc"; then
+              echo "PASS: $d"
+            else
+              echo "FAIL: $d"
+              status=1
+            fi
+            echo "::endgroup::"
+          done
+          exit "$status"
       - name: Package
         run: |
           cd dep/tcc

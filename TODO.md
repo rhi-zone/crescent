@@ -418,14 +418,22 @@ See `docs/roadmap-v2.md` for the authoritative project roadmap and sequencing. T
   resolve to `file:line` unchanged in dwarf-4, dwarf-5 and stabs modes; tcc's own
   `make test` — `btest` included — reaches `ALL TESTS PASSED` either side.
 
-- [ ] **The per-patch harnesses in `dep/tcc/patches/*-tests/` are still not run by CI.**
+- [x] **The per-patch harnesses in `dep/tcc/patches/*-tests/` are still not run by CI.**
   `make test` is wired now (see the `0021` item above), but the ~18 `run.sh` scripts that
   encode what each patch actually fixed are only ever run by hand, which is how a harness
-  rots. Measured in the CI container (alpine:latest + `build-base`): 15 of them pass under
-  busybox `sh`, and `0014`/`0018`/`0019` die with `syntax error: unexpected redirection`
-  because they use bash process substitution and alpine has no bash. So wiring them means
-  either adding `bash` to that job or rewriting three scripts — a call worth making
-  deliberately rather than slipping a package into an unrelated commit.
+  rots. Re-measured in the CI container (alpine:latest + `build-base`) with `0021`-`0023`
+  landed, via `sh -n` on each `run.sh`: 15 of the 18 still parse clean under busybox `sh`,
+  and `0014`/`0018`/`0019` still die with `syntax error: unexpected redirection` -- the
+  actual offending construct is bash herestrings (`<<<"$(marker ...)"`), not process
+  substitution as originally described here (`0017` uses `<(...)` process substitution and
+  parses fine under busybox `ash`, which supports it as an extension). Closed by adding
+  `bash` to the `tcc-linux-x86_64` job's `apk add` step and a new step in
+  `.github/workflows/build-vendored.yml` that loops `patches/*-tests/run.sh "$PWD/tcc"`
+  after the build and `make test`, failing the job on any non-zero exit (every harness ends
+  `[ "$fail" -eq 0 ]`, so this gates the same way `make test` does). Verified end to end in
+  a real `alpine:latest` docker container: all 23 patches apply, tcc builds
+  (`--config-musl`), `make test` passes, and all 18 harnesses pass, `0014`/`0018`/`0019`
+  included, with `bash` installed.
 
 - [ ] **tcc segfaults on a truncated object file, or one whose `sh_name` points past the
   end of `.shstrtab`.** Pre-existing and unrelated to
