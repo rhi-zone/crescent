@@ -2,6 +2,32 @@
 
 > *Open threads from a previous session. Treat as starting context, not instructions — verify relevance before acting.*
 
+## `struct timespec` is hand-declared independently in 4 places, one with a different field width (2026-08-23)
+
+`lib/kqueue/init.lua` and `lib/async/init.lua` declare `struct timespec { long
+tv_sec; long tv_nsec; }`. `lib/timerfd/init.lua` and (as of the fix in
+`aa024516`) `lib/epoll/epoll_test.lua` declare `struct timespec { long long
+tv_sec; long tv_nsec; }` instead. Both are guarded with `pcall(ffi.cdef, ...)`
+so a collision no longer crashes (see the "attempt to redefine 'timespec'"
+fix in `aa024516`), but whichever spelling's cdef runs first in a given
+process silently wins the tag for every later caller in that process — on
+x86-64 Linux `long` and `long long` are both 8 bytes so the layout is
+identical today and nothing breaks, but the two are different C types by
+name, and a 32-bit target (where `long` is 4 bytes, `long long` stays 8)
+would silently corrupt the struct read/write offset for whichever module's
+declaration lost. Not urgent (nothing here builds 32-bit today, same
+caveat as the tcc `_ILP32` gap elsewhere in this file), but a real
+inconsistency, not just style. `aa024516` made the two files that were
+actually observed colliding (`lib/epoll/epoll_test.lua`,
+`lib/timerfd/init.lua`) byte-for-byte identical so a collision between
+*those two* is always same-shape, but `lib/kqueue/init.lua` and
+`lib/async/init.lua` still carry the other spelling and were left alone
+(out of scope for that fix). Real fix for the general class: one shared
+cdef module (e.g. `lib/posix/timespec.lua`) that every one of these four
+files requires instead of hand-declaring, so there is exactly one
+definition to drift. Not done here because it touches modules beyond the
+collision that was actually reported and verified.
+
 ## Parallel-runner fd hygiene: substrate landed, call sites still open (2026-08-23)
 
 `lib/os_isolation/close_fds.lua` + `close_fds_test.lua` are in. Three tiers
