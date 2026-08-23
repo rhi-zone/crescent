@@ -1,9 +1,36 @@
 local ffi = require("ffi")
 if ffi.os ~= "Linux" then return end
 
+-- struct timespec/itimerspec are also declared by lib.timerfd (and, with a
+-- differently-shaped struct timespec, by lib.async and lib.kqueue -- see the
+-- TODO.md entry on consolidating these). LuaJIT errors on redeclaring a
+-- struct tag (even identically) but allows redeclaring an identical function
+-- prototype, so only the struct decls need the pcall guard -- this is the
+-- same convention lib/kqueue/init.lua and lib/async/init.lua already use.
+-- Without it, this file colliding with lib/timerfd/timerfd_test.lua's
+-- `require("lib.timerfd")` in the same worker process (whichever runs its
+-- struct cdef second) throws "attempt to redefine 'timespec'" and aborts
+-- that worker's whole test run.
+--
+-- The two structs are declared in SEPARATE pcall calls, not one string: a
+-- single ffi.cdef call aborts entirely on its first parse error, so bundling
+-- both in one pcall'd string meant that whenever `struct timespec` collided
+-- (already declared, even identically) `struct itimerspec` silently never
+-- got declared either -- not just here-and-suppressed but genuinely absent,
+-- surfacing later as "undeclared or implicit tag 'itimerspec'" wherever this
+-- file's own itimerspec-typed code ran. Measured live: this exact failure
+-- reproduced when lib.timerfd's cdef ran first in the same worker process.
+--
+-- The `long long tv_sec` spelling here (rather than plain `long`, which is
+-- what lib.kqueue/lib.async use) matches lib.timerfd's struct timespec
+-- byte-for-byte, so that IF this file's declaration loses the race against
+-- lib.timerfd's, the two are textually identical and the loser's pcall
+-- failure changes nothing observable -- unlike a same-name-different-layout
+-- struct, where whichever module's cdef happened to run first would
+-- silently decide the field layout every later caller in the process gets.
+pcall(ffi.cdef, "struct timespec { long long tv_sec; long tv_nsec; };")
+pcall(ffi.cdef, "struct itimerspec { struct timespec it_interval; struct timespec it_value; };")
 ffi.cdef([[
-  struct timespec { long tv_sec; long tv_nsec; };
-  struct itimerspec { struct timespec it_interval; struct timespec it_value; };
   int timerfd_create(int clockid, int flags);
   int timerfd_settime(int fd, int flags, void *new_value, void *old_value);
   long read(int fd, void *buf, unsigned long count);

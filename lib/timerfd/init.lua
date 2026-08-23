@@ -29,17 +29,37 @@ if ffi.os == "Windows" then
 	-- FIXME
 else
 	-- https://github.com/torvalds/linux/blob/c766d1472c70d25ad475cf56042af1652e792b23/include/uapi/linux/time.h
-	ffi.cdef [[
+	-- struct timespec/itimerspec are also declared by lib.epoll's test file
+	-- (kept textually identical to this declaration on purpose -- see that
+	-- file's comment) and, with a differently-shaped struct timespec, by
+	-- lib.async and lib.kqueue (see the TODO.md entry on consolidating
+	-- these). LuaJIT errors on redeclaring a struct tag (even identically)
+	-- but allows redeclaring an identical function prototype, so only the
+	-- struct decls need the pcall guard -- same convention lib/kqueue/init.lua
+	-- and lib/async/init.lua already use.
+	--
+	-- The two structs are declared in SEPARATE pcall calls, not one string:
+	-- a single ffi.cdef call aborts entirely on its first parse error, so
+	-- bundling both in one pcall'd string meant that whenever `struct
+	-- timespec` collided (already declared, even identically) `struct
+	-- itimerspec` silently never got declared either -- surfacing later as
+	-- "undeclared or implicit tag 'itimerspec'" or "bad argument #1 to
+	-- 'itimerspec' (size of C type is unknown or too large)" wherever this
+	-- module's own itimerspec-typed code ran. Measured live in the parallel
+	-- test runner.
+	pcall(ffi.cdef, [[
 		struct timespec {
 			long long tv_sec;
 			long tv_nsec;
 		};
-
+	]])
+	pcall(ffi.cdef, [[
 		struct itimerspec {
 			struct timespec it_interval;
 			struct timespec it_value;
 		};
-
+	]])
+	ffi.cdef [[
 		int close(int fd);
 		ssize_t read(int fd, void *buf, size_t count);
 
