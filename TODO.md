@@ -2,6 +2,72 @@
 
 > *Open threads from a previous session. Treat as starting context, not instructions — verify relevance before acting.*
 
+## `build-vendored.yml`: tcc-windows regression fixed, tcc-linux-aarch64 gap recorded (2026-08-23)
+
+- [x] **`tcc-windows-x86`/`tcc-windows-x86_64` regressed (previously green) the moment
+  `build-vendored.yml` started applying the full `0001`–`0039` patch series to the Windows
+  jobs instead of a short prefix.** Root-caused from the real CI logs (`gh run view --job
+  <id> --log`), not guessed: both jobs failed identically —
+  `dep\tcc\tccelf.c(3595): error C2065: 'off_t': undeclared identifier` — in the `cl
+  -Felibtcc.dll -LD ..\libtcc.c -DTCC_TARGET_PE ...` step. `off_t` comes from `0030`
+  (`d775984d`, "bounds-check the ELF object reader"), which predates the workflow change and
+  had never actually been applied to a Windows job before — CI's own history shows the
+  pre-update `tcc-windows-x86` job (run `32629386672`, head `59b4e224`) applying only
+  `0001`–`0007`, before `0030` existed in that list, and still succeeding; the same run's
+  `tcc-linux-x86_64` job compiles the identical `off_t` line under gcc without complaint on
+  both sides of the change (gcc always has `off_t` via `<unistd.h>`). `tcc.h`'s Windows
+  branch (`#ifdef _WIN32`) pulls in `<io.h>` for the POSIX-named `lseek`/`open`/`close`
+  shims but never `<sys/types.h>`, so `off_t` is genuinely undeclared there — this was a
+  latent, never-Windows-tested defect in `0030` itself, not a defect introduced by `0039`
+  (the `_LP64` predefine everyone's first guess landed on, including the initial hypothesis
+  going into this investigation — checked and ruled out: `0039` only touches
+  `include/tccdefs.h`, a data file consulted by target code TCC itself compiles later, not
+  by `cl` compiling `libtcc.c`; confirmed no diff in `tccelf.c`/`tcc.h` content between the
+  passing and failing runs beyond the new patches' own hunks, and `0039`'s hunk doesn't
+  touch `tccelf.c` at all). Fixed by editing `0030` in place (regenerated as a real diff —
+  applied `0001`–`0029` to a scratch copy, hand-edited the result, diffed, and verified the
+  regenerated patch reproduces byte-identical output and still applies cleanly against the
+  same base) rather than layering a `0040` patch on top: this is a type-correctness bug in
+  `0030`'s own new code, not a new gap. `off_t end = lseek(fd, 0, SEEK_END);` in the new
+  `file_size()` helper is now `long end = lseek(fd, 0, SEEK_END);`, matching every other
+  `lseek()` call site already in this file (`load_data()`, `read_ar_header()`), all of which
+  already treat the offset as `long`/`int`, never `off_t` — `0030` was the only `off_t` in
+  the entire tcc source tree. Verified: all 39 patches (`git apply` with the exact multi-arg
+  invocation `build-vendored.yml` uses) apply cleanly in sequence against a fresh checkout;
+  `gcc -o tccelf.o -c tccelf.c ...` still compiles clean (built a full working `tcc` binary
+  from the patched tree via `./configure --config-musl && make`, same as the
+  `tcc-linux-x86_64` job). Could not compile-verify under actual MSVC (no Windows/MSVC
+  toolchain available in this environment) — real confirmation is the next
+  `build-vendored.yml` run's `tcc-windows-x86`/`tcc-windows-x86_64` jobs.
+
+- [ ] **`tcc-linux-aarch64` fails independently, pre-existing, not touched by the Windows
+  fix above — root cause not found, needs an aarch64-capable environment to continue.**
+  From the real job log (`gh run view --job 97175691113 --log`): the native aarch64 `tcc`
+  that `./configure --config-musl && make` just built (in GitHub's `alpine:latest`
+  aarch64 container, matching `tcc-linux-x86_64`'s recipe exactly) fails compiling its own
+  `lib/bcheck.c` — `../tcc -c bcheck.c -o ../bcheck.o -B.. -I.. -bt` —
+  with `../include/stddef.h:6: error: incompatible redefinition of 'wchar_t'`, reached via
+  `bcheck.c:25` → `#include <stdatomic.h>` → `#include <stddef.h>`. The identical build step
+  on `tcc-linux-x86_64` (same run, same source, same `tccdefs.h`, `__WCHAR_TYPE__` resolves
+  to plain `int` on Linux for both architectures per `include/tccdefs.h`) compiles this exact
+  file cleanly and proceeds into `make test`. So this is genuinely arm64-specific in tcc's
+  own compiler, not an environment or predef difference — but *where* it diverges wasn't
+  found: `wchar_t` isn't a tcc built-in keyword (grepped `tcctok.h`/`tccgen.c` — no
+  arm64-conditional handling of it anywhere), `_STDDEF_H`'s include guard is architecture-
+  independent, and `__WCHAR_TYPE__`'s definition in `tccdefs.h` doesn't branch on
+  `__aarch64__` vs `__x86_64__` at all (only on OS). That means either (a) `stddef.h` is
+  somehow being read/expanded twice with the guard not deduping — which would need to be
+  something in tcc's own preprocessor state handling that differs on the arm64 backend, not
+  in this header — or (b) something in tcc's arm64 codegen/parser path predefines or
+  builtin-declares `wchar_t` before the header gets to it, not found by inspection. Not
+  guessed at further: this needs either real aarch64 hardware/QEMU (unavailable in this
+  session — no `qemu-aarch64-static`, and `docker run --platform linux/arm64` fails with
+  `exec format error`, no binfmt_misc registered) to reproduce and bisect against
+  `tccgen.c`'s typedef-redefinition-compatibility check, or a maintainer with access to one.
+  Toolchain-parity baseline for whoever picks this up: gcc/clang cross-compiling the same
+  `bcheck.c` for aarch64 has no trouble with `wchar_t`, so this is a tcc-side gap, not an
+  upstream libc/header issue — measure against that, not against guesswork.
+
 ## `lib.sandbox`'s instruction-budget mechanism is retired — won't-fix via jit.off, moved off it instead (2026-08-23)
 
 - [x] **The `jit.off()`/`jit.on()` fix (`eb2a1393`, recorded as `[x]` "fixed"

@@ -20,7 +20,7 @@
          ptr = s->data + rel->r_offset;
          sym_index = ELFW(R_SYM)(rel->r_info);
          sym = &((ElfW(Sym) *)symtab_section->data)[sym_index];
-@@ -3482,6 +3495,55 @@
+@@ -3482,6 +3495,61 @@
      return data;
  }
  
@@ -66,17 +66,23 @@
 +}
 +
 +/* Size of the file behind `fd', restoring nothing: every caller here seeks
-+   explicitly before it reads. */
++   explicitly before it reads. `long`, not `off_t`: every other lseek() call
++   in this file (see load_data() above and read_ar_header() below) already
++   treats the offset as `long`, and unlike them `off_t` is never declared
++   under _WIN32 here -- tcc.h's Windows branch pulls in <io.h> for the
++   POSIX-named lseek()/open()/close() shims but never <sys/types.h>, so
++   `off_t` is an undeclared identifier there (MSVC: C2065). `long` matches
++   both the file's own convention and what _lseek() actually returns. */
 +static unsigned long file_size(int fd)
 +{
-+    off_t end = lseek(fd, 0, SEEK_END);
++    long end = lseek(fd, 0, SEEK_END);
 +    return end < 0 ? 0 : (unsigned long)end;
 +}
 +
  typedef struct SectionMergeInfo {
      Section *s;            /* corresponding existing section */
      unsigned long offset;  /* offset of the new section in the existing section */
-@@ -3508,6 +3570,54 @@
+@@ -3508,6 +3576,54 @@
      return 0;
  }
  
@@ -131,7 +137,7 @@
  /* load an object file and merge it with current files */
  /* XXX: handle correctly stab (debug) info */
  ST_FUNC int tcc_load_object_file(TCCState *s1,
-@@ -3525,7 +3635,23 @@
+@@ -3525,7 +3641,23 @@
      ElfW(Sym) *sym, *symtab;
      ElfW_Rel *rel;
      Section *s;
@@ -155,7 +161,7 @@
      lseek(fd, file_offset, SEEK_SET);
      if (tcc_object_type(fd, &ehdr) != AFF_BINTYPE_REL)
          goto invalid;
-@@ -3535,14 +3661,53 @@
+@@ -3535,14 +3667,53 @@
  invalid:
          return tcc_error_noabort("invalid object file");
      }
@@ -213,7 +219,7 @@
  
      /* An input object carrying no .note.GNU-stack section has made exactly
         the statement an assembled source without the directive makes: it may
-@@ -3564,13 +3729,9 @@
+@@ -3564,13 +3735,9 @@
      }
  
      /* load symtab and strtab */
@@ -227,7 +233,7 @@
  
      for(i = 1; i < ehdr.e_shnum; i++) {
          sh = &shdr[i];
-@@ -3580,12 +3741,38 @@
+@@ -3580,12 +3747,38 @@
                  goto the_end;
              }
              nb_syms = sh->sh_size / sizeof(ElfW(Sym));
@@ -269,7 +275,7 @@
          }
  	if (sh->sh_flags & SHF_COMPRESSED)
  	    seencompressed = 1;
-@@ -3748,6 +3935,13 @@
+@@ -3748,6 +3941,13 @@
          if (sh->sh_link > 0)
              s->link = sm_table[sh->sh_link].s;
          if (sh->sh_type == SHT_RELX) {
@@ -283,7 +289,7 @@
              s->sh_info = sm_table[sh->sh_info].s->sh_num;
              /* update backward link */
              s1->sections[s->sh_info]->reloc = s;
-@@ -3762,8 +3956,19 @@
+@@ -3762,8 +3962,19 @@
  
      sym = symtab + 1;
      for(i = 1; i < nb_syms; i++, sym++) {
