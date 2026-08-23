@@ -21,11 +21,15 @@ if ffi_ok then
 			ssize_t write(int fd, const void *buf, size_t count);
 			int close(int fd);
 			long sysconf(int name);
+			int setpgid(int pid, int pgid);
+			int kill(int pid, int sig);
 		]]
 	end)
 	local sym_ok = pcall(function() return ffi.C.fork ~= nil end)
 	fork_available = (ffi_ok and sym_ok) == true
 end
+
+local SIGKILL = 9
 
 --: () -> integer
 local function get_cpu_count()
@@ -319,7 +323,21 @@ end
 
 -- ── parallel runner ───────────────────────────────────────────────────────────
 
-local function run_parallel(file_list, n)
+-- Per-worker wall-clock budget before the parent kills the worker's whole
+-- process group. Measured 2026-08-23 on this machine: a full `bin/cr test`
+-- parallel run (pre-this-fix, sequential-drain runner) completes in ~21s wall
+-- clock, which upper-bounds the slowest single worker's true runtime (all
+-- workers run concurrently, so total wall time can't be less than the
+-- slowest one -- though on the buggy runner it can also be inflated by
+-- pipe-blocking artifacts from the very livelock this change fixes). ~5.7x
+-- that (120s) is the default: generous enough to tolerate a slower or loaded
+-- CI host without the timeout firing on legitimate work, short enough to
+-- still catch a genuine hang instead of waiting indefinitely. Override via
+-- the timeout_s parameter for callers that know their own budget.
+local DEFAULT_WORKER_TIMEOUT_S = 120
+
+local function run_parallel(file_list, n, timeout_s)
+	timeout_s = timeout_s or DEFAULT_WORKER_TIMEOUT_S
 	-- Distribute files round-robin across n workers.
 	local buckets = {}
 	for i = 1, n do buckets[i] = {} end
@@ -335,8 +353,16 @@ local function run_parallel(file_list, n)
 		end
 	end
 
-	-- Fork workers, create a pipe per worker.
+	-- Fork workers, create a pipe per worker. Each worker is put in its own
+	-- process group (setpgid(0,0) in the child) so a timeout can kill(-pgid)
+	-- the whole subtree, not just the direct child -- a worker that spawns
+	-- its own children (e.g. via lib.os_isolation) would otherwise leave
+	-- orphans behind. Both parent and child call setpgid on the same pid to
+	-- avoid the fork/setpgid race: whichever runs first wins, and by the
+	-- time the parent might need to kill the group it is guaranteed set.
+	local close_fds_ok, close_fds = pcall(require, "lib.os_isolation.close_fds")
 	local pids    = {}
+	local pgids   = {}
 	local read_fds = {}
 	local pipefd  = ffi.new("int[2]")
 
@@ -353,40 +379,111 @@ local function run_parallel(file_list, n)
 			io.stderr:write("fork() failed\n")
 			os.exit(2)
 		elseif pid == 0 then
-			-- Child: close read end, run worker, exit.
+			-- Child: become its own process group leader, close every fd
+			-- except stdio and this worker's own pipe write end (drops
+			-- leaked read ends from earlier sibling workers' pipes, still
+			-- open in this child because it was forked after they were
+			-- created), close read end, run worker, exit.
+			ffi.C.setpgid(0, 0)
+			if close_fds_ok then close_fds.close_fds_except({ 0, 1, 2, wfd }) end
 			ffi.C.close(rfd)
 			run_worker(bucket, wfd)
 			-- run_worker calls os.exit; unreachable.
 		else
-			-- Parent: close write end, remember read end + pid.
+			-- Parent: close write end, remember read end + pid + pgid.
+			ffi.C.setpgid(pid, pid)
 			ffi.C.close(wfd)
 			pids[i]     = pid
+			pgids[i]    = pid -- setpgid(pid, pid) makes the pgid == the pid
 			read_fds[i] = rfd
 		end
 	end
 
-	-- Read all worker output (workers may finish in any order).
-	-- We read from each pipe sequentially; workers write ≤ a few KB, so no deadlock.
+	-- Multiplex all worker pipes concurrently via io_poll instead of
+	-- draining them one at a time: a worker that writes more than one pipe
+	-- buffer of output blocks on write() until the parent reads it, and a
+	-- sequential drain only reads pipe i after pipes 1..i-1 have hung up --
+	-- so a slow/quiet worker ahead of a chatty one starves the chatty one's
+	-- write() indefinitely. Concurrent readiness-driven draining removes
+	-- that ordering dependency entirely.
+	local io_poll_ok, io_poll = pcall(require, "lib.io_poll")
 	local all_lines = {}
-	local chunk_size = 4096
-	local buf = ffi.new("uint8_t[4096]")
+	local buf_by_i = {}
+	local done_by_i = {}
+	local counted_by_i = {}
+	local remaining = #workers
 
-	for i = 1, #workers do
-		local rfd = read_fds[i]
-		local chunks = {}
-		while true do
-			local n = ffi.C.read(rfd, buf, chunk_size)
-			if n <= 0 then break end
-			chunks[#chunks + 1] = ffi.string(buf, n)
+	if io_poll_ok and remaining > 0 then
+		local poller = io_poll.new()
+		for i = 1, #workers do
+			buf_by_i[i] = {}
+			local rfd = read_fds[i]
+			poller:add(rfd, function(data)
+				buf_by_i[i][#buf_by_i[i] + 1] = data
+			end, function()
+				done_by_i[i] = true
+			end)
 		end
-		ffi.C.close(rfd)
-		local text = table.concat(chunks)
-		for line in text:gmatch("[^\n]+") do
-			all_lines[#all_lines + 1] = line
+
+		local start_by_i = {} --[[: { [integer]: integer } ]]
+		local now = os.time()
+		for i = 1, #workers do start_by_i[i] = now end
+
+		local POLL_TICK_MS = 200 -- wake periodically even with no I/O, to check timeouts
+		while remaining > 0 do
+			poller:wait(POLL_TICK_MS)
+
+			local t = os.time()
+			for i = 1, #workers do
+				if done_by_i[i] and not counted_by_i[i] then
+					counted_by_i[i] = true
+					remaining = remaining - 1
+				elseif not done_by_i[i] and (t - start_by_i[i]) >= timeout_s then
+					-- Kill the whole process group, not just the direct
+					-- child. The pipe write end dying delivers EOF to the
+					-- read side, which the next wait() tick observes as a
+					-- normal close -- so this worker is marked done here,
+					-- immediately, rather than waiting on that round-trip.
+					ffi.C.kill(-pgids[i], SIGKILL)
+					done_by_i[i] = true
+					counted_by_i[i] = true
+					remaining = remaining - 1
+				end
+			end
+		end
+
+		for i = 1, #workers do
+			ffi.C.close(read_fds[i])
+			local text = table.concat(buf_by_i[i])
+			for line in text:gmatch("[^\n]+") do
+				all_lines[#all_lines + 1] = line
+			end
+		end
+	else
+		-- io_poll unavailable on this platform: fall back to the sequential
+		-- drain. Workers may still block on write() if this path is taken,
+		-- same as before this change -- io_poll not loading at all is a
+		-- narrower, platform-detection failure distinct from the livelock
+		-- this rewrite fixes.
+		local chunk_size = 4096
+		local buf = ffi.new("uint8_t[4096]")
+		for i = 1, #workers do
+			local rfd = read_fds[i]
+			local chunks = {}
+			while true do
+				local n = ffi.C.read(rfd, buf, chunk_size)
+				if n <= 0 then break end
+				chunks[#chunks + 1] = ffi.string(buf, n)
+			end
+			ffi.C.close(rfd)
+			local text = table.concat(chunks)
+			for line in text:gmatch("[^\n]+") do
+				all_lines[#all_lines + 1] = line
+			end
 		end
 	end
 
-	-- Wait for all children.
+	-- Wait for all children (including any just SIGKILLed above).
 	local status_p = ffi.new("int[1]")
 	for i = 1, #workers do
 		ffi.C.waitpid(pids[i], status_p, 0)
