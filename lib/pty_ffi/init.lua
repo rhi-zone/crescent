@@ -4,6 +4,7 @@ end
 
 local ffi = require("ffi")
 local bit = require("bit")
+local close_fds = require("lib.os_isolation.close_fds")
 
 if ffi.os == "Windows" then return nil, "pty_ffi: not available on this platform" end
 
@@ -111,6 +112,24 @@ local function last_error()
   return ffi.string(ffi.C.strerror(ffi.errno()))
 end
 
+-- Sweep every descriptor except `keep`, in the child right after fork().
+-- forkpty() is a fork-without-exec-adjacent site from this module's point of
+-- view: the process it produces DOES go on to exec (pty.lua's spawn() calls
+-- execvp right after forkpty() returns 0), but the window between fork() and
+-- that exec still runs arbitrary Lua (env setup) with every descriptor the
+-- calling process happened to hold, and any descriptor lacking O_CLOEXEC
+-- would otherwise survive into the exec'd program too. Failure here is not
+-- survivable: a child that could not be swept must not proceed into
+-- caller-controlled code holding an unknown descriptor set.
+--: ({ [integer]: integer }) -> nil
+local function sweep_child_or_die(keep)
+  local sweep_fn = close_fds.close_fds_except
+  local ok = sweep_fn and sweep_fn(keep)
+  if not ok then
+    ffi.C._exit(126)
+  end
+end
+
 -- ── Tier selection: openpty / forkpty ────────────────────────────────────────
 
 -- Tier 1 (system): libc or libutil provide openpty/forkpty directly.
@@ -140,14 +159,25 @@ if tier_lib then
     end
     return int1[0], int2[0]
   end
-  --: () -> (integer, integer) | (nil, string)
-  function M.forkpty()
+  --: (keep_fds: { [integer]: integer }) -> (integer, integer) | (nil, string)
+  function M.forkpty(keep_fds)
+    if type(keep_fds) ~= "table" then
+      return nil, "pty_ffi: forkpty: keep_fds is required (array of fds the caller's post-fork code needs; pass {} for none)"
+    end
     local pid = tier_lib.forkpty(int1, nil, nil, nil)
     if pid == -1 then
       return nil, "pty_ffi: forkpty: " .. last_error()
     end
     if pid == 0 then
-      -- child process
+      -- child process. The system forkpty(3) has already dup2'd the slave
+      -- onto 0/1/2 and closed master/slave itself (glibc/macOS libc
+      -- behaviour) -- 0/1/2 here ARE the pty connection this call exists to
+      -- set up, not an implicit "stdio is special" default, so they belong
+      -- in the keep set unconditionally alongside whatever else the caller
+      -- named.
+      local keep = { 0, 1, 2 } --: { [integer]: integer }
+      for _, fd in ipairs(keep_fds) do keep[#keep + 1] = fd end
+      sweep_child_or_die(keep)
       return 0, 0
     end
     -- parent: int1[0] is master fd
@@ -188,8 +218,11 @@ else
     end
     return master, slave
   end
-  --: () -> (integer, integer) | (nil, string)
-  function M.forkpty()
+  --: (keep_fds: { [integer]: integer }) -> (integer, integer) | (nil, string)
+  function M.forkpty(keep_fds)
+    if type(keep_fds) ~= "table" then
+      return nil, "pty_ffi: forkpty: keep_fds is required (array of fds the caller's post-fork code needs; pass {} for none)"
+    end
     -- TYPECHECKER WORKAROUND: this inlines openpty()'s body rather than calling
     -- M.openpty() because narrowing a destructured multi-return doesn't propagate
     -- to sibling locals. `local master, slave = openpty(); if not master then ...`
@@ -231,8 +264,14 @@ else
       return nil, "pty_ffi: fork: " .. err
     end
     if pid == 0 then
+      -- child: sweep before the dup2 dance, keeping only `slave` (not yet on
+      -- 0/1/2) plus whatever the caller named. Unlike the system tier, this
+      -- tier controls the pty setup itself, so it can sweep before wiring
+      -- 0/1/2 rather than after.
+      local keep = { slave } --: { [integer]: integer }
+      for _, fd in ipairs(keep_fds) do keep[#keep + 1] = fd end
+      sweep_child_or_die(keep)
       -- child: new session, set controlling terminal
-      ffi.C.close(master)
       ffi.C.setsid()
       ffi.C.ioctl(slave, TIOCSCTTY, 0)
       ffi.C.dup2(slave, 0)

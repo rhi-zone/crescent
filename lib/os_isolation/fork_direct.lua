@@ -32,9 +32,22 @@
 --     Best-effort thread count of the CALLING process (Linux only, via
 --     /proc/self/status). nil means "could not determine" — treat as
 --     "unknown," never as "one."
---   fork_direct.spawn(fn) -> handle | (nil, errmsg)
+--   fork_direct.spawn(fn, keep_fds) -> handle | (nil, errmsg)
 --     fn is called in the child with no arguments; its upvalues are already
 --     present in the child via COW (no serialization needed for INPUTS).
+--     keep_fds (REQUIRED, array of integer descriptors) names every
+--     descriptor fn's closure needs open in the child, besides the
+--     descriptors this module manages itself. There is no default: fn's
+--     upvalues can hold a file or socket opened by an arbitrary outer
+--     caller, and fork_direct has no way to discover that from here. Per
+--     this repo's caps-first convention ("if a cap is not injected,
+--     error"), the fd set is exactly that kind of caller-owned context, so
+--     spawn() refuses to guess -- pass {} explicitly when fn genuinely needs
+--     nothing beyond stdio-independent state. spawn() sweeps every other
+--     descriptor via lib.os_isolation.close_fds before calling fn, so a
+--     descriptor left off keep_fds is gone in the child, not just
+--     unreferenced. The internal result-reporting pipe is preserved
+--     automatically; callers never list it.
 --     handle.pid       : integer, the child's real OS pid (for
 --                         interrupt_kill / interrupt_ptrace).
 --     handle.join()  -> ok, result | (nil, errmsg)
@@ -49,6 +62,7 @@ end
 
 local ffi = require("ffi")
 local codec = require("lib.os_isolation.result_codec")
+local close_fds = require("lib.os_isolation.close_fds")
 
 ffi.cdef[[
 	int pipe(int pipefd[2]);
@@ -113,12 +127,16 @@ end
 
 --:: ForkDirectHandle = { pid: integer, join: () -> (boolean, unknown) }
 
---: (unknown) -> (ForkDirectHandle | nil, string | nil)
-function M.spawn(fn_)
+--: (unknown, unknown) -> (ForkDirectHandle | nil, string | nil)
+function M.spawn(fn_, keep_fds_)
 	if type(fn_) ~= "function" then
 		return nil, "fork_direct.spawn: fn must be a function"
 	end
+	if type(keep_fds_) ~= "table" then
+		return nil, "fork_direct.spawn: keep_fds is required (array of fds fn's closure needs; pass {} for none)"
+	end
 	local fn = fn_ --[[: () -> unknown]]
+	local keep_fds = keep_fds_ --[[: { [integer]: integer }]]
 
 	local n_threads = M.thread_count()
 	if n_threads and n_threads > 1 then
@@ -142,6 +160,26 @@ function M.spawn(fn_)
 		-- Async-signal-safe-only territory per the precondition above --
 		-- deliberately minimal work here.
 		_prime(fds[0])
+		-- Sweep every descriptor except the caller-named keep list and this
+		-- module's own write end (fds[1], which fn's pcall below still needs
+		-- to report its result). A sweep failure is not survivable here: fn
+		-- is about to run with an unknown set of inherited descriptors, which
+		-- is exactly the hazard this module exists to close. Fail loud rather
+		-- than run fn unswept.
+		local sweep = {} --: { [integer]: integer }
+		for i, fd in ipairs(keep_fds) do sweep[i] = fd end
+		sweep[#sweep + 1] = fds[1]
+		local sweep_fn = close_fds.close_fds_except
+		local swept, sweep_err
+		if sweep_fn then
+			swept, sweep_err = sweep_fn(sweep)
+		end
+		if not swept then
+			local payload = codec.encode(false, "fork_direct.spawn: close_fds_except failed: " .. tostring(sweep_err))
+			ffi.C.write(fds[1], payload, #payload)
+			_prime(fds[1])
+			ffi.C._exit(1)
+		end
 		local ok, result = pcall(fn)
 		local payload = codec.encode(ok, result)
 		local written = 0

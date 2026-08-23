@@ -73,8 +73,10 @@ function M.pty_cap(daemon_ctx, default_cmd)
 		local rows = opts and opts.rows or nil
 		local cols = opts and opts.cols or nil
 
-		-- forkpty: creates PTY pair + forks
-		local master_or_zero, pid_or_err = pty_ffi.forkpty()
+		-- forkpty: creates PTY pair + forks. The child execvp()s cmd right
+		-- below with no other descriptors of its own, so nothing beyond the
+		-- pty slave (which forkpty keeps automatically) is needed here.
+		local master_or_zero, pid_or_err = pty_ffi.forkpty({})
 		if not master_or_zero then
 			return nil, pid_or_err
 		end

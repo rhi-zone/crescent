@@ -71,7 +71,7 @@ T.describe("pty_ffi", function()
 
   T.describe("forkpty", function()
     T.it("forks with a PTY and reads child output", function()
-      local master, pid = pty.forkpty()
+      local master, pid = pty.forkpty({})
       T.ok(master, "forkpty returned a value")
       if master == 0 then
         -- child: exec echo

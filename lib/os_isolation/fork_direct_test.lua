@@ -10,7 +10,7 @@ local thread = require("lib.os_isolation.thread")
 
 T.describe("fork_direct.spawn", function()
 	T.it("runs fn in a real child process and returns its result", function()
-		local h, err = fork_direct.spawn(function() return 21 * 2 end)
+		local h, err = fork_direct.spawn(function() return 21 * 2 end, {})
 		T.ok(h, err)
 		T.ok(h.pid > 0)
 		local ok, result = h.join()
@@ -24,14 +24,14 @@ T.describe("fork_direct.spawn", function()
 			local sum = 0
 			for _, v in ipairs(captured) do sum = sum + v end
 			return sum
-		end)
+		end, {})
 		local ok, result = h.join()
 		T.ok(ok)
 		T.eq(result, 6)
 	end)
 
 	T.it("propagates a runtime error from the child as (false, message)", function()
-		local h = fork_direct.spawn(function() error("kaboom") end)
+		local h = fork_direct.spawn(function() error("kaboom") end, {})
 		local ok, err = h.join()
 		T.fail(ok)
 		T.ok(err:find("kaboom"))
@@ -42,7 +42,7 @@ T.describe("fork_direct.spawn", function()
 		local h = fork_direct.spawn(function()
 			_G.fork_direct_sentinel = "child"
 			return _G.fork_direct_sentinel
-		end)
+		end, {})
 		local ok, result = h.join()
 		T.ok(ok)
 		T.eq(result, "child") -- true inside the child's own copy
@@ -51,7 +51,7 @@ T.describe("fork_direct.spawn", function()
 	end)
 
 	T.it("join() twice on the same handle is an error, not a hang or crash", function()
-		local h = fork_direct.spawn(function() return 1 end)
+		local h = fork_direct.spawn(function() return 1 end, {})
 		local ok1 = h.join()
 		T.ok(ok1)
 		local ok2, err2 = h.join()
@@ -60,7 +60,7 @@ T.describe("fork_direct.spawn", function()
 	end)
 
 	T.it("rejects a non-function argument", function()
-		local h, err = fork_direct.spawn("not a function")
+		local h, err = fork_direct.spawn("not a function", {})
 		T.eq(h, nil)
 		T.ok(err:find("must be a function"))
 	end)
@@ -91,7 +91,7 @@ T.describe("fork_direct precondition enforcement (documented, checkable case)", 
 			end
 			local fork_direct = require("lib.os_isolation.fork_direct")
 			local n = fork_direct.thread_count()
-			local h, err = fork_direct.spawn(function() return 1 end)
+			local h, err = fork_direct.spawn(function() return 1 end, {})
 			return { n = n, spawn_ok = (h ~= nil), err = err }
 		]]
 		local handle, herr = thread.spawn(code)

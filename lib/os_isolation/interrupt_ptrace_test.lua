@@ -29,7 +29,7 @@ T.describe("interrupt_ptrace against a real child process (fork_direct)", functi
 		local h = fork_direct.spawn(function()
 			local i = 0
 			while true do i = i + 1 end
-		end)
+		end, {})
 
 		local sok, serr = interrupt_ptrace.suspend(h.pid)
 		T.ok(sok, serr)

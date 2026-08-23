@@ -58,7 +58,7 @@ local CASES = {
 T.describe("os_isolation parity: fork_direct vs fork_supervisor vs thread", function()
 	for _, case in ipairs(CASES) do
 		T.it(case.name, function()
-			local d_handle = fork_direct.spawn(case.fork_direct_fn)
+			local d_handle = fork_direct.spawn(case.fork_direct_fn, {})
 			local d_ok, d_result = d_handle.join()
 
 			local sup = fork_supervisor.start()
@@ -92,7 +92,7 @@ T.describe("os_isolation parity: each implementation actually isolates (not mere
 		local h = fork_direct.spawn(function()
 			_G.parity_sentinel = "mutated"
 			return true
-		end)
+		end, {})
 		h.join()
 		T.eq(_G.parity_sentinel, "before")
 		_G.parity_sentinel = nil
