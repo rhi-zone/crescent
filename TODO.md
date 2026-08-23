@@ -2,6 +2,74 @@
 
 > *Open threads from a previous session. Treat as starting context, not instructions — verify relevance before acting.*
 
+## Parallel-runner fd hygiene: substrate landed, call sites still open (2026-08-23)
+
+`lib/os_isolation/close_fds.lua` + `close_fds_test.lua` are in. Three tiers
+(close_range / /proc enumeration / linear scan), probed at load, parity-tested
+across every tier the host can run. All three are live on this machine.
+
+Still open, deliberately not done:
+
+- [ ] **Call the sweep from the fork sites.** Sites: `lib/pkg/install.lua:1097`,
+      `lib/process/init.lua:82,189`, `lib/test/cli.lua:351`,
+      `lib/type/static/cli.lua:293`, `lib/os_isolation/supervisor_main.lua:162`,
+      `lib/pty_ffi/init.lua:226`, `lib/os_isolation/fork_direct.lua:134`,
+      `lib/os_isolation/fork_supervisor.lua:163`,
+      `lib/platform/caps/http_client_test.lua:276`. Blocked on an undecided
+      design question, below.
+- [ ] **DECISION NEEDED — who owns the keep-list at general-purpose fork sites.**
+      Most sites can name their own keep-list. Two cannot, structurally:
+      `fork_direct.spawn(fn)` documents that the child inherits the caller's
+      upvalues via COW, and `pty_ffi`'s child `return 0, 0`s back into caller
+      code. At both, "the descriptors the child still needs" is a fact about
+      the *caller's* closure, not about the fork site. Sweeping there with a
+      site-chosen keep-list would silently break callers holding a pre-fork
+      file or socket. Options: leave those two unswept; add an optional
+      caller-supplied `opts.keep_fds`; or make the keep-list a required
+      parameter (breaking API change). Not picked — see the session that landed
+      close_fds.lua.
+- [ ] **`lib/test/cli.lua` sequential pipe drain.** `run_parallel` drains worker
+      pipes one at a time, and the comment above the loop asserts a safety
+      property ("workers write <= a few KB, so no deadlock") that does not hold:
+      a worker emitting more than one pipe buffer of output blocks on write()
+      until its turn. Fix is to multiplex over all read fds via `lib/io_poll`.
+      Note `lib/epoll`'s `remove_fd` does not issue `EPOLL_CTL_DEL` — use the
+      `remove` closure that `add()` returns, or a hung-up fd re-fires forever.
+- [ ] **Per-worker timeout + process-group kill in `run_parallel`.** Needs
+      `setpgid(0, 0)` in each worker right after fork so `kill(-pgid)` reaches
+      the whole subtree. Timeout duration not chosen.
+- [ ] **`close_fds.lua` raw syscall numbers cover x64 only.** Adding an
+      architecture means issuing the call on that hardware and observing the
+      result, not copying numbers from a header. Other arches fall through to
+      the next tier, which is correct but slower.
+
+## `lib/platform/caps/http_client_test.lua`'s TLS server child has never run (2026-08-23)
+
+Found while investigating a reported livelock. The forked TLS-server child in
+that test is unreachable, and appears to have been since it was written:
+
+- The test SKIPs on any box without an `openssl` binary on PATH (used to
+  generate the cert). This tree has none, including inside `nix develop`, so
+  the whole case is skipped and shows green.
+- With `openssl` forced onto PATH it fails at `ffi.C.bind` (line ~260), before
+  `fork()`: `lib/platform/caps/http_client.lua` requires `lib.ljsocket` at
+  module load, which cdefs `bind` with `const struct sockaddr *`. LuaJIT keeps
+  the first declaration, so the test's own `const void *` redeclaration does not
+  take, and passing `uint8_t[16]` is rejected. `http_client.lua` has required
+  ljsocket since its first commit (705b4cf7); the TLS test came later
+  (37df0705).
+
+So this site is not evidence for any runtime fd-leak claim. Separate open
+thread, unidentified: during a full `bin/cr test`, a worker was observed pinned
+at ~99% CPU in state R (pure userspace, `wchan` 0) for 5+ minutes. Not traced —
+`kernel.yama.ptrace_scope = 1` blocks attaching to a non-descendant, so
+catching it needs `strace -f` wrapped around the run from the start.
+
+- [ ] Decide whether the TLS test should be repaired (rename the cdef'd
+      symbol / build the sockaddr through ljsocket's own types, and drop the
+      openssl dependency) or removed.
+- [ ] Identify the 99%-CPU worker.
+
 ## Current roadmap
 
 See `docs/roadmap-v2.md` for the authoritative project roadmap and sequencing. The roadmap provides the current strategic direction informed by the value landscape analysis.
