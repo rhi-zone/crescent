@@ -411,7 +411,7 @@ do
 			socket.lasterror = function(num)
 				num = num or ffi.errno()
 				if not cache[num] then
-					local err = ffi.C.strerror(num)
+					local err = ffi.string(ffi.C.strerror(num))
 					cache[num] = err == "" and tostring(num) or err
 				end
 				return cache[num], num
@@ -470,7 +470,7 @@ do
 		local ret = ljsocket_ffi.getnameinfo(address, length, host, hostlen, serv, servlen, flags)
 		if ret == 0 then return true end
 		local err = socket.lasterror(ret)
-		return nil, ffi.string(err --[[:! Ptr<integer>]])
+		return nil, err
 	end
 
 	do
