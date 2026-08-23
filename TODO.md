@@ -61,16 +61,48 @@ Still open, deliberately not done:
       caller can see that. Every other fork site computes its own keep list
       locally from what it can already see (its own pipe fds, fds about to be
       dup2'd onto 0/1/2) — no shared/default keep-list convention needed there.
-- [ ] **`lib/test/cli.lua` sequential pipe drain.** `run_parallel` drains worker
-      pipes one at a time, and the comment above the loop asserts a safety
-      property ("workers write <= a few KB, so no deadlock") that does not hold:
-      a worker emitting more than one pipe buffer of output blocks on write()
-      until its turn. Fix is to multiplex over all read fds via `lib/io_poll`.
-      Note `lib/epoll`'s `remove_fd` does not issue `EPOLL_CTL_DEL` — use the
-      `remove` closure that `add()` returns, or a hung-up fd re-fires forever.
-- [ ] **Per-worker timeout + process-group kill in `run_parallel`.** Needs
-      `setpgid(0, 0)` in each worker right after fork so `kill(-pgid)` reaches
-      the whole subtree. Timeout duration not chosen.
+- [x] **`lib/test/cli.lua` sequential pipe drain.** (2026-08-23) `run_parallel`
+      used to drain worker pipes one at a time; the comment above that loop
+      asserted a safety property ("workers write <= a few KB, so no
+      deadlock") that did not hold. Fixed: replaced with `lib/io_poll`-based
+      concurrent multiplexing — one poller registers every worker's read fd,
+      `wait()` in a loop drains whichever fds are actually ready, no
+      per-worker ordering dependency. This is also what motivated the
+      `lib/epoll`/`lib/kqueue` `remove_fd`-doesn't-issue-`EPOLL_CTL_DEL`/
+      `EV_DELETE` fixes (`6924a735`, `a399c5eb`) landing first — the drain
+      loop relies on a hung-up fd's close callback firing exactly once and
+      the fd actually being deregistered, which those bugs broke.
+- [x] **Per-worker timeout + process-group kill in `run_parallel`.** (2026-08-23)
+      Each worker calls `setpgid(0, 0)` right after fork (parent also calls
+      `setpgid(child_pid, child_pid)` on the same pid, to close the
+      fork/setpgid race — whichever runs first wins). A worker with no
+      output for `timeout_s` (default 120s, documented in `cli.lua` next to
+      the constant — roughly 5.7x the ~21s healthy full-suite wall time
+      measured on this machine, chosen as a generous-but-bounded CI margin)
+      gets `kill(-pgid, SIGKILL)`, killing its whole subtree, not just the
+      direct child. Verified this is not just theoretical: while chasing an
+      unrelated hang (see the `lib/sandbox` entry below), this timeout is
+      what actually recovered the run instead of hanging forever, both
+      before and after that hang's root cause was found and fixed.
+      **New gap this surfaced, not fixed here:** `setpgid` isolating each
+      worker into its own process group means an *external* kill of the
+      top-level `bin/cr test` process (e.g. a CI job timeout, or a bare
+      `timeout N bin/cr test` without `--kill-after`/process-group
+      forwarding) no longer cascades to already-forked workers the way it
+      would have when they shared the parent's process group — `timeout`
+      and plain `kill` target a single pid, not a group, by default. Hit
+      this directly while testing: repeated external `timeout N` runs left
+      several `bin/cr test` worker processes orphaned (reparented to init)
+      and pinned at ~100% CPU for hours, only found via `ps` and cleaned up
+      by hand. Confirmed this is not a regression from the setpgid change
+      itself — the same external-kill-doesn't-reach-children gap already
+      existed pre-setpgid (a plain `timeout`/`kill` was never process-group
+      aware), setpgid just makes the previously-shared-group workers no
+      longer incidentally reachable by anything that happened to target the
+      group. Real fix needs the top-level process to trap SIGTERM/SIGINT
+      itself and `kill(-pgid)` every worker pgid it knows about before
+      exiting — not done here, out of scope for the timeout+pgkill feature
+      this entry accompanies.
 - [ ] **`close_fds.lua` raw syscall numbers cover x64 only.** Adding an
       architecture means issuing the call on that hardware and observing the
       result, not copying numbers from a header. Other arches fall through to
@@ -8722,7 +8754,7 @@ replaced.
   calling the four aliased methods (building the map border with four
   `fill()` calls instead of `fill_border()`, and keeping its own width/height
   constants instead of querying the map).
-- [ ] **`lib/sandbox`'s instruction-budget count-hook does not reliably fire
+- [x] **`lib/sandbox`'s instruction-budget count-hook does not reliably fire
   once a sandboxed loop gets hot enough for LuaJIT to trace-compile it.**
   `M.run`'s `opts.budget` enforcement (`lib/sandbox/init.lua`) works via
   `debug.sethook(fn, "", budget)`, a count hook. Confirmed independently of
@@ -8739,19 +8771,43 @@ replaced.
   outer) rather than realistic ones — a `budget = 5000` outer value in that
   same test previously hung `bin/cr test lib/sandbox/` for exactly this
   reason (not a bug in the save/restore fix itself; confirmed by bisecting
-  budget values with a standalone repro before the test was corrected). Not
-  fixed here — root cause is LuaJIT trace-compilation bypassing the
-  interpreter's hook dispatch, which needs either a different enforcement
-  mechanism (e.g. `jit.off` on sandboxed chunks, at a real performance
-  cost) or an upstream LuaJIT-level fix; out of scope for the nesting-hook
-  fix this entry accompanies. Any new sandboxed-loop test with a `budget`
-  large enough to plausibly get traced should stay under this threshold or
-  explicitly account for it. **Design consequence written up:**
+  budget values with a standalone repro before the test was corrected).
+  **2026-08-23: fixed in `M.run` itself.** Resurfaced during the parallel
+  test-runner livelock work as a real, reproducible worker hang: the
+  pre-existing `budget = 100` case in `sandbox_test.lua`'s "budget exceeded
+  returns error" test (below the documented 150/200 crossover, previously
+  assumed safe) hung ~50% of the time when run in a forked worker after
+  other JIT-heavy code earlier in that worker's file sequence (observed
+  with `lib.async`/coroutine-heavy code from an unrelated http client
+  test) — proving the crossover is not a fixed instruction count but a
+  race between the hook check and trace-compile/install timing, sensitive
+  to how "warmed up" the JIT compiler already is from unrelated prior code
+  in the same process. Confirmed live via `/proc/<pid>/status` and
+  `/proc/<pid>/wchan` (pure CPU spin, no syscall block) and reproduced down
+  to a 2-file, single-fork minimal case; the same 2 files unforked in one
+  process never reproduced it. Landed the mitigation this entry already
+  named: `M.run` now wraps the budgeted `pcall` in `jit.off()`/`jit.on()`
+  (saved/restored the same way as the hook itself, via `jit.status()`, so
+  a nested budgeted run doesn't re-enable the JIT out from under an outer
+  one) — with the JIT compiler off for the duration, nothing can get
+  trace-compiled, so the interpreter's hook dispatch is the only path,
+  unconditionally. Verified: 15/15 clean runs of the forked minimal repro
+  at `budget = 100` after the fix, vs. ~50% hangs before it; also verified
+  the fix does not require an artificially small budget by restoring that
+  test's `budget` to its original value. `--:: declare jit = {...}` in
+  `lib/type/static/stdlib_types.lua` gained `status`/`off`/`on` fields to
+  type these calls. **Design consequence written up:**
   `docs/genre-battery/sandboxing.md` ("Rejected: `debug.sethook` count-hook /
-  wall-clock budgets as a security mechanism") treats this finding as
-  conclusive evidence the count-hook mechanism cannot be a hostile-script
-  defense for control-stage mods, not merely a perf/reliability wrinkle —
-  read that doc for the downstream architecture decision this drove
+  wall-clock budgets as a security mechanism") treats the original finding
+  as conclusive evidence the count-hook mechanism *alone* cannot be a
+  hostile-script defense for control-stage mods — that conclusion still
+  stands even with `jit.off` added: this fix closes the reliability/hang
+  gap (the count-hook now always fires), not the security question (a
+  malicious script that discovers `jit.off` is active during its own
+  execution and finds another way to burn CPU without tripping the
+  instruction count is a different threat model than "does the hook
+  fire") — read that doc for the downstream architecture decision this
+  drove
   (multiple independent process/thread isolation implementations, not an
   in-VM budget).
 - [ ] **`fork()`-without-`exec()` safety on LuaJIT is undocumented
