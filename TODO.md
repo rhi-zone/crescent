@@ -2,6 +2,83 @@
 
 > *Open threads from a previous session. Treat as starting context, not instructions — verify relevance before acting.*
 
+## `lib.sandbox`'s instruction-budget mechanism is retired — won't-fix via jit.off, moved off it instead (2026-08-23)
+
+- [x] **The `jit.off()`/`jit.on()` fix (`eb2a1393`, recorded as `[x]` "fixed"
+      further down this file under "v10 corroboration engine, iteration 3
+      phases 2/4/5") did not actually close the race it targeted.** That
+      entry's "Verified: 15/15 clean runs" claim held for its own isolated
+      repro, but the same `budget = 100` case in `sandbox_test.lua`'s
+      "budget exceeded returns error" test was the root cause of a further
+      flaky worker hang found during the parallel-runner livelock
+      investigation — `debug.sethook`'s count hook still did not reliably
+      fire once LuaJIT had traced a tight loop, jit.off() notwithstanding.
+      Decision (this entry): stop treating `jit.off()` as having closed the
+      gap, and stop relying on the mechanism at all rather than continuing
+      to patch around its unreliability. This corrects, not replaces, the
+      older entry — that entry's empirical findings (LuaJIT source citation,
+      the save/restore nesting fix) still stand; only its "this fixes the
+      hang" conclusion is superseded.
+- [x] **Audited every non-test caller of `lib.sandbox`'s `opts.budget` in the
+      repo.** None exist. `lib/platform/init.lua`'s `M.run_app` /
+      `M.run_entry` accept a generic `opts.sandbox_opts` passthrough (its doc
+      comment used to say "passed through to sandbox.run (budget, etc.)"),
+      but grepping every caller of `run_app`/`run_entry`/`sandbox.run`
+      outside test files, none constructs `sandbox_opts` with a `.budget`
+      field — the passthrough exists but was never exercised for budgeting.
+      No production migration was needed as a result; this was plumbing,
+      not a load-bearing dependency.
+- [x] **Marked `opts.budget` unreliable/not-for-use at both definition sites
+      in `lib/sandbox/init.lua`** (module header doc-comment and the
+      `M.run` implementation block itself) — the rest of `lib/sandbox`
+      (`M.env`, `M.run` without a budget, `M.lock_string_metatable`,
+      `M.stdlib`/`M.pure`) is unaffected and still the sandbox's real
+      security boundary (reachability restriction — see
+      `lib/platform/CLAUDE.md`, "Sandbox is the security boundary"); only
+      the `debug.sethook`-based budget path is deprecated, not the module.
+      Left implemented rather than deleted, since deleting it would also
+      delete the working save/restore-hook-nesting behavior other code might
+      still transitively exercise by accident (e.g. a stray hook installed
+      elsewhere on the same thread) — the warning comments are the
+      enforcement point, not a code change that could itself regress
+      something. Also corrected `lib/platform/init.lua`'s `opts.sandbox_opts`
+      doc comment to stop suggesting `.budget` as a live option.
+- [x] **`lib/sandbox/sandbox_test.lua`: skipped (not deleted) the two tests
+      that actually trigger the hook** ("budget exceeded returns error",
+      "nested budgeted run does not clobber the outer budget hook") via
+      `T.skip(reason)`, under a new `describe` block labeled
+      "sandbox.run opts.budget (DEPRECATED, unreliable -- do not use)" that
+      explains why and points at this entry and at
+      `lib/sandbox/init.lua`. These are exactly the two tests that could
+      hang a worker (they build tight loops meant to trip the hook); running
+      them by default in `bin/cr test` would keep the hang risk this
+      decision exists to remove. The third budget test ("budget does not
+      fire when code is fast enough") has no loop and cannot hang, so it
+      stays running as a smoke check that `opts.budget` is a harmless no-op
+      on code that never trips it. `bin/cr test lib/sandbox/` still passes:
+      49 passed, 2 skipped (was 51 passed).
+- [x] **Bounded/interruptible execution already has a real replacement:**
+      `lib/os_isolation/` (landed `3ff5057f`, same day) — genuine OS
+      process/thread isolation plus SIGKILL/ptrace/cooperative interruption.
+      `lib/os_isolation/interrupt_cooperative.lua`'s in-code checker (opt-in,
+      author writes the check inline) is architecturally the "(c)
+      manually-instrumented loop checks" option from
+      `docs/genre-battery/sandboxing.md`'s "Decided direction" section —
+      already independent of `lib.sandbox`'s `debug.sethook` mechanism (it's
+      driven by explicit calls in the script, not an interpreter hook racing
+      JIT tracing), so no new substrate was needed to give callers a real
+      alternative; this decision is a subtraction (stop using the unreliable
+      path), not something blocked on new work.
+- [ ] **Not done here, left open:** `docs/genre-battery/sandboxing.md`'s
+      "Rejected: `debug.sethook` count-hook / wall-clock budgets" section
+      (around line 181) still frames the mechanism as "useful as a
+      *cooperative* bound — catching non-adversarial bugs" (line 215). This
+      finding is in tension with that claim (it was *catching* the bug via a
+      cooperative budget that itself hung), but revising that document's
+      argument is a design-doc edit or reasoning judgment call, not something
+      folded into the same pass as the mechanical migration/deprecation work
+      done above — separate task, flagged, not picked here.
+
 ## `struct timespec` is hand-declared independently in 4 places, one with a different field width (2026-08-23)
 
 `lib/kqueue/init.lua` and `lib/async/init.lua` declare `struct timespec { long
@@ -8810,6 +8887,14 @@ replaced.
   drove
   (multiple independent process/thread isolation implementations, not an
   in-VM budget).
+  **CORRECTION (2026-08-23, see this file's top-of-file entry "`lib.sandbox`'s
+  instruction-budget mechanism is retired" for the full record):** the
+  "Verified: 15/15 clean runs... this fix closes the reliability/hang gap
+  (the count-hook now always fires)" claim above did not hold — the same
+  `budget = 100` case went on to cause a further flaky worker hang during
+  the parallel-runner livelock investigation, with `jit.off()` in place.
+  Settled decision: no code in this repo relies on `opts.budget` anymore;
+  see the top-of-file entry for what changed.
 - [ ] **`fork()`-without-`exec()` safety on LuaJIT is undocumented
   upstream — substrate gap for any fork-based mod-process-isolation
   implementation.** Surfaced while designing control-stage sandboxing

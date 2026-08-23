@@ -621,7 +621,11 @@ end
 --
 -- opts.context       : {user_id, app_id, data_dir}
 -- opts.grants        : {cap_name=true, ...} — if nil, auto-grants everything
--- opts.sandbox_opts  : passed through to sandbox.run (budget, etc.)
+-- opts.sandbox_opts  : passed through to sandbox.run. Do NOT set .budget --
+--                      that mechanism is deprecated/unreliable (see the
+--                      opts.budget note in lib/sandbox/init.lua); no caller
+--                      in this repo may rely on it. Bounded/interruptible
+--                      execution goes through lib/os_isolation instead.
 function M.run_app(path, entry_key, opts)
 	opts = opts or {}
 	local context = opts.context or {}

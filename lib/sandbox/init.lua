@@ -19,7 +19,26 @@
 --   sandbox.pure                  -> capability bundle: no side-effect ops
 --
 -- opts:
---   opts.budget  : instruction count limit (via debug.sethook)
+--   opts.budget  : DEPRECATED, UNRELIABLE -- do not use for anything that
+--                  needs to actually bound execution. debug.sethook count
+--                  hooks do not reliably fire once LuaJIT trace-compiles a
+--                  hot loop, and the jit.off()/jit.on() wrap below (added to
+--                  close that race) does not close it completely either --
+--                  it was still observed to hang a forked test worker after
+--                  landing (2026-08-23 livelock investigation; see TODO.md,
+--                  "lib.sandbox's instruction-budget count-hook does not
+--                  reliably fire", and docs/genre-battery/sandboxing.md
+--                  "Rejected: debug.sethook count-hook / wall-clock budgets
+--                  as a security mechanism"). Nothing in this repo should
+--                  pass opts.budget going forward. Callers that need bounded
+--                  or interruptible execution use lib/os_isolation instead
+--                  (real OS process/thread isolation + SIGKILL/ptrace/
+--                  cooperative interruption -- see that module and
+--                  docs/genre-battery/sandboxing.md "Decided direction").
+--                  Left implemented (not deleted) only because sandbox.env/
+--                  sandbox.run's non-budget behavior is still load-bearing
+--                  and this is one function; see the block below for the
+--                  same warning at the point of implementation.
 --   opts.name    : chunk name for error messages (default "@sandbox")
 
 if not package.path:find("./?/init.lua", 1, true) then
@@ -86,6 +105,12 @@ function M.run(code, env, opts)
 		return false, err
 	end
 
+	-- DEPRECATED, UNRELIABLE -- see opts.budget note in the module header
+	-- above. Do not pass opts.budget in new code; use lib/os_isolation for
+	-- bounded/interruptible execution instead. This block is kept working,
+	-- unchanged, only so existing (skipped) test coverage that documents its
+	-- known-broken behavior still has something real to call.
+	--
 	-- Instruction budget: hook fires after `budget` instructions and kills the
 	-- coroutine. The hook restores whatever hook (if any) was active before
 	-- this run() call first — both to avoid a recursive error on the next
