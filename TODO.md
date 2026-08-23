@@ -366,7 +366,11 @@ wrong; it was inferred from the `#error`, never checked against `libtcc1.a`.
   `-Wl,-version-script` — resolved by adopting option (a), `LD=tcc`, which is
   upstream libtool's own documented answer.** The supported invocation for
   building `dep/libressl` with tcc is therefore `CC=<tcc> LD=<tcc>
-  ./configure --disable-asm`, recorded in `docs/native-tiers.md`. Setting `LD`
+  ./configure` — `--disable-asm` was part of this recipe when it was written and
+  is **no longer needed** as of 2026-08-23 (`0003` + `0004` +
+  `dep/tcc/patches/0039`); note also that `$CC` must be *named* `tcc` for
+  `0001` to take effect at all, see the build-recipe gotcha item below. Setting
+  `LD`
   is not cosmetic: it is what steers libtool out of the `with_gnu_ld=yes`
   branch, and the version-script problem simply does not arise on the
   non-GNU-ld path. Options (b) teach tcc `--version-script`, (c) declare
@@ -432,7 +436,14 @@ wrong; it was inferred from the `#error`, never checked against `libtcc1.a`.
   the literal `@plt` is part of the symbol name, so they cannot collide with a
   real lookup — but a naive dynsym count is badly inflated by them.
 
-- [ ] **New tcc assembler gap: `.intel_syntax` is unsupported, so libressl 4.3.2
+- [x] **CLOSED — not by teaching tcc Intel syntax, but by `0003`'s capability
+  probe selecting the vendored `att/` mirror; `--disable-asm` is no longer
+  needed and no longer the recipe.** See the closed `0004`/`0039` items below
+  for the complete asm-enabled build and its 136/136 `make check`. The original
+  entry is kept intact below because its measurement (all 21 files, not eight)
+  and its cost estimate for the Intel-parser route are still the record of why
+  that route was rejected.
+  **New tcc assembler gap: `.intel_syntax` is unsupported, so libressl 4.3.2
   needs `--disable-asm`.** Separate from the existing
   `dep/tcc/patches` (which closed the gaps in the `*-elf-x86_64.S` files):
   `crypto/bn/arch/amd64/bignum_*.S` (the s2n-bignum imports) are written in Intel
@@ -972,10 +983,12 @@ wrong; it was inferred from the `#error`, never checked against `libtcc1.a`.
     produces 21 `.lo` objects under `bn/arch/amd64/att/` with no bignum objects
     from the Intel directory (the single `.lo` there is `bn_arch.c`, which is C).
     gcc on the same patched tree answers `yes` and still passes `make check`
-    136/136. It does **not** yet get a complete tcc build: `make` fails on
-    `bn_div_words`, a `__GNUC__`-gated inline-asm gap tracked as its own item
-    below, so `make check` and the crypto vector suite have not been run
-    through a tcc-built library and no such claim should be read here.
+    136/136. On its own `0003` did **not** get a complete tcc build: `make`
+    failed on `bn_div_words`, and behind that `make check` was 92/136 from the
+    `_LP64` limb-width defect. **Both are closed as of 2026-08-23** (`0004` and
+    `dep/tcc/patches/0039`); the complete tcc build, its 136/136 `make check`
+    and the crypto-vector results through the tcc-built library are recorded in
+    the two closed items further down and in `docs/native-tiers.md`.
     **Patch-then-regenerate is the correct order, and it was verified rather
     than assumed.** `0001`/`0002` edit both `m4/libtool.m4` and the generated
     `configure`, so regenerating after applying them looks like it would
@@ -1005,33 +1018,174 @@ wrong; it was inferred from the `#error`, never checked against `libtcc1.a`.
     change detector — it will report differences that are purely the build
     directory.
 
-- [ ] **`bn_div_words` is a second, independent blocker on tcc + real asm, and
-  it is a `__GNUC__` gate rather than a syntax gate.** Found 2026-08-23 while
-  verifying `0003` end to end, and it is the reason "libressl builds with real
-  asm under tcc" is **not** yet true even though the `.intel_syntax` half is
-  closed and proven.
-  With asm enabled, `crypto/bn/arch/amd64/bn_arch.h` defines
-  `HAVE_BN_DIV_WORDS`, which makes `crypto/bn/bn_div.c` skip its portable C
-  `bn_div_words`. The intended replacement, `bn_div_rem_words_inline` (the
-  `divq` inline-asm block), sits behind `#if defined(__GNUC__)`. tcc defines
-  `__TINYC__` and not `__GNUC__`, so *neither* definition is compiled and
-  `bn_div_rem_words` falls through to a branch that calls the now-absent
-  `bn_div_words`. `make` then dies with a single error, `unresolved reference
-  to 'bn_div_words'`, at `apps/ocspcheck` link time.
-  Measured shape of the failure: `libcrypto.so.57.0.2`, `libssl` and `libtls`
-  all link successfully, and `bn_div_words` is the **only** non-libc undefined
-  symbol in `libcrypto`. Every AT&T bignum symbol resolves. Only the `apps/`
-  executables fail. `--disable-asm` never hit this because `OPENSSL_NO_ASM`
-  keeps the C version, and the gate is on `__GNUC__` rather than on syntax, so
-  it would bite the Intel path identically — the `att/` mirror is not
-  implicated in any way.
-  Three shapes for closing it, in three different places, none picked:
-  define `__GNUC__` (or whatever the gate actually wants) tcc-side; widen the
-  `#if` to accept `__TINYC__` libressl-side, which is only correct if tcc's
-  inline-asm constraint handling really does cope with that `divq` block;
-  or add a second configure-time capability probe for the inline asm, the same
-  shape as `0003`'s. Different blast radius each, and the middle one has a
-  correctness precondition nobody has measured yet.
+- [x] **CLOSED (2026-08-23) by `dep/libressl/patches/0004` + `dep/tcc/patches/0039`:
+  libressl builds and passes `make check` 136/136 under tcc with real assembly.**
+  This item previously recorded `bn_div_words` as "a `__GNUC__` gate" with three
+  candidate fixes. **The diagnosis in that framing was wrong in a way worth
+  keeping visible**, because the corrected version is what made the fix obvious:
+  it is not that "neither definition is compiled". The *caller* is compiled and
+  only the *callee* is suppressed. `#define HAVE_BN_DIV_WORDS` sat **outside**
+  the `#if defined(__GNUC__)` block entirely — gated only on `!_WIN32 &&
+  !OPENSSL_NO_ASM` — so it fired for every compiler, while the inline that
+  justifies it fired only for GNUC.
+  And nothing on amd64 defines `bn_div_words` at all: not the s2n asm, not
+  `arch/amd64/bn_arch.c`. The only definition in the tree is the portable C one
+  at `bn_div.c:77`. So the define never meant "a faster one exists here"; it
+  meant "nothing will call one", which holds only when the GNUC inline replaces
+  `bn_div.c`'s own `bn_div_rem_words_inline` — the sole caller, at line 155.
+  Latent upstream for any non-GNUC compiler, not a tcc-specific gap.
+  **`0004` does both halves** (owner call, 2026-08-23): moves the define inside
+  the conditional, which fixes it generally, *and* widens the gate to
+  `defined(__GNUC__) || defined(__TINYC__)`, which puts tcc on the same
+  configuration gcc builds and upstream tests instead of an
+  asm-on-but-portable-helpers mix nobody tests. The widening was measured first,
+  not assumed: the three helpers (`divq`/`mulq`/`subq`, with `%b0`, a matching
+  constraint and `rm`) compiled by tcc and gcc into one process and run against
+  each other over 4,000,000 edge-biased random iterations — 0 mismatches.
+  Corroborating: tcc already defines `__GNUC__` on FreeBSD/NetBSD/OpenBSD/Darwin,
+  so it has taken this branch on four of its platforms all along.
+  **Behind `bn_div_words` sat a much more serious defect — see the `_LP64` entry
+  above.** With `0004` alone the build completed but `make check` was 92/136,
+  every failure bignum-rooted, because tcc did not predefine `_LP64` and
+  libressl's `bn.h` therefore selected 32-bit limbs against 64-bit assembly.
+  Worth carrying forward: the `--disable-asm` runs recorded earlier in this file
+  as 136/136 were passing with 32-bit bignum limbs on x86-64 — self-consistent
+  pure C, hence green, but not the configuration anyone intended.
+  **Verified state, measured on the NixOS host 2026-08-23**, tcc built from
+  `dep/tcc` + all 39 patches (so `_LP64` comes from `0039`, not a command-line
+  `-D`; the harness aborts if it does not), libressl + all 4 patches,
+  regenerated, `CC=tcc LD=tcc ./configure` with **no `--disable-asm`**:
+  - probe answers `no`, `att/` list selected, 21 bignum objects built;
+  - `make` completes including `apps/`; `apps/openssl/openssl` links and runs;
+    `BN_BITS2` is 64;
+  - `make check`: **136 total, 136 pass, 0 fail, 0 skip, 0 error**;
+  - tcc's own `make test`: ALL TESTS PASSED;
+  - crypto through that library, **52 checks / 0 failures**: SHA-256 and
+    SHA-512 vs coreutils over 15 lengths (0, the 55/56/57 and 63/64/65 block
+    boundaries, >1 MiB); AES-256-CBC vs libressl's own `tests/evptests.txt`
+    (NIST SP 800-38A, read from the shipped file rather than recalled), each
+    vector encrypted and decrypted; AES differentials on random key/IV/input
+    vs a gcc-built build; RSA-2048 keygen/sign/verify with the signature
+    **re-verified by the gcc build**, plus a negative control confirming a
+    tampered message is rejected;
+  - all **32** per-patch harnesses green; `verify-bignum-att-tcc.sh` reports
+    `equal=80 differs=4 tcc-rejects=0 no-reference=0`, 368,000 differential
+    checks, 0 mismatches, `.note.GNU-stack` 1/1 — byte-for-byte the recorded
+    baseline.
+  **gcc is unaffected, checked where it is decided**: preprocessing `bn_arch.h`
+  under gcc with and without `0004` gives a byte-identical translation unit and
+  an identical set of 21 `HAVE_BN_*` macros, and `bn_div.c` — the only TU whose
+  code could change — preprocesses identically (3735 lines) either way.
+
+- [x] **CLOSED (2026-08-23) by `dep/tcc/patches/0039-lp64-predefine.patch`: tcc
+  did not predefine `_LP64`, and libressl was silently building 32-bit bignum
+  limbs on x86-64 as a result.** The most consequential single line in the tcc
+  patch stack, and it was found by its consequences rather than by reading
+  predefs.
+  tcc defined `__LP64__` but not `_LP64`. gcc defines both — measured against
+  gcc 15.2, which also defines both `__ILP32__` and `_ILP32` under `-m32`. The
+  pair is the convention; neither spelling is more correct, and portable code
+  reaches for whichever it was written against.
+  An omitted predefine of this kind does not fail loudly. `#if defined(_LP64)`
+  on a compiler that omits it is not a diagnostic — it is a silent selection of
+  the 32-bit branch on a 64-bit target. `include/openssl/bn.h:143` picks the
+  bignum limb type on exactly that test and never consults `__LP64__`, so amd64
+  libressl under tcc ran its whole bignum layer on 32-bit limbs while the
+  s2n-bignum assembly it calls uses 64-bit ones. `make check` was **92/136**,
+  all 44 failures bignum-rooted — every `bn_*` test plus rsa, dsa, ec, dh, cms
+  and tls behind them, symptoms from `BN_add` dropping high words to
+  `bn_div_words` asserting to glibc aborting on a corrupted heap.
+  The assembly was never implicated and neither was `0003`'s `att/` mirror:
+  calling `bignum_add` directly out of the tcc-built `libcrypto.a` on a failing
+  vector returned the correct result. `-D_LP64` and nothing else took the same
+  tree to 136/136, which is what isolated it.
+  Fixed tcc-side rather than by patching libressl's one check, because the same
+  trap is set for any other consumer that spells it `_LP64`. Blast radius across
+  `dep/`, measured: libressl's `bn.h` (the intended fix), `sha.h` and
+  `crypto/modes/modes_local.h` (both only choose `UL` vs `ULL` on types that are
+  64-bit either way under LP64 — width-neutral), and `luajit/src/lj_arch.h:323`,
+  which is inside the **PPC** target branch — preprocessing `lj_arch.h` with a
+  38- vs 39-patch tcc gives an identical macro set on x86_64 (`LJ_ARCH_BITS 64`,
+  `LJ_ARCH_NAME "x64"`, `LJ_64 1`, `LJ_TARGET_X64 1`), so `0039` is inert there.
+  `0039-tests/run.sh` pins the reference behaviour against gcc: 8/8 gcc, 7/7
+  patched tcc, and 3 pass / 4 fail on an unpatched tcc including a standalone
+  reduction of the libressl bug (a `bn.h`-shaped `_LP64`-gated limb selection
+  that must pick a machine-word limb; it fails with `invalid array size`).
+
+- [ ] **A tcc-linked LuaJIT carries two duplicate FDE records in a trailing
+  `.eh_frame` chunk; coverage is complete, so nothing is broken, but nobody
+  knows what puts them there.** Surfaced 2026-08-23 while checking `0039`'s
+  effect on LuaJIT. `.eh_frame_hdr` reports `fde_count` 2402 and 2402 table
+  slots, and cross-checking the table against readelf's FDE list gives 2402
+  distinct start PCs with an empty set difference in both directions — the
+  "fully indexed" invariant holds and `pcall` works, which is why this is a
+  curiosity rather than a defect.
+  But readelf reports **2404** FDE records and **73** CIEs, not 2402/72. The
+  two extras are exact duplicates — the same PC ranges (`0x4996d0..0x49daf7`
+  and `0x49daf7..0x49db97`, the VM range) appearing again in a trailing
+  `.eh_frame` chunk whose CIE carries id `0xffffffff` instead of `0`.
+  Byte-identical in a 38-patch and a 39-patch build, so it is not `0039`'s and
+  predates it. Not chased. Worth knowing before anyone treats a raw readelf FDE
+  count as the invariant — the count that means something is the dedup'd
+  coverage, which is what the harness checks.
+
+- [ ] **`bin/cr test` livelocks on the default parallel runner, and it
+  reproduces at pristine HEAD.** Surfaced 2026-08-23 while running the tcc
+  regression bar; attributed, not guessed. A tree built with `git archive HEAD`
+  — no uncommitted work, no patch files, nothing from the tcc thread — times
+  out at 900s with the parent pinned and workers blocked writing to pipes, and
+  does so repeatably. So it is neither the tcc patches nor the in-progress
+  typechecker edits that were also in the working tree at the time.
+  A comment in `lib/type/static/cli.lua` assumes worker output stays small
+  enough never to fill the pipe buffer; that assumption is the suspect, though
+  the exact mechanism was not confirmed (ptrace was blocked in the sandbox).
+  `--jobs=1` does **not** livelock — it is merely slow, still progressing
+  healthily with everything passing when a 2400s cap cut it off, so the
+  sequential path is not implicated.
+  Separately and still open: a run on the dirty tree reported
+  `lib/https/https_test.lua` failing identically on glibc and musl and
+  reproducing standalone. Whether that also fails at HEAD is **not** established
+  — the baseline run was capped before reaching it. Worth attributing before
+  anyone treats it as a known-good baseline. Unrelated to tcc either way.
+
+- [ ] **Third build-recipe gotcha for tcc-built libressl: the compiler must be
+  *named* `tcc`, or `0001` silently does nothing and the build dies somewhere
+  unrelated.** Cost an hour 2026-08-23; the failure gives no hint of the cause.
+  `0001-libtool-tinycc-compiler-support.patch` adds its `wl` handling as a
+  `tcc*)` case in libtool's compiler dispatch, which matches on the **basename
+  of `$CC`**. Invoking tcc through a wrapper script named anything else — a
+  perfectly natural thing to do on NixOS, where a wrapper is how the
+  `-B`/`--sysincludepaths` flags get attached — falls through to the default
+  case, `wl` comes out `""` instead of `-Wl,`, and libtool then degrades every
+  `-Wl,-z,relro` in `LDFLAGS` into a bare `-z relro`. tcc's driver has no `-z`
+  option at all, so the build fails at the *first executable it links*
+  (`apps/ocspcheck`) with `tcc: error: invalid option -- '-z'` — which looks
+  exactly like a missing tcc feature and is nothing of the kind. Measured:
+  identical trees, identical `LDFLAGS`, identical probe answer
+  (`-Wl,-z,relro`… yes), `wl=""` with a wrapper named `ftcc-cc` and
+  `wl="-Wl,"` with one named `tcc`. Both tcc binaries accept `-Wl,-z,relro`
+  and reject bare `-z relro`, so tcc is not the variable.
+  Worth deciding separately: whether `0001` should match on a *capability*
+  rather than a compiler name, the same way `0003` deliberately probes for
+  `.intel_syntax` instead of testing the compiler's identity. The name match
+  is the fragile shape `0003`'s design notes argue against, sitting in a patch
+  written before that principle was articulated. Not changed here — it works
+  for the documented recipe, and reshaping it is its own measured task.
+
+- [ ] **tcc defines `__ILP32__` without `_ILP32` — the mirror of the `_LP64`
+  gap that `0039` closes, deliberately left open.** Measured 2026-08-23 against
+  gcc 15.2, which under `-m32` defines *both* `__ILP32__` and `_ILP32`, exactly
+  as it defines both `__LP64__` and `_LP64` on a 64-bit target. `dep/tcc`'s
+  `include/tccdefs.h` defines only the double-underscore spelling in its 32-bit
+  branch.
+  The failure mode would be the same shape as the one `0039` fixed: code
+  written against `_ILP32` silently takes a non-ILP32 branch, with no
+  diagnostic. Nothing in crescent builds a 32-bit target today, and this tcc
+  build cannot even produce one (no i386 cross binary), so closing it would be
+  an unmeasured change to a configuration nothing exercises — which is why it
+  is recorded rather than folded into `0039`. If a 32-bit tcc target ever
+  becomes real, this is a one-line fix in the same file and the `0039-tests`
+  harness already has the 32-bit leg written (it currently reports `skip`).
 
 - [ ] **`pcall` of an error raised inside an `ffi.cast` callback, unwinding
   back out through musl's `qsort`, panics — and it is not a tcc defect.**

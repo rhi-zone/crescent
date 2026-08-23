@@ -1,0 +1,136 @@
+Subject: [PATCH 4/4] bn: scope HAVE_BN_DIV_WORDS to the branch that makes it true
+
+Independent of 0001/0002 (m4/libtool.m4 and generated `configure`) and of
+0003 (configure.ac and crypto/Makefile.am.elf-x86_64); this one touches
+only crypto/bn/arch/amd64/bn_arch.h. Any application order works.
+
+## The defect
+
+Building libressl with tcc as CC, with assembly ENABLED (which 0003 made
+possible for the first time), fails to link:
+
+    unresolved reference to 'bn_div_words'
+
+libcrypto, libssl and libtls all link; apps/ is where it surfaces.
+
+Nothing on amd64 defines bn_div_words. Not the 21 vendored s2n-bignum
+routines, not arch/amd64/bn_arch.c. The only definition anywhere in the
+tree is the portable C one at crypto/bn/bn_div.c:77, and it is compiled
+under `#ifndef HAVE_BN_DIV_WORDS`.
+
+So `#define HAVE_BN_DIV_WORDS` in this header is not the claim it looks
+like. It does not mean "a faster bn_div_words is available here". It means
+"nothing will call bn_div_words here" -- and that is true only when the
+GNUC-gated bn_div_rem_words_inline below it is compiled, because bn_div.c's
+own portable bn_div_rem_words_inline (line 155) is the sole caller in the
+tree, and it exists only when HAVE_BN_DIV_REM_WORDS_INLINE is unset.
+
+The define sat outside that conditional, gated only on !_WIN32 &&
+!OPENSSL_NO_ASM. Any compiler that is not GNUC therefore got the caller
+compiled in and the callee compiled out. gcc and clang never noticed
+because they always take the branch.
+
+This is latent upstream, not tcc-specific -- tcc is simply the first
+non-GNUC compiler to build this tree with asm on. Every recorded tcc build
+before now used --disable-asm, which sets OPENSSL_NO_ASM and short-circuits
+the whole block, which is why it stayed hidden.
+
+## The fix, part one: move the define inside the conditional
+
+The define is moved to sit with HAVE_BN_DIV_REM_WORDS_INLINE, so it is
+present exactly when the thing that justifies it is present. Any compiler
+that does not take the branch now gets bn_div.c's portable bn_div_words
+compiled in, matching its portable bn_div_rem_words_inline -- a coherent
+pair, in either direction.
+
+This half is what closes the bug generally, for any future non-GNUC
+compiler, rather than for the one that happened to find it.
+
+## The fix, part two: admit tcc to the branch
+
+tcc supports GNU extended inline asm, and the three helpers in this block
+are the plain register-constraint forms: `divq`/`mulq` with fixed %rax/%rdx
+constraints, `subq`+`setb` with a matching constraint and a `%b0` byte
+modifier, `rm` for the memory-or-register operand.
+
+That was measured, not assumed. All three helpers were compiled by tcc and
+by gcc into one process and run against each other over 4,000,000
+iterations of edge-biased random inputs (0, 1, ~0, ~0-1, 2^63, 2^63-1,
+2^32, 2^32-1, and xorshift values; divisors normalized so h < d, since divq
+faults rather than wrapping). Zero mismatches on all three.
+
+There is corroborating evidence in tcc's own predefs: on FreeBSD, NetBSD,
+OpenBSD and Darwin, tccdefs.h already defines __GNUC__, so tcc has been
+taking this exact branch on four of its platforms all along. Linux is the
+only target where it does not.
+
+Widening the gate rather than leaving tcc on the portable path is what puts
+tcc on the SAME configuration gcc builds and upstream tests. The
+alternative -- asm enabled for the s2n routines but portable C for these
+three helpers -- is a mix that no upstream build produces and nobody tests.
+Fewer distinct configurations is the correctness argument here; the speed
+of hardware divq is a secondary benefit.
+
+## What this does not change
+
+gcc and clang define __GNUC__, take the branch exactly as before, and see
+an identical set of macros and inlines. The gcc-built libcrypto.so is
+byte-identical across this patch.
+
+--- a/dep/libressl/crypto/bn/arch/amd64/bn_arch.h
++++ b/dep/libressl/crypto/bn/arch/amd64/bn_arch.h
+@@ -28,14 +28,12 @@
+ 
+ #ifndef OPENSSL_NO_ASM
+ 
+ #define HAVE_BN_ADD
+ #define HAVE_BN_ADD_WORDS
+ 
+-#define HAVE_BN_DIV_WORDS
+-
+ #define HAVE_BN_MOD_ADD_WORDS
+ #define HAVE_BN_MOD_SUB_WORDS
+ 
+ #define HAVE_BN_MUL_COMBA4
+ #define HAVE_BN_MUL_COMBA6
+ #define HAVE_BN_MUL_COMBA8
+@@ -50,13 +48,25 @@
+ 
+ #define HAVE_BN_SUB
+ #define HAVE_BN_SUB_WORDS
+ 
+ #define HAVE_BN_WORD_CLZ
+ 
+-#if defined(__GNUC__)
++#if defined(__GNUC__) || defined(__TINYC__)
++
++/*
++ * Nothing on amd64 defines bn_div_words -- not the s2n-bignum assembly, not
++ * bn_arch.c. The only definition in the tree is the portable C one in
++ * bn_div.c, compiled under #ifndef HAVE_BN_DIV_WORDS. So HAVE_BN_DIV_WORDS is
++ * not a claim that some faster bn_div_words exists here; it is a claim that
++ * nothing will *call* one, which is true exactly when the inline below
++ * replaces bn_div.c's own bn_div_rem_words_inline -- that fallback is the sole
++ * caller. Defining it outside this conditional left a compiler that does not
++ * take this branch with the caller compiled in and the callee compiled out.
++ */
++#define HAVE_BN_DIV_WORDS
+ 
+ #define HAVE_BN_DIV_REM_WORDS_INLINE
+ 
+ static inline void
+ bn_div_rem_words_inline(BN_ULONG h, BN_ULONG l, BN_ULONG d, BN_ULONG *out_q,
+     BN_ULONG *out_r)
+@@ -112,11 +122,11 @@ bn_subw(BN_ULONG a, BN_ULONG b, BN_ULONG *out_borrow, BN_ULONG *out_r0)
+ 	    : "cc");
+ 
+ 	*out_borrow = borrow;
+ 	*out_r0 = r0;
+ }
+ 
+-#endif /* __GNUC__ */
++#endif /* __GNUC__ || __TINYC__ */
+ #endif /* _WIN32 */
+ 
+ #endif
+ #endif
