@@ -8241,7 +8241,16 @@ local n = x + 1
 ]])
     end)
 
-    assert.it("-> ...(integer): y is nil — arithmetic on y errors", function()
+    assert.it("-> ...(integer): y is nil — spreading a scalar produces exactly one slot", function()
+        -- Splice semantics: spreading T produces exactly as many slots as T
+        -- itself structurally denotes (docs/semantics.md §7.1 read together
+        -- with the `(true, ...R)` precedent in lib/type/static/CLAUDE.md —
+        -- R = integer splices to exactly one element, not many). A scalar
+        -- `integer` denotes exactly one value, so slot 0 (x) is `integer`
+        -- and slot 1 (y) is past the only slot the spread produces — same
+        -- category as `t[4]` on a fixed tuple (docs/type-system.md's Tuples
+        -- section), not the separate "extra slots are nil" invariant for
+        -- fixed-arity `(A, B)`-style returns.
         has_error([[
 --: () -> ...(integer)
 local function f() return 1 end

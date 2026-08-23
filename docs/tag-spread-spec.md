@@ -16,11 +16,32 @@ Introduce `-> ...(T)` in return position as the explicit multi-return marker.
 
 ```
 -> integer?              -- single value, type is integer | nil
--> ...(integer | nil)   -- multi-return with one slot of type integer | nil
+-> ...(integer)          -- variadic multi-return: every slot has type integer
 -> ...((integer, integer) | (nil, string))  -- multi-return union of patterns (string.find style)
 ```
 
 The `...` before the return type expression is the disambiguator. Without `...`, the return is always a single value regardless of whether the type happens to be a tuple or union-of-tuples.
+
+### What `...(T)` means
+
+Per `docs/semantics.md` §7.1 (ground-truth invariant, listed there as not yet
+covered by a fuzz test but still the intended, documented behavior):
+
+> Spread multi-return slot extraction: slot N has exactly the declared type.
+
+No qualifier, no "first slot only." Every slot of a spread multi-return —
+however many the caller asks for — has exactly `T`. This is a different
+invariant from the regular (non-spread) multi-return case, `docs/semantics.md`
+§7 #17: "slot N of a multi-return is the declared type; extra slots are nil."
+That one applies to a *fixed*-arity `(A, B)`-style return, where the arity is
+part of the type. `...(T)` is the opposite case — the annotation deliberately
+does not state an arity, so there is no fixed length for "extra" to be beyond.
+
+`-> ...(union-of-tuples)` (the `string.find`/`pcall` pattern) is a different
+question — which of N fixed-arity patterns a single call matched, not how
+many `T`-typed values came back — and is handled by its own existing,
+untouched mechanism (`ctx._multi_ret` + `narrow.lua:filter_tuple_union_arms`),
+not by the per-slot rule above.
 
 ## Grammar
 

@@ -2939,26 +2939,32 @@ function eager_slot(ctx, tid, slot)
         end
         return elem_id
     end
-    -- A raw vararg spread (e.g. string.match returns ...(string | nil)):
-    -- each slot extracts the inner element type.
+    -- Splice semantics (docs/semantics.md §7.1, lib/type/static/CLAUDE.md's
+    -- `(true, ...R)` precedent): spreading T produces exactly as many slots
+    -- as T itself structurally denotes. A plain/scalar T denotes exactly one
+    -- value, so it splices to exactly one slot — same as no spread at all.
+    -- A union-of-tuples T is a different question (which of N fixed-arity
+    -- patterns a call matched, not a scalar repeated); re-dispatch into the
+    -- TAG_UNION branch below so that untouched per-arm logic handles it.
     if t.tag == defs.TAG_SPREAD then
-        return types_mod.find(ctx, types_mod.spread_inner(t))
+        local inner = types_mod.find(ctx, types_mod.spread_inner(t))
+        local inner_t = ctx.types:get(inner)
+        if inner_t.tag == TAG_UNION then
+            return eager_slot(ctx, inner, slot)
+        end
+        if slot == 0 then return inner end
+        return ctx.T_NIL
     end
-    if t.tag == defs.TAG_TUPLE then
+    if t.tag == TAG_TUPLE then
         local tp_s, tp_l = types_mod.agg_members_start(t), types_mod.agg_members_len(t)
         if slot < tp_l then
             return unwrap_spread(types_mod.find(ctx, ctx.lists:get(tp_s + slot)))
         end
-        -- Overflow slot: when the trailing tuple slot is TAG_SPREAD (variadic
-        -- return tail, e.g. `(A, ...(B))`), all subsequent slots have the
-        -- spread's inner type.
-        if tp_l > 0 then
-            local last_id = types_mod.find(ctx, ctx.lists:get(tp_s + tp_l - 1))
-            local last = ctx.types:get(last_id)
-            if last.tag == defs.TAG_SPREAD then
-                return types_mod.find(ctx, types_mod.spread_inner(last))
-            end
-        end
+        -- Overflow slot: a fixed-prefix-plus-spread-tail tuple (`(A, ...(B))`)
+        -- already accounts for the spread's one slot as its last member
+        -- (handled by unwrap_spread on the in-bounds path above) — a scalar
+        -- spread never contributes more than that one slot, so anything past
+        -- tp_l is genuine overflow, same as any other tuple.
         return ctx.T_NIL
     end
     if t.tag == TAG_UNION then

@@ -1704,6 +1704,15 @@ local function solve_index(ctx, c)
         local slot = types_mod.lit_str_id(key_t)
         local obj_tid = find(ctx, obj_tid_raw)
         local obj_t = ctx.types:get(obj_tid)
+        -- Splice semantics: unwrap TAG_SPREAD up front so every slot-typing
+        -- branch below (TAG_TUPLE, TAG_UNION, the scalar fallback, ...)
+        -- handles the spread's actual inner type directly — same as
+        -- `(true, ...R)` splicing R's elements (docs/semantics.md §7.1;
+        -- lib/type/static/CLAUDE.md). No separate spread-specific branch.
+        if obj_t.tag == defs.TAG_SPREAD then
+            obj_tid = find(ctx, types_mod.spread_inner(obj_t))
+            obj_t = ctx.types:get(obj_tid)
+        end
         -- HM Phase 1c step 7: free param + integer-key access → emit
         -- `{ [integer]: V, ... }` bound. The bound captures "this param
         -- has integer-keyed indexer access"; specific tuple-slot semantics
@@ -1796,13 +1805,6 @@ local function solve_index(ctx, c)
         end
         if obj_t.tag == TAG_NEVER then
             bind_to(ctx, res_tid, ctx.T_NEVER)
-            return true
-        end
-        -- Vararg spread (e.g. ...(string|nil) from string.match): each slot is
-        -- the inner element type. This covers method calls like str:match(pat)
-        -- where the return type resolves to TAG_SPREAD before C_INDEX fires.
-        if obj_t.tag == TAG_SPREAD then
-            bind_to(ctx, res_tid, find(ctx, types_mod.spread_inner(obj_t)))
             return true
         end
         -- Non-tuple: slot 0 = the value itself, others = nil
