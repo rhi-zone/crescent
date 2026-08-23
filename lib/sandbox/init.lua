@@ -95,9 +95,28 @@ function M.run(code, env, opts)
 	-- hook is saved/restored on every exit path: normal completion below and
 	-- the error path inside the hook itself, since pcall(fn) below catches
 	-- that error and execution always reaches the post-pcall restore too.
+	--
+	-- debug.sethook's count hook is an interpreter-level mechanism: it does
+	-- not reliably fire once LuaJIT trace-compiles a hot loop (see TODO.md,
+	-- "lib/sandbox's instruction-budget count-hook does not reliably fire").
+	-- Measured live: a sandboxed `while true do i=i+1 end` with budget=100,
+	-- forked and run after other JIT-heavy code earlier in the same process,
+	-- sometimes never hit the hook and spun forever -- the hook check and
+	-- the trace becoming hot/installed are a race, and how "warmed up" the
+	-- JIT compiler already is (from unrelated prior code in the same
+	-- process) can tip it either way, not just the loop's own iteration
+	-- count. jit.off() for the duration of the budgeted call closes this by
+	-- construction: with the JIT compiler off, nothing gets trace-compiled,
+	-- so the interpreter's hook dispatch is the only path and always runs.
+	-- Saved/restored the same way as the hook itself (jit.status() before,
+	-- only re-enabling if it was already on), so a nested budgeted run
+	-- doesn't re-enable the JIT out from under an outer one.
 	local prev_hook, prev_mask, prev_count
+	local was_jit_on
 	if opts.budget then
 		prev_hook, prev_mask, prev_count = debug.gethook()
+		was_jit_on = jit.status()
+		jit.off()
 		local budget = opts.budget
 		debug.sethook(function()
 			if prev_hook then
@@ -105,6 +124,7 @@ function M.run(code, env, opts)
 			else
 				debug.sethook(nil, "", nil)
 			end
+			if was_jit_on then jit.on() end
 			error("sandbox: instruction budget exceeded")
 		end, "", budget)
 	end
@@ -117,6 +137,7 @@ function M.run(code, env, opts)
 		else
 			debug.sethook(nil, "", nil)  -- clear hook (none was active before)
 		end
+		if was_jit_on then jit.on() end
 	end
 
 	return ok, result

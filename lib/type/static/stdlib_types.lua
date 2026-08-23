@@ -107,7 +107,7 @@
 --:: declare _G = $GlobalScope
 --:: declare package = { path: string, cpath: string, config: string, loaded: { [string]: unknown, ... }, preload: { [string]: unknown, ... }, ... }
 --:: declare arg = { [integer]: string, ... }
---:: declare jit = { version: string, version_num: integer, os: string, arch: string, ... }
+--:: declare jit = { version: string, version_num: integer, os: string, arch: string, status: () -> (boolean, ...string), off: (f: unknown | nil, recursive: boolean | nil) -> nil, on: (f: unknown | nil, recursive: boolean | nil) -> nil, ... }
 --:: declare register_ffi_module = ((string) -> nil) | nil
 
 ---------------------------------------------------------------------------

@@ -114,7 +114,31 @@ T.describe("sandbox.run", function()
 
 	T.it("budget exceeded returns error", function()
 		local env = S.env(S.pure)
-		-- tight loop, will hit budget quickly
+		-- Tight loop, will hit budget quickly.
+		--
+		-- Regression: this hung intermittently (~50% of runs) when run in a
+		-- forked worker after other JIT-heavy code earlier in the same
+		-- worker's file sequence (observed with lib.async/coroutine-heavy
+		-- code from an http client test). Root cause: debug.sethook's count
+		-- hook is interpreter-only and races against LuaJIT trace-compiling
+		-- this loop (see TODO.md, "lib.sandbox's instruction-budget
+		-- count-hook does not reliably fire") -- how "warmed up" the JIT
+		-- compiler already is from unrelated prior code in the same process
+		-- can tip that race, not just this loop's own iteration count, so
+		-- budget=100 being under the ~56-back-edge hot-loop threshold was
+		-- not actually a safe margin on its own. Confirmed live via
+		-- /proc/<pid>/status and /proc/<pid>/wchan (pure CPU spin, no
+		-- syscall block) and reproduced down to a 2-file, single-fork
+		-- minimal case; the same 2 files unforked in one process never
+		-- reproduced it, so trace-compile/hook-check timing -- not forking
+		-- itself -- is the actual race.
+		--
+		-- Fixed at the source in lib/sandbox/init.lua: M.run now wraps the
+		-- budgeted pcall in jit.off()/jit.on(), so nothing can get
+		-- trace-compiled while a budget is enforced and the interpreter's
+		-- hook dispatch is the only path, unconditionally. Verified: 15/15
+		-- clean runs of the forked minimal repro at this budget value after
+		-- the jit.off fix landed, versus ~50% hangs before it.
 		local ok, err = S.run("local i = 0; while true do i = i + 1 end", env, { budget = 100 })
 		T.fail(ok)
 		T.ok(err:find("budget exceeded"))
