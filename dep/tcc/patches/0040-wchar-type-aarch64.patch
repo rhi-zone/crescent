@@ -1,0 +1,88 @@
+Subject: [PATCH 40] branch __WCHAR_TYPE__ on aarch64 to match the real ABI
+
+tcc's own bootstrap (`lib/bcheck.c`, built by tcc against itself via
+`../tcc -c bcheck.c -o ../bcheck.o -B.. -I.. -bt`) fails only on
+aarch64/musl, never on x86_64/musl, with:
+
+    ../include/stddef.h:6: error: incompatible redefinition of 'wchar_t'
+
+reached via `bcheck.c:25` -> `#include <stdatomic.h>` -> `#include
+<stddef.h>`. Reproduced locally (qemu-aarch64 + an aarch64-musl cross
+toolchain, native-equivalent build against a real Alpine aarch64
+musl-dev package extracted for its headers) and root-caused with `tcc
+-E`, not guessed at: it is a genuine ABI mismatch between tcc's own
+bundled `include/stddef.h` and the real target libc, and it only
+happens to be latent on x86_64.
+
+`bcheck.c` first includes `<stdlib.h>` (real musl, found via the
+default sysinclude path's second entry, the target's `/usr/include`).
+Musl's `stdlib.h` requests `wchar_t` through its own per-type include
+guard (`__NEED_wchar_t` / `__DEFINED_wchar_t` in
+`bits/alltypes.h`), independent of any `_STDDEF_H` guard, and defines
+it to match the real target ABI:
+
+    typedef unsigned wchar_t;   /* aarch64 musl-dev 1.2.5-r3, verified
+                                    directly from the Alpine package */
+    typedef int      wchar_t;   /* x86_64 musl-dev 1.2.5-r3, same check */
+
+This matches the platforms' real C ABIs: AAPCS64 specifies `wchar_t`
+as `unsigned int`; the x86-64 SysV ABI specifies it as (signed) `int`.
+
+`bcheck.c` then includes `<stdatomic.h>`, which resolves to tcc's
+*own* bundled `{B}/include/stdatomic.h` (first in the sysinclude
+search order, ahead of the target's `/usr/include` -- Alpine's
+musl-dev ships no `stdatomic.h` of its own, so this is not a
+search-order accident). That header does its own `#include
+<stddef.h>`, which likewise resolves to tcc's own bundled
+`include/stddef.h` (same reason: found first). tcc's `stddef.h`
+typedefs `wchar_t` via `__WCHAR_TYPE__`, and `tccdefs.h` hardcodes
+`__WCHAR_TYPE__` to plain `int` for every `__linux__` target
+regardless of architecture -- no aarch64/x86_64 branch existed here at
+all. Musl's real `stddef.h`-family definition and tcc's own predefine
+therefore both apply to the same translation unit, and the compiler
+sees a second, differing typedef of `wchar_t`:
+
+  - x86_64: musl's `int` vs tcc's `int` -- identical, no error, bug
+    stays latent.
+  - aarch64: musl's `unsigned int` vs tcc's `int` -- incompatible,
+    "incompatible redefinition of 'wchar_t'".
+
+Confirmed both ways locally: building tcc against a real x86_64
+Alpine musl-dev sysroot compiles `bcheck.c` clean; building the
+identical source against a real aarch64 Alpine musl-dev sysroot
+(under qemu-aarch64) reproduces the exact CI error above; applying
+this patch and rebuilding for aarch64 makes it compile clean too, with
+no change to the x86_64 build.
+
+Two prior hypotheses from an earlier investigation (recorded in
+TODO.md) are ruled out by this: it is not `stddef.h` being read twice
+with its own guard not deduping (musl's `stdlib.h` never touches
+`_STDDEF_H` at all -- it defines `wchar_t` through a completely
+separate, per-type guard mechanism), and it is not tcc's arm64
+parser/codegen builtin-declaring `wchar_t` (there is no such
+declaration anywhere in the arm64 backend; the conflict is entirely
+between two *header* definitions).
+
+Indentation is load-bearing in this file: only lines indented four or
+more columns are emitted into the compiled-in predefs, and lines at
+column 1 are conditionals whose platform macros get substituted at
+conversion time (see `conftest.c`'s `platform_macros` table, which
+already maps `__aarch64__` for exactly this purpose). The nested
+`#if defined __aarch64__` here follows the same existing pattern
+already used a few lines above in this file (guarding `_LOCORE` inside
+the NetBSD branch).
+
+--- a/dep/tcc/include/tccdefs.h
++++ b/dep/tcc/include/tccdefs.h
+@@ -61,7 +61,11 @@
+     #define __WCHAR_TYPE__ unsigned short
+     #define __WINT_TYPE__ unsigned short
+ #elif defined __linux__
++#if defined __aarch64__
++    #define __WCHAR_TYPE__ unsigned int
++#else
+     #define __WCHAR_TYPE__ int
++#endif
+     #define __WINT_TYPE__ unsigned int
+ #else
+     #define __WCHAR_TYPE__ int

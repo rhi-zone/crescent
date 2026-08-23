@@ -2,7 +2,7 @@
 
 > *Open threads from a previous session. Treat as starting context, not instructions — verify relevance before acting.*
 
-## `build-vendored.yml`: tcc-windows regression fixed, tcc-linux-aarch64 gap recorded (2026-08-23)
+## `build-vendored.yml`: tcc-windows regression fixed, tcc-linux-aarch64 root-caused and fixed (2026-08-23)
 
 - [x] **`tcc-windows-x86`/`tcc-windows-x86_64` regressed (previously green) the moment
   `build-vendored.yml` started applying the full `0001`–`0039` patch series to the Windows
@@ -40,33 +40,53 @@
   toolchain available in this environment) — real confirmation is the next
   `build-vendored.yml` run's `tcc-windows-x86`/`tcc-windows-x86_64` jobs.
 
-- [ ] **`tcc-linux-aarch64` fails independently, pre-existing, not touched by the Windows
-  fix above — root cause not found, needs an aarch64-capable environment to continue.**
-  From the real job log (`gh run view --job 97175691113 --log`): the native aarch64 `tcc`
-  that `./configure --config-musl && make` just built (in GitHub's `alpine:latest`
-  aarch64 container, matching `tcc-linux-x86_64`'s recipe exactly) fails compiling its own
-  `lib/bcheck.c` — `../tcc -c bcheck.c -o ../bcheck.o -B.. -I.. -bt` —
-  with `../include/stddef.h:6: error: incompatible redefinition of 'wchar_t'`, reached via
-  `bcheck.c:25` → `#include <stdatomic.h>` → `#include <stddef.h>`. The identical build step
-  on `tcc-linux-x86_64` (same run, same source, same `tccdefs.h`, `__WCHAR_TYPE__` resolves
-  to plain `int` on Linux for both architectures per `include/tccdefs.h`) compiles this exact
-  file cleanly and proceeds into `make test`. So this is genuinely arm64-specific in tcc's
-  own compiler, not an environment or predef difference — but *where* it diverges wasn't
-  found: `wchar_t` isn't a tcc built-in keyword (grepped `tcctok.h`/`tccgen.c` — no
-  arm64-conditional handling of it anywhere), `_STDDEF_H`'s include guard is architecture-
-  independent, and `__WCHAR_TYPE__`'s definition in `tccdefs.h` doesn't branch on
-  `__aarch64__` vs `__x86_64__` at all (only on OS). That means either (a) `stddef.h` is
-  somehow being read/expanded twice with the guard not deduping — which would need to be
-  something in tcc's own preprocessor state handling that differs on the arm64 backend, not
-  in this header — or (b) something in tcc's arm64 codegen/parser path predefines or
-  builtin-declares `wchar_t` before the header gets to it, not found by inspection. Not
-  guessed at further: this needs either real aarch64 hardware/QEMU (unavailable in this
-  session — no `qemu-aarch64-static`, and `docker run --platform linux/arm64` fails with
-  `exec format error`, no binfmt_misc registered) to reproduce and bisect against
-  `tccgen.c`'s typedef-redefinition-compatibility check, or a maintainer with access to one.
-  Toolchain-parity baseline for whoever picks this up: gcc/clang cross-compiling the same
-  `bcheck.c` for aarch64 has no trouble with `wchar_t`, so this is a tcc-side gap, not an
-  upstream libc/header issue — measure against that, not against guesswork.
+- [x] **`tcc-linux-aarch64`'s `../include/stddef.h:6: error: incompatible redefinition of
+  'wchar_t'` (building tcc's own `lib/bcheck.c` via `../tcc -c bcheck.c -o ../bcheck.o -B..
+  -I.. -bt`) root-caused and fixed by `dep/tcc/patches/0040-wchar-type-aarch64.patch`.**
+  Reproduced locally this session (no aarch64 hardware needed): `nix shell
+  nixpkgs#pkgsCross.aarch64-multiplatform-musl.buildPackages.gcc` cross-built tcc for
+  aarch64/musl, `nix shell nixpkgs#qemu-user`'s `qemu-aarch64` ran the resulting binary, and
+  a real Alpine aarch64 `musl-dev-1.2.5-r3.apk`/`gcc-13.2.1...apk` pair (downloaded directly
+  from `dl-cdn.alpinelinux.org`, extracted with `gzip -dc | tar --ignore-zeros -xf -` since
+  `.apk` is three concatenated gzip members) was used as `--sysroot` so tcc's own default
+  `/usr/include` search entry resolved to the *exact* headers the CI Alpine container
+  installs — not a guess at what they contain. This reproduced the CI error byte-for-byte:
+  same file, same line, same message. Root cause, confirmed with `tcc -E` on the failing
+  invocation (not inferred): `bcheck.c` first includes `<stdlib.h>` (real musl, found via
+  the sysinclude path's target `/usr/include` entry), whose `bits/alltypes.h` defines
+  `wchar_t` through musl's own per-type guard (`__NEED_wchar_t`/`__DEFINED_wchar_t`,
+  independent of any `_STDDEF_H` guard) to match the *real target ABI*:
+  `typedef unsigned wchar_t;` on aarch64 (AAPCS64), `typedef int wchar_t;` on x86_64 (SysV)
+  — verified directly from both extracted `.apk`s, not from ABI docs alone. `bcheck.c` then
+  includes `<stdatomic.h>`, which resolves to tcc's *own* bundled `{B}/include/stdatomic.h`
+  (first in the sysinclude search order — Alpine's musl-dev ships no `stdatomic.h` of its
+  own, confirmed by extracting the package and finding none, so this isn't a search-order
+  fluke), which does its own `#include <stddef.h>`, again resolving to tcc's own bundled
+  `include/stddef.h` (same reason). That header typedefs `wchar_t` via `__WCHAR_TYPE__`,
+  which `include/tccdefs.h` hardcoded to plain `int` for *every* `__linux__` target
+  regardless of architecture — no arm64/x86_64 branch existed there at all. Two competing
+  `wchar_t` typedefs therefore land in the same translation unit: on x86_64 both say `int`
+  (identical — no error, bug stays latent); on aarch64 musl says `unsigned int` and tcc says
+  `int` (incompatible — the exact CI error). Both prior hypotheses from the original
+  investigation are ruled out by this, not just superseded: it is not `stddef.h` read twice
+  with a non-deduping guard (musl's `stdlib.h` never touches `_STDDEF_H` — it defines
+  `wchar_t` through a completely separate per-type guard), and it is not an arm64
+  codegen/parser builtin declaring `wchar_t` (no such declaration exists anywhere in the
+  arm64 backend; the conflict is entirely between two *header* definitions, both textual).
+  Fix: `dep/tcc/patches/0040-wchar-type-aarch64.patch` branches `__WCHAR_TYPE__` on
+  `__aarch64__` inside the existing `__linux__` case in `include/tccdefs.h`, matching the
+  same nested-`#if defined __aarch64__`-inside-an-OS-branch pattern already used a few lines
+  above in that file (the `_LOCORE` guard). Verified both ways after the fix, same
+  methodology: rebuilding tcc for aarch64 against the real Alpine aarch64 sysroot now
+  compiles `bcheck.c` and every other `lib/` object (`stdatomic.c`, `builtin.c`, `tcov.c`,
+  `armflush.c`, `atomic.S`, `alloca.S`, `alloca-bt.S`) clean under `qemu-aarch64`; rebuilding
+  for x86_64 against the real Alpine x86_64 sysroot still compiles clean too (no regression).
+  `dep/tcc/SOURCE_SHA256` regenerated via `tooling/scripts/vendor-verify.sh update tcc`
+  (after `git add`ing the new patch file — the hash is git-scoped via `git ls-files` and
+  silently ignores untracked files) and reverified with `verify`. Not yet confirmed against
+  the real `build-vendored.yml` `tcc-linux-aarch64` CI job itself (this session's repro used
+  an emulated-but-real Alpine sysroot, not the actual CI container) — that's the next real
+  signal once this lands.
 
 ## `lib.sandbox`'s instruction-budget mechanism is retired — won't-fix via jit.off, moved off it instead (2026-08-23)
 
