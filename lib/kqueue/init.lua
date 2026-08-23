@@ -98,15 +98,26 @@ end
 --: () -> kqueue_poller
 M.new = function () return kqueue:new() end
 
+-- The one true removal path: clears bookkeeping AND issues the EV_DELETE
+-- kevent changes so the kernel's registration is actually dropped. Both
+-- add()'s returned `remove` closure and wait()'s EV_EOF handling call this
+-- same function -- previously they diverged, and the EV_EOF path only
+-- cleared Lua-side bookkeeping, leaving the fd registered in the kernel
+-- kqueue set. A hung-up fd stayed registered forever and (being level-style
+-- for EOF conditions) kept re-firing on every subsequent kevent() call,
+-- mirroring the epoll HUP/RDHUP bug fixed alongside this one.
 --: (self: kqueue_poller, fd: number) -> nil
 local remove_fd = function (self, fd)
-	if self.rets[fd] then
+	local ret = self.rets[fd]
+	if ret then
 		self.read_cbs[fd] = nil
 		self.write_cbs[fd] = nil
 		self.close_cbs[fd] = nil
 		self.rets[fd] = nil
 		if not self.weak[fd] then self.count = self.count - 1 end
 		self.weak[fd] = nil
+		-- may silently fail if fd already closed
+		ffi.C.kevent(self.fd, ret._del_changes, 2, nil, 0, nil)
 	end
 end
 
@@ -183,8 +194,6 @@ kqueue.add = function (self, fd, on_read, close, weak)
 	--: () -> nil
 	local remove = function ()
 		remove_fd(ep, fd)
-		-- may silently fail if fd already closed
-		ffi.C.kevent(ep.fd, del_changes, 2, nil, 0, nil)
 	end
 
 	ep.rets[fd] = { write = nil, remove = remove, _write_toggle = write_toggle, _del_changes = del_changes }
