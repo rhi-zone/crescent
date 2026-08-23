@@ -143,16 +143,25 @@ local read_cb = function (fd, read_fn)
 	end
 end
 
---: (self: epoll, fd: number) -> nil
+-- The one true removal path: clears bookkeeping AND issues EPOLL_CTL_DEL so
+-- the kernel's registration is actually dropped. Both add()'s returned
+-- `remove` closure and wait()'s EPOLLHUP/EPOLLRDHUP handling call this same
+-- function -- previously they diverged, and the HUP/RDHUP path only cleared
+-- Lua-side bookkeeping, leaving the fd registered in the kernel epoll set. A
+-- hung-up fd stayed registered forever and re-fired on every subsequent
+-- epoll_wait.
+--: (self: epoll, fd: integer) -> nil
 local remove_fd = function (self, fd)
-	if self.rets[fd] then
+	local ret = self.rets[fd]
+	if ret then
 		self.read_cbs[fd] = nil
 		self.write_cbs[fd] = nil
 		self.close_cbs[fd] = nil
 		self.rets[fd] = nil
 		if not self.weak[fd] then self.count = self.count - 1 end
 		self.weak[fd] = nil
-		--[[do i need to close?]]
+		--[[this may silently fail if the socket has already been closed.]]
+		epoll_ctl_c(self.fd, --[[EPOLL_CTL_DEL]] 2, fd, ret._ev)
 	end
 end
 
@@ -211,8 +220,6 @@ epoll.add = function (self, fd, on_read, close, weak)
 	--: () -> nil
 	local remove = function ()
 		remove_fd(ep, fd)
-		--[[this may silently fail if the socket has been closed.]]
-		epoll_ctl_c(ep.fd, --[[EPOLL_CTL_DEL]] 2, fd, events)
 	end
 	if epoll_ctl_c(ep.fd, --[[EPOLL_CTL_ADD]] 1, fd, events) ~= 0 then
 		return nil, nil, "epoll: add failed"
@@ -283,12 +290,12 @@ epoll.wait = function (self, timeout_ms)
 	if bit.band(event.events, --[[EPOLLHUP]] 0x10) ~= 0 then
 		local cb = self.close_cbs[fd]
 		if cb then cb() end
-		if self.rets[fd] then remove_fd(self, fd) end
+		if self.rets[fd] then remove_fd(self, math.floor(fd)) end
 	end
 	if bit.band(event.events, --[[EPOLLRDHUP]] 0x2000) ~= 0 then
 		local cb = self.close_cbs[fd]
 		if cb then cb() end
-		if self.rets[fd] then remove_fd(self, fd) end
+		if self.rets[fd] then remove_fd(self, math.floor(fd)) end
 	end
 end
 M.wait = epoll.wait

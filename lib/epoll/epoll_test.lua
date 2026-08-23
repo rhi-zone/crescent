@@ -8,6 +8,7 @@ ffi.cdef([[
   int timerfd_settime(int fd, int flags, void *new_value, void *old_value);
   long read(int fd, void *buf, unsigned long count);
   int close(int fd);
+  int pipe(int pipefd[2]);
 ]])
 
 local T = require("lib.test.assert")
@@ -114,5 +115,45 @@ T.describe("epoll", function()
     T.ok(err, "got error for unknown fd")
 
     ffi.C.close(tfd)
+  end)
+
+  -- Regression test: wait()'s EPOLLHUP/EPOLLRDHUP handling used to clear only
+  -- this module's own bookkeeping (read_cbs/rets/count/...) without issuing
+  -- EPOLL_CTL_DEL, unlike add()'s returned `remove` closure which always did.
+  -- A fd removed via that path stayed registered in the kernel epoll set
+  -- forever. We can't observe the kernel's registration table directly, but
+  -- EPOLL_CTL_ADD on an already-registered fd fails with EEXIST -- so
+  -- re-adding the same fd number after an internal HUP-triggered removal is
+  -- a direct, non-flaky witness that EPOLL_CTL_DEL actually ran.
+  T.it("a fd removed via the internal HUP path is fully deregistered from the kernel", function()
+    local pipefd = ffi.new("int[2]")
+    T.ok(ffi.C.pipe(pipefd) == 0, "pipe() succeeded")
+    local rfd, wfd = pipefd[0], pipefd[1]
+
+    local ep = epoll.new()
+    local hup_count = 0
+    local w, r = ep:add(rfd, function() end, function() hup_count = hup_count + 1 end)
+    T.ok(w, "add returned write function")
+    T.ok(r, "add returned remove function")
+
+    -- Closing the write end makes the read end hang up.
+    ffi.C.close(wfd)
+
+    -- wait() observes the hangup and removes rfd via the internal HUP path
+    -- (remove_fd), NOT via the `r` closure returned above.
+    ep:wait(1000)
+    T.eq(hup_count, 1, "close callback fired once on hangup")
+    T.eq(ep.count, 0, "bookkeeping count dropped to 0 after internal removal")
+
+    -- If the HUP path didn't issue EPOLL_CTL_DEL, rfd is still registered in
+    -- the kernel epoll set even though our own bookkeeping says otherwise,
+    -- and this ADD fails with EEXIST.
+    local w2, r2, err2 = ep:add(rfd, function() end)
+    T.ok(w2 ~= nil, "re-add on the same fd succeeded (regression: HUP-path removal left the fd registered in the kernel)")
+    T.ok(r2 ~= nil, "re-add returned a remove function")
+    T.eq(err2, nil, "re-add reported no error")
+
+    if r2 then r2() end
+    ffi.C.close(rfd)
   end)
 end)
