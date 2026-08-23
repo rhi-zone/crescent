@@ -46,6 +46,7 @@ end
 local ffi = require("ffi")
 local json = require("lib.json")
 local bit = require("bit")
+local close_fds = require("lib.os_isolation.close_fds")
 
 ffi.cdef[[
 	int pipe(int pipefd[2]);
@@ -166,6 +167,18 @@ local function handle_spawn(req)
 		return encoded or ENCODE_FAILURE_FALLBACK
 	end
 	if pid == 0 then
+		-- Sweep every fd except this child's own result-pipe write end
+		-- before doing anything else -- in particular before load()/pcall
+		-- run req.args-supplied, arbitrary code. This child never execs, so
+		-- this is the highest-stakes fork-without-exec site in the
+		-- supervisor: any descriptor left open here (a socket or file
+		-- belonging to some caller several frames up the SUPERVISOR
+		-- process's own history) would be directly reachable from that
+		-- arbitrary code. A sweep failure is fatal.
+		local sweep_fn = close_fds.close_fds_except
+		local swept = sweep_fn and sweep_fn({ fds[1] })
+		if not swept then ffi.C._exit(126) end
+
 		_prime(fds[0])
 		local fn, load_err = load(code, "@os_isolation_supervisor_child")
 		local ok, result

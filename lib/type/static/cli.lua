@@ -295,6 +295,17 @@ local function spawn_worker(bucket, project_opts, cache_dir)
         io.stderr:write("fork() failed\n")
         os.exit(2)
     elseif pid == 0 then
+        -- Sweep every fd except the result pipe's write end before doing
+        -- anything else. This child never execs (run_worker just calls
+        -- into the typechecker and exits), so a leaked descriptor from an
+        -- outer caller would otherwise survive for the child's whole life.
+        -- A sweep failure is fatal: run_worker is about to run with an
+        -- unknown inherited descriptor set otherwise.
+        local close_fds = require("lib.os_isolation.close_fds")
+        local sweep_fn = close_fds.close_fds_except
+        local swept = sweep_fn and sweep_fn({ wfd })
+        if not swept then os.exit(1) end
+
         C.close(rfd)
         run_worker(bucket, wfd, project_opts, cache_dir)
         -- unreachable

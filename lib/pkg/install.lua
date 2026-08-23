@@ -21,6 +21,7 @@ local manifest = require("lib.pkg.manifest")
 local lock     = require("lib.pkg.lock")
 local config   = require("lib.pkg.config")
 local merge3   = require("lib.merge3")
+local close_fds = require("lib.os_isolation.close_fds")
 
 ffi.cdef[[
 	int link(const char *oldpath, const char *newpath);
@@ -1106,6 +1107,17 @@ local function parallel_fetch(work, jobs, opts)
 						results[item.name] = { err = tostring(err) }
 					end
 				elseif pid == 0 then
+					-- Child: sweep every fd except the result pipe's write end
+					-- before doing anything else. This child never execs, so
+					-- any leaked descriptor (a socket or file belonging to
+					-- some caller several frames up) would otherwise survive
+					-- for the rest of this process's life. A sweep failure
+					-- is fatal here -- fetch_package() is about to run with
+					-- an unknown inherited descriptor set otherwise.
+					local sweep_fn = close_fds.close_fds_except
+					local swept = sweep_fn and sweep_fn({ write_fd })
+					if not swept then os.exit(1) end
+
 					-- Child: close read end, run fetch, write result, exit.
 					ffi.C.close(read_fd)
 

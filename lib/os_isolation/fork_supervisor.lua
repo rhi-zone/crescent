@@ -66,6 +66,7 @@ local ffi = require("ffi")
 local bit = require("bit")
 local json = require("lib.json")
 local codec = require("lib.os_isolation.result_codec")
+local close_fds = require("lib.os_isolation.close_fds")
 
 ffi.cdef[[
 	int pipe(int pipefd[2]);
@@ -171,6 +172,18 @@ function M.start(opts)
 		-- becomes the supervisor process via exec -- this fork() is the
 		-- ONE fork-without-exec this library ever does from the CALLER's
 		-- process, and it happens only in start(), not per-spawn.
+		--
+		-- Sweep before the dup2 dance, keeping only the not-yet-dup2'd pipe
+		-- ends this child is about to wire onto 0/1 -- same shape as
+		-- pty_ffi's posix-tier forkpty(). Descriptors survive exec unless
+		-- CLOEXEC was set, so a leaked fd here would reach the exec'd
+		-- bin/cr too. A sweep failure is fatal: proceeding into exec with
+		-- an unknown descriptor set is exactly the hazard this guards
+		-- against.
+		local sweep_fn = close_fds.close_fds_except
+		local swept = sweep_fn and sweep_fn({ req_pipe[0], resp_pipe[1] })
+		if not swept then ffi.C._exit(126) end
+
 		_prime(req_pipe[1])
 		_prime(resp_pipe[0])
 		ffi.C.dup2(req_pipe[0], 0)

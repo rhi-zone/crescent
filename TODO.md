@@ -10,24 +10,31 @@ across every tier the host can run. All three are live on this machine.
 
 Still open, deliberately not done:
 
-- [ ] **Call the sweep from the fork sites.** Sites: `lib/pkg/install.lua:1097`,
-      `lib/process/init.lua:82,189`, `lib/test/cli.lua:351`,
-      `lib/type/static/cli.lua:293`, `lib/os_isolation/supervisor_main.lua:162`,
-      `lib/pty_ffi/init.lua:226`, `lib/os_isolation/fork_direct.lua:134`,
-      `lib/os_isolation/fork_supervisor.lua:163`,
-      `lib/platform/caps/http_client_test.lua:276`. Blocked on an undecided
-      design question, below.
-- [ ] **DECISION NEEDED — who owns the keep-list at general-purpose fork sites.**
-      Most sites can name their own keep-list. Two cannot, structurally:
-      `fork_direct.spawn(fn)` documents that the child inherits the caller's
-      upvalues via COW, and `pty_ffi`'s child `return 0, 0`s back into caller
-      code. At both, "the descriptors the child still needs" is a fact about
-      the *caller's* closure, not about the fork site. Sweeping there with a
-      site-chosen keep-list would silently break callers holding a pre-fork
-      file or socket. Options: leave those two unswept; add an optional
-      caller-supplied `opts.keep_fds`; or make the keep-list a required
-      parameter (breaking API change). Not picked — see the session that landed
-      close_fds.lua.
+- [x] **Call the sweep from the fork sites.** (2026-08-23) Wired at
+      `lib/pkg/install.lua:1097` (keep = `{write_fd}`), `lib/process/init.lua:82`
+      (`mod.exec`, keep = the not-yet-dup2'd pipe write/read ends) and `:189`
+      (`mod.spawn`, keep = `{0, 1, 2}` — this site has no pipes of its own, the
+      exec'd program inherits the caller's real stdio directly), `lib/type/static/cli.lua:293`
+      (`spawn_worker`, keep = `{wfd}`), `lib/os_isolation/supervisor_main.lua:162`
+      (`handle_spawn`, keep = `{fds[1]}` — highest-stakes site, runs arbitrary
+      `load()`ed code), `lib/os_isolation/fork_supervisor.lua:163` (`M.start`,
+      keep = the not-yet-dup2'd pipe ends, swept before the dup2 dance, same
+      shape as `pty_ffi`'s posix-tier `forkpty()`), `lib/platform/caps/http_client_test.lua:276`
+      (TLS server child, keep = `{srv_fd}` — still untested at runtime, this
+      test's fork site has never actually executed on this tree; see the
+      "TLS server child has never run" section below). `lib/pty_ffi/init.lua:226`
+      and `lib/os_isolation/fork_direct.lua:134` were already done by the
+      session that resolved the decision below. **`lib/test/cli.lua:351` is
+      deliberately NOT wired** — a parallel session owns a larger rewrite of
+      that file's fork site (epoll-based pipe draining) and will wire it as
+      part of that work.
+- [x] **DECISION NEEDED — who owns the keep-list at general-purpose fork sites.**
+      (2026-08-23) Decided: `fork_direct.spawn` and `pty_ffi`'s `forkpty`/`openpty`-adjacent
+      fork now take a REQUIRED `keep_fds` array parameter (breaking API change) —
+      the caller names what its own closure/post-fork code needs, since only the
+      caller can see that. Every other fork site computes its own keep list
+      locally from what it can already see (its own pipe fds, fds about to be
+      dup2'd onto 0/1/2) — no shared/default keep-list convention needed there.
 - [ ] **`lib/test/cli.lua` sequential pipe drain.** `run_parallel` drains worker
       pipes one at a time, and the comment above the loop asserts a safety
       property ("workers write <= a few KB, so no deadlock") that does not hold:

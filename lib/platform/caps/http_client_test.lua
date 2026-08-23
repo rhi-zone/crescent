@@ -281,6 +281,17 @@ T.describe("caps.http_client TLS integration", function()
 
 		if pid == 0 then
 			-- ── Child: minimal TLS HTTP server (handles exactly one request) ──
+			-- Sweep every fd except the listening socket before doing
+			-- anything else -- this child never execs, and the test
+			-- process may hold other fds (other tests' temp files,
+			-- sockets) that have nothing to do with this one. A sweep
+			-- failure is fatal: the child is about to run TLS handshake
+			-- logic with an unknown inherited descriptor set otherwise.
+			local close_fds = require("lib.os_isolation.close_fds")
+			local sweep_fn = close_fds.close_fds_except
+			local swept = sweep_fn and sweep_fn({ srv_fd })
+			if not swept then ffi.C._exit(126) end
+
 			local cfg = tls_lib.config_new()
 			if tls_lib.config_set_keypair_file(cfg, cert_path, key_path) < 0 then
 				ffi.C._exit(1)

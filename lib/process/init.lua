@@ -4,6 +4,7 @@ end
 
 local ffi = require("ffi")
 local bit = require("bit")
+local close_fds = require("lib.os_isolation.close_fds")
 
 ffi.cdef[[
   int pipe(int pipefd[2]);
@@ -89,6 +90,21 @@ function mod.exec(cmd, args, opts)
 
   if pid == 0 then
     -- child process
+    -- Sweep every fd except the not-yet-dup2'd pipe ends this child is
+    -- about to wire onto 0/1/2, before doing anything else -- including
+    -- the dup2 dance itself. Descriptors survive exec unless CLOEXEC was
+    -- set on them, so a leaked fd here would reach the exec'd program too.
+    -- A sweep failure is fatal: proceeding into exec'd, caller-controlled
+    -- code with an unknown descriptor set is exactly the hazard this
+    -- guards against.
+    do
+      local keep = { stdout_pipe[1], stderr_pipe[1] } --[[: { [integer]: integer } ]]
+      if stdin_pipe then keep[#keep + 1] = stdin_pipe[0] end
+      local sweep_fn = close_fds.close_fds_except
+      local swept = sweep_fn and sweep_fn(keep)
+      if not swept then ffi.C._exit(126) end
+    end
+
     -- redirect stdout
     ffi.C.close(stdout_pipe[0])
     ffi.C.dup2(stdout_pipe[1], 1)
@@ -191,6 +207,17 @@ function mod.spawn(cmd, args, opts)
 
   if pid == 0 then
     -- child process
+    -- mod.spawn has no pipes of its own -- the exec'd program inherits the
+    -- caller's real stdio directly (this is the pass-through spawn, unlike
+    -- mod.exec above which redirects stdout/stderr/stdin through pipes), so
+    -- 0/1/2 are named explicitly here because the child genuinely needs
+    -- them, not as an implicit default. A sweep failure is fatal: proceeding
+    -- into exec'd, caller-controlled code with an unknown descriptor set is
+    -- exactly the hazard this guards against.
+    local sweep_fn = close_fds.close_fds_except
+    local swept = sweep_fn and sweep_fn({ 0, 1, 2 })
+    if not swept then ffi.C._exit(126) end
+
     if opts.cwd then
       if ffi.C.chdir(opts.cwd) ~= 0 then ffi.C._exit(127) end
     end
