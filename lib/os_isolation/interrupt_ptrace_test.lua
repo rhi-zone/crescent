@@ -31,16 +31,30 @@ T.describe("interrupt_ptrace against a real child process (fork_direct)", functi
 			while true do i = i + 1 end
 		end, {})
 
-		local sok, serr = interrupt_ptrace.suspend(h.pid)
-		T.ok(sok, serr)
-		T.ok(interrupt_kill.is_alive(h.pid)) -- suspended, not killed
+		-- Everything that can fail runs inside a nested pcall so the
+		-- unconditional cleanup below still runs on assertion failure. This
+		-- child is a real busy loop with nothing else to stop it -- T.it's
+		-- own pcall ("failures are caught and recorded; subsequent it()
+		-- blocks run") would otherwise skip straight past kill()/join() and
+		-- leak it as a permanent orphan, reparented to init, spinning at
+		-- ~100% CPU, indistinguishable in `ps` from a live worker (COW
+		-- fork_direct child, never execs, same cmdline as the parent).
+		-- Reproduced directly; this is the confirmed root cause of the
+		-- "unstraced 99%-cpu worker" investigation -- see TODO.md.
+		local ok, err = pcall(function()
+			local sok, serr = interrupt_ptrace.suspend(h.pid)
+			T.ok(sok, serr)
+			T.ok(interrupt_kill.is_alive(h.pid)) -- suspended, not killed
 
-		local rok, rerr = interrupt_ptrace.resume(h.pid)
-		T.ok(rok, rerr)
+			local rok, rerr = interrupt_ptrace.resume(h.pid)
+			T.ok(rok, rerr)
+		end)
 
 		-- clean up: this child never exits on its own
 		interrupt_kill.kill(h.pid)
 		h.join()
+
+		if not ok then error(err, 0) end
 	end)
 
 	T.it("suspend() on a nonexistent pid fails, not throws", function()

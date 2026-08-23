@@ -14,7 +14,21 @@ T.describe("interrupt_kill.kill / is_alive", function()
 			local i = 0
 			while true do i = i + 1 end
 		end, {})
-		T.ok(interrupt_kill.is_alive(h.pid))
+
+		-- The pre-kill assertion runs inside a nested pcall so a failure
+		-- here still falls through to kill()/join() below. T.it wraps the
+		-- whole test body in its own pcall ("failures are caught and
+		-- recorded; subsequent it() blocks run" -- lib/test/assert.lua) --
+		-- without this inner guard, a failure here would skip straight past
+		-- the kill and leak this child as a permanent orphan: reparented to
+		-- init on the worker's exit, spinning at ~100% CPU with nothing
+		-- left to stop it, and indistinguishable in `ps`/`/proc` from a
+		-- live worker since it never execs (COW fork_direct child, same
+		-- cmdline as the parent). Reproduced directly: a parent that exits
+		-- without join()/kill() leaves exactly this orphan behind. This is
+		-- the confirmed root cause of the "unstraced 99%-cpu worker"
+		-- investigation -- see TODO.md.
+		local pre_ok, pre_err = pcall(T.ok, interrupt_kill.is_alive(h.pid))
 
 		local ok, err = interrupt_kill.kill(h.pid)
 		T.ok(ok, err)
@@ -25,6 +39,8 @@ T.describe("interrupt_kill.kill / is_alive", function()
 		local jok, jerr = h.join()
 		T.fail(jok)
 		T.ok(jerr:find("no output"))
+
+		if not pre_ok then error(pre_err, 0) end
 	end)
 
 	T.it("is_alive returns false for a pid that has been killed AND reaped", function()

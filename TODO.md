@@ -43,6 +43,56 @@ Still open, deliberately not done:
       result, not copying numbers from a header. Other arches fall through to
       the next tier, which is correct but slower.
 
+## RESOLVED: the "unstraced 99%-cpu worker" mystery (2026-08-23)
+
+Root-caused and reproduced directly, not guessed at. The prior session
+observed a worker pinned at ~99% CPU for 5+ minutes during a full test run,
+couldn't ptrace-attach mid-run to see what it was doing, and left this open.
+
+**Mechanism (reproduced live):** `fork_direct.spawn(fn, keep_fds)` is a COW
+fork with no exec. A child running an intentional infinite busy loop (used
+by `lib/os_isolation/interrupt_kill_test.lua` and
+`interrupt_ptrace_test.lua` to test kill/suspend against a real target that
+won't exit on its own) is only ever stopped by the test body explicitly
+calling `interrupt_kill.kill(h.pid)`. `lib/test/assert.lua`'s `T.it` wraps
+every test body in `pcall` and *continues to the next test on failure*
+("failures are caught and recorded; subsequent it() blocks run"). Both
+affected tests had at least one assertion (`T.ok(interrupt_kill.is_alive(...))`,
+`T.ok(sok, serr)`, etc.) positioned *between* `spawn()` and the cleanup
+`kill()`/`join()` calls. If that assertion throws, `T.it`'s pcall catches it
+and the test framework moves on — but the kill/join call it jumped over
+never runs. The busy-loop child is now orphaned: reparented to init, still
+running the exact same `bin/cr` binary image (never execs, so `/proc/pid/cmdline`
+is identical to a live worker's), spinning at ~100% CPU with a plain
+increment loop and no syscalls in progress — hence "unstraced": there is
+nothing interesting to catch mid-attach, and nothing distinguishes it from
+a legitimate worker in `ps`/`/proc` without checking PPID against init.
+
+**Reproduced directly** (not inferred): a throwaway script that
+`fork_direct.spawn`s the exact busy loop and then `os.exit(1)`s without
+join/kill left a `bin/ld-musl.../luajit-bin .../bin/cr.lua run ...` process at
+PPID 1, STAT `R`, ~99% CPU, indefinitely, until manually `kill -9`'d.
+Re-running the affected test with the assertion between spawn and cleanup
+forced to fail confirmed the same leak; after the fix below, the identical
+failure-injection left zero surviving descendants.
+
+**Fix landed:** both tests now run the risky assertions inside a nested
+`pcall`, unconditionally run the real kill()/join() cleanup afterward
+regardless of whether that inner pcall succeeded, then re-raise the
+original failure so the test still reports as failed. See
+`lib/os_isolation/interrupt_kill_test.lua` and `interrupt_ptrace_test.lua`.
+
+**Open generalization, not fixed here:** this hazard applies to *any* future
+test that `fork_direct.spawn`s a child with no self-termination and puts a
+fallible assertion between spawn and cleanup. The fix above is per-site,
+not structural. A structural fix (e.g. `T.it` tracking spawned
+`fork_direct` handles for guaranteed cleanup regardless of body outcome, or
+a `T.finally`-style primitive in `lib/test/assert.lua`) would close the
+whole class but wasn't built — no other current test hits this pattern, and
+it isn't clear yet whether `T.finally` is the right shape or whether
+cleanup-tracking belongs in `fork_direct` itself. Flagging as a real
+open question, not a settled design.
+
 ## `lib/platform/caps/http_client_test.lua`'s TLS server child has never run (2026-08-23)
 
 Found while investigating a reported livelock. The forked TLS-server child in
