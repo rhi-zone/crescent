@@ -2,6 +2,27 @@
 
 > *Open threads from a previous session. Treat as starting context, not instructions — verify relevance before acting.*
 
+## `libtcc1.a` is never built or committed anywhere (found 2026-08-23/24, not fixed)
+
+- [ ] **tcc's own runtime helper library, `libtcc1.a`, is not produced by any
+  currently-running CI job and is not committed to `bin/` alongside the
+  `tcc-*` compiler binaries `build-vendored.yml` does commit.** It used to
+  be built (and uploaded as a throwaway, `retention-days: 1` artifact) by
+  `tcc-bootstrap-linux-x86_64`/`-linux-aarch64`, but only ever consumed by
+  `tcc-build-deps-linux-x86_64` — a diagnostic job (using freshly
+  bootstrapped tcc to compile sqlite3/zlib/luajit/libressl as a
+  self-hosting smoke test, never itself committing anything) that was
+  removed 2026-08-23 when tcc got folded into `build-vendored.yml`'s main
+  lockstep `commit` job. Removing that diagnostic job also dropped the
+  `libtcc1.a` build step, since nothing else read the artifact — this was
+  not a new gap at the time (libtcc1.a was already never committed, even
+  before the removal), just a previously-unused build output that stopped
+  being produced. Matters only if tcc's real intended use — a tier-4
+  C-build fallback compiler per `docs/native-tiers.md` — needs to actually
+  link things at runtime, which generally requires `libtcc1.a` alongside
+  the compiler binary. Not investigated further: whether `bin/tcc-*` is
+  currently usable at all without it hasn't been checked.
+
 ## `build-vendored.yml`: tcc-windows regression fixed, tcc-linux-aarch64 root-caused and fixed (2026-08-23)
 
 - [x] **`tcc-windows-x86`/`tcc-windows-x86_64` regressed (previously green) the moment
@@ -2783,36 +2804,39 @@ wrong; it was inferred from the `#error`, never checked against `libtcc1.a`.
 
 ## lib/os_isolation/thread.lua open safety question — follow-up (2026-08-14)
 
-- [ ] **Re-vendor LuaJIT to pick up the `LuaJIT/LuaJIT#1498` fix.** This
-  repo's vendored `bin/luajit-bin` (built by
-  `.github/workflows/build-vendored.yml`, tracking the `v2.1` branch, last
-  updated 2026-07-25 per commit `c651bc4e`) predates the fix for
-  [LuaJIT/LuaJIT#1498](https://github.com/LuaJIT/LuaJIT/issues/1498) ("FFI
-  callback invoked from C leaves `cur_L` stale — crash in `lj_trace_exit`
-  when the compiled callback takes a trace exit," merged 2026-08-01) by
-  about a week. `thread.lua`'s own code shape was analyzed and shown NOT to
-  hit this bug's precondition (see `thread.lua`'s module header and
-  `docs/genre-battery/sandboxing.md`'s `thread.lua` note) — but the fix is
-  still a straightforwardly good pickup given how structurally close the
-  bug is to this module's mechanism (an FFI callback invoked with no Lua
-  frame active, on a thread the VM didn't just enter through). Re-running
-  the workflow re-vendors LuaJIT + sqlite3 + zlib + libressl + wepoll
-  together across every supported platform in one shot — a repo-wide
-  infrastructure change, left here as an explicit recommendation rather
-  than done unilaterally during the investigation that found this.
-- [ ] **`LuaJIT/LuaJIT#1506`, "`store to dead GC object` in FFI callback,"
-  is still open upstream as of 2026-08-14** — a different GC-liveness
-  mechanism than `#1498` (an FFI-visible-only callback with no Lua-side
-  anchor getting collected out from under a live C pointer to it), not
-  analyzed against `thread.lua`'s specific shape to the same depth as
-  `#1498` was. `thread.lua`'s BOOTSTRAP chunk keeps its callback anchored
-  via the Lua-level `cb` local for the bootstrap pcall's duration and hands
-  only the raw pointer (not the cdata) to `pthread_create`, which differs
-  from `#1506`'s repro (a callback stored only behind a C global, never a
-  Lua variable) — but this difference has not been checked with the same
-  rigor as the `#1498` analysis. Revisit once `#1506` is resolved upstream,
-  or sooner if someone wants to do the same depth of structural analysis
-  against it that `#1498` got.
+- [x] **Re-vendor LuaJIT to pick up the `LuaJIT/LuaJIT#1498` fix — DONE
+  (2026-08-21, commit `c3a3643b`).** Vendored LuaJIT bumped from `1edc3e52`
+  to v2.1 HEAD `1ee778a4e37122d8ca7d5733c590a47dafd6b15c`, rebuilt across
+  every platform via `.github/workflows/build-vendored.yml`, binaries
+  committed `5cde6a83` (2026-08-24). Motivated in practice, not just as a
+  precaution — see the `#1506` item directly below, which this same bump
+  fixed.
+- [x] **`LuaJIT/LuaJIT#1506`, "`store to dead GC object` in FFI callback" —
+  RESOLVED, both upstream and in this repo (2026-08-24).** Fixed upstream
+  2026-08-18 ("FFI: Mark cts->L in atomic phase", commit `71797fa7`).
+  Turned out to be the actual root cause of a real, live bug this
+  session found by chance while investigating unrelated `bin/cr test`
+  slowness: two independent `bin/cr test lib/os_isolation --jobs=1`
+  processes were caught hanging 68+ and 70+ minutes each (never
+  completing even at a 25-minute outer timeout in one case), and
+  `perf record` against a live one showed 99.96% of samples inside a
+  single JIT-compiled trace with zero syscalls — a genuine hot spin in
+  compiled code, not slow contention as the original 2026-08-14
+  investigation's circumstantial CPU-contention read had concluded (see
+  `docs/genre-battery/sandboxing.md`'s now-updated `thread.lua` note,
+  which corrects that earlier read). The vendored LuaJIT was pinned to
+  `1edc3e52` — the exact commit `#1506`'s own reporter cited reproducing
+  the bug on. Fixed by the same re-vendor as the `#1498` item above;
+  confirmed by re-running the exact hang repro after the bump (two
+  concurrent `bin/cr test lib/os_isolation --jobs=1` runs, previously
+  hanging 68-70+ minutes, both completed in under 2.5 seconds, all tests
+  passing). `thread.lua`'s own callback-anchoring shape (kept anchored via
+  the Lua-level `cb` local, differing from `#1506`'s minimal repro which
+  never anchors it at all) may or may not have made this module less
+  exposed than the bare repro — not re-analyzed against the upstream fix's
+  actual patch, since the practical fix (re-vendor) is the same either
+  way and the live hang was reproduced and resolved directly, which is
+  stronger evidence than the structural analysis would have added.
 
 ## Typechecker substrate gaps (found while implementing lib/type/v10_toy/{init,w,v10_toy_test}.lua, 2026-08-11)
 

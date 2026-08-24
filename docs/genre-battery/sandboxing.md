@@ -453,17 +453,18 @@ the process*. They compose — run `lib.sandbox`-restricted code inside an
   before `pthread_create` — already sets that `global_State`'s `cur_L` to
   the only `lua_State` it will ever have, before the new pthread exists.
   This rules out this SPECIFIC known bug for this SPECIFIC code shape by
-  source-grounded reasoning, not just absence of a report — but does not
-  cover every possible hazard (notably not
-  [#1506](https://github.com/LuaJIT/LuaJIT/issues/1506), "`store to dead GC
-  object` in FFI callback," a different GC-liveness mechanism, still open
-  upstream as of 2026-08-14, not analyzed to the same depth here). This
-  repo's own vendored LuaJIT (`bin/luajit-bin`, tracking the `v2.1` branch,
-  last updated 2026-07-25) predates the #1498 fix (2026-08-01) by about a
-  week — re-running `.github/workflows/build-vendored.yml` would pick it
-  up, but that workflow re-vendors LuaJIT/sqlite3/zlib/libressl/wepoll
-  together across every supported platform, a repo-wide call left as an
-  explicit recommendation rather than made unilaterally here. **Empirically**,
+  source-grounded reasoning, not just absence of a report.
+  **UPDATE (2026-08-24): the second hazard this section flagged as
+  unanalyzed — [#1506](https://github.com/LuaJIT/LuaJIT/issues/1506),
+  "`store to dead GC object` in FFI callback" — is now fixed upstream
+  (2026-08-18, "FFI: Mark cts->L in atomic phase") and confirmed as the
+  actual root cause of the "occasional slowdown" finding below, not a
+  remaining open hazard.** This repo's vendored LuaJIT was re-pinned from
+  `1edc3e52` (the exact commit #1506's own reporter cited reproducing the
+  bug on) to v2.1 HEAD `1ee778a4e37122d8ca7d5733c590a47dafd6b15c`
+  (`c3a3643b`, 2026-08-21), rebuilt across every platform via
+  `.github/workflows/build-vendored.yml`, and committed (`5cde6a83`,
+  2026-08-24). **Empirically**,
   a new permanent regression test,
   `lib/os_isolation/thread_stress_test.lua`, exercises concurrent spawns
   under deliberate GC pressure on both parent and child sides and asserts
@@ -477,23 +478,32 @@ the process*. They compose — run `lib.sandbox`-restricted code inside an
   200M+ loop iterations" testing. Zero crashes, zero corruption, zero wrong
   results in any run — still not a safety proof, but real adversarial
   exercise of the exact mechanism, not merely "nobody has written about
-  this." **A second, distinct finding from the original testing**: the full
-  `lib/os_isolation` test suite occasionally took far longer to complete
-  than its normal sub-few-seconds run time — most reliably reproduced by
-  running several full copies of the suite in parallel (an artificial
-  stress case), but also observed, less often, on a single serial `bin/cr
-  test` invocation. Each individual workload run in isolation (up to tens
-  of millions of loop iterations) consistently completed in well under a
-  second on its own; the slowdowns showed up specifically running the FULL
-  suite (many spawns across many test files), which points at ordinary CPU
-  contention across many concurrently forked processes and pthreads rather
-  than a hang in the mechanism itself — but this is circumstantial timing
-  evidence, not a proof, and it is not ruled out as something worse. The
-  additional parallel stress runs above did NOT reproduce this slowdown, a
-  further data point against it being that hazard, but not a resolution —
-  it was rare before, so its absence in a handful of runs doesn't rule it
-  back in or out. A caller running many `thread.lua` units concurrently
-  should not assume a short fixed timeout is safe. Gives GC/heap separation
+  this." **A second, distinct finding from the original testing, RESOLVED
+  2026-08-24**: the full `lib/os_isolation` test suite occasionally took
+  far longer to complete than its normal sub-few-seconds run time — most
+  reliably reproduced by running several full copies of the suite in
+  parallel, but also observed, less often, on a single serial `bin/cr test`
+  invocation. At the time this was written it was attributed,
+  circumstantially, to ordinary CPU contention rather than a real hang —
+  that attribution was WRONG. Two independent live occurrences were caught
+  directly during a follow-up investigation (2026-08-21): both were
+  genuine hangs, not slow contention — `perf record` against one showed
+  99.96% of samples inside a single JIT-compiled trace with zero syscalls
+  (a hot spin in compiled code), and both were `bin/cr test
+  lib/os_isolation --jobs=1` processes that ran 68+ and 70+ minutes
+  without ever completing. This matches #1506's mechanism exactly (see
+  above) — the callback's `lua_State` freed mid-callback under GC-sweep
+  timing, a hazard specific to JIT-compiled execution, which is why it
+  never showed up in the earlier isolated/small-workload testing (those
+  never got hot enough to trace before finishing). Fixed by the LuaJIT
+  re-vendor above, and confirmed against the exact repro that hung before:
+  two concurrent `bin/cr test lib/os_isolation --jobs=1` runs, previously
+  observed hanging 68-70+ minutes, both completed in under 2.5 seconds
+  after the re-vendor, all tests passing. A caller running many
+  `thread.lua` units concurrently under the pre-2026-08-24 vendored
+  LuaJIT should still not have assumed a short fixed timeout was safe;
+  that caveat no longer applies to the current vendored binary. Gives
+  GC/heap separation
   between units, explicitly NOT fault containment (shared address space —
   an FFI/C bug in one unit can still corrupt the whole process) and NOT a
   cheap forced-stop, exactly as this section already said above.
@@ -611,16 +621,13 @@ Do not treat any of these as decided; none of them were.
   for a 200M-iteration workload — but nothing recorded to
   `docs/perf/log.md`, and per-CLAUDE.md convention it should be before any
   tick-frequency viability claim is made).
-- **`thread.lua`'s behavior under heavy concurrent spawn load is not fully
-  diagnosed**, only observed — see "Implemented" above. Circumstantial
-  evidence points at CPU contention (isolated/serial runs of the identical
-  workload were consistently fast; many-way-parallel runs of the same
-  workload were not), not a hang in the mechanism itself, but this was not
-  proven, and it was not ruled out as the GC-phase/reentrancy hazard the
-  callback-on-a-foreign-thread open safety question already names. Needs
-  real profiling (not more manual `timeout`-wrapped trials) before any
-  claim stronger than "works in the common case, degrades unpredictably
-  under self-constructed extreme concurrent load" is warranted.
+- ~~`thread.lua`'s behavior under heavy concurrent spawn load is not fully
+  diagnosed~~ — **RESOLVED (2026-08-24), moved out of "open": it was
+  genuinely diagnosed and it was not CPU contention.** See "Implemented"
+  above's updated note — real profiling (`perf record` against a live
+  hung process) found a hot spin inside a JIT-compiled trace, matching
+  LuaJIT/LuaJIT#1506, fixed upstream and by re-vendoring here. Nothing
+  remains open here to diagnose further.
 - ~~`interrupt_ptrace.lua` against a `thread.lua` tid is environment-
   dependent~~ — **RESOLVED (2026-08-14), moved out of "open": it is not
   environment-dependent, it is permanently impossible for that specific
