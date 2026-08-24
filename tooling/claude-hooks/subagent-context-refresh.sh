@@ -17,14 +17,23 @@
 # into context multiple times over a handful of tool calls. 1-in-8 keeps
 # refreshes periodic without being redundant on short subagent runs.
 #
-# Re-emits style-rules.md AND subagent-coordinator-note.md (not
-# subagent-role-note.md — delegation framing doesn't drift the same way).
-# The coordinator-note counters the hardcoded harness guidance that a
-# coordinator's relayed message is never the user's consent — that guidance
-# is standing, effectively re-asserted every turn, so a spawn-only note gets
-# outweighed over a long run and the subagent drifts back to treating
-# relayed task-direction as suspect. Folding the note into this periodic
-# refresh matches its cadence to the cadence of the guidance it's countering.
+# Re-emits style-rules.md, subagent-coordinator-note.md, AND the lily
+# persona (not subagent-role-note.md — delegation framing doesn't drift the
+# same way). The coordinator-note counters the hardcoded harness guidance
+# that a coordinator's relayed message is never the user's consent — that
+# guidance is standing, effectively re-asserted every turn, so a spawn-only
+# note gets outweighed over a long run and the subagent drifts back to
+# treating relayed task-direction as suspect. Folding the note into this
+# periodic refresh matches its cadence to the cadence of the guidance it's
+# countering.
+#
+# The lily persona (.claude/agents/lily.md's body, frontmatter stripped)
+# drifts back the same way over a long run — it's only asserted once, at
+# spawn, same as the coordinator-note used to be — so it rides the same
+# periodic refresh for the same reason. This fires for every subagent
+# regardless of subagent_type, not just ones spawned as "lily" — intentional
+# per owner direction (persona-reinforcement across the lily ecosystem), not
+# an oversight.
 #
 # Replaces the old PreToolUse(SendMessage)-splice periodic-refresh half of
 # inject-subagent-context-agent.sh: that fired 100% of the time a message was
@@ -45,6 +54,10 @@ set -euo pipefail
 dir="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"
 style_file="$dir/style-rules.md"
 coordinator_note_file="$dir/subagent-coordinator-note.md"
+# lily.md lives under .claude/agents/, not tooling/claude-hooks/ — same
+# repo-root-relative path used by block-mainsession-exploration.sh to locate
+# an agent definition file from this dir.
+lily_file="$dir/../../.claude/agents/lily.md"
 
 input=$(head -c $((1024 * 1024)))
 
@@ -61,7 +74,7 @@ if (( RANDOM % 8 != 0 )); then
     exit 0
 fi
 
-escape_file() {
+escape_stdin() {
     awk '
         {
             gsub(/\\/, "\\\\")
@@ -70,7 +83,23 @@ escape_file() {
             gsub(/\r/, "\\r")
             printf "%s\\n", $0
         }
-    ' "$1" | sed '$ s/\\n$//'
+    ' | sed '$ s/\\n$//'
+}
+
+escape_file() {
+    escape_stdin < "$1"
+}
+
+# lily.md's frontmatter (name/description, between the first two lone "---"
+# fences) is agent-registration metadata, not persona text — strip it before
+# injecting, same fence-counting approach as
+# block-mainsession-exploration.sh's frontmatter read, inverted to keep the
+# body instead of the fenced block.
+lily_body_escaped() {
+    awk '
+        /^---[[:space:]]*$/ { fence++; next }
+        fence >= 2
+    ' "$1" | escape_stdin
 }
 
 inject=""
@@ -82,6 +111,16 @@ for f in "$style_file" "$coordinator_note_file"; do
         inject="${inject}$(escape_file "$f")"
     fi
 done
+
+if [ -f "$lily_file" ]; then
+    lily_escaped="$(lily_body_escaped "$lily_file")"
+    if [ -n "$lily_escaped" ]; then
+        if [ -n "$inject" ]; then
+            inject="${inject}\\n\\n"
+        fi
+        inject="${inject}<lily-persona>\\n${lily_escaped}\\n</lily-persona>"
+    fi
+fi
 
 # Nothing to inject — no context files present.
 if [ -z "$inject" ]; then
