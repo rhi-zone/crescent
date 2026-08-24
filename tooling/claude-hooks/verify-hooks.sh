@@ -51,7 +51,13 @@ static_check() {
     name="$(basename "$hook")"
     while IFS= read -r ref; do
         [ -n "$ref" ] || continue
-        if [ ! -f "$HOOKS_DIR/$ref" ]; then
+        # Directory-shaped refs (trailing slash, e.g. ../../.claude/agents/)
+        # validate with -d; file refs keep the -f check.
+        case "$ref" in
+            */) present=1; [ -d "$HOOKS_DIR/$ref" ] || present=0 ;;
+            *)  present=1; [ -f "$HOOKS_DIR/$ref" ] || present=0 ;;
+        esac
+        if [ "$present" -eq 0 ]; then
             note "FAIL static  $name: missing dependency $ref"
             fail=1; missing=1
         fi
@@ -108,7 +114,7 @@ run_fixture() {
 }
 
 # ── the propagated hook set (must match HOOK_FILES in propagate-harness.sh) ──
-HOOKS="inject-orchestrator-rules.sh inject-style-rules.sh block-blocking-bash.sh block-mainsession-exploration.sh post-history.sh require-explicit-agent-type.sh"
+HOOKS="inject-orchestrator-rules.sh inject-style-rules.sh block-blocking-bash.sh block-runaway-find.sh block-mainsession-exploration.sh post-history.sh require-explicit-agent-type.sh subagent-context-start.sh subagent-context-refresh.sh"
 
 for h in $HOOKS; do
     if [ ! -f "$HOOKS_DIR/$h" ]; then
@@ -125,8 +131,11 @@ run_fixture inject-orchestrator-rules.sh
 run_fixture inject-style-rules.sh
 run_fixture post-history.sh
 run_fixture block-blocking-bash.sh
+run_fixture block-runaway-find.sh
 run_fixture block-mainsession-exploration.sh
 run_fixture require-explicit-agent-type.sh
+run_fixture subagent-context-start.sh
+run_fixture subagent-context-refresh.sh
 
 # Extra inline cases: bonus regression coverage beyond the required fixture,
 # exercising deny paths and the subagent bypass. A deliberate, well-formed
@@ -135,6 +144,8 @@ run_case inject-orchestrator-rules.sh allow subagent \
     '{"session_id":"verify-smoke","agent_id":"verify-smoke","prompt":"verify smoke"}'
 run_case block-blocking-bash.sh deny tail-follow \
     '{"tool_name":"Bash","tool_input":{"command":"tail -f /var/log/syslog"}}'
+run_case block-runaway-find.sh deny root-find \
+    '{"tool_name":"Bash","tool_input":{"command":"find / -maxdepth 8"}}'
 
 # PreToolUse (all tools): each case exercises a distinct lib/ helper.
 #   subagent-bypass    → agent_id skeleton scan
@@ -147,6 +158,12 @@ run_case block-mainsession-exploration.sh deny read-mainsession \
 # require-explicit-agent-type: missing subagent_type must be denied.
 run_case require-explicit-agent-type.sh deny missing-subagent-type \
     '{"tool_name":"Agent","tool_input":{"description":"d","prompt":"p"}}'
+
+# subagent-context-refresh: main-session payload (no agent_id) must never
+# emit additionalContext — the main session already gets style refreshes via
+# inject-style-rules.sh.
+run_case subagent-context-refresh.sh allow mainsession-bypass \
+    '{"tool_name":"Bash","hook_event_name":"PostToolUse","tool_input":{"command":"echo hi"}}'
 
 if [ "$fail" -ne 0 ]; then
     note "hook verification FAILED in $HOOKS_DIR"
