@@ -41,6 +41,15 @@
     ],
     "PreToolUse": [
       {
+        "matcher": "Agent|SendMessage",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PROJECT_DIR}/tooling/claude-hooks/inject-subagent-identity-agent.sh"
+          }
+        ]
+      },
+      {
         "matcher": "Bash",
         "hooks": [
           {
@@ -55,6 +64,15 @@
           {
             "type": "command",
             "command": "${CLAUDE_PROJECT_DIR}/tooling/claude-hooks/block-runaway-find.sh"
+          }
+        ]
+      },
+      {
+        "matcher": "Agent|Workflow",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PROJECT_DIR}/tooling/claude-hooks/enforce-cost-tier.sh"
           }
         ]
       },

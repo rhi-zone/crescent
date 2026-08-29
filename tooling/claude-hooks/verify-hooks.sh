@@ -114,7 +114,7 @@ run_fixture() {
 }
 
 # ── the propagated hook set (must match HOOK_FILES in propagate-harness.sh) ──
-HOOKS="inject-orchestrator-rules.sh inject-style-rules.sh block-blocking-bash.sh block-runaway-find.sh block-mainsession-exploration.sh post-history.sh require-explicit-agent-type.sh subagent-context-start.sh subagent-context-refresh.sh"
+HOOKS="inject-orchestrator-rules.sh inject-style-rules.sh block-blocking-bash.sh block-runaway-find.sh block-mainsession-exploration.sh enforce-cost-tier.sh post-history.sh require-explicit-agent-type.sh subagent-context-start.sh subagent-context-refresh.sh"
 
 for h in $HOOKS; do
     if [ ! -f "$HOOKS_DIR/$h" ]; then
@@ -133,6 +133,7 @@ run_fixture post-history.sh
 run_fixture block-blocking-bash.sh
 run_fixture block-runaway-find.sh
 run_fixture block-mainsession-exploration.sh
+run_fixture enforce-cost-tier.sh
 run_fixture require-explicit-agent-type.sh
 run_fixture subagent-context-start.sh
 run_fixture subagent-context-refresh.sh
@@ -154,6 +155,17 @@ run_case block-mainsession-exploration.sh allow subagent-bypass \
     '{"tool_name":"Read","agent_id":"verify-smoke","tool_input":{"file_path":"/x"}}'
 run_case block-mainsession-exploration.sh deny read-mainsession \
     '{"tool_name":"Read","tool_input":{"file_path":"/x"}}'
+
+# enforce-cost-tier: gate applies at ALL depths (subagent payloads included).
+run_case enforce-cost-tier.sh deny missing-model \
+    '{"tool_name":"Agent","tool_input":{"subagent_type":"general-purpose","description":"d","prompt":"p"}}'
+run_case enforce-cost-tier.sh deny subagent-missing-model \
+    '{"tool_name":"Agent","agent_id":"verify-smoke","tool_input":{"subagent_type":"general-purpose","description":"d","prompt":"p"}}'
+# no-model-param exceptions are gone for every subagent_type, impl-orchestrator's
+# old name included — there is no code path left that can resolve a model when
+# none was passed.
+run_case enforce-cost-tier.sh deny impl-orchestrator-missing-model \
+    '{"tool_name":"Agent","tool_input":{"subagent_type":"impl-orchestrator","description":"d","prompt":"p"}}'
 
 # require-explicit-agent-type: missing subagent_type must be denied.
 run_case require-explicit-agent-type.sh deny missing-subagent-type \
